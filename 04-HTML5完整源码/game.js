@@ -448,17 +448,43 @@
         return {
           bestChef: parsed.bestChef || 0,
           bestZen: parsed.bestZen || 0,
-          unlockedTiers: Array.isArray(parsed.unlockedTiers) ? parsed.unlockedTiers : [1, 2, 3, 4]
+          unlockedTiers: Array.isArray(parsed.unlockedTiers) ? parsed.unlockedTiers : [1, 2, 3, 4],
+          bgmTrack: parsed.bgmTrack === 'waltz' || parsed.bgmTrack === 'bossa' || parsed.bgmTrack === 'off'
+            ? parsed.bgmTrack
+            : 'waltz',
+          sfxEnabled: typeof parsed.sfxEnabled === 'boolean' ? parsed.sfxEnabled : true
         };
       }
     } catch (_) {}
-    return { bestChef: 0, bestZen: 0, unlockedTiers: [1, 2, 3, 4] };
+    return { bestChef: 0, bestZen: 0, unlockedTiers: [1, 2, 3, 4], bgmTrack: 'waltz', sfxEnabled: true };
   }
 
   function persistSaveData() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(saveData));
     } catch (_) {}
+  }
+
+  // Apply persisted audio preferences (BGM starts enabled by default on first user gesture)
+  audio.bgmTrack = saveData.bgmTrack;
+  audio.bgmEnabled = saveData.bgmTrack !== 'off';
+  audio.setSfxEnabled(saveData.sfxEnabled);
+
+  function syncAudioButtons() {
+    const info = audio.getTrackInfo();
+    btnBgm.textContent = info.label;
+    btnBgm.classList.toggle('is-active', audio.bgmEnabled);
+    btnBgm.title = `背景音乐：${info.title} · 点击切换曲目或关闭 (圆舞曲 → 吃茶爵士 → 关，快捷键 M)`;
+    btnSfx.textContent = audio.sfxEnabled ? '🔊 音效: 开' : '🔇 音效: 关';
+  }
+
+  function syncAudioMood() {
+    const overlayOpen =
+      titleModal.classList.contains('is-open') ||
+      blessingModal.classList.contains('is-open') ||
+      compendiumModal.classList.contains('is-open') ||
+      gameoverModal.classList.contains('is-open');
+    audio.setMuffled(overlayOpen);
   }
 
   // Preload all base, solo-action, and neighbor-interaction sprite images cleanly
@@ -774,6 +800,7 @@
     gameState.paused = true;
     gameState.blessingLockUntil = performance.now() + 140;
     blessingModal.classList.add('is-open');
+    syncAudioMood();
     audio.playBlessingOpen();
     updateHUD();
   }
@@ -782,6 +809,7 @@
     if (!blessingModal.classList.contains('is-open')) return;
     blessingModal.classList.remove('is-open');
     gameState.paused = false;
+    syncAudioMood();
     updateHUD();
   }
 
@@ -855,6 +883,7 @@
 
     blessingModal.classList.remove('is-open');
     gameState.paused = false;
+    syncAudioMood();
     showToast(`🎁 获得祝福【${pickedSummary}】！`);
     spawnSparkleBurst(JAR.canvasW / 2, 240, '#ffe27a', 26);
     spawnShockwave(JAR.canvasW / 2, 250, 150, '#ffe47a', 3.5);
@@ -1975,6 +2004,7 @@
     } else {
       gameState.dangerDuration = Math.max(0, gameState.dangerDuration - dt * 2.2);
     }
+    audio.setDangerLevel(Math.max(0, Math.min(1, (gameState.dangerDuration - 0.45) / 2.1)));
   }
 
   function triggerGameOver() {
@@ -1985,6 +2015,7 @@
     blessingModal.classList.remove('is-open');
     cancelToolMode();
     audio.setFeverMode(false);
+    audio.setDangerLevel(0);
     audio.playGameOver();
 
     const bestBefore = getBestScore();
@@ -2001,6 +2032,7 @@
 
     updateHUD();
     gameoverModal.classList.add('is-open');
+    syncAudioMood();
   }
 
   // Rendering: Starlight Glass Jar + Aim Lock-On + Magnet Tethers + Special Drops + FX
@@ -3608,6 +3640,17 @@
 
   // Keyboard support
   window.addEventListener('keydown', (ev) => {
+    if (ev.key === 'm' || ev.key === 'M') {
+      ev.preventDefault();
+      audio.ensureCtx();
+      const on = audio.toggleBGM();
+      saveData.bgmTrack = audio.bgmTrack;
+      persistSaveData();
+      syncAudioButtons();
+      const info = audio.getTrackInfo();
+      showToast(on ? `🎵 背景音乐已开启：${info.title}` : '🔇 背景音乐已关闭');
+      return;
+    }
     if (ev.key === 'p' || ev.key === 'P') {
       if (!titleModal.classList.contains('is-open')) {
         ev.preventDefault();
@@ -3686,10 +3729,12 @@
       compendiumGrid.appendChild(card);
     });
     compendiumModal.classList.add('is-open');
+    syncAudioMood();
   }
 
   function closeCompendium() {
     compendiumModal.classList.remove('is-open');
+    syncAudioMood();
   }
 
   // Start / Reset Run
@@ -3760,10 +3805,13 @@
 
     cancelToolMode();
     audio.setFeverMode(false);
+    audio.setDangerLevel(0);
     if (cafeStageEl) cafeStageEl.classList.remove('is-fever');
     blessingModal.classList.remove('is-open');
     titleModal.classList.remove('is-open');
     gameoverModal.classList.remove('is-open');
+    syncAudioMood();
+    audio.unlock();
 
     if (mode === 'chef') {
       generateOrder();
@@ -3777,6 +3825,17 @@
     updateHUD();
   }
 
+  // Unlock Web Audio & smoothly start cozy café BGM on the player's first gesture
+  function handleAudioGestureUnlock(ev) {
+    if (ev && ev.target && ev.target.closest && ev.target.closest('#btn-bgm')) return;
+    audio.unlock();
+  }
+  window.addEventListener('pointerdown', handleAudioGestureUnlock, { passive: true });
+  window.addEventListener('keydown', handleAudioGestureUnlock, { passive: true });
+  document.addEventListener('visibilitychange', () => {
+    audio.setTabHidden(document.hidden);
+  });
+
   // UI Event Bindings
   modeSelectEl.addEventListener('click', (ev) => {
     const btn = ev.target.closest('.mode-option');
@@ -3789,17 +3848,20 @@
   btnStartGame.addEventListener('click', () => {
     audio.ensureCtx();
     startNewRun(gameState.mode);
+    audio.playStartCafe();
   });
 
   btnPlayAgain.addEventListener('click', () => {
     audio.ensureCtx();
     startNewRun(gameState.mode);
+    audio.playStartCafe();
   });
 
   btnRestart.addEventListener('click', () => {
     if (!gameState.running && titleModal.classList.contains('is-open')) return;
     audio.ensureCtx();
     startNewRun(gameState.mode);
+    audio.playStartCafe();
     showToast('🔄 已重新开启新一轮营业！');
   });
 
@@ -3836,16 +3898,26 @@
 
   btnSfx.addEventListener('click', () => {
     audio.ensureCtx();
-    const nextMuted = !audio.muted;
-    audio.setMuted(nextMuted);
-    btnSfx.textContent = nextMuted ? '🔇 音效: 关' : '🔊 音效: 开';
+    const nextEnabled = !audio.sfxEnabled;
+    audio.setSfxEnabled(nextEnabled);
+    saveData.sfxEnabled = nextEnabled;
+    persistSaveData();
+    syncAudioButtons();
+    showToast(nextEnabled ? '🔊 游戏音效已开启' : '🔇 游戏音效已关闭');
   });
 
   btnBgm.addEventListener('click', () => {
     audio.ensureCtx();
-    const on = audio.toggleBGM();
-    btnBgm.textContent = on ? '🎵 音乐: 开' : '🎵 音乐: 关';
-    btnBgm.classList.toggle('is-active', on);
+    audio.cycleBGMTrack();
+    saveData.bgmTrack = audio.bgmTrack;
+    persistSaveData();
+    syncAudioButtons();
+    const info = audio.getTrackInfo();
+    if (info.id === 'off') {
+      showToast('🔇 背景音乐已关闭（可随时点击或按 M 重新开启）');
+    } else {
+      showToast(`🎵 当前背景音乐：${info.title}`);
+    }
   });
 
   btnCompendium.addEventListener('click', openCompendium);
@@ -3891,6 +3963,7 @@
         polyCount: e.worldPolys ? e.worldPolys.length : 0
       }))
     }),
+    getAudioState: () => audio.getDebugState(),
     togglePhysicsDebug: (val) => toggleDebugPhysics(val),
     setCurTier: (tier) => {
       gameState.curTier = Math.max(1, Math.min(9, tier));
@@ -3930,6 +4003,8 @@
   };
 
   // Boot Sequence
+  syncAudioButtons();
+  syncAudioMood();
   resizeCanvases();
   loadSprites().then(() => {
     buildEvolutionRing();

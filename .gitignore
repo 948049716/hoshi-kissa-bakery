@@ -1,0 +1,54 @@
+# ==========================================
+# 星夜吃茶：喵呜甜品合合乐 (Hoshi Kissa)
+# ==========================================
+
+# 打包构建产物 (可通过 python3 scripts/build_standalone.py 重新生成)
+dist/
+
+# Node.js 依赖与日志 (scripts/verify_e2e.mjs 等脚本环境)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Python 缓存与虚拟环境 (scripts/extract_assets.py 等管线脚本)
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# 端到端测试、截图与临时调试文件
+/tmp/
+tmp/
+.tmp/
+game_verify/
+test-results/
+playwright-report/
+*.log
+
+# 环境变量与本地密钥
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# 操作系统生成文件
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# 编辑器 / IDE 配置
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

@@ -42,7 +42,7 @@
         </div>
 
         <div class="parchment-sheet">
-          <!-- Starlight Fever Meter -->
+          <!-- Starlight Fever Meter & Special Drops / Perks Strip -->
           <div class="fever-box" id="fever-box">
             <div class="fever-head">
               <span id="fever-label">✨ 星光能量槽</span>
@@ -50,6 +50,10 @@
             </div>
             <div class="fever-track">
               <div class="fever-fill" id="fever-fill"></div>
+            </div>
+            <div class="special-status-row">
+              <span class="rainbow-pill" id="rainbow-pill" title="倒计时归零时下一颗必出彩虹万能糖，碰任何甜品立刻升阶！">🌈 彩虹糖: 12步</span>
+              <div class="perks-mini-row" id="active-perks-bar"></div>
             </div>
           </div>
 
@@ -71,7 +75,8 @@
               <button class="skip-order-btn" id="btn-skip-order" type="button" title="更换新订单">换一单</button>
             </div>
             <div class="order-slots" id="order-slots"></div>
-            <div class="order-reward-line" id="order-reward-line">完成奖励: +240 分 · +20 ⭐</div>
+            <div class="order-rush-line" id="order-rush-line">⚡ 极速挑战：14 步内完成 ×1.6 + 🌈彩虹糖</div>
+            <div class="order-reward-line" id="order-reward-line">完成奖励: +240 分 · +20 ⭐ · 🎁三选一祝福</div>
           </div>
         </div>
       </section>
@@ -89,6 +94,7 @@
             <div class="m-fever-box" id="m-fever-box">
               <div class="m-fever-head">
                 <span id="m-fever-label">✨ 星光能量</span>
+                <span class="m-rainbow-pill" id="m-rainbow-pill">🌈12步</span>
                 <span id="m-fever-pct">0%</span>
               </div>
               <div class="fever-track m-fever-track">
@@ -115,10 +121,11 @@
         </div>
 
         <div class="m-order-bar" id="m-order-bar">
-          <span class="m-order-label">🌟 心愿</span>
+          <span class="m-order-label">🌟心愿</span>
           <div class="m-order-slots" id="m-order-slots"></div>
-          <span class="m-order-reward" id="m-order-reward">+240分·+20⭐</span>
-          <button class="skip-order-btn m-skip-btn" id="m-btn-skip-order" type="button">换一单</button>
+          <span class="m-rush-pill" id="m-order-rush">⚡14步</span>
+          <span class="m-order-reward" id="m-order-reward">+240·+20⭐</span>
+          <button class="skip-order-btn m-skip-btn" id="m-btn-skip-order" type="button">换单</button>
         </div>
       </section>
 
@@ -129,6 +136,10 @@
             <span id="target-banner-text">点击罐内甜品使用道具</span>
             <button class="target-cancel-btn" id="btn-cancel-target" type="button">取消</button>
           </div>
+          <button class="blessing-ready-btn" id="blessing-ready-btn" type="button" title="点击打开星夜主厨祝福三选一 (快捷键 B)">
+            🎁 领取星夜祝福 (1)
+          </button>
+          <div class="m-perks-float" id="m-perks-float" aria-hidden="true"></div>
           <canvas id="game-canvas" width="440" height="520" aria-label="游戏主画布"></canvas>
         </div>
 
@@ -202,27 +213,43 @@
           </div>
           <div class="title-copy">
             <h1 id="title-heading">星夜吃茶：喵呜甜品合合乐</h1>
-            <p class="title-sub">Hoshi Kissa · Starlight Patisserie</p>
+            <p class="title-sub">Hoshi Kissa · Starlight Patisserie 2.0</p>
             <div class="title-rules">
-              <div>🫐 <strong>精准投放</strong>：移动鼠标/手指瞄准，可用 <strong>[Q]/[E] 或滚轮</strong> 微调落点倾角，点击放入玻璃罐。</div>
-              <div>📐 <strong>真实轮廓物理</strong>：每款甜点均按手绘轮廓构建复合多边形刚体（平底塔稳落、猫耳/天使翼真实卡位翻滚），相同甜品相碰即合！</div>
-              <div>📋 <strong>口袋与厨具</strong>：善用 <strong>[H] 暂存口袋</strong> 与 3 款魔法厨具完成顾客心愿单，连击引爆 <strong>2倍星光狂热</strong>！</div>
+              <div>🧲 <strong>丝滑Q弹连锁</strong>：指哪落哪 + 同阶微磁吸 + 合成星爆气浪，瞄准锁定金光一触即发大连锁！</div>
+              <div>🌈 <strong>彩虹万能糖 & ✨ 黄金甜点</strong>：彩虹糖碰谁谁升阶，黄金甜点触发 <strong>2.5倍暴击与星尘雨</strong>！</div>
+              <div>🎁 <strong>轻肉鸽祝福 & 🔥 5倍狂热</strong>：完成心愿单解锁<strong>三选一魔法卡</strong>构筑流派，狂热时刻强力磁吸最高 <strong>5倍积分</strong>！</div>
             </div>
 
             <div class="mode-select" id="mode-select">
               <button class="mode-option is-selected" data-mode="chef" type="button">
                 <strong>🌟 星夜主厨模式</strong>
-                <span>心愿订单 + 道具经济</span>
+                <span>极速心愿单 + 祝福构筑</span>
               </button>
               <button class="mode-option" data-mode="zen" type="button">
                 <strong>🍵 悠闲经典模式</strong>
-                <span>纯粹放松冲刺高分</span>
+                <span>里程碑祝福 + 畅爽冲分</span>
               </button>
             </div>
 
             <button class="primary-cta" id="btn-start-game" type="button">✨ 开始营业 · Start Baking</button>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Roguelike 3-Choice Chef Blessing Modal -->
+  <div class="modal-backdrop" id="blessing-modal" role="dialog" aria-modal="true" aria-labelledby="blessing-heading">
+    <div class="storybook-modal blessing-modal-card">
+      <div class="storybook-inner">
+        <div class="modal-head blessing-head">
+          <div>
+            <h2 id="blessing-heading">🎁 星夜主厨祝福 · 三选一</h2>
+            <p class="blessing-sub" id="blessing-sub">任选 1 张魔法秘方，立刻强化本局甜品连锁！</p>
+          </div>
+          <button class="wood-btn" id="btn-defer-blessing" type="button" title="先收起来，稍后再领">稍后领取</button>
+        </div>
+        <div class="blessing-grid" id="blessing-grid"></div>
       </div>
     </div>
   </div>

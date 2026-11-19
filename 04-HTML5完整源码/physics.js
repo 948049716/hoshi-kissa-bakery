@@ -636,16 +636,20 @@
    * Step the rigid-body world forward by `dt` seconds.
    * Order: Semi-implicit Euler (integrate forces -> tentative step -> detect contacts ->
    * PGS sequential impulse velocity solver -> positional stabilization).
-   * Returns { mergePairs, impacts, debugContacts }.
+   * Returns { mergePairs, impacts, debugContacts, magnetLinks }.
    */
-  function stepWorld(bodies, jar, dt, gravity = 1180) {
+  function stepWorld(bodies, jar, dt, gravity = 1420, opts = {}) {
     const SUBSTEPS = 3;
     const VELOCITY_ITERS = 10;
     const subDt = dt / SUBSTEPS;
 
+    const magnetRange = typeof opts.magnetRange === 'number' ? opts.magnetRange : 10;
+    const magnetForce = typeof opts.magnetForce === 'number' ? opts.magnetForce : 460;
+
     const mergePairs = [];
     const impacts = [];
     let lastContacts = [];
+    let lastMagnetLinks = [];
 
     for (let s = 0; s < SUBSTEPS; s++) {
       // 1. Integrate gravity into velocities & advance tentative positions/angles
@@ -653,12 +657,12 @@
         const b = bodies[i];
         if (b.merged) continue;
         b.vy += gravity * subDt;
-        b.vx *= 0.9975;
-        b.vy *= 0.9975;
-        b.vr *= 0.992;
+        b.vx *= 0.9985;
+        b.vy *= 0.9985;
+        b.vr *= 0.994;
 
-        if (b.vr > 10) b.vr = 10;
-        else if (b.vr < -10) b.vr = -10;
+        if (b.vr > 12) b.vr = 12;
+        else if (b.vr < -12) b.vr = -12;
 
         b.x += b.vx * subDt;
         b.y += b.vy * subDt;
@@ -666,12 +670,13 @@
         b.inContact = false;
       }
 
-      // 2. Update world polygons & generate all contact manifolds
+      // 2. Update world polygons & generate all contact manifolds + same-tier/wildcard magnet
       for (let i = 0; i < bodies.length; i++) {
         if (!bodies[i].merged) updateBodyWorld(bodies[i]);
       }
 
       const contacts = [];
+      const magnetLinks = s === SUBSTEPS - 1 ? [] : null;
       for (let i = 0; i < bodies.length; i++) {
         const a = bodies[i];
         if (a.merged) continue;
@@ -684,16 +689,45 @@
           const b = bodies[j];
           if (b.merged) continue;
 
+          const isWildPair = !!(a.isWildcard || b.isWildcard);
+          const canMerge = isWildPair || a.tier === b.tier;
+
           const dx = b.x - a.x;
           const dy = b.y - a.y;
-          const rs = a.boundR + b.boundR + 1;
-          if (dx * dx + dy * dy > rs * rs) continue;
+          const distSq = dx * dx + dy * dy;
+          const effMagnet = isWildPair ? Math.max(18, magnetRange * 1.15) : magnetRange;
+          const rs = a.boundR + b.boundR + (canMerge ? effMagnet + 4 : 1);
+          if (distSq > rs * rs) continue;
 
-          if (a.tier === b.tier) {
-            if (testBodiesOverlap(a, b)) {
+          if (canMerge) {
+            const dist = Math.sqrt(distSq) || 0.001;
+            const wildCloseTouch = isWildPair && dist <= (a.r + b.r) * 1.03;
+            const sameCloseSnap = !isWildPair && dist <= (a.r + b.r) * 0.96 && a.age > 0.08 && b.age > 0.08;
+            if (wildCloseTouch || sameCloseSnap || testBodiesOverlap(a, b)) {
               a.merged = true;
               b.merged = true;
               mergePairs.push([a, b]);
+              break;
+            }
+
+            // Silky same-tier / wildcard magnetic pull when nearby
+            const surfaceGap = dist - (a.r + b.r);
+            if (surfaceGap < effMagnet && a.age > 0.06 && b.age > 0.06) {
+              const strength = Math.max(0.12, Math.min(1, 1 - Math.max(0, surfaceGap) / effMagnet));
+              const pull = magnetForce * (0.35 + 0.65 * strength * strength) * subDt;
+              const ux = dx / dist;
+              const uy = dy / dist;
+              const invTotal = a.invMass + b.invMass || 1;
+              const shareA = Math.min(1.6, (a.invMass / invTotal) * 2);
+              const shareB = Math.min(1.6, (b.invMass / invTotal) * 2);
+              a.vx += ux * pull * shareA;
+              a.vy += uy * pull * shareA;
+              b.vx -= ux * pull * shareB;
+              b.vy -= uy * pull * shareB;
+
+              if (magnetLinks) {
+                magnetLinks.push({ a, b, strength, isWild: isWildPair });
+              }
             }
             continue;
           }
@@ -725,20 +759,20 @@
         }
       }
 
-      // 5. Calm resting micro-damping for settled pastries
+      // 5. Gentle micro-damping only for nearly stationary pastries (keeps slopes & rolling lively!)
       for (let i = 0; i < bodies.length; i++) {
         const b = bodies[i];
         if (b.merged || !b.inContact) continue;
         const linSpdSq = b.vx * b.vx + b.vy * b.vy;
         const angSpd = Math.abs(b.vr);
-        if (linSpdSq < 180 && angSpd < 0.45) {
-          b.vx *= 0.88;
-          b.vy *= 0.88;
-          b.vr *= 0.82;
-          if (linSpdSq < 14 && angSpd < 0.08) {
-            b.vx *= 0.5;
-            b.vy *= 0.5;
-            b.vr *= 0.4;
+        if (linSpdSq < 55 && angSpd < 0.24) {
+          b.vx *= 0.93;
+          b.vy *= 0.93;
+          b.vr *= 0.88;
+          if (linSpdSq < 7 && angSpd < 0.05) {
+            b.vx *= 0.65;
+            b.vy *= 0.65;
+            b.vr *= 0.55;
           }
         }
       }
@@ -748,13 +782,15 @@
 
       if (s === SUBSTEPS - 1) {
         lastContacts = contacts;
+        lastMagnetLinks = magnetLinks || [];
       }
     }
 
     return {
       mergePairs,
       impacts,
-      debugContacts: lastContacts
+      debugContacts: lastContacts,
+      magnetLinks: lastMagnetLinks
     };
   }
 

@@ -414,6 +414,7 @@
   const btnStartGame = document.getElementById('btn-start-game');
 
   const blessingModal = document.getElementById('blessing-modal');
+  const blessingHeadingEl = document.getElementById('blessing-heading');
   const blessingGrid = document.getElementById('blessing-grid');
   const blessingSubEl = document.getElementById('blessing-sub');
   const btnDeferBlessing = document.getElementById('btn-defer-blessing');
@@ -547,8 +548,8 @@
     perks: {},
     pendingBlessings: 0,
     blessingChoices: [],
-    blessingAutoDelay: 0,
-    blessingDeferred: false,
+    blessingLastReason: '',
+    blessingLockUntil: 0,
     zenNextMilestone: 500,
     hitstopTimer: 0,
     screenShake: 0,
@@ -681,26 +682,35 @@
     return picked;
   }
 
-  function queueBlessing(reason = '订单完成') {
-    gameState.pendingBlessings++;
-    gameState.blessingDeferred = false;
-    gameState.blessingAutoDelay = Math.max(gameState.blessingAutoDelay, 1.05);
-    if (blessingSubEl) {
-      blessingSubEl.textContent = `${reason}！任选 1 张星夜秘方，永久强化本局烘焙！`;
-    }
-    updateHUD();
+  function pulseBlessingReadyBtn() {
+    if (!blessingReadyBtn) return;
+    blessingReadyBtn.classList.remove('is-fresh');
+    void blessingReadyBtn.offsetWidth;
+    blessingReadyBtn.classList.add('is-fresh');
   }
 
-  function openBlessingModal() {
-    if (!gameState.running || gameState.over || gameState.pendingBlessings <= 0) return;
-    if (titleModal.classList.contains('is-open') || gameoverModal.classList.contains('is-open')) return;
-    if (compendiumModal.classList.contains('is-open')) closeCompendium();
-    if (gameState.activeToolMode) cancelToolMode();
-
-    if (!gameState.blessingChoices || gameState.blessingChoices.length === 0) {
-      gameState.blessingChoices = rollBlessingChoices();
+  function updateBlessingHeader(pickedSummary = '') {
+    const rem = gameState.pendingBlessings;
+    if (blessingHeadingEl) {
+      blessingHeadingEl.innerHTML =
+        rem > 1
+          ? `🎁 星夜主厨祝福 <span class="blessing-rem-pill">剩余 ${rem} 次</span>`
+          : '🎁 星夜主厨祝福 · 三选一';
     }
+    if (blessingSubEl) {
+      if (pickedSummary) {
+        blessingSubEl.textContent = `✅ 已获得【${pickedSummary}】！继续任选 1 张星夜秘方（还剩 ${rem} 次）`;
+      } else {
+        const reason = gameState.blessingLastReason || '心愿达成';
+        blessingSubEl.textContent =
+          rem > 1
+            ? `${reason}！当前已积攒 ${rem} 次祝福，可一口气连续挑选！`
+            : `${reason}！任选 1 张星夜秘方，永久强化本局烘焙！`;
+      }
+    }
+  }
 
+  function renderBlessingCards(animateDeal = false) {
     blessingGrid.innerHTML = '';
     gameState.blessingChoices.forEach((b, idx) => {
       const curLv = getPerkLevel(b.id);
@@ -713,7 +723,10 @@
 
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'blessing-card';
+      btn.className = animateDeal ? 'blessing-card is-dealing' : 'blessing-card';
+      if (animateDeal) {
+        btn.style.animationDelay = `${idx * 45}ms`;
+      }
       btn.dataset.blessingId = b.id;
       btn.innerHTML = `
         <div class="blessing-icon-circle">${b.icon}</div>
@@ -728,25 +741,52 @@
       btn.addEventListener('click', () => applyBlessing(b.id));
       blessingGrid.appendChild(btn);
     });
+  }
+
+  function queueBlessing(reason = '订单完成') {
+    gameState.pendingBlessings++;
+    gameState.blessingLastReason = reason;
+    updateHUD();
+
+    if (blessingModal.classList.contains('is-open')) {
+      updateBlessingHeader('');
+      return;
+    }
+
+    audio.playBlessingReady();
+    spawnSparkleBurst(JAR.canvasW / 2, JAR.floorY + 12, '#ffe27a', 16);
+    pulseBlessingReadyBtn();
+  }
+
+  function openBlessingModal() {
+    if (!gameState.running || gameState.over || gameState.pendingBlessings <= 0) return;
+    if (titleModal.classList.contains('is-open') || gameoverModal.classList.contains('is-open')) return;
+    if (compendiumModal.classList.contains('is-open')) closeCompendium();
+    if (gameState.activeToolMode) cancelToolMode();
+
+    if (!gameState.blessingChoices || gameState.blessingChoices.length === 0) {
+      gameState.blessingChoices = rollBlessingChoices();
+    }
+
+    updateBlessingHeader('');
+    renderBlessingCards(true);
 
     gameState.paused = true;
-    gameState.blessingDeferred = false;
+    gameState.blessingLockUntil = performance.now() + 140;
     blessingModal.classList.add('is-open');
     audio.playBlessingOpen();
     updateHUD();
   }
 
-  function closeBlessingModal(defer = true) {
+  function closeBlessingModal() {
     if (!blessingModal.classList.contains('is-open')) return;
     blessingModal.classList.remove('is-open');
     gameState.paused = false;
-    if (defer && gameState.pendingBlessings > 0) {
-      gameState.blessingDeferred = true;
-    }
     updateHUD();
   }
 
   function applyBlessing(id) {
+    if (performance.now() < gameState.blessingLockUntil) return;
     const def = BLESSINGS.find((b) => b.id === id);
     if (!def) return;
 
@@ -797,18 +837,25 @@
       }
     }
 
+    const lvTag = def.repeatable ? '' : ` Lv.${getPerkLevel(id)}`;
+    const pickedSummary = `${def.icon} ${def.name}${lvTag}`;
     gameState.pendingBlessings = Math.max(0, gameState.pendingBlessings - 1);
     gameState.blessingChoices = [];
-    gameState.blessingDeferred = false;
-    blessingModal.classList.remove('is-open');
-    gameState.paused = false;
 
-    if (gameState.pendingBlessings > 0) {
-      gameState.blessingAutoDelay = 0.7;
+    // Seamless continuous draw inside the same open modal when multiple blessings are queued!
+    if (gameState.pendingBlessings > 0 && blessingModal.classList.contains('is-open')) {
+      gameState.blessingLockUntil = performance.now() + 180;
+      gameState.blessingChoices = rollBlessingChoices();
+      updateBlessingHeader(pickedSummary);
+      renderBlessingCards(true);
+      spawnSparkleBurst(JAR.canvasW / 2, 240, '#ffe27a', 18);
+      updateHUD();
+      return;
     }
 
-    const lvTag = def.repeatable ? '' : ` Lv.${getPerkLevel(id)}`;
-    showToast(`🎁 获得祝福【${def.icon} ${def.name}${lvTag}】！`);
+    blessingModal.classList.remove('is-open');
+    gameState.paused = false;
+    showToast(`🎁 获得祝福【${pickedSummary}】！`);
     spawnSparkleBurst(JAR.canvasW / 2, 240, '#ffe27a', 26);
     spawnShockwave(JAR.canvasW / 2, 250, 150, '#ffe47a', 3.5);
     gameState.jarFlash = 0.55;
@@ -1227,16 +1274,21 @@
       if (mHoldBubbleEl) mHoldBubbleEl.classList.remove('is-rainbow', 'is-golden');
     }
 
-    // Pending Blessing Floating Button
+    // Pending Blessing Floating Button (manual claim anytime, zero interruption)
     if (blessingReadyBtn) {
+      const count = gameState.pendingBlessings;
       const showBtn =
-        gameState.pendingBlessings > 0 &&
+        count > 0 &&
         !blessingModal.classList.contains('is-open') &&
         !gameState.activeToolMode &&
         gameState.running &&
         !gameState.over;
       blessingReadyBtn.classList.toggle('visible', showBtn);
-      blessingReadyBtn.textContent = `🎁 领取星夜祝福 (${gameState.pendingBlessings})`;
+      const countStr = String(count);
+      if (blessingReadyBtn.dataset.count !== countStr) {
+        blessingReadyBtn.dataset.count = countStr;
+        blessingReadyBtn.innerHTML = `🎁 领取星夜祝福 <span class="blessing-count-badge">×${count}</span>`;
+      }
     }
 
     renderActivePerks();
@@ -3344,21 +3396,6 @@
         stepPhysics(dt);
       }
       updateDessertAnimations(dt);
-
-      // Auto-open queued Roguelike 3-Choice Blessing smoothly after current combo chain settles
-      if (
-        gameState.pendingBlessings > 0 &&
-        !gameState.blessingDeferred &&
-        !gameState.activeToolMode &&
-        !blessingModal.classList.contains('is-open') &&
-        !compendiumModal.classList.contains('is-open') &&
-        gameState.comboTimer <= 0.15
-      ) {
-        gameState.blessingAutoDelay -= dt;
-        if (gameState.blessingAutoDelay <= 0) {
-          openBlessingModal();
-        }
-      }
     }
 
     // Decay screen shake & impact flash smoothly
@@ -3686,8 +3723,12 @@
     gameState.perks = {};
     gameState.pendingBlessings = 0;
     gameState.blessingChoices = [];
-    gameState.blessingAutoDelay = 0;
-    gameState.blessingDeferred = false;
+    gameState.blessingLastReason = '';
+    gameState.blessingLockUntil = 0;
+    if (blessingReadyBtn) {
+      blessingReadyBtn.classList.remove('is-fresh');
+      delete blessingReadyBtn.dataset.count;
+    }
     gameState.zenNextMilestone = 500;
     gameState.hitstopTimer = 0;
     gameState.screenShake = 0;

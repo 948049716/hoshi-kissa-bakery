@@ -218,6 +218,11 @@ class StarlightAudio {
     });
   }
 
+  playBlessingReady() {
+    this._playTone(1046.5, 'sine', 0.075, 0.18, 0.006);
+    setTimeout(() => this._playTone(1318.51, 'sine', 0.075, 0.24, 0.008), 65);
+  }
+
   playBlessingOpen() {
     const notes = [523.25, 659.25, 783.99, 987.77];
     notes.forEach((f, i) => {

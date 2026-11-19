@@ -1155,7 +1155,7 @@ body {
   z-index: 9;
   display: none;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   padding: 4px 13px;
   border-radius: 999px;
   border: 2.5px solid var(--ink);
@@ -1175,9 +1175,35 @@ body {
   display: inline-flex;
 }
 
+.blessing-ready-btn.is-fresh {
+  animation: feverShift 2.2s linear infinite, blessingPopFresh 0.55s cubic-bezier(0.34, 1.56, 0.64, 1), blessingBob 1.1s ease-in-out 0.55s infinite alternate;
+}
+
+.blessing-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  padding: 0 6px;
+  height: 18px;
+  border-radius: 999px;
+  background: #e5493a;
+  color: #fffdf5;
+  border: 1.5px solid var(--ink);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+}
+
 @keyframes blessingBob {
   from { transform: translateX(-50%) translateY(0) scale(1); }
   to { transform: translateX(-50%) translateY(-3px) scale(1.03); }
+}
+
+@keyframes blessingPopFresh {
+  0% { transform: translateX(-50%) scale(0.84); box-shadow: 0 0 0 0 rgba(255, 224, 110, 0.95); }
+  50% { transform: translateX(-50%) translateY(-6px) scale(1.14); box-shadow: 0 0 0 12px rgba(255, 224, 110, 0); }
+  100% { transform: translateX(-50%) translateY(0) scale(1); box-shadow: 0 4px 14px rgba(255, 198, 72, 0.65), 0 2px 0 #5b3317; }
 }
 
 .m-perks-float {
@@ -1193,6 +1219,26 @@ body {
   align-items: flex-start;
   gap: 10px;
   margin-bottom: 12px;
+}
+
+.blessing-head h2 {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.blessing-rem-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 2px solid var(--ink);
+  background: linear-gradient(180deg, #ffe680, #f4a93b);
+  color: #4a230b;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.2;
 }
 
 .blessing-head .wood-btn {
@@ -1228,6 +1274,15 @@ body {
   cursor: pointer;
   font-family: inherit;
   transition: transform 0.16s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+
+.blessing-card.is-dealing {
+  animation: blessingCardDeal 0.24s cubic-bezier(0.22, 1.25, 0.36, 1) both;
+}
+
+@keyframes blessingCardDeal {
+  0% { opacity: 0; transform: translateY(10px) scale(0.94); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .blessing-card:hover {
@@ -1989,7 +2044,7 @@ body {
             <div class="title-rules">
               <div>🧲 <strong>丝滑Q弹连锁</strong>：指哪落哪 + 同阶微磁吸 + 合成星爆气浪，瞄准锁定金光一触即发大连锁！</div>
               <div>🌈 <strong>彩虹万能糖 & ✨ 黄金甜点</strong>：彩虹糖碰谁谁升阶，黄金甜点触发 <strong>2.5倍暴击与星尘雨</strong>！</div>
-              <div>🎁 <strong>轻肉鸽祝福 & 🔥 5倍狂热</strong>：完成心愿单解锁<strong>三选一魔法卡</strong>构筑流派，狂热时刻强力磁吸最高 <strong>5倍积分</strong>！</div>
+              <div>🎁 <strong>轻肉鸽祝福 & 🔥 5倍狂热</strong>：完成心愿单积攒<strong>三选一祝福</strong>（随时点击罐底按钮或按 <strong>B</strong> 连抽不打断），狂热最高 <strong>5倍积分</strong>！</div>
             </div>
 
             <div class="mode-select" id="mode-select">
@@ -2019,7 +2074,7 @@ body {
             <h2 id="blessing-heading">🎁 星夜主厨祝福 · 三选一</h2>
             <p class="blessing-sub" id="blessing-sub">任选 1 张魔法秘方，立刻强化本局甜品连锁！</p>
           </div>
-          <button class="wood-btn" id="btn-defer-blessing" type="button" title="先收起来，稍后再领">稍后领取</button>
+          <button class="wood-btn" id="btn-defer-blessing" type="button" title="收起弹窗，留待稍后领取 (快捷键 Esc)">稍后再领</button>
         </div>
         <div class="blessing-grid" id="blessing-grid"></div>
       </div>
@@ -2291,6 +2346,11 @@ class StarlightAudio {
         this._playTone(f, 'triangle', 0.11, 0.3, 0.006);
       }, i * 40);
     });
+  }
+
+  playBlessingReady() {
+    this._playTone(1046.5, 'sine', 0.075, 0.18, 0.006);
+    setTimeout(() => this._playTone(1318.51, 'sine', 0.075, 0.24, 0.008), 65);
   }
 
   playBlessingOpen() {
@@ -3713,6 +3773,7 @@ window.HOSHI_PHYSICS_SHAPES = {"tier_1":{"width":239,"height":265,"com_x":122.98
   const btnStartGame = document.getElementById('btn-start-game');
 
   const blessingModal = document.getElementById('blessing-modal');
+  const blessingHeadingEl = document.getElementById('blessing-heading');
   const blessingGrid = document.getElementById('blessing-grid');
   const blessingSubEl = document.getElementById('blessing-sub');
   const btnDeferBlessing = document.getElementById('btn-defer-blessing');
@@ -3846,8 +3907,8 @@ window.HOSHI_PHYSICS_SHAPES = {"tier_1":{"width":239,"height":265,"com_x":122.98
     perks: {},
     pendingBlessings: 0,
     blessingChoices: [],
-    blessingAutoDelay: 0,
-    blessingDeferred: false,
+    blessingLastReason: '',
+    blessingLockUntil: 0,
     zenNextMilestone: 500,
     hitstopTimer: 0,
     screenShake: 0,
@@ -3980,26 +4041,35 @@ window.HOSHI_PHYSICS_SHAPES = {"tier_1":{"width":239,"height":265,"com_x":122.98
     return picked;
   }
 
-  function queueBlessing(reason = '订单完成') {
-    gameState.pendingBlessings++;
-    gameState.blessingDeferred = false;
-    gameState.blessingAutoDelay = Math.max(gameState.blessingAutoDelay, 1.05);
-    if (blessingSubEl) {
-      blessingSubEl.textContent = `${reason}！任选 1 张星夜秘方，永久强化本局烘焙！`;
-    }
-    updateHUD();
+  function pulseBlessingReadyBtn() {
+    if (!blessingReadyBtn) return;
+    blessingReadyBtn.classList.remove('is-fresh');
+    void blessingReadyBtn.offsetWidth;
+    blessingReadyBtn.classList.add('is-fresh');
   }
 
-  function openBlessingModal() {
-    if (!gameState.running || gameState.over || gameState.pendingBlessings <= 0) return;
-    if (titleModal.classList.contains('is-open') || gameoverModal.classList.contains('is-open')) return;
-    if (compendiumModal.classList.contains('is-open')) closeCompendium();
-    if (gameState.activeToolMode) cancelToolMode();
-
-    if (!gameState.blessingChoices || gameState.blessingChoices.length === 0) {
-      gameState.blessingChoices = rollBlessingChoices();
+  function updateBlessingHeader(pickedSummary = '') {
+    const rem = gameState.pendingBlessings;
+    if (blessingHeadingEl) {
+      blessingHeadingEl.innerHTML =
+        rem > 1
+          ? `🎁 星夜主厨祝福 <span class="blessing-rem-pill">剩余 ${rem} 次</span>`
+          : '🎁 星夜主厨祝福 · 三选一';
     }
+    if (blessingSubEl) {
+      if (pickedSummary) {
+        blessingSubEl.textContent = `✅ 已获得【${pickedSummary}】！继续任选 1 张星夜秘方（还剩 ${rem} 次）`;
+      } else {
+        const reason = gameState.blessingLastReason || '心愿达成';
+        blessingSubEl.textContent =
+          rem > 1
+            ? `${reason}！当前已积攒 ${rem} 次祝福，可一口气连续挑选！`
+            : `${reason}！任选 1 张星夜秘方，永久强化本局烘焙！`;
+      }
+    }
+  }
 
+  function renderBlessingCards(animateDeal = false) {
     blessingGrid.innerHTML = '';
     gameState.blessingChoices.forEach((b, idx) => {
       const curLv = getPerkLevel(b.id);
@@ -4012,7 +4082,10 @@ window.HOSHI_PHYSICS_SHAPES = {"tier_1":{"width":239,"height":265,"com_x":122.98
 
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'blessing-card';
+      btn.className = animateDeal ? 'blessing-card is-dealing' : 'blessing-card';
+      if (animateDeal) {
+        btn.style.animationDelay = `${idx * 45}ms`;
+      }
       btn.dataset.blessingId = b.id;
       btn.innerHTML = `
         <div class="blessing-icon-circle">${b.icon}</div>
@@ -4027,25 +4100,52 @@ window.HOSHI_PHYSICS_SHAPES = {"tier_1":{"width":239,"height":265,"com_x":122.98
       btn.addEventListener('click', () => applyBlessing(b.id));
       blessingGrid.appendChild(btn);
     });
+  }
+
+  function queueBlessing(reason = '订单完成') {
+    gameState.pendingBlessings++;
+    gameState.blessingLastReason = reason;
+    updateHUD();
+
+    if (blessingModal.classList.contains('is-open')) {
+      updateBlessingHeader('');
+      return;
+    }
+
+    audio.playBlessingReady();
+    spawnSparkleBurst(JAR.canvasW / 2, JAR.floorY + 12, '#ffe27a', 16);
+    pulseBlessingReadyBtn();
+  }
+
+  function openBlessingModal() {
+    if (!gameState.running || gameState.over || gameState.pendingBlessings <= 0) return;
+    if (titleModal.classList.contains('is-open') || gameoverModal.classList.contains('is-open')) return;
+    if (compendiumModal.classList.contains('is-open')) closeCompendium();
+    if (gameState.activeToolMode) cancelToolMode();
+
+    if (!gameState.blessingChoices || gameState.blessingChoices.length === 0) {
+      gameState.blessingChoices = rollBlessingChoices();
+    }
+
+    updateBlessingHeader('');
+    renderBlessingCards(true);
 
     gameState.paused = true;
-    gameState.blessingDeferred = false;
+    gameState.blessingLockUntil = performance.now() + 140;
     blessingModal.classList.add('is-open');
     audio.playBlessingOpen();
     updateHUD();
   }
 
-  function closeBlessingModal(defer = true) {
+  function closeBlessingModal() {
     if (!blessingModal.classList.contains('is-open')) return;
     blessingModal.classList.remove('is-open');
     gameState.paused = false;
-    if (defer && gameState.pendingBlessings > 0) {
-      gameState.blessingDeferred = true;
-    }
     updateHUD();
   }
 
   function applyBlessing(id) {
+    if (performance.now() < gameState.blessingLockUntil) return;
     const def = BLESSINGS.find((b) => b.id === id);
     if (!def) return;
 
@@ -4096,18 +4196,25 @@ window.HOSHI_PHYSICS_SHAPES = {"tier_1":{"width":239,"height":265,"com_x":122.98
       }
     }
 
+    const lvTag = def.repeatable ? '' : ` Lv.${getPerkLevel(id)}`;
+    const pickedSummary = `${def.icon} ${def.name}${lvTag}`;
     gameState.pendingBlessings = Math.max(0, gameState.pendingBlessings - 1);
     gameState.blessingChoices = [];
-    gameState.blessingDeferred = false;
-    blessingModal.classList.remove('is-open');
-    gameState.paused = false;
 
-    if (gameState.pendingBlessings > 0) {
-      gameState.blessingAutoDelay = 0.7;
+    // Seamless continuous draw inside the same open modal when multiple blessings are queued!
+    if (gameState.pendingBlessings > 0 && blessingModal.classList.contains('is-open')) {
+      gameState.blessingLockUntil = performance.now() + 180;
+      gameState.blessingChoices = rollBlessingChoices();
+      updateBlessingHeader(pickedSummary);
+      renderBlessingCards(true);
+      spawnSparkleBurst(JAR.canvasW / 2, 240, '#ffe27a', 18);
+      updateHUD();
+      return;
     }
 
-    const lvTag = def.repeatable ? '' : ` Lv.${getPerkLevel(id)}`;
-    showToast(`🎁 获得祝福【${def.icon} ${def.name}${lvTag}】！`);
+    blessingModal.classList.remove('is-open');
+    gameState.paused = false;
+    showToast(`🎁 获得祝福【${pickedSummary}】！`);
     spawnSparkleBurst(JAR.canvasW / 2, 240, '#ffe27a', 26);
     spawnShockwave(JAR.canvasW / 2, 250, 150, '#ffe47a', 3.5);
     gameState.jarFlash = 0.55;
@@ -4526,16 +4633,21 @@ window.HOSHI_PHYSICS_SHAPES = {"tier_1":{"width":239,"height":265,"com_x":122.98
       if (mHoldBubbleEl) mHoldBubbleEl.classList.remove('is-rainbow', 'is-golden');
     }
 
-    // Pending Blessing Floating Button
+    // Pending Blessing Floating Button (manual claim anytime, zero interruption)
     if (blessingReadyBtn) {
+      const count = gameState.pendingBlessings;
       const showBtn =
-        gameState.pendingBlessings > 0 &&
+        count > 0 &&
         !blessingModal.classList.contains('is-open') &&
         !gameState.activeToolMode &&
         gameState.running &&
         !gameState.over;
       blessingReadyBtn.classList.toggle('visible', showBtn);
-      blessingReadyBtn.textContent = `🎁 领取星夜祝福 (${gameState.pendingBlessings})`;
+      const countStr = String(count);
+      if (blessingReadyBtn.dataset.count !== countStr) {
+        blessingReadyBtn.dataset.count = countStr;
+        blessingReadyBtn.innerHTML = `🎁 领取星夜祝福 <span class="blessing-count-badge">×${count}</span>`;
+      }
     }
 
     renderActivePerks();
@@ -6643,21 +6755,6 @@ window.HOSHI_PHYSICS_SHAPES = {"tier_1":{"width":239,"height":265,"com_x":122.98
         stepPhysics(dt);
       }
       updateDessertAnimations(dt);
-
-      // Auto-open queued Roguelike 3-Choice Blessing smoothly after current combo chain settles
-      if (
-        gameState.pendingBlessings > 0 &&
-        !gameState.blessingDeferred &&
-        !gameState.activeToolMode &&
-        !blessingModal.classList.contains('is-open') &&
-        !compendiumModal.classList.contains('is-open') &&
-        gameState.comboTimer <= 0.15
-      ) {
-        gameState.blessingAutoDelay -= dt;
-        if (gameState.blessingAutoDelay <= 0) {
-          openBlessingModal();
-        }
-      }
     }
 
     // Decay screen shake & impact flash smoothly
@@ -6985,8 +7082,12 @@ window.HOSHI_PHYSICS_SHAPES = {"tier_1":{"width":239,"height":265,"com_x":122.98
     gameState.perks = {};
     gameState.pendingBlessings = 0;
     gameState.blessingChoices = [];
-    gameState.blessingAutoDelay = 0;
-    gameState.blessingDeferred = false;
+    gameState.blessingLastReason = '';
+    gameState.blessingLockUntil = 0;
+    if (blessingReadyBtn) {
+      blessingReadyBtn.classList.remove('is-fresh');
+      delete blessingReadyBtn.dataset.count;
+    }
     gameState.zenNextMilestone = 500;
     gameState.hitstopTimer = 0;
     gameState.screenShake = 0;

@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="description" content="星夜吃茶 Hoshi Kissa · 喵呜甜品合合乐 — 手绘水彩绘本风物理合成休闲游戏" />
+  <title>星夜吃茶 · 喵呜甜品合合乐 | Hoshi Kissa</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="cafe-stage" id="cafe-stage">
+    <canvas class="ambient-canvas" id="ambient-canvas"></canvas>
+
+    <!-- Top Navigation Bar -->
+    <header class="top-bar">
+      <div class="brand-pill">
+        <span class="brand-moon">🌙</span>
+        <span class="brand-name">星夜吃茶 · Hoshi Kissa</span>
+        <span class="mode-tag" id="mode-tag">星夜主厨模式</span>
+      </div>
+
+      <div class="top-actions">
+        <button class="wood-btn" id="btn-debug-phys" type="button" title="显示真实复合多边形碰撞体、质心与接触法线 (快捷键 P)">📐 物理轮廓</button>
+        <button class="wood-btn" id="btn-bgm" type="button" title="切换八音盒背景音乐">🎵 音乐: 关</button>
+        <button class="wood-btn" id="btn-sfx" type="button" title="切换音效">🔊 音效: 开</button>
+        <button class="wood-btn" id="btn-compendium" type="button">📖 甜品图鉴</button>
+        <button class="wood-btn" id="btn-restart" type="button">🔄 重新开局</button>
+      </div>
+    </header>
+
+    <!-- 3-Column Cozy Bakery Stage -->
+    <main class="play-grid">
+      <!-- Left Wooden Board: Score, Fever, Patron Orders -->
+      <section class="wood-board left-board" aria-label="分数与订单面板">
+        <div class="board-header">
+          <div class="score-label">SCORE · 烘焙积分</div>
+          <div class="score-value" id="score-value">0</div>
+          <div class="sub-stats">
+            <span>最高: <strong id="best-value">0</strong></span>
+            <span class="stardust-pill" title="星尘币：完成订单或合成可得，用于补充厨具">⭐ <strong id="stardust-value">30</strong></span>
+          </div>
+        </div>
+
+        <div class="parchment-sheet">
+          <!-- Starlight Fever Meter -->
+          <div class="fever-box" id="fever-box">
+            <div class="fever-head">
+              <span id="fever-label">✨ 星光能量槽</span>
+              <span id="fever-pct">0%</span>
+            </div>
+            <div class="fever-track">
+              <div class="fever-fill" id="fever-fill"></div>
+            </div>
+          </div>
+
+          <!-- Mascot / Customer Dialogue -->
+          <div class="mascot-row">
+            <div class="patron-frame" id="patron-avatar">
+              <img src="assets/processed/chef_mikan.webp" alt="店长小蜜柑" />
+            </div>
+            <div class="speech-bubble">
+              <div class="speech-name" id="patron-name">店长 · 小蜜柑</div>
+              <div id="patron-speech">欢迎光临星夜吃茶！合成相同甜品，把星冠猫神蛋糕做出来吧～</div>
+            </div>
+          </div>
+
+          <!-- Customer Order Card -->
+          <div class="order-box" id="order-box">
+            <div class="order-title-row">
+              <span id="order-heading">🌟 今日星夜心愿单</span>
+              <button class="skip-order-btn" id="btn-skip-order" type="button" title="更换新订单">换一单</button>
+            </div>
+            <div class="order-slots" id="order-slots"></div>
+            <div class="order-reward-line" id="order-reward-line">完成奖励: +240 分 · +20 ⭐</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Center Stage: Glass Mixing Jar & 3 Counter Tools -->
+      <section class="center-stage" aria-label="星光搅拌罐游戏区">
+        <div class="jar-canvas-wrap">
+          <div class="target-banner" id="target-banner">
+            <span id="target-banner-text">点击罐内甜品使用道具</span>
+            <button class="target-cancel-btn" id="btn-cancel-target" type="button">取消</button>
+          </div>
+          <canvas id="game-canvas" width="440" height="520" aria-label="游戏主画布"></canvas>
+        </div>
+
+        <div class="tools-dock" role="toolbar" aria-label="厨房魔法道具">
+          <button class="tool-btn" id="btn-tool-shake" type="button" title="星铃轻摇：晃动玻璃罐，促成连锁合成 (快捷键 1)">
+            <img src="assets/processed/tool_shake.webp" alt="星铃轻摇" />
+            <span class="tool-badge" id="badge-shake">2</span>
+            <span class="tool-caption">1 · 摇一摇</span>
+          </button>
+
+          <button class="tool-btn" id="btn-tool-fork" type="button" title="泡泡小叉：消除罐内任意 1~4 阶小甜品 (快捷键 2)">
+            <img src="assets/processed/tool_fork.webp" alt="泡泡小叉" />
+            <span class="tool-badge" id="badge-fork">2</span>
+            <span class="tool-caption">2 · 泡泡叉</span>
+          </button>
+
+          <button class="tool-btn" id="btn-tool-spoon" type="button" title="星尘魔法勺：让罐内任意甜品立刻进化 +1 阶 (快捷键 3)">
+            <img src="assets/processed/tool_spoon.webp" alt="星尘魔法勺" />
+            <span class="tool-badge" id="badge-spoon">1</span>
+            <span class="tool-caption">3 · 升阶勺</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- Right Wooden Board: Next, Hold, Evolution Ring -->
+      <aside class="wood-board right-board" aria-label="预览与进化图谱">
+        <div class="parchment-sheet">
+          <div class="preview-pair">
+            <div class="preview-card">
+              <div class="preview-label">NEXT · 下一颗</div>
+              <div class="preview-bubble" id="next-bubble">
+                <img id="next-img" src="assets/processed/tier_1.webp" alt="下一颗甜品" />
+              </div>
+              <div class="preview-sub" id="next-name">蓝莓星露糖</div>
+            </div>
+
+            <div class="preview-card">
+              <div class="preview-label">HOLD · 暂存</div>
+              <div class="preview-bubble is-clickable" id="hold-bubble" title="点击或按 H / Space 交换暂存甜品">
+                <img id="hold-img" src="" alt="" style="display: none;" />
+                <span id="hold-empty" style="font-size:12px;color:#8a6544;font-weight:700;">点击暂存</span>
+              </div>
+              <div class="preview-sub" id="hold-name">快捷键 [H]</div>
+            </div>
+          </div>
+
+          <div class="evo-section">
+            <div class="evo-head">
+              <span>🍰 甜品进化链 (1 → 9)</span>
+              <span id="discovered-count">1 / 9</span>
+            </div>
+            <div class="evo-ring" id="evo-ring">
+              <div class="evo-center-label">两两相碰<br />星光合成</div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- Toast Banner -->
+  <div class="toast-banner" id="toast-banner"></div>
+
+  <!-- Title Screen Modal -->
+  <div class="modal-backdrop is-open" id="title-modal" role="dialog" aria-modal="true" aria-labelledby="title-heading">
+    <div class="storybook-modal">
+      <div class="storybook-inner">
+        <div class="title-grid">
+          <div class="title-art-frame">
+            <img src="assets/processed/title_hero.webp" alt="星夜吃茶 Hoshi Kissa 主视觉插画" />
+          </div>
+          <div class="title-copy">
+            <h1 id="title-heading">星夜吃茶：喵呜甜品合合乐</h1>
+            <p class="title-sub">Hoshi Kissa · Starlight Patisserie</p>
+            <div class="title-rules">
+              <div>🫐 <strong>精准投放</strong>：移动鼠标/手指瞄准，可用 <strong>[Q]/[E] 或滚轮</strong> 微调落点倾角，点击放入玻璃罐。</div>
+              <div>📐 <strong>真实轮廓物理</strong>：每款甜点均按手绘轮廓构建复合多边形刚体（平底塔稳落、猫耳/天使翼真实卡位翻滚），相同甜品相碰即合！</div>
+              <div>📋 <strong>口袋与厨具</strong>：善用 <strong>[H] 暂存口袋</strong> 与 3 款魔法厨具完成顾客心愿单，连击引爆 <strong>2倍星光狂热</strong>！</div>
+            </div>
+
+            <div class="mode-select" id="mode-select">
+              <button class="mode-option is-selected" data-mode="chef" type="button">
+                <strong>🌟 星夜主厨模式</strong>
+                <span>心愿订单 + 道具经济</span>
+              </button>
+              <button class="mode-option" data-mode="zen" type="button">
+                <strong>🍵 悠闲经典模式</strong>
+                <span>纯粹放松冲刺高分</span>
+              </button>
+            </div>
+
+            <button class="primary-cta" id="btn-start-game" type="button">✨ 开始营业 · Start Baking</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Compendium Modal -->
+  <div class="modal-backdrop" id="compendium-modal" role="dialog" aria-modal="true" aria-labelledby="comp-heading">
+    <div class="storybook-modal">
+      <div class="storybook-inner">
+        <div class="modal-head">
+          <h2 id="comp-heading">📖 星夜甜品图鉴 (已解锁 <span id="comp-unlocked">1</span>/9)</h2>
+          <button class="wood-btn" id="btn-close-comp" type="button">✕ 关闭</button>
+        </div>
+        <div class="compendium-grid" id="compendium-grid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Game Over Modal -->
+  <div class="modal-backdrop" id="gameover-modal" role="dialog" aria-modal="true" aria-labelledby="go-heading">
+    <div class="storybook-modal gameover-card">
+      <div class="storybook-inner">
+        <div class="modal-head">
+          <h2 id="go-heading">🌙 今夜打烊总结</h2>
+          <span class="mode-tag" style="background:#ffe7a8;color:#723c0c;border-color:#9e6722;" id="go-rank">见习甜点师</span>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-tile">
+            <span>本局得分</span>
+            <strong><span id="go-score">0</span><span class="new-best-tag" id="go-new-best" style="display:none;">新纪录!</span></strong>
+          </div>
+          <div class="stat-tile">
+            <span>最高纪录</span>
+            <strong id="go-best">0</strong>
+          </div>
+          <div class="stat-tile">
+            <span>最高阶甜品</span>
+            <strong id="go-max-tier" style="font-size:15px;">-</strong>
+          </div>
+          <div class="stat-tile">
+            <span>完成订单 / 最高连击</span>
+            <strong><span id="go-orders">0</span> 单 · <span id="go-combo">1</span>x</strong>
+          </div>
+        </div>
+
+        <button class="primary-cta" id="btn-play-again" type="button">🔄 再来一局 · Play Again</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="audio.js"></script>
+  <script src="physics_shapes.js"></script>
+  <script src="physics.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>

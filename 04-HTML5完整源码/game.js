@@ -3826,15 +3826,26 @@
   }
 
   // Unlock Web Audio & smoothly start cozy café BGM on the player's first gesture
+  // (iOS Safari / mobile WebViews require touchend or click; pointerdown alone is ignored)
   function handleAudioGestureUnlock(ev) {
     if (ev && ev.target && ev.target.closest && ev.target.closest('#btn-bgm')) return;
     audio.unlock();
   }
   window.addEventListener('pointerdown', handleAudioGestureUnlock, { passive: true });
+  window.addEventListener('touchend', handleAudioGestureUnlock, { passive: true });
+  window.addEventListener('click', handleAudioGestureUnlock, { passive: true });
   window.addEventListener('keydown', handleAudioGestureUnlock, { passive: true });
+  window.addEventListener('pageshow', () => {
+    if (!document.hidden) audio.setTabHidden(false);
+  });
   document.addEventListener('visibilitychange', () => {
     audio.setTabHidden(document.hidden);
   });
+
+  // Prevent iOS Safari pinch-to-zoom and accidental double-tap browser zoom on rapid tool clicks
+  document.addEventListener('gesturestart', (ev) => ev.preventDefault(), { passive: false });
+  document.addEventListener('gesturechange', (ev) => ev.preventDefault(), { passive: false });
+  document.addEventListener('dblclick', (ev) => ev.preventDefault(), { passive: false });
 
   // UI Event Bindings
   modeSelectEl.addEventListener('click', (ev) => {

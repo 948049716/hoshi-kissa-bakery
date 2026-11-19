@@ -23,6 +23,8 @@
   box-sizing: border-box;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 html,
@@ -32,10 +34,18 @@ body {
   width: 100%;
   height: 100%;
   overflow: hidden;
+  touch-action: manipulation;
+  overscroll-behavior: none;
   font-family: var(--font-display);
   color: var(--ink);
   background-color: #131c24;
   -webkit-font-smoothing: antialiased;
+}
+
+button,
+[role="button"],
+.is-clickable {
+  touch-action: manipulation;
 }
 
 /* Main Cafe Backdrop */

@@ -55,6 +55,9 @@ class StarlightAudio {
     this._sfxBus = null;
     this._sfxReverbSend = null;
     this._noiseBuffer = null;
+    this._htmlAudioUnlocked = false;
+    this._silentAudioEl = null;
+    this._gainBoostedAtRunning = false;
 
     // Bright C-major / Lydian pentatonic scale spanning 2+ octaves (Hz) for exhilarating combo climb
     this.scale = [
@@ -181,6 +184,13 @@ class StarlightAudio {
   }
 
   ensureCtx() {
+    if (!this._externalCtx && typeof navigator !== 'undefined' && navigator.audioSession) {
+      try {
+        if (navigator.audioSession.type !== 'playback') {
+          navigator.audioSession.type = 'playback';
+        }
+      } catch (_) {}
+    }
     if (!this.ctx) {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return null;
@@ -189,24 +199,72 @@ class StarlightAudio {
     if (!this._graphReady && this.ctx) {
       this._initGraph(this.ctx);
     }
-    if (this.ctx && this.ctx.state === 'suspended' && !this._externalCtx) {
+    if (this.ctx && this.ctx.state !== 'running' && !this._externalCtx) {
       this.ctx.resume().then(() => {
-        if (this.bgmEnabled && !this.tabHidden && !this._isPlayingBGM) {
+        if (!this.bgmEnabled || this.tabHidden) return;
+        if (!this._isPlayingBGM) {
           this.startBGM();
+        } else if (this._bgmMasterGain) {
+          this._rampParam(this._bgmMasterGain.gain, this._targetBGMGain(), 0.28, false);
+          this._gainBoostedAtRunning = true;
         }
       }).catch(() => {});
     }
     return this.ctx;
   }
 
+  _unlockMobileAudio(ctx) {
+    if (!ctx || this._externalCtx) return;
+    // 1. Play 1-sample silent buffer in Web Audio to unlock iOS Safari / Android WebView output
+    try {
+      const buf = ctx.createBuffer(1, 1, 22050);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(ctx.destination);
+      src.start(0);
+    } catch (_) {}
+
+    // 2. Play a tiny silent WAV via HTMLAudioElement once so iOS routes Web Audio through media playback
+    // (allows sound even when the iPhone side mute switch is turned on)
+    if (!this._htmlAudioUnlocked && typeof Audio !== 'undefined') {
+      try {
+        if (!this._silentAudioEl) {
+          const el = new Audio(
+            'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA'
+          );
+          el.setAttribute('playsinline', '');
+          el.playsInline = true;
+          el.volume = 0.01;
+          this._silentAudioEl = el;
+        }
+        const p = this._silentAudioEl.play();
+        if (p && typeof p.then === 'function') {
+          p.then(() => {
+            this._htmlAudioUnlocked = true;
+          }).catch(() => {});
+        } else {
+          this._htmlAudioUnlocked = true;
+        }
+      } catch (_) {}
+    }
+  }
+
   /**
-   * Call on first user gesture to unlock Web Audio & smoothly start BGM if enabled.
+   * Call on user gesture (touchend/click/keydown) to unlock Web Audio & smoothly start BGM if enabled.
    */
   unlock() {
     const ctx = this.ensureCtx();
     if (!ctx) return;
-    if (this.bgmEnabled && !this.tabHidden && !this._isPlayingBGM) {
-      this.startBGM();
+    this._unlockMobileAudio(ctx);
+    if (this.bgmEnabled && !this.tabHidden) {
+      if (ctx.state === 'running') {
+        if (!this._isPlayingBGM) {
+          this.startBGM();
+        } else if (this._bgmMasterGain && this._bgmMasterGain.gain.value < 0.01) {
+          this._rampParam(this._bgmMasterGain.gain, this._targetBGMGain(), 0.25, false);
+          this._gainBoostedAtRunning = true;
+        }
+      }
     }
   }
 
@@ -520,9 +578,10 @@ class StarlightAudio {
 
     this._isPlayingBGM = true;
     this._nextNoteTime = ctx.currentTime + 0.08;
+    this._gainBoostedAtRunning = ctx.state === 'running';
 
-    // Smooth cozy fade-in so music blooms gently
-    this._rampParam(this._bgmMasterGain.gain, this._targetBGMGain(), this._fadeInDone ? 0.45 : 0.85, true);
+    // Smooth cozy fade-in so music blooms gently (linear ramp avoids mobile WebView exponential underflow)
+    this._rampParam(this._bgmMasterGain.gain, this._targetBGMGain(), this._fadeInDone ? 0.35 : 0.75, false);
     this._rampParam(this._bgmToneFilter.frequency, this.muffled ? 580 : 12500, 0.35, true);
     this._fadeInDone = true;
 
@@ -536,6 +595,7 @@ class StarlightAudio {
       this._schedTimer = null;
     }
     this._isPlayingBGM = false;
+    this._gainBoostedAtRunning = false;
     if (this.ctx && this._bgmMasterGain) {
       if (fade) {
         this._rampParam(this._bgmMasterGain.gain, 0.0001, 0.28, true);
@@ -558,6 +618,11 @@ class StarlightAudio {
   _schedulerTick() {
     if (!this.bgmEnabled || this.tabHidden || !this.ctx) return;
     if (!this._externalCtx && this.ctx.state !== 'running') return;
+
+    if (!this._externalCtx && (!this._gainBoostedAtRunning || this._bgmMasterGain.gain.value < 0.01)) {
+      this._gainBoostedAtRunning = true;
+      this._rampParam(this._bgmMasterGain.gain, this._targetBGMGain(), 0.28, false);
+    }
 
     const track = this.TRACKS[this.bgmTrack] || this.TRACKS.waltz;
     const now = this.ctx.currentTime;

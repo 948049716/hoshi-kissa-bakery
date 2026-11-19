@@ -18,7 +18,7 @@
       points: 2,
       color: '#4674d6',
       crumbColor: '#b7dcff',
-      material: { friction: 0.14, restitution: 0.36 },
+      material: { friction: 0.18, restitution: 0.24 },
       lore: '凝结了午夜星露的晶莹蓝莓糖，酸甜清冽，是所有甜点的起点。',
       src: 'assets/processed/tier_1.webp',
       actSrc: 'assets/processed/tier_1_act.webp',
@@ -33,7 +33,7 @@
       points: 6,
       color: '#eb8861',
       crumbColor: '#ffe3c4',
-      material: { friction: 0.18, restitution: 0.34 },
+      material: { friction: 0.20, restitution: 0.22 },
       lore: '蓬松金黄的泡芙球里挤满白桃鲜奶油，脸颊总是红扑扑的。',
       src: 'assets/processed/tier_2.webp',
       actSrc: 'assets/processed/tier_2_act.webp',
@@ -48,7 +48,7 @@
       points: 14,
       color: '#7da85c',
       crumbColor: '#cde6a8',
-      material: { friction: 0.21, restitution: 0.31 },
+      material: { friction: 0.22, restitution: 0.20 },
       lore: '揉进宇治抹茶粉的软糯猫猫团子，在月光下会轻轻抖动小耳朵。',
       src: 'assets/processed/tier_3.webp',
       actSrc: 'assets/processed/tier_3_act.webp',
@@ -63,7 +63,7 @@
       points: 28,
       color: '#f2c849',
       crumbColor: '#ffe38c',
-      material: { friction: 0.24, restitution: 0.28 },
+      material: { friction: 0.25, restitution: 0.18 },
       lore: '香脆黄油塔皮盛满蜂蜜柠檬凝乳，咬一口就像咬住一束星光。',
       src: 'assets/processed/tier_4.webp',
       actSrc: 'assets/processed/tier_4_act.webp',
@@ -78,7 +78,7 @@
       points: 52,
       color: '#f29eb6',
       crumbColor: '#ffd4e3',
-      material: { friction: 0.23, restitution: 0.30 },
+      material: { friction: 0.24, restitution: 0.19 },
       lore: '冰凉Q弹的樱粉麻薯裹着雪白淡奶油，头顶一颗娇嫩甜草莓。',
       src: 'assets/processed/tier_5.webp',
       actSrc: 'assets/processed/tier_5_act.webp',
@@ -93,7 +93,7 @@
       points: 96,
       color: '#b86228',
       crumbColor: '#eab074',
-      material: { friction: 0.20, restitution: 0.30 },
+      material: { friction: 0.22, restitution: 0.19 },
       lore: '淋满海盐琥珀焦糖与可可流心的松软甜甜圈，点缀星星糖片。',
       src: 'assets/processed/tier_6.webp',
       actSrc: 'assets/processed/tier_6_act.webp',
@@ -108,7 +108,7 @@
       points: 168,
       color: '#9b7fd6',
       crumbColor: '#e2d5ff',
-      material: { friction: 0.19, restitution: 0.29 },
+      material: { friction: 0.21, restitution: 0.18 },
       lore: '薰衣草紫杏仁饼壳夹着梦幻奶霜夹心，安静地做着甜美的梦。',
       src: 'assets/processed/tier_7.webp',
       actSrc: 'assets/processed/tier_7_act.webp',
@@ -123,7 +123,7 @@
       points: 290,
       color: '#8f5936',
       crumbColor: '#d9a97c',
-      material: { friction: 0.26, restitution: 0.25 },
+      material: { friction: 0.27, restitution: 0.16 },
       lore: '层层交织的糖炒栗蓉与香草奶霜，点缀金箔，醇厚而温柔。',
       src: 'assets/processed/tier_8.webp',
       actSrc: 'assets/processed/tier_8_act.webp',
@@ -138,7 +138,7 @@
       points: 540,
       color: '#f5be58',
       crumbColor: '#ffea99',
-      material: { friction: 0.25, restitution: 0.26 },
+      material: { friction: 0.26, restitution: 0.16 },
       lore: '星夜吃茶的传说级至高甜点！戴着宝石皇冠与天使奶油翼的猫神舒芙蕾。',
       src: 'assets/processed/tier_9.webp',
       actSrc: 'assets/processed/tier_9_act.webp',
@@ -554,6 +554,7 @@
     prevDropX: 220,
     aimAngle: 0, // manual tilt via Q/E or wheel (-0.78..+0.78 rad)
     dropSway: 0, // visual-only pendulum liveliness while moving horizontally
+    touchAim: { active: false, cancelled: false, lastStableX: 220 },
     debugPhysics: false, // toggleable wireframe/contact inspector
     lastDebugContacts: [],
     magnetLinks: [],
@@ -1713,7 +1714,7 @@
     const magnetRange = 10 + magnetLv * 12 + (isFever ? 26 : 0);
     const magnetForce = 480 + magnetLv * 280 + (isFever ? 640 : 0);
 
-    const result = Physics.stepWorld(gameState.entities, JAR, dt, 1420, {
+    const result = Physics.stepWorld(gameState.entities, JAR, dt, 1680, {
       magnetRange,
       magnetForce
     });
@@ -2456,14 +2457,15 @@
     ctx.fillStyle = bgGrad;
     ctx.fill();
 
-    if (isFever) {
-      ctx.clip();
-      for (let m = 0; m < 10; m++) {
-        const mx = JAR.left + 22 + ((m * 41 + Math.sin(nowSec * 1.4 + m) * 16) % (JAR.right - JAR.left - 44));
-        const my = JAR.floorY - (((nowSec * 65 + m * 47) % (JAR.floorY - JAR.neckY)));
-        ctx.fillStyle = m % 2 === 0 ? 'rgba(255, 234, 138, 0.45)' : 'rgba(255, 182, 220, 0.42)';
-        drawStar(ctx, mx, my, 3.2 + (m % 3), nowSec * 3 + m);
-      }
+    ctx.clip();
+    const moteCount = isFever ? 12 : 5;
+    for (let m = 0; m < moteCount; m++) {
+      const mx = JAR.left + 22 + ((m * 47 + Math.sin(nowSec * (isFever ? 1.4 : 0.7) + m) * 18) % (JAR.right - JAR.left - 44));
+      const my = JAR.floorY - (((nowSec * (isFever ? 65 : 22) + m * 59) % (JAR.floorY - JAR.neckY)));
+      ctx.fillStyle = isFever
+        ? (m % 2 === 0 ? 'rgba(255, 234, 138, 0.48)' : 'rgba(255, 182, 220, 0.44)')
+        : 'rgba(255, 236, 178, 0.22)';
+      drawStar(ctx, mx, my, isFever ? 3.2 + (m % 3) : 2.1 + (m % 2) * 0.8, nowSec * (isFever ? 3 : 1.2) + m);
     }
     ctx.restore();
 
@@ -2510,9 +2512,12 @@
       const aimAngle = getAimTotalAngle();
       const landY = predictLandingY(gameState.curTier, gameState.dropX, aimAngle, curIsWild);
       lockedTarget = findAimMergeTarget(gameState.curTier, gameState.dropX, landY, curIsWild);
+      const isAimCancelled = gameState.touchAim.active && gameState.touchAim.cancelled;
+      const isTouchAiming = gameState.touchAim.active && !gameState.touchAim.cancelled;
 
       // Dashed guide line (turns bright pulsing gold/rainbow when locked onto a merge!)
       ctx.save();
+      if (isAimCancelled) ctx.globalAlpha = 0.25;
       ctx.beginPath();
       ctx.setLineDash(lockedTarget ? [7, 4] : [6, 6]);
       ctx.moveTo(gameState.dropX, JAR.dropY + curR * 0.9 + 2);
@@ -2522,25 +2527,27 @@
         ctx.strokeStyle = curIsWild
           ? `rgba(255, 168, 224, ${pulse})`
           : `rgba(255, 228, 102, ${pulse})`;
-        ctx.lineWidth = 2.8;
+        ctx.lineWidth = isTouchAiming ? 3.2 : 2.8;
       } else {
         ctx.strokeStyle = curIsWild
           ? 'rgba(255, 186, 232, 0.72)'
           : curIsGold
           ? 'rgba(255, 224, 102, 0.76)'
+          : isTouchAiming
+          ? 'rgba(255, 232, 152, 0.85)'
           : 'rgba(255, 224, 132, 0.58)';
-        ctx.lineWidth = 1.8;
+        ctx.lineWidth = isTouchAiming ? 2.4 : 1.8;
       }
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.restore();
 
       // Exact landing ghost silhouette (faint sprite + dashed compound polygon contour)
-      if (landY > JAR.dropY + 26) {
+      if (landY > JAR.dropY + 26 && !isAimCancelled) {
         if (curIsWild) {
           drawRainbowWildcard(ctx, gameState.dropX, landY, curR, aimAngle, nowSec, 0.34);
         } else {
-          drawTierSprite(gameState.curTier, gameState.dropX, landY, curR, aimAngle, 0, 0, 0.24);
+          drawTierSprite(gameState.curTier, gameState.dropX, landY, curR, aimAngle, 0, 0, isTouchAiming ? 0.34 : 0.25);
         }
         drawShapePolygons(
           ctx,
@@ -2549,9 +2556,9 @@
           landY,
           curR,
           aimAngle,
-          lockedTarget ? 'rgba(255, 238, 118, 0.92)' : 'rgba(255, 232, 148, 0.52)',
-          lockedTarget ? 2.1 : 1.4,
-          lockedTarget ? 'rgba(255, 232, 118, 0.14)' : 'rgba(255, 224, 132, 0.06)',
+          lockedTarget ? 'rgba(255, 238, 118, 0.95)' : isTouchAiming ? 'rgba(255, 238, 170, 0.78)' : 'rgba(255, 232, 148, 0.52)',
+          lockedTarget ? 2.2 : 1.5,
+          lockedTarget ? 'rgba(255, 232, 118, 0.16)' : 'rgba(255, 224, 132, 0.07)',
           [4, 4]
         );
 
@@ -2584,6 +2591,8 @@
       // Current treat hovering above rim (unplaced treat with periodic solo action)
       if (gameState.dropCooldown <= 0.09) {
         const visualAngle = aimAngle + gameState.dropSway * 0.45;
+        ctx.save();
+        if (isAimCancelled) ctx.globalAlpha = 0.45;
         if (curIsWild) {
           drawRainbowWildcard(ctx, gameState.dropX, JAR.dropY, curR, visualAngle, nowSec, 1);
         } else {
@@ -2602,6 +2611,24 @@
           if (gameState.heldActionAnim) {
             drawDessertActionFX(ctx, gameState.dropX, JAR.dropY, curR, gameState.curTier, gameState.heldActionAnim);
           }
+        }
+        ctx.restore();
+
+        if (isAimCancelled) {
+          ctx.save();
+          ctx.fillStyle = 'rgba(42, 22, 12, 0.88)';
+          ctx.strokeStyle = 'rgba(255, 210, 140, 0.8)';
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.roundRect(JAR.canvasW / 2 - 58, JAR.neckY + 12, 116, 22, 11);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#ffe8bc';
+          ctx.font = 'bold 11px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('↑ 松手取消投放', JAR.canvasW / 2, JAR.neckY + 23);
+          ctx.restore();
         }
 
         // Show subtle manual tilt readout pill when player tilts with Q/E or wheel
@@ -2647,7 +2674,16 @@
     // 4.8 Magnetic Starlight Tether Arcs
     drawMagnetLinks(ctx, nowSec);
 
-    // 5. All Physics Entities inside Jar
+    // 5. All Physics Entities inside Jar (with soft grounded contact shadows)
+    ctx.save();
+    ctx.fillStyle = 'rgba(24, 12, 6, 0.22)';
+    for (const e of gameState.entities) {
+      ctx.beginPath();
+      ctx.ellipse(e.x + 2, e.y + e.r * 0.14, e.r * 0.94, e.r * 0.88, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
     for (const e of gameState.entities) {
       const isHovered = gameState.activeToolMode && gameState.hoveredEntityId === e.id;
       const validTarget =
@@ -2767,11 +2803,11 @@
     ctx.strokeStyle = '#4A2C2A';
     ctx.stroke();
 
-    // Curved specular glass sheen on left & right walls
+    // Curved specular glass sheen on left, right, and curved bottom caustic rim
     ctx.beginPath();
     ctx.moveTo(JAR.left + 12, JAR.neckY + 28);
     ctx.quadraticCurveTo(JAR.left + 10, 310, JAR.left + 32, JAR.floorY - 46);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.36)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.38)';
     ctx.lineWidth = 7;
     ctx.lineCap = 'round';
     ctx.stroke();
@@ -2779,8 +2815,15 @@
     ctx.beginPath();
     ctx.moveTo(JAR.right - 12, JAR.neckY + 34);
     ctx.quadraticCurveTo(JAR.right - 10, 310, JAR.right - 34, JAR.floorY - 50);
-    ctx.strokeStyle = 'rgba(255, 244, 214, 0.24)';
+    ctx.strokeStyle = 'rgba(255, 244, 214, 0.26)';
     ctx.lineWidth = 5;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(JAR.left + 92, JAR.floorY - 12);
+    ctx.quadraticCurveTo(JAR.canvasW / 2, JAR.floorY + 1, JAR.right - 92, JAR.floorY - 12);
+    ctx.strokeStyle = 'rgba(255, 248, 224, 0.34)';
+    ctx.lineWidth = 4.5;
     ctx.stroke();
 
     // Brass Neck Collar Rim at top of jar
@@ -2800,7 +2843,7 @@
     ctx.beginPath();
     ctx.moveTo(JAR.left + 6, JAR.neckY - 6);
     ctx.lineTo(JAR.right - 6, JAR.neckY - 6);
-    ctx.strokeStyle = 'rgba(255, 250, 220, 0.7)';
+    ctx.strokeStyle = 'rgba(255, 250, 220, 0.72)';
     ctx.lineWidth = 2;
     ctx.stroke();
     ctx.restore();
@@ -3584,6 +3627,12 @@
       gameState.hoveredEntityId = hit ? hit.id : null;
       return;
     }
+    if (ev.pointerType === 'touch' && gameState.touchAim.active) {
+      gameState.touchAim.cancelled = pt.y < JAR.neckY - 22;
+      updateDropPointerX(pt.x);
+      gameState.touchAim.lastStableX = gameState.dropX;
+      return;
+    }
     updateDropPointerX(pt.x);
   });
 
@@ -3598,19 +3647,50 @@
     }
     toolConsumedPointer = false;
     updateDropPointerX(pt.x);
+    if (ev.pointerType === 'touch') {
+      gameState.touchAim.active = true;
+      gameState.touchAim.cancelled = pt.y < JAR.neckY - 22;
+      gameState.touchAim.lastStableX = gameState.dropX;
+    }
   });
+
+  function clearTouchAim() {
+    gameState.touchAim.active = false;
+    gameState.touchAim.cancelled = false;
+  }
 
   canvas.addEventListener('pointerup', (ev) => {
     if (toolConsumedPointer) {
       toolConsumedPointer = false;
+      clearTouchAim();
       return;
     }
-    if (!gameState.running || gameState.over || gameState.paused) return;
-    if (gameState.activeToolMode) return;
+    if (!gameState.running || gameState.over || gameState.paused) {
+      clearTouchAim();
+      return;
+    }
+    if (gameState.activeToolMode) {
+      clearTouchAim();
+      return;
+    }
     const pt = canvasCoordsFromEvent(ev);
+    if (ev.pointerType === 'touch' && gameState.touchAim.active) {
+      const cancelled = gameState.touchAim.cancelled || pt.y < JAR.neckY - 22;
+      // Ignore tiny lift-off skin-roll jitter (< 10px) so touch drops stay laser-accurate
+      const targetX =
+        Math.abs(pt.x - gameState.touchAim.lastStableX) <= 10 ? gameState.touchAim.lastStableX : pt.x;
+      clearTouchAim();
+      if (cancelled) return;
+      updateDropPointerX(targetX);
+      dropCurrentTreat();
+      return;
+    }
+    clearTouchAim();
     updateDropPointerX(pt.x);
     dropCurrentTreat();
   });
+
+  canvas.addEventListener('pointercancel', clearTouchAim);
 
   canvas.addEventListener(
     'wheel',

@@ -239,6 +239,23 @@
   const discoveredCountEl = document.getElementById('discovered-count');
   const evoRingEl = document.getElementById('evo-ring');
 
+  // Mobile Compact HUD Elements
+  const mScoreEl = document.getElementById('m-score-value');
+  const mBestEl = document.getElementById('m-best-value');
+  const mStardustEl = document.getElementById('m-stardust-value');
+  const mFeverBox = document.getElementById('m-fever-box');
+  const mFeverLabel = document.getElementById('m-fever-label');
+  const mFeverPctEl = document.getElementById('m-fever-pct');
+  const mFeverFillEl = document.getElementById('m-fever-fill');
+  const mNextImgEl = document.getElementById('m-next-img');
+  const mHoldBubbleEl = document.getElementById('m-hold-bubble');
+  const mHoldImgEl = document.getElementById('m-hold-img');
+  const mHoldEmptyEl = document.getElementById('m-hold-empty');
+  const mOrderBarEl = document.getElementById('m-order-bar');
+  const mOrderSlotsEl = document.getElementById('m-order-slots');
+  const mOrderRewardEl = document.getElementById('m-order-reward');
+  const mBtnSkipOrder = document.getElementById('m-btn-skip-order');
+
   const targetBannerEl = document.getElementById('target-banner');
   const targetBannerTextEl = document.getElementById('target-banner-text');
   const btnCancelTarget = document.getElementById('btn-cancel-target');
@@ -610,12 +627,15 @@
   function renderOrder() {
     if (gameState.mode !== 'chef') {
       orderBoxEl.style.display = 'none';
+      if (mOrderBarEl) mOrderBarEl.style.display = 'none';
       return;
     }
     orderBoxEl.style.display = 'block';
+    if (mOrderBarEl) mOrderBarEl.style.display = 'flex';
     if (!gameState.order) return;
 
     orderSlotsEl.innerHTML = '';
+    if (mOrderSlotsEl) mOrderSlotsEl.innerHTML = '';
     gameState.order.slots.forEach((slot) => {
       const t = TIERS[slot.tier - 1];
       const div = document.createElement('div');
@@ -625,8 +645,18 @@
         <div class="order-slot-name">${t.name}</div>
       `;
       orderSlotsEl.appendChild(div);
+
+      if (mOrderSlotsEl) {
+        const mDiv = document.createElement('div');
+        mDiv.className = `m-order-slot${slot.done ? ' is-done' : ''}`;
+        mDiv.innerHTML = `<img src="${t.src}" alt="${t.name}" />`;
+        mOrderSlotsEl.appendChild(mDiv);
+      }
     });
     orderRewardLineEl.textContent = `完成奖励: +${gameState.order.rewardScore} 分 · +${gameState.order.rewardDust} ⭐`;
+    if (mOrderRewardEl) {
+      mOrderRewardEl.textContent = `+${gameState.order.rewardScore}分·+${gameState.order.rewardDust}⭐`;
+    }
   }
 
   // Score, Fever & HUD Sync
@@ -651,26 +681,41 @@
   }
 
   function updateHUD() {
-    bestEl.textContent = String(getBestScore());
-    stardustEl.textContent = String(gameState.stardust);
+    const bestStr = String(getBestScore());
+    const dustStr = String(gameState.stardust);
+    bestEl.textContent = bestStr;
+    stardustEl.textContent = dustStr;
+    if (mBestEl) mBestEl.textContent = bestStr;
+    if (mStardustEl) mStardustEl.textContent = dustStr;
 
     const isFever = gameState.feverTimer > 0;
     feverBox.classList.toggle('is-fever', isFever);
+    if (mFeverBox) mFeverBox.classList.toggle('is-fever', isFever);
     if (isFever) {
       const pct = Math.max(0, (gameState.feverTimer / 10.0) * 100);
-      feverFillEl.style.width = `${pct.toFixed(1)}%`;
+      const pctWidth = `${pct.toFixed(1)}%`;
+      const pctText = `${gameState.feverTimer.toFixed(1)}s`;
+      feverFillEl.style.width = pctWidth;
       feverLabel.textContent = '🌈 星光狂热 2×';
-      feverPctEl.textContent = `${gameState.feverTimer.toFixed(1)}s`;
+      feverPctEl.textContent = pctText;
+      if (mFeverFillEl) mFeverFillEl.style.width = pctWidth;
+      if (mFeverLabel) mFeverLabel.textContent = '🌈 狂热 2×';
+      if (mFeverPctEl) mFeverPctEl.textContent = pctText;
     } else {
-      feverFillEl.style.width = `${Math.round(gameState.feverEnergy)}%`;
+      const pctWidth = `${Math.round(gameState.feverEnergy)}%`;
+      feverFillEl.style.width = pctWidth;
       feverLabel.textContent = '✨ 星光能量槽';
-      feverPctEl.textContent = `${Math.round(gameState.feverEnergy)}%`;
+      feverPctEl.textContent = pctWidth;
+      if (mFeverFillEl) mFeverFillEl.style.width = pctWidth;
+      if (mFeverLabel) mFeverLabel.textContent = '✨ 星光能量';
+      if (mFeverPctEl) mFeverPctEl.textContent = pctWidth;
     }
 
     // Next & Hold Previews
     const nextDef = TIERS[gameState.nextTier - 1];
     nextImgEl.src = nextDef.src;
     nextNameEl.textContent = nextDef.name;
+    if (mNextImgEl) mNextImgEl.src = nextDef.src;
 
     if (gameState.holdTier) {
       const holdDef = TIERS[gameState.holdTier - 1];
@@ -678,10 +723,17 @@
       holdImgEl.style.display = 'block';
       holdEmptyEl.style.display = 'none';
       holdNameEl.textContent = holdDef.name;
+      if (mHoldImgEl) {
+        mHoldImgEl.src = holdDef.src;
+        mHoldImgEl.style.display = 'block';
+      }
+      if (mHoldEmptyEl) mHoldEmptyEl.style.display = 'none';
     } else {
       holdImgEl.style.display = 'none';
       holdEmptyEl.style.display = 'block';
       holdNameEl.textContent = '快捷键 [H]';
+      if (mHoldImgEl) mHoldImgEl.style.display = 'none';
+      if (mHoldEmptyEl) mHoldEmptyEl.style.display = 'block';
     }
 
     // Tool Badges
@@ -1658,9 +1710,14 @@
       }
       if (gameState.skipCooldown > 0) {
         gameState.skipCooldown = Math.max(0, gameState.skipCooldown - dt);
-        btnSkipOrder.disabled = gameState.skipCooldown > 0;
-        btnSkipOrder.textContent =
-          gameState.skipCooldown > 0 ? `冷却 ${Math.ceil(gameState.skipCooldown)}s` : '换一单';
+        const isCooling = gameState.skipCooldown > 0;
+        const skipTxt = isCooling ? `冷却 ${Math.ceil(gameState.skipCooldown)}s` : '换一单';
+        btnSkipOrder.disabled = isCooling;
+        btnSkipOrder.textContent = skipTxt;
+        if (mBtnSkipOrder) {
+          mBtnSkipOrder.disabled = isCooling;
+          mBtnSkipOrder.textContent = skipTxt;
+        }
       }
 
       if (gameState.feverTimer > 0) {
@@ -1683,6 +1740,7 @@
     } else {
       scoreEl.textContent = String(gameState.score);
     }
+    if (mScoreEl) mScoreEl.textContent = scoreEl.textContent;
 
     // Update particles & popups even after game over for polish
     for (let i = gameState.particles.length - 1; i >= 0; i--) {
@@ -1957,6 +2015,10 @@
     gameState.skipCooldown = 0;
     btnSkipOrder.disabled = false;
     btnSkipOrder.textContent = '换一单';
+    if (mBtnSkipOrder) {
+      mBtnSkipOrder.disabled = false;
+      mBtnSkipOrder.textContent = '换一单';
+    }
 
     cancelToolMode();
     titleModal.classList.remove('is-open');
@@ -2001,6 +2063,7 @@
   });
 
   holdBubbleEl.addEventListener('click', swapHoldPocket);
+  if (mHoldBubbleEl) mHoldBubbleEl.addEventListener('click', swapHoldPocket);
   btnToolShake.addEventListener('click', () => armOrUseTool('shake'));
   btnToolFork.addEventListener('click', () => armOrUseTool('fork'));
   btnToolSpoon.addEventListener('click', () => armOrUseTool('spoon'));
@@ -2012,6 +2075,7 @@
     showToast('📋 已为顾客更换新的星夜心愿单！');
     generateOrder();
   });
+  if (mBtnSkipOrder) mBtnSkipOrder.addEventListener('click', () => btnSkipOrder.click());
 
   if (btnDebugPhys) {
     btnDebugPhys.addEventListener('click', () => toggleDebugPhysics());

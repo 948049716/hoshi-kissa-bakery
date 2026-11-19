@@ -76,6 +76,52 @@
         </div>
       </section>
 
+      <!-- Mobile Compact HUD (visible on <= 820px) -->
+      <section class="mobile-hud" id="mobile-hud" aria-label="移动端快捷状态栏">
+        <div class="m-hud-top">
+          <div class="m-stats-card">
+            <div class="m-score-row">
+              <span class="m-score-label">得分</span>
+              <strong class="m-score-val" id="m-score-value">0</strong>
+              <span class="m-sub-pill">最高 <strong id="m-best-value">0</strong></span>
+              <span class="stardust-pill m-dust-pill">⭐ <strong id="m-stardust-value">30</strong></span>
+            </div>
+            <div class="m-fever-box" id="m-fever-box">
+              <div class="m-fever-head">
+                <span id="m-fever-label">✨ 星光能量</span>
+                <span id="m-fever-pct">0%</span>
+              </div>
+              <div class="fever-track m-fever-track">
+                <div class="fever-fill" id="m-fever-fill"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="m-preview-pair">
+            <div class="m-preview-item">
+              <span class="m-preview-tag">NEXT</span>
+              <div class="m-preview-box">
+                <img id="m-next-img" src="assets/processed/tier_1.webp" alt="下一颗甜品" />
+              </div>
+            </div>
+            <div class="m-preview-item">
+              <span class="m-preview-tag">HOLD</span>
+              <div class="m-preview-box is-clickable" id="m-hold-bubble" title="点击交换暂存甜品">
+                <img id="m-hold-img" src="" alt="" style="display: none;" />
+                <span id="m-hold-empty" class="m-hold-empty">暂存</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="m-order-bar" id="m-order-bar">
+          <span class="m-order-label">🌟 心愿</span>
+          <div class="m-order-slots" id="m-order-slots"></div>
+          <span class="m-order-reward" id="m-order-reward">+240分·+20⭐</span>
+          <button class="skip-order-btn m-skip-btn" id="m-btn-skip-order" type="button">换一单</button>
+        </div>
+      </section>
+
       <!-- Center Stage: Glass Mixing Jar & 3 Counter Tools -->
       <section class="center-stage" aria-label="星光搅拌罐游戏区">
         <div class="jar-canvas-wrap">

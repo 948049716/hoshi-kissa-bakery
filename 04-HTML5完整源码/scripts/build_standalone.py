@@ -6,9 +6,8 @@ into a single 100% self-contained standalone HTML file.
 import base64
 from pathlib import Path
 
-ROOT = Path("/home/antigravity/hoshi-kissa-bakery")
-DIST = ROOT / "dist"
-DIST.mkdir(parents=True, exist_ok=True)
+ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = ROOT.parent
 
 
 def data_uri(rel_path: str) -> str:
@@ -29,7 +28,7 @@ def build():
     game_js = (ROOT / "game.js").read_text(encoding="utf-8")
 
     # Replace all processed asset URLs across CSS, HTML, and JS with inline base64 data URIs
-    asset_files = sorted((ROOT / "assets/processed").glob("*.webp"))
+    asset_files = sorted((ROOT / "assets/processed").glob("*.webp"), key=lambda p: len(p.name), reverse=True)
     replacements = {f"assets/processed/{p.name}": data_uri(f"assets/processed/{p.name}") for p in asset_files}
 
     for rel, uri in replacements.items():
@@ -43,7 +42,7 @@ def build():
     html = html.replace('<script src="physics.js"></script>', f"<script>\n{physics_js}\n</script>")
     html = html.replace('<script src="game.js"></script>', f"<script>\n{game_js}\n</script>")
 
-    out_path = DIST / "hoshi-kissa-bakery.html"
+    out_path = REPO_ROOT / "hoshi-kissa-bakery.html"
     out_path.write_text(html, encoding="utf-8")
     print(f"Built standalone HTML: {out_path} ({out_path.stat().st_size / 1024:.1f} KB)")
 

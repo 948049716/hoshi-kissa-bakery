@@ -21,6 +21,8 @@
       material: { friction: 0.34, restitution: 0.26 },
       lore: '凝结了午夜星露的晶莹蓝莓糖，酸甜清冽，是所有甜点的起点。',
       src: 'assets/processed/tier_1.webp',
+      actSrc: 'assets/processed/tier_1_act.webp',
+      intSrc: 'assets/processed/tier_1_int.webp',
       meta: { anchor_x_norm: 0.4979, anchor_y_norm: 0.5478, radius_norm_w: 0.4972 }
     },
     {
@@ -34,6 +36,8 @@
       material: { friction: 0.44, restitution: 0.21 },
       lore: '蓬松金黄的泡芙球里挤满白桃鲜奶油，脸颊总是红扑扑的。',
       src: 'assets/processed/tier_2.webp',
+      actSrc: 'assets/processed/tier_2_act.webp',
+      intSrc: 'assets/processed/tier_2_int.webp',
       meta: { anchor_x_norm: 0.5000, anchor_y_norm: 0.5582, radius_norm_w: 0.4711 }
     },
     {
@@ -47,6 +51,8 @@
       material: { friction: 0.54, restitution: 0.16 },
       lore: '揉进宇治抹茶粉的软糯猫猫团子，在月光下会轻轻抖动小耳朵。',
       src: 'assets/processed/tier_3.webp',
+      actSrc: 'assets/processed/tier_3_act.webp',
+      intSrc: 'assets/processed/tier_3_int.webp',
       meta: { anchor_x_norm: 0.4980, anchor_y_norm: 0.4838, radius_norm_w: 0.4771 }
     },
     {
@@ -60,6 +66,8 @@
       material: { friction: 0.56, restitution: 0.14 },
       lore: '香脆黄油塔皮盛满蜂蜜柠檬凝乳，咬一口就像咬住一束星光。',
       src: 'assets/processed/tier_4.webp',
+      actSrc: 'assets/processed/tier_4_act.webp',
+      intSrc: 'assets/processed/tier_4_int.webp',
       meta: { anchor_x_norm: 0.4981, anchor_y_norm: 0.5126, radius_norm_w: 0.4459 }
     },
     {
@@ -73,6 +81,8 @@
       material: { friction: 0.58, restitution: 0.15 },
       lore: '冰凉Q弹的樱粉麻薯裹着雪白淡奶油，头顶一颗娇嫩甜草莓。',
       src: 'assets/processed/tier_5.webp',
+      actSrc: 'assets/processed/tier_5_act.webp',
+      intSrc: 'assets/processed/tier_5_int.webp',
       meta: { anchor_x_norm: 0.4980, anchor_y_norm: 0.5767, radius_norm_w: 0.4601 }
     },
     {
@@ -86,6 +96,8 @@
       material: { friction: 0.52, restitution: 0.16 },
       lore: '淋满海盐琥珀焦糖与可可流心的松软甜甜圈，点缀星星糖片。',
       src: 'assets/processed/tier_6.webp',
+      actSrc: 'assets/processed/tier_6_act.webp',
+      intSrc: 'assets/processed/tier_6_int.webp',
       meta: { anchor_x_norm: 0.5000, anchor_y_norm: 0.4905, radius_norm_w: 0.4832 }
     },
     {
@@ -99,6 +111,8 @@
       material: { friction: 0.48, restitution: 0.17 },
       lore: '薰衣草紫杏仁饼壳夹着梦幻奶霜夹心，安静地做着甜美的梦。',
       src: 'assets/processed/tier_7.webp',
+      actSrc: 'assets/processed/tier_7_act.webp',
+      intSrc: 'assets/processed/tier_7_int.webp',
       meta: { anchor_x_norm: 0.4960, anchor_y_norm: 0.4947, radius_norm_w: 0.4851 }
     },
     {
@@ -112,6 +126,8 @@
       material: { friction: 0.62, restitution: 0.11 },
       lore: '层层交织的糖炒栗蓉与香草奶霜，点缀金箔，醇厚而温柔。',
       src: 'assets/processed/tier_8.webp',
+      actSrc: 'assets/processed/tier_8_act.webp',
+      intSrc: 'assets/processed/tier_8_int.webp',
       meta: { anchor_x_norm: 0.4980, anchor_y_norm: 0.5080, radius_norm_w: 0.4860 }
     },
     {
@@ -125,6 +141,8 @@
       material: { friction: 0.60, restitution: 0.12 },
       lore: '星夜吃茶的传说级至高甜点！戴着宝石皇冠与天使奶油翼的猫神舒芙蕾。',
       src: 'assets/processed/tier_9.webp',
+      actSrc: 'assets/processed/tier_9_act.webp',
+      intSrc: 'assets/processed/tier_9_int.webp',
       meta: { anchor_x_norm: 0.4903, anchor_y_norm: 0.6025, radius_norm_w: 0.3841 }
     }
   ];
@@ -319,22 +337,33 @@
     } catch (_) {}
   }
 
-  // Preload all sprite images cleanly
+  // Preload all base, solo-action, and neighbor-interaction sprite images cleanly
   const spriteImages = {};
+  const spriteActionImages = {};
+  const spriteInteractImages = {};
   let assetsReady = false;
   function loadSprites() {
-    const promises = TIERS.map(
-      (t) =>
-        new Promise((resolve) => {
-          const img = new Image();
-          img.onload = () => {
-            spriteImages[t.tier] = img;
-            resolve();
-          };
-          img.onerror = resolve;
-          img.src = t.src;
-        })
-    );
+    const loadOne = (url, targetMap, tier) =>
+      new Promise((resolve) => {
+        if (!url) {
+          resolve();
+          return;
+        }
+        const img = new Image();
+        img.onload = () => {
+          targetMap[tier] = img;
+          resolve();
+        };
+        img.onerror = resolve;
+        img.src = url;
+      });
+
+    const promises = [];
+    for (const t of TIERS) {
+      promises.push(loadOne(t.src, spriteImages, t.tier));
+      promises.push(loadOne(t.actSrc, spriteActionImages, t.tier));
+      promises.push(loadOne(t.intSrc, spriteInteractImages, t.tier));
+    }
     return Promise.all(promises).then(() => {
       assetsReady = true;
     });
@@ -379,6 +408,11 @@
     holdTier: null,
     canHoldThisTurn: true,
     dropCooldown: 0,
+    heldActionCooldown: 1.6,
+    heldActionAnim: null,
+    previewActionCooldown: 2.6,
+    previewActionTimer: 0,
+    previewActionTarget: null,
     dangerDuration: 0,
     jarShakeAmp: 0,
     nextEntityId: 1,
@@ -836,6 +870,8 @@
       gameState.curTier = tmp;
     }
     gameState.canHoldThisTurn = false;
+    gameState.heldActionAnim = null;
+    gameState.heldActionCooldown = 1.4 + Math.random() * 1.4;
     clampDropX();
     updateHUD();
   }
@@ -893,7 +929,11 @@
       dangerTime: 0,
       inContact: false,
       merged: false,
-      creditedToOrder: false
+      creditedToOrder: false,
+      // Per-dessert periodic solo action & neighbor-squeeze interaction timers
+      soloCooldown: 1.5 + Math.random() * 2.6,
+      interactCooldown: 1.2 + Math.random() * 2.3,
+      anim: null
     };
     Physics.configureBodyShape(entity, shapeDef, def.radius, def.material);
     if (bornFromMerge) {
@@ -922,6 +962,8 @@
     gameState.dropSway *= 0.35;
     gameState.canHoldThisTurn = true;
     gameState.dropCooldown = 0.40;
+    gameState.heldActionAnim = null;
+    gameState.heldActionCooldown = 1.5 + Math.random() * 1.5;
     clampDropX();
     updateHUD();
   }
@@ -1464,9 +1506,22 @@
         );
       }
 
-      // Current treat hovering above rim
+      // Current treat hovering above rim (unplaced treat with periodic solo action)
       if (gameState.dropCooldown <= 0.14) {
-        drawTierSprite(gameState.curTier, gameState.dropX, JAR.dropY, curDef.radius, aimAngle, 0, 0, 1);
+        drawTierSprite(
+          gameState.curTier,
+          gameState.dropX,
+          JAR.dropY,
+          curDef.radius,
+          aimAngle,
+          0,
+          0,
+          1,
+          gameState.heldActionAnim
+        );
+        if (gameState.heldActionAnim) {
+          drawDessertActionFX(ctx, gameState.dropX, JAR.dropY, curDef.radius, gameState.curTier, gameState.heldActionAnim);
+        }
 
         // Show subtle manual tilt readout pill when player tilts with Q/E or wheel
         if (Math.abs(gameState.aimAngle) > 0.03) {
@@ -1499,7 +1554,7 @@
         ((gameState.activeToolMode === 'fork' && e.tier <= 4) ||
           (gameState.activeToolMode === 'spoon' && e.tier < 9));
 
-      drawTierSprite(e.tier, e.x, e.y, e.r, e.angle, e.squishAmt, e.squishAngle, 1);
+      drawTierSprite(e.tier, e.x, e.y, e.r, e.angle, e.squishAmt, e.squishAngle, 1, e.anim);
 
       // Highlight exact polygon contour when targeting with Fork or Spoon
       if (validTarget) {
@@ -1511,6 +1566,13 @@
         );
       } else if (isHovered && gameState.activeToolMode === 'fork' && e.tier > 4) {
         drawEntityWorldPolys(ctx, e, 'rgba(255, 100, 90, 0.82)', 2.4);
+      }
+    }
+
+    // 5.2 Render Solo Action Emotes & Neighbor Squeeze Interaction FX above treats
+    for (const e of gameState.entities) {
+      if (e.anim) {
+        drawDessertActionFX(ctx, e.x, e.y, e.r, e.tier, e.anim);
       }
     }
 
@@ -1613,16 +1675,241 @@
     ctx.restore();
   }
 
-  function drawTierSprite(tier, x, y, r, angle, squishAmt = 0, squishAngle = 0, alpha = 1) {
+  /**
+   * Computes procedural offset, rotation, squash-and-stretch, and active sprite frame
+   * for each tier's signature solo action or paired neighbor-squeeze interaction.
+   */
+  function computeDessertAnimPose(tier, anim) {
+    if (!anim) {
+      return { dx: 0, dy: 0, dAngle: 0, sx: 1, sy: 1, spriteKind: 'base' };
+    }
+    const p = Math.max(0, Math.min(1, anim.t / anim.dur));
+    const env = Math.sin(p * Math.PI);
+
+    if (anim.kind === 'interact') {
+      const s = anim.isLeader ? 1 : -1;
+      const ux = anim.ux || 0;
+      const uy = anim.uy || 0;
+      const tx = -uy;
+      const ty = ux;
+
+      if (anim.style === 'nuzzle') {
+        // Cheek-to-cheek affectionate lean + perpendicular nuzzle rub
+        const push = Math.sin(p * Math.PI) * 3.8;
+        const rub = Math.sin(p * Math.PI * 4) * 2.1 * env * s;
+        return {
+          dx: ux * push + tx * rub,
+          dy: uy * push + ty * rub,
+          dAngle: Math.sin(p * Math.PI * 4) * 0.14 * env * s,
+          sx: 1 + 0.08 * Math.sin(p * Math.PI * 2) * env,
+          sy: 1 - 0.06 * Math.sin(p * Math.PI * 2) * env,
+          spriteKind: 'int'
+        };
+      } else if (anim.style === 'boop') {
+        // Double elastic squeeze-boop toward shared contact point
+        const wave = Math.abs(Math.sin(p * Math.PI * 2)) * env;
+        return {
+          dx: ux * wave * 4.2,
+          dy: uy * wave * 4.2,
+          dAngle: Math.sin(p * Math.PI * 2) * 0.09 * env * s,
+          sx: 1 + 0.11 * wave,
+          sy: 1 - 0.09 * wave,
+          spriteKind: 'int'
+        };
+      } else {
+        // 'chat': Cozy duet sway & whisper between neighbors
+        const hop = Math.abs(Math.sin(p * Math.PI * 3)) * env;
+        return {
+          dx: ux * 2.4 * env,
+          dy: uy * 2.0 * env - hop * 3.0,
+          dAngle: Math.sin(p * Math.PI * 3) * 0.15 * env * s,
+          sx: 1 + 0.07 * Math.sin(p * Math.PI * 3) * env,
+          sy: 1 - 0.05 * Math.sin(p * Math.PI * 3) * env,
+          spriteKind: p > 0.35 && p < 0.72 ? 'act' : 'int'
+        };
+      }
+    }
+
+    // Signature per-tier solo idle action (1..9)
+    switch (tier) {
+      case 1: // 蓝莓星露糖: 星露眨眼双跳 + 绿叶轻摇
+        return {
+          dx: 0,
+          dy: -Math.abs(Math.sin(p * Math.PI * 2)) * 5.2 * env,
+          dAngle: Math.sin(p * Math.PI * 4) * 0.16 * env,
+          sx: 1 + 0.08 * Math.cos(p * Math.PI * 4) * env,
+          sy: 1 - 0.07 * Math.cos(p * Math.PI * 4) * env,
+          spriteKind: 'act'
+        };
+      case 2: // 蜜桃泡芙球: 奶油鼓腮呼吸律动
+        return {
+          dx: 0,
+          dy: -2.6 * env,
+          dAngle: Math.sin(p * Math.PI * 2) * 0.09 * env,
+          sx: 1 + 0.13 * Math.sin(p * Math.PI * 3) * env,
+          sy: 1 - 0.09 * Math.sin(p * Math.PI * 3) * env,
+          spriteKind: 'act'
+        };
+      case 3: // 抹茶猫耳团子: 高频猫耳抖抖 + 开心微跳
+        return {
+          dx: 0,
+          dy: -3.6 * Math.abs(Math.sin(p * Math.PI * 2)) * env,
+          dAngle: Math.sin(p * Math.PI * 8) * 0.15 * env,
+          sx: 1 - 0.06 * Math.sin(p * Math.PI * 2) * env,
+          sy: 1 + 0.09 * Math.sin(p * Math.PI * 2) * env,
+          spriteKind: 'act'
+        };
+      case 4: // 柠檬蜂蜜布丁塔: 凝乳果冻Q晃
+        return {
+          dx: Math.sin(p * Math.PI * 4) * 3.0 * env,
+          dy: -1.8 * env,
+          dAngle: Math.sin(p * Math.PI * 4) * 0.09 * env,
+          sx: 1 + 0.12 * Math.sin(p * Math.PI * 5) * env,
+          sy: 1 - 0.10 * Math.sin(p * Math.PI * 5) * env,
+          spriteKind: 'act'
+        };
+      case 5: // 草莓奶油大福: 麻薯软糯拉伸弹跳
+        return {
+          dx: 0,
+          dy: -Math.max(0, Math.sin(p * Math.PI * 2)) * 5.8 * env,
+          dAngle: Math.sin(p * Math.PI * 2) * 0.08 * env,
+          sx: 1 - 0.11 * Math.sin(p * Math.PI * 2) * env,
+          sy: 1 + 0.14 * Math.sin(p * Math.PI * 2) * env,
+          spriteKind: 'act'
+        };
+      case 6: // 焦糖星云甜甜圈: 星云旋舞摇摆
+        return {
+          dx: 0,
+          dy: -3.0 * env,
+          dAngle: Math.sin(p * Math.PI * 3) * 0.24 * env,
+          sx: 1 + 0.08 * env,
+          sy: 1 + 0.08 * env,
+          spriteKind: 'act'
+        };
+      case 7: // 星夜猫猫马卡龙: 睡醒睁眼伸懒腰
+        return {
+          dx: 0,
+          dy: -4.2 * env,
+          dAngle: Math.sin(p * Math.PI * 6) * 0.07 * env,
+          sx: 1 - 0.08 * env,
+          sy: 1 + 0.14 * env,
+          spriteKind: 'act'
+        };
+      case 8: // 皇家栗子蒙布朗: 金栗闪耀挺胸
+        return {
+          dx: 0,
+          dy: -4.0 * env,
+          dAngle: Math.sin(p * Math.PI * 2) * 0.07 * env,
+          sx: 1 + 0.09 * env,
+          sy: 1 + 0.12 * env,
+          spriteKind: 'act'
+        };
+      case 9: // 星冠猫神舒芙蕾: 天使奶油翼振翅悬浮
+      default:
+        return {
+          dx: 0,
+          dy: -Math.abs(Math.sin(p * Math.PI * 3)) * 7.2 * env,
+          dAngle: Math.sin(p * Math.PI * 3) * 0.09 * env,
+          sx: 1 + 0.10 * Math.cos(p * Math.PI * 6) * env,
+          sy: 1 - 0.07 * Math.cos(p * Math.PI * 6) * env,
+          spriteKind: 'act'
+        };
+    }
+  }
+
+  function drawHeartIcon(c, x, y, size, color) {
+    c.save();
+    c.translate(x, y);
+    c.fillStyle = color;
+    c.strokeStyle = '#4A2C2A';
+    c.lineWidth = 1.6;
+    c.beginPath();
+    const s = size * 0.5;
+    c.moveTo(0, s * 0.85);
+    c.bezierCurveTo(-s * 1.35, -s * 0.1, -s * 0.75, -s * 1.2, 0, -s * 0.45);
+    c.bezierCurveTo(s * 0.75, -s * 1.2, s * 1.35, -s * 0.1, 0, s * 0.85);
+    c.closePath();
+    c.fill();
+    c.stroke();
+    c.restore();
+  }
+
+  function drawDessertActionFX(c, x, y, r, tier, anim) {
+    if (!anim) return;
+    const p = Math.max(0, Math.min(1, anim.t / anim.dur));
+    const env = Math.sin(p * Math.PI);
+    if (env <= 0.04) return;
+
+    c.save();
+    c.globalAlpha = Math.min(1, env * 1.25);
+
+    if (anim.kind === 'interact') {
+      // Only the leader of the squeezed pair draws the shared contact-point interaction FX
+      if (!anim.isLeader) {
+        c.restore();
+        return;
+      }
+      const cx = anim.cx;
+      const cy = anim.cy;
+      const floatY = cy - 6 - p * 14;
+
+      if (anim.style === 'nuzzle') {
+        drawHeartIcon(c, cx, floatY, 13 + 3 * env, '#ff6f9c');
+        drawHeartIcon(c, cx + 10, floatY - 7, 8 + 2 * env, '#ffa3c2');
+      } else if (anim.style === 'boop') {
+        // Playful squeeze/sparkle marks at contact point
+        drawStar(c, cx - 7, floatY, 5.5 * env, p * 5);
+        c.fillStyle = '#ffe169';
+        drawStar(c, cx + 8, floatY - 4, 4.5 * env, -p * 5);
+      } else {
+        // 'chat': Floating duet musical notes
+        c.font = '900 13px sans-serif';
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        c.lineWidth = 3;
+        c.strokeStyle = '#3c2118';
+        const note = p < 0.5 ? '♪' : '♫';
+        c.strokeText(note, cx + Math.sin(p * 10) * 5, floatY);
+        c.fillStyle = '#ffe47a';
+        c.fillText(note, cx + Math.sin(p * 10) * 5, floatY);
+      }
+      c.restore();
+      return;
+    }
+
+    // Solo Action micro-emote above upper-right rim of the dessert
+    const soloEmotes = ['✦', '♪', '喵~', '✨', '♡', '★', '!', '♛', '👑'];
+    const label = tier === 7 && p < 0.35 ? 'Zzz' : soloEmotes[(tier - 1) % soloEmotes.length];
+    const ex = x + r * 0.55;
+    const ey = y - r * 0.72 - p * 10;
+    c.font = '800 11.5px sans-serif';
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.lineWidth = 2.8;
+    c.strokeStyle = '#3c2118';
+    c.strokeText(label, ex, ey);
+    c.fillStyle = '#fff3b8';
+    c.fillText(label, ex, ey);
+    c.restore();
+  }
+
+  function drawTierSprite(tier, x, y, r, angle, squishAmt = 0, squishAngle = 0, alpha = 1, anim = null) {
     const def = TIERS[tier - 1];
     const shapeDef = getShapeDef(tier);
-    const img = spriteImages[tier];
+    const pose = computeDessertAnimPose(tier, anim);
+    let img = spriteImages[tier];
+    if (pose.spriteKind === 'act' && spriteActionImages[tier]) {
+      img = spriteActionImages[tier];
+    } else if (pose.spriteKind === 'int' && spriteInteractImages[tier]) {
+      img = spriteInteractImages[tier];
+    }
+
     if (!img) {
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.fillStyle = def.color;
       ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.arc(x + pose.dx, y + pose.dy, r, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
       return;
@@ -1630,15 +1917,20 @@
 
     ctx.save();
     if (alpha < 1) ctx.globalAlpha = alpha;
-    ctx.translate(x, y);
+    ctx.translate(x + pose.dx, y + pose.dy);
 
+    const totalAngle = angle + pose.dAngle;
     // Directional soft-body squish strictly along real world impact normal
     if (Math.abs(squishAmt) > 0.002) {
       ctx.rotate(squishAngle);
       ctx.scale(1 - squishAmt, 1 + squishAmt * 0.82);
-      ctx.rotate(angle - squishAngle);
+      ctx.rotate(totalAngle - squishAngle);
     } else {
-      ctx.rotate(angle);
+      ctx.rotate(totalAngle);
+    }
+
+    if (pose.sx !== 1 || pose.sy !== 1) {
+      ctx.scale(pose.sx, pose.sy);
     }
 
     if (shapeDef) {
@@ -1656,6 +1948,206 @@
       ctx.drawImage(img, -def.meta.anchor_x_norm * dw, -def.meta.anchor_y_norm * dh, dw, dh);
     }
     ctx.restore();
+  }
+
+  function updateDessertAnimations(dt) {
+    // 1. Unplaced Held Dessert periodic solo action above the jar rim
+    if (gameState.heldActionAnim) {
+      gameState.heldActionAnim.t += dt;
+      if (gameState.heldActionAnim.t >= gameState.heldActionAnim.dur) {
+        gameState.heldActionAnim = null;
+      }
+    } else if (gameState.dropCooldown <= 0 && !gameState.activeToolMode) {
+      gameState.heldActionCooldown -= dt;
+      if (gameState.heldActionCooldown <= 0) {
+        gameState.heldActionAnim = { kind: 'solo', t: 0, dur: 1.1 };
+        gameState.heldActionCooldown = 2.6 + Math.random() * 2.2;
+      }
+    }
+
+    // 2. Unplaced NEXT / HOLD Preview Bubbles periodic action
+    const nextBubbleEl = document.getElementById('next-bubble');
+    const mNextBoxEl = mNextImgEl ? mNextImgEl.parentElement : null;
+    if (gameState.previewActionTimer > 0) {
+      gameState.previewActionTimer -= dt;
+      if (gameState.previewActionTimer <= 0) {
+        gameState.previewActionTimer = 0;
+        gameState.previewActionTarget = null;
+        if (nextBubbleEl) nextBubbleEl.classList.remove('is-acting');
+        if (mNextBoxEl) mNextBoxEl.classList.remove('is-acting');
+        if (holdBubbleEl) holdBubbleEl.classList.remove('is-acting');
+        if (mHoldBubbleEl) mHoldBubbleEl.classList.remove('is-acting');
+        const nextDef = TIERS[gameState.nextTier - 1];
+        nextImgEl.src = nextDef.src;
+        if (mNextImgEl) mNextImgEl.src = nextDef.src;
+        if (gameState.holdTier) {
+          const holdDef = TIERS[gameState.holdTier - 1];
+          holdImgEl.src = holdDef.src;
+          if (mHoldImgEl) mHoldImgEl.src = holdDef.src;
+        }
+      }
+    } else {
+      gameState.previewActionCooldown -= dt;
+      if (gameState.previewActionCooldown <= 0) {
+        const useHold = gameState.holdTier !== null && Math.random() < 0.45;
+        gameState.previewActionTarget = useHold ? 'hold' : 'next';
+        gameState.previewActionTimer = 0.95;
+        gameState.previewActionCooldown = 3.0 + Math.random() * 2.5;
+        if (useHold && gameState.holdTier) {
+          const holdDef = TIERS[gameState.holdTier - 1];
+          if (holdDef.actSrc) {
+            holdImgEl.src = holdDef.actSrc;
+            if (mHoldImgEl) mHoldImgEl.src = holdDef.actSrc;
+          }
+          if (holdBubbleEl) holdBubbleEl.classList.add('is-acting');
+          if (mHoldBubbleEl) mHoldBubbleEl.classList.add('is-acting');
+        } else {
+          const nextDef = TIERS[gameState.nextTier - 1];
+          if (nextDef.actSrc) {
+            nextImgEl.src = nextDef.actSrc;
+            if (mNextImgEl) mNextImgEl.src = nextDef.actSrc;
+          }
+          if (nextBubbleEl) nextBubbleEl.classList.add('is-acting');
+          if (mNextBoxEl) mNextBoxEl.classList.add('is-acting');
+        }
+      }
+    }
+
+    // 3. Advance active animations on entities inside the jar
+    const entities = gameState.entities;
+    let activeAnimCount = 0;
+    for (let i = 0; i < entities.length; i++) {
+      const e = entities[i];
+      if (e.anim) {
+        e.anim.t += dt;
+        if (e.anim.t >= e.anim.dur) {
+          e.anim = null;
+        } else {
+          activeAnimCount++;
+        }
+      }
+    }
+
+    // 4. Build map of touching/squeezed neighbors inside the jar
+    const neighborMap = new Map();
+    const addNeighborPair = (a, b, cx, cy) => {
+      if (!a || !b || a.id === b.id || a.merged || b.merged) return;
+      if (!neighborMap.has(a.id)) neighborMap.set(a.id, []);
+      if (!neighborMap.has(b.id)) neighborMap.set(b.id, []);
+      const listA = neighborMap.get(a.id);
+      if (!listA.some((item) => item.neighbor.id === b.id)) {
+        listA.push({ neighbor: b, cx, cy });
+      }
+      const listB = neighborMap.get(b.id);
+      if (!listB.some((item) => item.neighbor.id === a.id)) {
+        listB.push({ neighbor: a, cx, cy });
+      }
+    };
+
+    const contacts = gameState.lastDebugContacts || [];
+    for (let i = 0; i < contacts.length; i++) {
+      const ct = contacts[i];
+      if (ct.a && ct.a.id > 0 && ct.b && ct.b.id > 0) {
+        addNeighborPair(ct.a, ct.b, ct.px, ct.py);
+      }
+    }
+
+    for (let i = 0; i < entities.length; i++) {
+      const a = entities[i];
+      for (let j = i + 1; j < entities.length; j++) {
+        const b = entities[j];
+        const dist = Math.hypot(b.x - a.x, b.y - a.y);
+        if (dist <= (a.r + b.r) * 1.09 && dist > 1e-3) {
+          const cx = (a.x * b.r + b.x * a.r) / (a.r + b.r);
+          const cy = (a.y * b.r + b.y * a.r) / (a.r + b.r);
+          addNeighborPair(a, b, cx, cy);
+        }
+      }
+    }
+
+    // 5. Trigger periodic Neighbor Squeeze Interactions & Solo Signature Actions
+    const styles = ['nuzzle', 'boop', 'chat'];
+    for (let i = 0; i < entities.length; i++) {
+      const e = entities[i];
+      if (e.anim || e.merged) continue;
+
+      e.interactCooldown -= dt;
+      e.soloCooldown -= dt;
+
+      const settled = Math.hypot(e.vx, e.vy) < 75 && Math.abs(e.vr) < 2.4 && e.age > 0.35;
+      if (!settled) continue;
+
+      // Priority A: Squeezed neighbor interaction
+      if (e.interactCooldown <= 0) {
+        const nbs = neighborMap.get(e.id) || [];
+        const available = nbs.filter(
+          (item) =>
+            !item.neighbor.anim &&
+            !item.neighbor.merged &&
+            Math.hypot(item.neighbor.vx, item.neighbor.vy) < 75 &&
+            item.neighbor.age > 0.35
+        );
+        if (available.length > 0 && activeAnimCount < 6) {
+          const pick = available[Math.floor(Math.random() * available.length)];
+          const nb = pick.neighbor;
+          const dx = nb.x - e.x;
+          const dy = nb.y - e.y;
+          const len = Math.hypot(dx, dy) || 1;
+          const ux = dx / len;
+          const uy = dy / len;
+          const style = styles[Math.floor(Math.random() * styles.length)];
+          const dur = 1.25;
+
+          e.anim = {
+            kind: 'interact',
+            style,
+            t: 0,
+            dur,
+            partnerId: nb.id,
+            ux,
+            uy,
+            cx: pick.cx,
+            cy: pick.cy,
+            isLeader: true
+          };
+          nb.anim = {
+            kind: 'interact',
+            style,
+            t: 0,
+            dur,
+            partnerId: e.id,
+            ux: -ux,
+            uy: -uy,
+            cx: pick.cx,
+            cy: pick.cy,
+            isLeader: false
+          };
+
+          applyDirectionalSquish(e, ux, uy, 210);
+          applyDirectionalSquish(nb, -ux, -uy, 210);
+
+          e.interactCooldown = 3.2 + Math.random() * 4.0;
+          nb.interactCooldown = 3.2 + Math.random() * 4.0;
+          e.soloCooldown = Math.max(e.soloCooldown, 1.8);
+          nb.soloCooldown = Math.max(nb.soloCooldown, 1.8);
+          activeAnimCount += 2;
+          continue;
+        } else {
+          e.interactCooldown = 0.8 + Math.random() * 1.3;
+        }
+      }
+
+      // Priority B: Solo signature action
+      if (e.soloCooldown <= 0) {
+        if (activeAnimCount < 6) {
+          e.anim = { kind: 'solo', t: 0, dur: 1.15 };
+          e.soloCooldown = 3.0 + Math.random() * 4.2;
+          activeAnimCount += 1;
+        } else {
+          e.soloCooldown = 0.7 + Math.random() * 1.0;
+        }
+      }
+    }
   }
 
   function renderAmbientFireflies(dt, nowSec) {
@@ -1730,6 +2222,7 @@
       }
 
       stepPhysics(dt);
+      updateDessertAnimations(dt);
     }
 
     // Smooth score counter animation

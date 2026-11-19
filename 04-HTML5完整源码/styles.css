@@ -657,6 +657,19 @@ body {
   width: 62px;
   height: 62px;
   object-fit: contain;
+  transition: transform 0.18s ease;
+}
+
+.preview-bubble.is-acting img,
+.m-preview-box.is-acting img {
+  animation: previewTreatAct 0.95s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+@keyframes previewTreatAct {
+  0%, 100% { transform: translateY(0) rotate(0deg) scale(1, 1); }
+  22% { transform: translateY(-4px) rotate(-7deg) scale(1.08, 0.93); }
+  48% { transform: translateY(-6px) rotate(8deg) scale(0.94, 1.09); }
+  72% { transform: translateY(-2px) rotate(-5deg) scale(1.05, 0.96); }
 }
 
 .preview-sub {

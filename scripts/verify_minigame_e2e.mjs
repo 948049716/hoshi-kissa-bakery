@@ -10,7 +10,10 @@ const __dirname = path.dirname(__filename);
 const REPO_ROOT = path.resolve(__dirname, '..');
 const MINIGAME_DIR = path.join(REPO_ROOT, '05-微信小游戏版本');
 
-const CHROMIUM = '/usr/bin/chromium';
+const CHROMIUM =
+  process.env.CHROME_PATH ||
+  ['/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome'].find((p) => fs.existsSync(p)) ||
+  '/usr/bin/chromium';
 const OUT_DIR = '/tmp/minigame_verify';
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
@@ -329,6 +332,7 @@ async function run() {
     [
       '--headless=new',
       '--no-sandbox',
+      '--disable-dev-shm-usage',
       '--disable-gpu',
       `--remote-debugging-port=${cdpPort}`,
       `--user-data-dir=${userDataDir}`,

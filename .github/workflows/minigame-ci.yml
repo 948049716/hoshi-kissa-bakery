@@ -1,0 +1,104 @@
+name: WeChat Mini Game CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '05-微信小游戏版本/**'
+      - 'scripts/verify_minigame_e2e.mjs'
+      - 'scripts/upload_minigame.mjs'
+      - '.github/workflows/minigame-ci.yml'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'CI 操作类型 (upload 上传代码版本 / preview 生成体验二维码)'
+        required: true
+        default: 'upload'
+        type: choice
+        options:
+          - upload
+          - preview
+      version:
+        description: '版本号 (留空则自动使用 1.0.<run_number>)'
+        required: false
+        default: ''
+        type: string
+      desc:
+        description: '版本备注 (留空则使用当前提交信息)'
+        required: false
+        default: ''
+        type: string
+
+concurrency:
+  group: minigame-ci-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: E2E 自动化验证
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Syntax check Mini Game & scripts
+        run: |
+          for f in 05-微信小游戏版本/game.js 05-微信小游戏版本/src/*.js scripts/*.mjs; do
+            node --check "$f"
+          done
+
+      - name: Run headless Chrome Mini Game E2E suite
+        run: node scripts/verify_minigame_e2e.mjs
+
+      - name: Upload E2E screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: minigame-e2e-screenshots
+          path: /tmp/minigame_verify
+          if-no-files-found: ignore
+          retention-days: 7
+
+  upload:
+    name: 上传到微信开发者平台
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install miniprogram-ci cleanly in runner temp
+        run: |
+          mkdir -p "$RUNNER_TEMP/mpci"
+          npm --prefix "$RUNNER_TEMP/mpci" install --no-save miniprogram-ci@latest
+
+      - name: Upload / Preview Mini Game via miniprogram-ci
+        env:
+          MINIPROGRAM_CI_PATH: ${{ runner.temp }}/mpci/node_modules/miniprogram-ci
+          WECHAT_PRIVATE_KEY: ${{ secrets.WECHAT_PRIVATE_KEY }}
+          WECHAT_APPID: ${{ secrets.WECHAT_APPID }}
+          WECHAT_ACTION: ${{ github.event_name == 'workflow_dispatch' && inputs.action || 'upload' }}
+          WECHAT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
+          WECHAT_DESC: ${{ github.event_name == 'workflow_dispatch' && inputs.desc || '' }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: node scripts/upload_minigame.mjs
+
+      - name: Upload preview QR code artifact
+        if: github.event_name == 'workflow_dispatch' && inputs.action == 'preview'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wechat-preview-qrcode
+          path: ${{ runner.temp }}/wechat_preview_qrcode.jpg
+          if-no-files-found: ignore
+          retention-days: 3

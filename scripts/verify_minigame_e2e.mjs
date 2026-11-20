@@ -671,6 +671,52 @@ async function run() {
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.dropsMadeThisRun === dropsBeforeSling + 1, 'Slingshot release must launch treat');
 
+  // 3C. Regression: pull down, then swing far sideways while finger rises (dy < 26) — must stay
+  // latched in sling with a wide angle; the top drop point must NOT slide with the finger.
+  await waitForCooldown();
+  const wideStartX = Math.round(jb.x + jb.w * 0.5);
+  const wideStartY = Math.round(jb.y + jb.h * 0.25);
+  const wideScale = jb.w / 440;
+  const widePath = [
+    [0, 18], [0, 36], [0, 46],
+    [-30, 40], [-60, 30], [-90, 20], [-120, 12], [-140, 6]
+  ];
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: wideStartX, y: wideStartY, button: 'left', clickCount: 1 });
+  let wideDropX = null;
+  for (let pIdx = 0; pIdx < widePath.length; pIdx++) {
+    const [dxL, dyL] = widePath[pIdx];
+    await send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: Math.round(wideStartX + dxL * wideScale),
+      y: Math.round(wideStartY + dyL * wideScale),
+      button: 'left'
+    });
+    await sleep(22);
+    if (pIdx === 2) {
+      const s2 = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+      assert(s2.aim.mode === 'sling', `Expected sling after straight pull-down, got ${s2.aim.mode}`);
+      wideDropX = s2.dropX;
+    }
+  }
+  await sleep(80);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.aim && st.aim.active && st.aim.mode === 'sling', `Wide sideways swing must stay in sling mode, got ${JSON.stringify(st.aim)}`);
+  assert(Math.abs(st.dropX - wideDropX) < 0.5, `Drop point must stay locked during sling (was ${wideDropX}, now ${st.dropX})`);
+  assert(st.aim.angle < -0.9, `Wide left swing must form a wide launch angle, got ${st.aim.angle}`);
+  await screenshot('08c_slingshot_wide_angle_375.png');
+  const dropsBeforeWide = st.dropsMadeThisRun;
+  await send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    x: Math.round(wideStartX - 140 * wideScale),
+    y: Math.round(wideStartY + 6 * wideScale),
+    button: 'left',
+    clickCount: 1
+  });
+  await sleep(520);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.dropsMadeThisRun === dropsBeforeWide + 1, 'Wide-angle slingshot release must launch treat');
+  await waitForCooldown();
+
   // Hold swap + Quick vertical tap-drop
   await tapHit('mobile_hold_swap');
   await sleep(160);

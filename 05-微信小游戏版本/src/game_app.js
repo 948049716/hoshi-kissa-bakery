@@ -285,7 +285,8 @@ function createApp() {
       launchVy: 320,
       angle: 0,
       cancelled: false,
-      stretchBand: 0
+      stretchBand: 0,
+      slingLocked: false
     },
     touchAim: { active: false, cancelled: false, lastStableX: 220 },
     debugPhysics: false,
@@ -3613,7 +3614,8 @@ function createApp() {
       launchVy: 320,
       angle: 0,
       cancelled: false,
-      stretchBand: 0
+      stretchBand: 0,
+      slingLocked: false
     };
     gameState.lastDebugContacts = [];
     gameState.magnetLinks = [];
@@ -3866,17 +3868,29 @@ function createApp() {
     aim.cancelled = cancelled;
     gameState.touchAim.cancelled = cancelled;
 
+    const dragDx = lx - aim.anchorX;
     const dragDy = ly - aim.anchorY;
-    if (dragDy >= 26 && !cancelled) {
+    const pullDist = Math.hypot(dragDx, dragDy);
+    // Sling latch: once the player has pulled down into slingshot mode, stay in sling for the
+    // rest of this hold (sideways swings naturally lift the finger and used to drop dy < 26,
+    // which flipped back to quick-drop and slid the top drop point instead of forming an angle).
+    // Only returning to (almost) the anchor point un-commits the sling.
+    if (aim.slingLocked && pullDist < 12) {
+      aim.slingLocked = false;
+    }
+    if (!aim.slingLocked && !cancelled && (dragDy >= 26 || (dragDy >= 10 && pullDist >= 34))) {
+      aim.slingLocked = true;
+      // Lock the launch origin at the anchor column for the whole pull.
+      gameState.dropX = clampDropXVal(aim.anchorX);
+    }
+    if (aim.slingLocked) {
       // Pull-down Direct-Aim Slingshot / Bank-Shot Mode!
       aim.mode = 'sling';
-      const originX = gameState.dropX;
-      const originY = JAR.dropY + 4;
-      const vxDir = lx - originX;
-      const vyDir = Math.max(24, ly - originY);
-      const rawAng = Math.atan2(vxDir, vyDir);
+      // Aim follows the drag vector from the anchor (not from the jar top), so a modest sideways
+      // swing already yields a wide bank-shot angle; clamp to ±62° downward cone.
+      const vyDir = Math.max(14, dragDy);
+      const rawAng = Math.atan2(dragDx, vyDir);
       const clampedAng = Math.max(-1.08, Math.min(1.08, rawAng)); // ±62° cone downward
-      const pullDist = Math.hypot(lx - aim.anchorX, ly - aim.anchorY);
       const power = Math.max(0.12, Math.min(1.0, (pullDist - 24) / 115));
       const bouncyBoost = app.hasRelic('rel_bouncy') ? 1.25 : 1.0;
       const speed = (420 + 660 * power) * bouncyBoost;
@@ -3913,6 +3927,7 @@ function createApp() {
     gameState.aim.power = 0;
     gameState.aim.cancelled = false;
     gameState.aim.stretchBand = 0;
+    gameState.aim.slingLocked = false;
     gameState.touchAim.active = false;
     gameState.touchAim.cancelled = false;
   }
@@ -3959,6 +3974,7 @@ function createApp() {
           gameState.aim.launchVx = 0;
           gameState.aim.launchVy = 320;
           gameState.aim.stretchBand = 0;
+          gameState.aim.slingLocked = false;
           gameState.aim.cancelled = pointerType === 'touch' && ly < JAR.neckY - 20;
           if (pointerType === 'touch') {
             gameState.touchAim.active = true;
@@ -4004,6 +4020,7 @@ function createApp() {
             gameState.aim.anchorX = gameState.dropX;
             gameState.aim.anchorY = startY;
             gameState.aim.stretchBand = 0;
+            gameState.aim.slingLocked = false;
             if (pointerType === 'touch') gameState.touchAim.active = true;
             updateAimVector(lx, ly, pointerType);
           }
@@ -4458,6 +4475,7 @@ function createApp() {
       dropsUntilRainbow: gameState.dropsUntilRainbow,
       canHoldThisTurn: gameState.canHoldThisTurn,
       aim: { ...gameState.aim },
+      dropX: gameState.dropX,
       aimAngle: +gameState.aimAngle.toFixed(3),
       curTier: gameState.curTier,
       curMeta: { ...gameState.curMeta },

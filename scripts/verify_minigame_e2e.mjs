@@ -329,6 +329,8 @@ async function run() {
 
   const cdpPort = 9280 + Math.floor(Math.random() * 60);
   console.log('Launching headless browser:', CHROMIUM);
+  const chromeEnv = { ...process.env };
+  delete chromeEnv.DBUS_SESSION_BUS_ADDRESS;
   const chrome = spawn(
     CHROMIUM,
     [
@@ -336,13 +338,18 @@ async function run() {
       '--no-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--disable-background-networking',
+      '--disable-sync',
+      '--disable-extensions',
       '--remote-debugging-address=127.0.0.1',
       `--remote-debugging-port=${cdpPort}`,
       `--user-data-dir=${userDataDir}`,
       '--window-size=1280,760',
       'about:blank'
     ],
-    { stdio: ['ignore', 'pipe', 'pipe'] }
+    { stdio: ['ignore', 'pipe', 'pipe'], env: chromeEnv }
   );
 
   let chromeStderr = '';
@@ -357,19 +364,35 @@ async function run() {
     chromeExit = `code=${code}, sig=${sig}`;
   });
 
+  const pollCdpJson = () => new Promise((resolve) => {
+    const req = http.get(`http://127.0.0.1:${cdpPort}/json/list`, (res) => {
+      let body = '';
+      res.on('data', (d) => { body += d; });
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(body));
+        } catch (_) {
+          resolve(null);
+        }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.setTimeout(1000, () => { req.destroy(); resolve(null); });
+  });
+
   let wsUrl = null;
-  for (let i = 0; i < 80; i++) {
-    try {
-      const res = await fetch(`http://127.0.0.1:${cdpPort}/json/list`);
-      const pages = await res.json();
-      if (pages.length > 0 && pages[0].webSocketDebuggerUrl) {
-        wsUrl = pages[0].webSocketDebuggerUrl;
-        break;
-      }
-    } catch (_) {}
-    await sleep(150);
+  for (let i = 0; i < 225; i++) {
+    if (chromeExit !== null) break;
+    const pages = await pollCdpJson();
+    if (Array.isArray(pages) && pages.length > 0 && pages[0].webSocketDebuggerUrl) {
+      wsUrl = pages[0].webSocketDebuggerUrl;
+      break;
+    }
+    await sleep(200);
   }
   if (!wsUrl) {
+    try { chrome.kill('SIGKILL'); } catch (_) {}
+    try { server.close(); } catch (_) {}
     throw new Error(
       `Failed to connect to Chromium CDP (bin=${CHROMIUM}, exit=${chromeExit || 'still running'})\n${chromeStderr}`
     );

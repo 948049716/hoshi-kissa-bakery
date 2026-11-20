@@ -12,11 +12,10 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-SRC_ROOT = SCRIPT_DIR.parent
-REPO_ROOT = SRC_ROOT.parent
-OUT_DIR = SRC_ROOT / "assets/processed"
+REPO_ROOT = SCRIPT_DIR.parent
 PNG_DIR = REPO_ROOT / "02-游戏素材-精修透明PNG"
 RAW_DIR = REPO_ROOT / "03-游戏素材-原始原图与WebP"
+OUT_DIR = PNG_DIR
 ART_DIR = RAW_DIR
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 PNG_DIR.mkdir(parents=True, exist_ok=True)
@@ -265,7 +264,6 @@ def extract_desserts():
                 meta["width"], meta["height"] = trimmed.size
 
             trimmed.save(OUT_DIR / f"tier_{idx}.png")
-            trimmed.save(OUT_DIR / f"tier_{idx}.webp", quality=88, method=6)
             metadata[f"tier_{idx}"] = meta
             extracted.append((idx, trimmed, meta))
             idx += 1
@@ -311,7 +309,6 @@ def extract_mascot_and_tools():
     if bbox:
         cat_rgba = cat_rgba.crop(bbox)
     cat_rgba.save(OUT_DIR / "chef_mikan.png")
-    cat_rgba.save(OUT_DIR / "chef_mikan.webp", quality=88, method=6)
 
     # 2. Three circular wooden medallions
     tools = [
@@ -346,7 +343,6 @@ def extract_mascot_and_tools():
             med = med.crop(mb)
         med = med.resize((128, 128), Image.Resampling.LANCZOS)
         med.save(OUT_DIR / f"{name}.png")
-        med.save(OUT_DIR / f"{name}.webp", quality=90, method=6)
 
     v2 = Image.new("RGBA", (640, 240), (24, 30, 44, 255))
     m_img = Image.open(OUT_DIR / "chef_mikan.png")
@@ -371,7 +367,7 @@ def build_clean_bakery_backdrop():
     mock_src = Image.open(ART_DIR / "gameplay_mockup_1795019430813.jpg").convert("RGB")
 
     title_hero = title_src.resize((1120, 625), Image.Resampling.LANCZOS)
-    title_hero.save(OUT_DIR / "title_hero.webp", quality=84, method=6)
+    title_hero.save(OUT_DIR / "title_hero.png")
 
     bg_arr = np.array(title_src, dtype=np.float32)
     m_arr = np.array(mock_src, dtype=np.float32)
@@ -522,17 +518,16 @@ def build_clean_bakery_backdrop():
 
     final_bg = final_bg.resize((1280, 714), Image.Resampling.LANCZOS)
     final_bg.save(OUT_DIR / "bakery_bg.png")
-    final_bg.save(OUT_DIR / "bakery_bg.webp", quality=84, method=6)
     final_bg.save("/tmp/verify_bakery_bg.jpg", quality=92)
 
 
 def extract_plan_b_assets():
     """
     Slice 1024x1024 2x2 Plan B sprite sheet into:
-      - patron_luna.webp  (top-left, max 256x256)
-      - patron_mugi.webp  (top-right, max 256x256)
-      - event_yarn_ball.webp (bottom-left, max 192x192)
-      - icon_shop_sign.webp  (bottom-right, max 192x192)
+      - patron_luna.png  (top-left, max 256x256)
+      - patron_mugi.png  (top-right, max 256x256)
+      - event_yarn_ball.png (bottom-left, max 192x192)
+      - icon_shop_sign.png  (bottom-right, max 192x192)
     """
     src = RAW_DIR / "plan_b_sprites_sheet.jpg"
     if not src.exists():
@@ -585,10 +580,8 @@ def extract_plan_b_assets():
             rgba = rgba.resize(new_sz, Image.Resampling.LANCZOS)
 
         png_path = PNG_DIR / f"{name}.png"
-        webp_path = OUT_DIR / f"{name}.webp"
         rgba.save(png_path)
-        rgba.save(webp_path, quality=webp_q, method=6)
-        kb = webp_path.stat().st_size / 1024.0
+        kb = png_path.stat().st_size / 1024.0
         report.append((name, rgba.size, round(kb, 1)))
 
         # Place on dark verification canvas to check zero white halo

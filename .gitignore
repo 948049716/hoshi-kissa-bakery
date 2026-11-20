@@ -2,10 +2,7 @@
 # 星夜吃茶：喵呜甜品合合乐 (Hoshi Kissa)
 # ==========================================
 
-# 打包构建产物 (可通过 python3 scripts/build_standalone.py 重新生成)
-dist/
-
-# Node.js 依赖与日志 (scripts/verify_e2e.mjs 等脚本环境)
+# Node.js 依赖与日志 (scripts/verify_minigame_e2e.mjs 等测试脚本环境)
 node_modules/
 npm-debug.log*
 yarn-debug.log*
@@ -27,7 +24,7 @@ env/
 /tmp/
 tmp/
 .tmp/
-game_verify/
+minigame_verify/
 test-results/
 playwright-report/
 *.log

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const REPO_ROOT = path.resolve(__dirname, '../..');
+const REPO_ROOT = path.resolve(__dirname, '..');
 const MINIGAME_DIR = path.join(REPO_ROOT, '05-微信小游戏版本');
 
 const CHROMIUM = '/usr/bin/chromium';
@@ -129,6 +129,19 @@ function buildPreviewHtml(moduleMap) {
       return showCapsule ? computeCapsuleRect() : null;
     },
     createCanvas() {
+      if (typeof CanvasGradient !== 'undefined' && CanvasGradient.prototype && !CanvasGradient.prototype.__hoshiIosColorGuard) {
+        const origAddColorStop = CanvasGradient.prototype.addColorStop;
+        Object.defineProperty(CanvasGradient.prototype, '__hoshiIosColorGuard', { value: true });
+        CanvasGradient.prototype.addColorStop = function (offset, color) {
+          if (typeof color === 'string') {
+            const norm = color.trim().toLowerCase();
+            if (norm.startsWith('hsl(') || norm.startsWith('hsla(')) {
+              throw new SyntaxError('iOS WeChat Canvas2D rejects hsl()/hsla() color stops: ' + color);
+            }
+          }
+          return origAddColorStop.call(this, offset, color);
+        };
+      }
       const c = document.createElement('canvas');
       if (!screenCanvasCreated) {
         screenCanvasCreated = true;
@@ -578,6 +591,38 @@ async function run() {
   assert(st.entities.some((e) => e.isYarnBall && e.yarnHp === 2), 'Expected active yarn ball with yarnHp=2');
   await screenshot('09_physics_yarn_375.png');
   await evalJS(`window.__HOSHI_DEBUG__.togglePhysicsDebug(false)`);
+
+  // Rainbow Wildcard E2E (covers NEXT preview, active held treat, HOLD swap, and jar drop under iOS color guard)
+  await evalJS(`window.__HOSHI_DEBUG__.grantRainbow()`);
+  await sleep(220);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.nextMeta && st.nextMeta.wildcard === true, 'Expected Rainbow Wildcard in NEXT preview');
+
+  // Drop current treat so Rainbow Wildcard advances to active held dessert
+  await dragSwipe(Math.round(jb.x + jb.w * 0.5), Math.round(jb.y + jb.h * 0.35), Math.round(jb.x + jb.w * 0.5), Math.round(jb.y + jb.h * 0.35));
+  await sleep(550);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.curMeta && st.curMeta.wildcard === true, 'Expected Rainbow Wildcard to advance to held treat');
+
+  // Swap Rainbow Wildcard into HOLD preview box, drop 1 treat to refresh hold, swap back, then drop Rainbow
+  await tapHit('mobile_hold_swap');
+  await sleep(220);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.holdMeta && st.holdMeta.wildcard === true, 'Expected Rainbow Wildcard inside HOLD preview');
+  await screenshot('09b_rainbow_hold_375.png');
+
+  await dragSwipe(Math.round(jb.x + jb.w * 0.35), Math.round(jb.y + jb.h * 0.35), Math.round(jb.x + jb.w * 0.35), Math.round(jb.y + jb.h * 0.35));
+  await sleep(550);
+  await tapHit('mobile_hold_swap');
+  await sleep(220);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.curMeta && st.curMeta.wildcard === true, 'Expected Rainbow Wildcard swapped back to held treat');
+
+  const beforeWildScore = st.score;
+  await dragSwipe(Math.round(jb.x + jb.w * 0.5), Math.round(jb.y + jb.h * 0.35), Math.round(jb.x + jb.w * 0.5), Math.round(jb.y + jb.h * 0.35));
+  await sleep(600);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.entities.some((e) => e.isWildcard) || st.score > beforeWildScore, 'Expected Rainbow Wildcard active in jar or merged cleanly');
 
   // Trigger Chime Event -> Queue Blessing -> Open Blessing 3-Choice Modal
   await evalJS(`window.__HOSHI_DEBUG__.triggerEvent('chime')`);

@@ -2,7 +2,7 @@
 """
 Extract exact, faithful compound convex polygon collision meshes, true center of mass,
 and normalized polar moment of inertia directly from the alpha masks of tier_1..tier_9.png.
-Outputs assets/processed/physics_shapes.json and a visual verification sheet.
+Outputs 02-游戏素材-精修透明PNG/physics_shapes.json, 05-微信小游戏版本/src/physics_shapes.js, and a visual verification sheet.
 """
 import json
 import math
@@ -12,10 +12,9 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-SRC_ROOT = SCRIPT_DIR.parent
-REPO_ROOT = SRC_ROOT.parent
-PROC_DIR = SRC_ROOT / "assets/processed"
+REPO_ROOT = SCRIPT_DIR.parent
 PNG_DIR = REPO_ROOT / "02-游戏素材-精修透明PNG"
+MINIGAME_SRC_DIR = REPO_ROOT / "05-微信小游戏版本/src"
 
 
 def cross2(o, a, b):
@@ -398,13 +397,12 @@ def main():
         yd.ellipse([156, 156, 164, 164], fill=(255, 70, 70, 255), outline=(255, 255, 255, 255))
         yv.convert("RGB").save("/tmp/verify_yarn_mesh.jpg", quality=94)
 
-    out_json = PROC_DIR / "physics_shapes.json"
+    out_json = PNG_DIR / "physics_shapes.json"
     out_json.write_text(json.dumps(shapes_data, indent=2), encoding="utf-8")
-    (PNG_DIR / "physics_shapes.json").write_text(json.dumps(shapes_data, indent=2), encoding="utf-8")
-    out_js = SRC_ROOT / "physics_shapes.js"
+    out_js = MINIGAME_SRC_DIR / "physics_shapes.js"
     out_js.write_text(
         "// Auto-generated from sprite alpha contours by scripts/extract_physics_shapes.py\n"
-        "window.HOSHI_PHYSICS_SHAPES = " + json.dumps(shapes_data, separators=(",", ":")) + ";\n",
+        "module.exports = " + json.dumps(shapes_data, separators=(",", ":")) + ";\n",
         encoding="utf-8",
     )
     verify.convert("RGB").save("/tmp/verify_physics_meshes.jpg", quality=94)

@@ -1,6 +1,6 @@
 /**
  * Unified Platform Abstraction Layer for WeChat Mini Game (`wx.*`)
- * with transparent fallback to HTML5 Canvas/Storage/WebAudio for browser preview.
+ * with lightweight browser Canvas/Storage/WebAudio fallback for local verification.
  */
 'use strict';
 

@@ -43,7 +43,7 @@
 ├── game.json              # 小游戏竖屏与设备方向配置
 ├── project.config.json    # 微信开发者工具工程配置 (compileType: "game")
 ├── game.js                # 小游戏入口脚本
-├── wechat_avatar_144x144.png  # 微信小游戏头像图标 (144×144 PNG, 约 33.6 KB)
+├── wechat_avatar_144x144.png  # 微信小游戏头像图标 (144×144 PNG, 约 46.3 KB)
 ├── assets/                # 37 份 PNG/JPG 量化资源 (约 1.28 MB)
 └── src/
     ├── platform.js        # wx.* API 与浏览器降级抽象层

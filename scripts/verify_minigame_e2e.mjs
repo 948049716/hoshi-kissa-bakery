@@ -613,6 +613,9 @@ async function run() {
   await sleep(340);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.mode === 'chef' && st.running === true && st.lobbyOpen === false, 'Started chef mode');
+  assert(st.shift === 1 && st.shiftTarget === 1200, `Expected Shift 1 target ¥1200, got shift=${st.shift}, target=${st.shiftTarget}`);
+  assert(st.stepsLeft === 16 && st.stepsMax === 16, `Expected 16/16 steps in Shift 1, got ${st.stepsLeft}/${st.stepsMax}`);
+  assert(st.hits.some((h) => h.id === 'mobile_relics_bar'), 'Expected mobile_relics_bar hit in Chef HUD');
   assert(st.entities.length === 4, `Expected 4 pre-populated starter treats, got ${st.entities.length}`);
   assert(st.orders && st.orders.length === 2, `Expected Dual-Table orders (2), got ${st.orders && st.orders.length}`);
   assert(st.entities.some((e) => e.isServable), 'Expected starter T3 to be immediately servable with bell halo');
@@ -732,11 +735,12 @@ async function run() {
   const swappable = st.entities.filter((e) => !e.isYarnBall);
   assert(swappable.length >= 2, 'Need >= 2 swappable entities for Luna skill test');
   const swA = swappable[0];
-  const swB = swappable[swappable.length - 1];
   await tapAt(Math.round(jb.x + swA.x * jb.scale), Math.round(jb.y + swA.y * jb.scale));
   await sleep(160);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.activeSkillMode === 'swap_2', `Expected Luna swap_2 mode after 1st tap, got ${st.activeSkillMode}`);
+  const swB = st.entities.find((e) => !e.isYarnBall && e.id !== swA.id);
+  assert(swB, 'Need live second swappable entity for Luna swap_2');
   await tapAt(Math.round(jb.x + swB.x * jb.scale), Math.round(jb.y + swB.y * jb.scale));
   await sleep(180);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
@@ -790,6 +794,139 @@ async function run() {
   }
   assert(st.activeModal === null, 'Blessing modal closed after selection');
 
+  // 3F. Phase 2 — 5-Shift Early Close, Mobile Prep Shop (Reroll/Buy/Sell/Mod), Shift 2 Carry-Over & Relics
+  await evalJS(`window.__HOSHI_DEBUG__.addShiftRevenue(1300)`);
+  await sleep(220);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.shiftClearedFlag === true, `Expected shiftClearedFlag=true after meeting target, got ${st.shiftClearedFlag}`);
+  assert(st.hits.some((h) => h.id === 'btn_close_shift_early'), 'Expected btn_close_shift_early CTA in mobile HUD');
+  await checkCapsuleAndViewportBounds('iPhone SE Chef Early Close 375x667', 375, 667, 0);
+  await screenshot('10b_early_close_375.png');
+
+  const coinsBeforeEarlyClose = st.coins;
+  const stepsBeforeEarlyClose = st.stepsLeft;
+  await tapHit('btn_close_shift_early');
+  await sleep(280);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === 'prep_shop', `Expected prep_shop modal after early close, got ${st.activeModal}`);
+  assert(
+    st.coins >= coinsBeforeEarlyClose + 35 + stepsBeforeEarlyClose * 4,
+    `Expected coins payout >= base(35)+interest(${stepsBeforeEarlyClose * 4}), before=${coinsBeforeEarlyClose}, after=${st.coins}`
+  );
+  assert(
+    st.prepShop && st.prepShop.nextShiftNum === 2 && st.prepShop.relicOffers.length === 3 && st.prepShop.modOffers.length === 2,
+    `Unexpected prepShop state: ${JSON.stringify(st.prepShop)}`
+  );
+  await checkCapsuleAndViewportBounds('iPhone SE Prep Shop Top 375x667', 375, 667, 0);
+  await screenshot('10c_prep_shop_375.png');
+
+  // Add extra coins to test Reroll -> Buy Relic -> Sell Relic (50% refund) -> Re-buy Relic -> Scroll & Buy Deck Mod
+  await evalJS(`window.__HOSHI_DEBUG__.addCoins(300)`);
+  await sleep(140);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const rerollCostBefore = st.prepShop.rerollCost;
+  await tapHit('prep_reroll');
+  await sleep(200);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.prepShop.rerollCost === rerollCostBefore + 5,
+    `Expected prep_reroll cost to increment +5 (before=${rerollCostBefore}, after=${st.prepShop.rerollCost})`
+  );
+
+  // Buy first relic offer
+  const firstRelicHit = st.hits.find((h) => h.id.startsWith('prep_buy_relic_'));
+  assert(firstRelicHit, 'Expected at least one prep_buy_relic_* hit in Prep Shop');
+  const firstRelicId = firstRelicHit.id.replace('prep_buy_relic_', '');
+  const coinsBeforeBuy = st.coins;
+  await tapHit(firstRelicHit.id);
+  await sleep(200);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.relics.includes(firstRelicId), `Expected relic ${firstRelicId} equipped after purchase`);
+  assert(st.coins < coinsBeforeBuy, 'Expected coin deduction after buying relic');
+
+  // Sell that relic for 50% refund
+  const coinsBeforeSell = st.coins;
+  await tapHit(`prep_sell_${firstRelicId}`);
+  await sleep(200);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(!st.relics.includes(firstRelicId), `Expected relic ${firstRelicId} removed after selling`);
+  assert(st.coins > coinsBeforeSell, 'Expected 50% coin refund after selling relic');
+
+  // Buy another available relic so we carry a relic into Shift 2
+  const secondRelicHit = st.hits.find((h) => h.id.startsWith('prep_buy_relic_'));
+  assert(secondRelicHit, 'Expected second prep_buy_relic_* hit');
+  await tapHit(secondRelicHit.id);
+  await sleep(200);
+
+  // Scroll Prep Shop body down to reach Deck Sculpting Mods and buy one
+  await dragSwipe(188, 520, 188, 220, 8);
+  await sleep(200);
+  await checkCapsuleAndViewportBounds('iPhone SE Prep Shop Scrolled 375x667', 375, 667, 0);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const modHit = st.hits.find((h) => h.id.startsWith('prep_buy_mod_'));
+  assert(modHit, 'Expected prep_buy_mod_* hit after scrolling Prep Shop');
+  await tapHit(modHit.id);
+  await sleep(200);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.prepShop.modOffers.some((m) => m.bought), 'Expected Deck Mod offer marked bought');
+
+  // Launch Shift 2 & verify Hot-Oven Carry-Over
+  await tapHit('prep_next_shift');
+  await sleep(340);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === null, 'Prep Shop closed on Shift 2 start');
+  assert(st.shift === 2 && st.shiftTarget === 2600, `Expected Shift 2 target ¥2600, got shift=${st.shift}, target=${st.shiftTarget}`);
+  assert(st.stepsLeft >= 16, `Expected >= 16 steps in Shift 2, got ${st.stepsLeft}`);
+  assert(st.entities.length >= 2, `Expected Hot-Oven Carry-Over treats in Shift 2 jar, got ${st.entities.length}`);
+
+  // Verify Relics Mechanics: rel_bumpers (2 Butter Bumpers), rel_aged (agedStacks++), rel_antigrav (4th drop flips gravity!)
+  await evalJS(`
+    window.__HOSHI_DEBUG__.equipRelic('rel_bumpers');
+    window.__HOSHI_DEBUG__.equipRelic('rel_aged');
+    window.__HOSHI_DEBUG__.equipRelic('rel_antigrav');
+  `);
+  await sleep(180);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.obstacles && st.obstacles.length === 2, `Expected 2 Butter Bumpers from rel_bumpers, got ${st.obstacles && st.obstacles.length}`);
+
+  // Spawn an isolated servable treat matching active order on the left, then drop 4 treats on the right
+  const activeOrder = st.orders.find((o) => !o.completed);
+  const neededSlot = activeOrder && activeOrder.slots.find((s) => !s.done);
+  assert(neededSlot, 'Expected active uncompleted order slot in Shift 2');
+  const agedTestId = await evalJS(`window.__HOSHI_DEBUG__.spawnTestEntity(${neededSlot.tier}, 115, 430)`);
+  await sleep(120);
+  const jb2 = st.jarBox;
+  const dropsBeforeAnti = st.dropsMadeThisRun;
+  const dropFracs = [0.46, 0.54, 0.50, 0.56, 0.44, 0.52, 0.48, 0.58];
+  for (let attempt = 0; attempt < dropFracs.length; attempt++) {
+    await tapAt(Math.round(jb2.x + jb2.w * dropFracs[attempt]), Math.round(jb2.y + jb2.h * 0.24));
+    st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+    if (st.dropsMadeThisRun - dropsBeforeAnti >= 4) break;
+    await sleep(260);
+  }
+  assert(
+    st.antigravTimer > 0,
+    `Expected rel_antigrav to trigger on 4th drop (antigravTimer=${st.antigravTimer}, dropsDelta=${st.dropsMadeThisRun - dropsBeforeAnti}, relics=${JSON.stringify(st.relics)}, modal=${st.activeModal}, paused=${st.paused}, stepsLeft=${st.stepsLeft})`
+  );
+  const agedEnt = st.entities.find((e) => e.id === agedTestId);
+  assert(
+    (agedEnt && agedEnt.agedStacks >= 1) || st.entities.some((e) => e.agedStacks >= 1),
+    `Expected rel_aged to increment agedStacks on servable treat (agedEnt=${JSON.stringify(agedEnt)})`
+  );
+  await screenshot('10d_relics_antigrav_bumpers_375.png');
+
+  // Open Relics Build Inspector Modal from HUD bar
+  await tapHit('mobile_relics_bar');
+  await sleep(220);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === 'relics', `Expected relics inspector modal, got ${st.activeModal}`);
+  await checkCapsuleAndViewportBounds('iPhone SE Relics Modal 375x667', 375, 667, 0);
+  await screenshot('10e_relics_modal_375.png');
+  await tapHit('modal_close');
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === null, 'Relics modal closed cleanly');
+
   // ==========================================================
   // 4. 90s Rush Mode: Tap-to-Serve +3.0s Extension, Emergency Gust & Settlement
   // ==========================================================
@@ -832,8 +969,35 @@ async function run() {
   assert(st.over === true && st.rushFinished === true && st.activeModal === 'gameover', 'Rush timer expiration opens settlement');
   await screenshot('12_rush_gameover_390.png');
 
+  // 4B. Phase 2 — Mikan +10🪙 Starting Coins, Shift 5 Grand Prix Victory & Endless Overtime (Shift 6)
+  await evalJS(`window.__HOSHI_DEBUG__.selectPatron('mikan'); window.__HOSHI_DEBUG__.startMode('chef');`);
+  await sleep(300);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.mode === 'chef' && st.coins >= 10, `Expected Mikan starting coins >= 10, got ${st.coins}`);
+
+  await evalJS(`
+    window.__HOSHI_DEBUG__.setShift(5);
+    window.__HOSHI_DEBUG__.addShiftRevenue(15500);
+    window.__HOSHI_DEBUG__.triggerShiftClear();
+  `);
+  await sleep(280);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === 'shift_victory', `Expected shift_victory modal on Shift 5 clear, got ${st.activeModal}`);
+  await checkCapsuleAndViewportBounds('iPhone 14 Shift 5 Victory 390x844', 390, 844, 34);
+  await screenshot('12b_shift_victory_390.png');
+
+  // Enter Endless Overtime -> Prep Shop for Shift 6 -> Launch Shift 6
+  await tapHit('victory_endless');
+  await sleep(240);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === 'prep_shop' && st.prepShop && st.prepShop.nextShiftNum === 6, 'Expected Prep Shop for Shift 6 Endless Overtime');
+  await tapHit('prep_next_shift');
+  await sleep(320);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === null && st.shift === 6 && st.shiftTarget > 15000, `Expected Shift 6 Endless target > 15000, got shift=${st.shift}, target=${st.shiftTarget}`);
+
   // ==========================================================
-  // 5. Desktop 1280x760 Play Screen + Chef & Zen Checks
+  // 5. Desktop 1280x760 Play Screen + Chef 5-Shift, Prep Shop & Zen Checks
   // ==========================================================
   await setViewport(1280, 760, false, 1);
   await navigate('?safeTop=8&safeBottom=0&capsule=1');
@@ -842,9 +1006,26 @@ async function run() {
   await tapHit('btn_start');
   await sleep(300);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.mode === 'chef' && st.running === true, 'Chef mode running on desktop');
+  assert(st.mode === 'chef' && st.running === true && st.shift === 1, 'Chef mode running on desktop at Shift 1');
+  assert(st.hits.some((h) => h.id === 'wide_relics_bar'), 'Expected wide_relics_bar hit on desktop Chef HUD');
   await checkCapsuleAndViewportBounds('Desktop Chef HUD 1280x760', 1280, 760, 0);
   await screenshot('13_chef_desktop_1280.png');
+
+  // Desktop Early Close + 3-column Desktop Prep Shop Layout Verification
+  await evalJS(`
+    window.__HOSHI_DEBUG__.equipRelic('rel_bumpers');
+    window.__HOSHI_DEBUG__.addShiftRevenue(1300);
+  `);
+  await sleep(220);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.hits.some((h) => h.id === 'btn_close_shift_early'), 'Expected Desktop btn_close_shift_early CTA');
+  await checkCapsuleAndViewportBounds('Desktop Chef Early Close 1280x760', 1280, 760, 0);
+  await tapHit('btn_close_shift_early');
+  await sleep(260);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === 'prep_shop', `Expected desktop prep_shop modal, got ${st.activeModal}`);
+  await checkCapsuleAndViewportBounds('Desktop Prep Shop 1280x760', 1280, 760, 0);
+  await screenshot('13b_prep_shop_desktop_1280.png');
 
   await evalJS(`window.__HOSHI_DEBUG__.returnToLobby()`);
   await sleep(160);

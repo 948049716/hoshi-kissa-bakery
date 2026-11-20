@@ -597,10 +597,16 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
 
   // 2. Translucent glass chamber fill + clip internal motes / shooting stars / chime pulse
   ctx.save();
+  const isAntiGrav = gameState.antigravTimer > 0;
   traceJarInnerPath(ctx);
   ctx.closePath();
   const bgGrad = ctx.createLinearGradient(0, JAR.neckY, 0, JAR.floorY);
-  if (isFever) {
+  if (isAntiGrav) {
+    const shimmer = 0.5 + 0.5 * Math.sin(nowSec * 6.5);
+    bgGrad.addColorStop(0, `rgba(182, 134, 255, ${0.28 + shimmer * 0.1})`);
+    bgGrad.addColorStop(0.5, `rgba(104, 72, 188, ${0.22 + (1 - shimmer) * 0.08})`);
+    bgGrad.addColorStop(1, `rgba(148, 212, 255, ${0.18 + shimmer * 0.08})`);
+  } else if (isFever) {
     const shimmer = 0.5 + 0.5 * Math.sin(nowSec * 3.8);
     bgGrad.addColorStop(0, `rgba(255, 226, 130, ${0.24 + shimmer * 0.1})`);
     bgGrad.addColorStop(0.5, `rgba(255, 168, 210, ${0.14 + (1 - shimmer) * 0.08})`);
@@ -648,12 +654,16 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
     }
   }
 
-  // Internal glass motes
-  const moteCount = isFever ? 12 : theme.id === 'amber' ? 6 : 9;
+  // Internal glass motes (drift rapidly upward in Anti-Gravity mode!)
+  const moteCount = isAntiGrav ? 14 : isFever ? 12 : theme.id === 'amber' ? 6 : 9;
   const spanY = JAR.floorY - JAR.neckY;
   for (let m = 0; m < moteCount; m++) {
-    const mx = JAR.left + 22 + ((m * 47 + Math.sin(nowSec * (isFever ? 1.4 : 0.8) + m) * 20) % (JAR.right - JAR.left - 44));
-    if (theme.moteKind === 'petal' && !isFever) {
+    const mx = JAR.left + 22 + ((m * 47 + Math.sin(nowSec * (isFever || isAntiGrav ? 1.6 : 0.8) + m) * 20) % (JAR.right - JAR.left - 44));
+    if (isAntiGrav) {
+      const my = JAR.floorY - (((nowSec * 120 + m * 53) % spanY));
+      ctx.fillStyle = m % 2 === 0 ? 'rgba(222, 184, 255, 0.65)' : 'rgba(164, 232, 255, 0.52)';
+      UI.drawStar(ctx, mx, my, 3.2 + (m % 3) * 0.9, nowSec * 4.5 + m);
+    } else if (theme.moteKind === 'petal' && !isFever) {
       const my = JAR.neckY + (((nowSec * 28 + m * 61) % spanY));
       ctx.fillStyle = m % 2 === 0 ? 'rgba(255, 206, 226, 0.52)' : 'rgba(255, 174, 206, 0.42)';
       UI.drawSakuraPetal(ctx, mx, my, 4.2 + (m % 2) * 1.4, nowSec * 1.4 + m);
@@ -668,6 +678,24 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
         : theme.moteColor;
       UI.drawStar(ctx, mx, my, isFever ? 3.2 + (m % 3) : 2.1 + (m % 2) * 0.8, nowSec * (isFever ? 3 : 1.2) + m);
     }
+  }
+
+  // Active Anti-Gravity Pill
+  if (gameState.running && !gameState.over && isAntiGrav) {
+    const pillY = JAR.neckY + (gameState.serveCascadeTimer > 0 ? 40 : 18);
+    ctx.save();
+    UI.roundRectPath(ctx, JAR.canvasW * 0.5 - 86, pillY - 10, 172, 20, 10);
+    ctx.fillStyle = 'rgba(62, 26, 108, 0.9)';
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#dfb8ff';
+    ctx.stroke();
+    ctx.fillStyle = '#f2e0ff';
+    ctx.font = UI.fontStr(10.5, 900);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`🛸 月光反重力 ×2.2 (${gameState.antigravTimer.toFixed(1)}s)`, JAR.canvasW * 0.5, pillY + 0.5);
+    ctx.restore();
   }
 
   // Active Serve Cascade Avalanche Timer Pill (inside top glass)
@@ -729,10 +757,45 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
   }
   ctx.restore();
 
+  // 3.5 Static Jar Obstacles (e.g., Butter Bumpers from rel_bumpers!)
+  if (gameState.obstacles && gameState.obstacles.length > 0) {
+    for (let oi = 0; oi < gameState.obstacles.length; oi++) {
+      const ob = gameState.obstacles[oi];
+      if (!ob || ob.type !== 'bumper') continue;
+      const flash = ob.hitFlash > 0 ? Math.min(1, ob.hitFlash / 0.36) : 0;
+      const sc = 1 + flash * 0.24;
+      ctx.save();
+      ctx.translate(ob.x, ob.y);
+      ctx.scale(sc, sc);
+      // Warm glow ring
+      ctx.fillStyle = flash > 0.05 ? `rgba(255, 232, 120, ${0.45 + flash * 0.4})` : 'rgba(255, 216, 112, 0.24)';
+      ctx.beginPath();
+      ctx.arc(0, 0, ob.r + 5.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      const bg = ctx.createRadialGradient(-4, -5, 2, 0, 0, ob.r);
+      bg.addColorStop(0, '#fffce0');
+      bg.addColorStop(0.6, '#ffd262');
+      bg.addColorStop(1, '#c9781b');
+      ctx.fillStyle = bg;
+      ctx.beginPath();
+      ctx.arc(0, 0, ob.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.lineWidth = 2.4;
+      ctx.strokeStyle = flash > 0.1 ? '#fff7c4' : '#4A2C2A';
+      ctx.stroke();
+
+      ctx.fillStyle = '#fff7d4';
+      UI.drawStar(ctx, 0, 0, ob.r * 0.48, nowSec * 1.6 + oi);
+      ctx.restore();
+    }
+  }
+
   // 4. Dual-Mode Aim Trajectory (Quick Vertical Drop + Pull-Down Slingshot Bank-Shot)
   let lockedTarget = null;
   const isTargetingMode = !!(gameState.activeToolMode || gameState.activeSkillMode);
-  if (gameState.running && !gameState.over && !isTargetingMode) {
+  const canDropStep = gameState.mode !== 'chef' || gameState.stepsLeft > 0;
+  if (gameState.running && !gameState.over && !isTargetingMode && canDropStep) {
     const curMeta = gameState.curMeta || { wildcard: false, golden: false };
     const curIsWild = !!curMeta.wildcard;
     const curIsGold = !curIsWild && !!curMeta.golden;
@@ -745,9 +808,11 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
     const isAimCancelled = !!(aim.cancelled || (gameState.touchAim.active && gameState.touchAim.cancelled));
     const isTouchAiming = !!((aim.active || gameState.touchAim.active) && !isAimCancelled);
     const [lr, lg, lb] = theme.lockColor;
+    const hasBouncy = Array.isArray(gameState.relics) && gameState.relics.includes('rel_bouncy');
+    const hasPrism = Array.isArray(gameState.relics) && gameState.relics.includes('rel_prism');
 
     if (isSling) {
-      // Slingshot Bank-Shot Trajectory Preview (with up to 1 glass wall bounce!)
+      // Slingshot Bank-Shot Trajectory Preview (1 bounce default, 2 with rel_bouncy!)
       const gScale = curIsWild ? 1.0 : (curTierDef.material && curTierDef.material.gravityScale) || 1.0;
       const traj = Physics.predictBankShotTrajectory(
         curR,
@@ -759,7 +824,12 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
         gameState.entities,
         1880,
         gScale,
-        gameState.curTier
+        gameState.curTier,
+        {
+          wallRestBonus: hasBouncy ? 0.25 : 0,
+          maxBounces: hasBouncy ? 2 : 1,
+          obstacles: gameState.obstacles
+        }
       );
       if (traj.hitBody && !traj.hitBody.isYarnBall) {
         if (curIsWild || traj.hitBody.isWildcard || traj.hitBody.tier === gameState.curTier) {
@@ -770,7 +840,8 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
         lockedTarget = findAimMergeTarget(gameState, gameState.curTier, traj.endX, traj.endY, curIsWild, effectiveMagnetLv);
       }
 
-      const hasBounce = !!traj.bouncePoint;
+      const bPoints = traj.bouncePoints || (traj.bouncePoint ? [traj.bouncePoint] : []);
+      const hasBounce = bPoints.length > 0;
       ctx.save();
       // Power gauge arc underneath launch point
       const arcR = curR + 11;
@@ -808,12 +879,12 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
         ctx.setLineDash([]);
       }
 
-      // Highlight reflection star at glass side-wall bounce point
-      if (traj.bouncePoint) {
-        const bp = traj.bouncePoint;
-        ctx.fillStyle = '#9cf4ff';
-        UI.drawStar(ctx, bp.x, bp.y, 7.5 + Math.sin(nowSec * 12) * 1.5, nowSec * 4);
-        ctx.strokeStyle = 'rgba(156, 244, 255, 0.72)';
+      // Highlight reflection stars at all glass side-wall bounce points
+      for (let bi = 0; bi < bPoints.length; bi++) {
+        const bp = bPoints[bi];
+        ctx.fillStyle = bi >= 1 ? '#ffe47a' : '#9cf4ff';
+        UI.drawStar(ctx, bp.x, bp.y, 7.5 + Math.sin(nowSec * 12 + bi) * 1.5, nowSec * 4);
+        ctx.strokeStyle = bi >= 1 ? 'rgba(255, 228, 122, 0.8)' : 'rgba(156, 244, 255, 0.72)';
         ctx.lineWidth = 1.8;
         ctx.beginPath();
         ctx.arc(bp.x, bp.y, 12, 0, Math.PI * 2);
@@ -842,12 +913,15 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
 
       // Callout badge for Bank-Shot or Lock-on
       if (lockedTarget || hasBounce) {
+        const multLabel = bPoints.length >= 2 && hasBouncy ? '×2.8' : hasPrism ? '×2.0' : '×1.5';
         const tagText = lockedTarget
           ? hasBounce
-            ? '🎱 弹壁可合成 ×1.5!'
+            ? `🎱 ${bPoints.length >= 2 ? '二段弹壁' : '弹壁可合成'} ${multLabel}!`
             : curIsWild
             ? '🌈 升阶+1!'
             : '✦ 可合成!'
+          : bPoints.length >= 2
+          ? '🎱 二段折射'
           : '🎱 弹壁折射';
         const tagW = tagText.length * 7.8 + 18;
         const tagY = Math.max(JAR.neckY + 20, traj.endY - curR - 14);
@@ -1102,6 +1176,17 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
       UI.drawRainbowWildcard(ctx, e.x, e.y, e.r, e.angle, nowSec, 1);
     } else {
       if (e.isGolden) UI.drawGoldenAura(ctx, e.x, e.y, e.r, nowSec, 1);
+      if (e.bumperCrit && !e.isMeteorShot) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 224, 96, 0.85)';
+        ctx.lineWidth = 2.4;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, e.r + 3.5, nowSec * 3, nowSec * 3 + Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
       if (e.isMeteorShot) {
         ctx.save();
         ctx.strokeStyle = 'rgba(255, 138, 64, 0.92)';
@@ -1121,7 +1206,7 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
       }
     }
 
-    // Servable Gold Bell Ring + Bouncing Tap-to-Serve Pill!
+    // Servable Gold Bell Ring + Bouncing Tap-to-Serve Pill (with Aged Caramel Ledger bonus!)
     if (isServable && !isTargetingMode) {
       const sp = 0.65 + 0.35 * Math.sin(nowSec * 7 + e.id);
       ctx.save();
@@ -1142,11 +1227,24 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
 
       const bob = Math.sin(nowSec * 7.5 + e.id) * 2.5;
       const pillY = Math.max(JAR.neckY + 12, e.y - e.r - 10 + bob);
-      const pillTxt = isSouffle ? '👑献礼·×2' : isVipServable ? '👑VIP上菜' : '🔔上菜';
-      const pillW = isSouffle || isVipServable ? 58 : 44;
+      const hasAged = !isSouffle && e.agedStacks > 0 && Array.isArray(gameState.relics) && gameState.relics.includes('rel_aged');
+      const pillTxt = isSouffle
+        ? '👑献礼·×2'
+        : hasAged
+        ? `🔥+${e.agedStacks * 30}%`
+        : isVipServable
+        ? '👑VIP上菜'
+        : '🔔上菜';
+      const pillW = isSouffle || isVipServable || hasAged ? 58 : 44;
       ctx.save();
       UI.roundRectPath(ctx, e.x - pillW * 0.5, pillY - 9, pillW, 18, 9);
-      ctx.fillStyle = isSouffle ? 'rgba(136, 72, 12, 0.94)' : isVipServable ? 'rgba(134, 34, 88, 0.92)' : 'rgba(72, 42, 14, 0.92)';
+      ctx.fillStyle = hasAged
+        ? 'rgba(156, 56, 14, 0.94)'
+        : isSouffle
+        ? 'rgba(136, 72, 12, 0.94)'
+        : isVipServable
+        ? 'rgba(134, 34, 88, 0.92)'
+        : 'rgba(72, 42, 14, 0.92)';
       ctx.fill();
       ctx.lineWidth = 1.4;
       ctx.strokeStyle = isVipServable ? '#ffb8e0' : '#ffe27a';

@@ -389,7 +389,7 @@
     return best;
   }
 
-  function collideBodyWithJar(body, jar, contactsOut) {
+  function collideBodyWithJar(body, jar, contactsOut, wallRestBonus = 0) {
     const SKIN = 0.45;
     const innerLeft = jar.left + jar.cornerR;
     const innerRight = jar.right - jar.cornerR;
@@ -442,8 +442,8 @@
       const isSideWall = Math.abs(c.nx) > 0.85 && Math.abs(c.ny) < 0.25;
       const bankE =
         isSideWall && body.isBankLaunched && body.age < 1.8
-          ? Math.max(baseE, body.tier === 2 ? 0.78 : 0.64)
-          : baseE;
+          ? Math.min(0.96, Math.max(baseE, body.tier === 2 ? 0.78 : 0.64) + wallRestBonus)
+          : Math.min(0.94, baseE + (isSideWall ? wallRestBonus * 0.65 : 0));
       contactsOut.push({
         a: STATIC_JAR,
         b: body,
@@ -654,11 +654,15 @@
     const magnetRange = typeof opts.magnetRange === 'number' ? opts.magnetRange : 10;
     const magnetForce = typeof opts.magnetForce === 'number' ? opts.magnetForce : 460;
     const gravityDir = typeof opts.gravityDir === 'number' ? opts.gravityDir : 1;
+    const wallRestBonus = typeof opts.wallRestBonus === 'number' ? opts.wallRestBonus : 0;
+    const globalResonance = !!opts.globalResonance;
+    const obstacles = Array.isArray(opts.obstacles) ? opts.obstacles : [];
 
     const mergePairs = [];
     const impacts = [];
     const wallBounces = [];
     const meteorHits = [];
+    const bumperHits = [];
     let lastContacts = [];
     let lastMagnetLinks = [];
 
@@ -691,6 +695,15 @@
         b.x += b.vx * subDt;
         b.y += b.vy * subDt;
         b.angle += b.vr * subDt;
+
+        // Gentle glass-lid cap during Anti-Gravity inversion so treats stay safely inside jar
+        if (gravityDir < 0) {
+          const ceilY = jar.neckY + Math.max(18, b.r * 0.72);
+          if (b.y < ceilY) {
+            b.y = ceilY;
+            if (b.vy < 0) b.vy = Math.abs(b.vy) * 0.35 + 22;
+          }
+        }
         b.inContact = false;
       }
 
@@ -705,9 +718,60 @@
         const a = bodies[i];
         if (a.merged) continue;
 
-        if (collideBodyWithJar(a, jar, contacts)) {
+        if (collideBodyWithJar(a, jar, contacts, wallRestBonus)) {
           a.inContact = true;
           a.hasCollided = true;
+        }
+
+        // Static jar obstacles (e.g., Butter Bumpers from rel_bumpers / Shift 3)
+        for (let oi = 0; oi < obstacles.length; oi++) {
+          const ob = obstacles[oi];
+          if (!ob || ob.type !== 'bumper') continue;
+          const bdx = a.x - ob.x;
+          const bdy = a.y - ob.y;
+          const minD = a.r + ob.r;
+          const dSq = bdx * bdx + bdy * bdy;
+          if (dSq < minD * minD) {
+            const dist = Math.sqrt(dSq) || 0.001;
+            const nx = bdx / dist;
+            const ny = bdy / dist;
+            const pen = minD - dist;
+            a.x += nx * (pen + 0.4);
+            a.y += ny * (pen + 0.4);
+            updateBodyWorld(a);
+            a.inContact = true;
+            a.hasCollided = true;
+
+            const vn = a.vx * nx + a.vy * ny;
+            if (vn < 60) {
+              const e = ob.restitution || 1.15;
+              const bounceSpd = Math.max(210, -vn * e);
+              const tx = -ny;
+              const ty = nx;
+              const vt = a.vx * tx + a.vy * ty;
+              a.vx = nx * bounceSpd + tx * vt * 0.92;
+              a.vy = ny * bounceSpd + ty * vt * 0.92;
+              const maxSpd = 920;
+              const spd = Math.hypot(a.vx, a.vy);
+              if (spd > maxSpd) {
+                a.vx = (a.vx / spd) * maxSpd;
+                a.vy = (a.vy / spd) * maxSpd;
+              }
+              a.vr += (nx >= 0 ? 1 : -1) * 3.5;
+
+              if (a.lastBumperHitAge === undefined || a.age - a.lastBumperHitAge > 0.1) {
+                a.lastBumperHitAge = a.age;
+                bumperHits.push({
+                  body: a,
+                  bumper: ob,
+                  x: ob.x + nx * ob.r,
+                  y: ob.y + ny * ob.r,
+                  nx,
+                  ny
+                });
+              }
+            }
+          }
         }
 
         for (let j = i + 1; j < bodies.length; j++) {
@@ -729,8 +793,8 @@
           const dy = b.y - a.y;
           const distSq = dx * dx + dy * dy;
 
-          // T3 Matcha Kitty resonance field boosts magnet range for nearby matching pairs
-          let nearResonance = !!(a.resonanceTimer > 0 || b.resonanceTimer > 0);
+          // T3 Matcha Kitty / rel_resonance magnet boost for matching pairs
+          let nearResonance = !!(globalResonance || a.resonanceTimer > 0 || b.resonanceTimer > 0);
           if (!nearResonance && canMerge && resonators.length > 0) {
             const mx = (a.x + b.x) * 0.5;
             const my = (a.y + b.y) * 0.5;
@@ -878,6 +942,7 @@
       impacts,
       wallBounces,
       meteorHits,
+      bumperHits,
       debugContacts: lastContacts,
       magnetLinks: lastMagnetLinks
     };
@@ -1007,7 +1072,8 @@
     existingBodies,
     gravity = 1880,
     gravityScale = 1.0,
-    tier = 1
+    tier = 1,
+    opts = {}
   ) {
     const r = eqRadius * 0.94;
     const minX = jar.left + r;
@@ -1015,17 +1081,20 @@
     const leftArcCx = jar.left + jar.cornerR;
     const rightArcCx = jar.right - jar.cornerR;
     const arcCy = jar.floorY - jar.cornerR;
-    const wallRest = tier === 2 ? 0.78 : 0.64;
+    const wallRestBonus = typeof opts.wallRestBonus === 'number' ? opts.wallRestBonus : 0;
+    const maxBounces = typeof opts.maxBounces === 'number' ? opts.maxBounces : 1;
+    const obstacles = Array.isArray(opts.obstacles) ? opts.obstacles : [];
+    const wallRest = Math.min(0.96, (tier === 2 ? 0.78 : 0.64) + wallRestBonus);
 
     const points = [{ x: originX, y: originY }];
     let x = originX;
     let y = originY;
     let vx = vx0;
     let vy = vy0;
-    let bouncePoint = null;
+    const bouncePoints = [];
     let hitBody = null;
     const stepDt = 0.015;
-    const maxSteps = 50;
+    const maxSteps = maxBounces > 1 ? 62 : 50;
 
     for (let step = 0; step < maxSteps; step++) {
       vy += gravity * gravityScale * stepDt;
@@ -1034,14 +1103,14 @@
       const nx = x + vx * stepDt;
       const ny = y + vy * stepDt;
 
-      // Side-wall reflection (up to 1 clear bank-shot bounce)
+      // Side-wall reflection (up to maxBounces bank-shot bounces)
       if (nx < minX) {
         const t = vx !== 0 ? Math.max(0, Math.min(1, (minX - x) / (nx - x))) : 0;
         const by = y + (ny - y) * t;
         x = minX + 0.5;
         y = by;
-        if (!bouncePoint && by < arcCy) {
-          bouncePoint = { x: minX, y: by };
+        if (bouncePoints.length < maxBounces && by < arcCy) {
+          bouncePoints.push({ x: minX, y: by });
           points.push({ x: minX, y: by });
           vx = Math.abs(vx) * wallRest;
           vy *= 0.92;
@@ -1055,8 +1124,8 @@
         const by = y + (ny - y) * t;
         x = maxX - 0.5;
         y = by;
-        if (!bouncePoint && by < arcCy) {
-          bouncePoint = { x: maxX, y: by };
+        if (bouncePoints.length < maxBounces && by < arcCy) {
+          bouncePoints.push({ x: maxX, y: by });
           points.push({ x: maxX, y: by });
           vx = -Math.abs(vx) * wallRest;
           vy *= 0.92;
@@ -1069,6 +1138,34 @@
 
       x = nx;
       y = ny;
+
+      // Butter bumper reflection in preview
+      for (let oi = 0; oi < obstacles.length; oi++) {
+        const ob = obstacles[oi];
+        if (!ob || ob.type !== 'bumper') continue;
+        const bdx = x - ob.x;
+        const bdy = y - ob.y;
+        const hitD = r + ob.r;
+        if (bdx * bdx + bdy * bdy <= hitD * hitD) {
+          const d = Math.hypot(bdx, bdy) || 1;
+          const bnx = bdx / d;
+          const bny = bdy / d;
+          x = ob.x + bnx * (hitD + 1);
+          y = ob.y + bny * (hitD + 1);
+          const vn = vx * bnx + vy * bny;
+          if (vn < 0) {
+            const e = ob.restitution || 1.15;
+            vx -= (1 + e) * vn * bnx;
+            vy -= (1 + e) * vn * bny;
+            const spd = Math.hypot(vx, vy);
+            if (spd > 920) {
+              vx = (vx / spd) * 920;
+              vy = (vy / spd) * 920;
+            }
+          }
+          points.push({ x, y });
+        }
+      }
 
       // Curved bottom corners & floor check
       if (y > arcCy && (x < leftArcCx || x > rightArcCx)) {
@@ -1115,7 +1212,8 @@
     const last = points[points.length - 1];
     return {
       points,
-      bouncePoint,
+      bouncePoint: bouncePoints[0] || null,
+      bouncePoints,
       endX: last.x,
       endY: last.y,
       hitBody

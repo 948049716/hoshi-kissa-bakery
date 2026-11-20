@@ -284,8 +284,8 @@ const PATRONS = [
       shortLabel: '捞底',
       desc: '点选罐内 1~5 阶甜品捞回待投区，原位触发抽底雪崩！'
     },
-    passiveDesc: '主动技【金勺捞底】捞出底层甜品造雪崩；VIP 订单赏金 +25%',
-    shortPassive: '捞底·VIP+25%',
+    passiveDesc: '主动技【金勺捞底】捞出底层甜品；VIP赏金+25% + 开局+10🪙',
+    shortPassive: '捞底·+10🪙',
     greet: '刚出炉的星光面糊好香呀～亮金铃的甜品直接点它就能上菜哦！',
     thanks: '太棒啦！抽底上菜一气呵成，香气飘满月光街道啦～',
     idleLines: [
@@ -402,14 +402,319 @@ const SHOP_UPGRADES = [
     name: '星尘糖霜壶',
     costs: [45, 95, 170],
     mults: [1, 1.15, 1.3, 1.5],
+    startCoins: [0, 5, 10, 15],
     maxLv: 3,
     shortTag: (lv) => `糖霜Lv.${lv}`,
     desc: (lv) => {
       const pcts = [0, 15, 30, 50];
-      if (lv === 0) return '下级效果：局内星尘与打烊永久星尘收益 +15%';
-      if (lv < 3) return `当前：星尘收益 +${pcts[lv]}% · 下级提升至 +${pcts[lv + 1]}%`;
-      return '已满级：局内与打烊结算永久星尘收益全面 +50%！';
+      const coins = [0, 5, 10, 15];
+      if (lv === 0) return '下级效果：星尘收益 +15% 且主厨闯关开局自带 +5🪙';
+      if (lv < 3) return `当前：星尘+${pcts[lv]}%·开局+${coins[lv]}🪙 · 下级+${pcts[lv + 1]}%/+${coins[lv + 1]}🪙`;
+      return '已满级：星尘收益全面 +50%，且主厨闯关开局自带 +15🪙 启动资金！';
     }
+  }
+];
+
+// =========================================================================
+// 4.0 Phase 2: 5-Shift Night Bakery Roguelike, 16 Relics & 6 Deck Mods
+// =========================================================================
+const SHIFTS = [
+  {
+    shift: 1,
+    name: '暮色试营业',
+    steps: 16,
+    target: 1200,
+    baseCoins: 35,
+    badge: '第1幕·试营',
+    modifier: null,
+    desc: '纯净开场幕：底部预置 4 颗甜品，点击金铃出餐体验抽底雪崩！'
+  },
+  {
+    shift: 2,
+    name: '晚风星灯夜',
+    steps: 16,
+    target: 2600,
+    baseCoins: 45,
+    badge: '第2幕·星灯',
+    modifier: 'golden_breeze',
+    desc: '热炉传承保留最高 2 颗甜品，且开局第 1 颗必为镀金甜品！'
+  },
+  {
+    shift: 3,
+    name: '挑剔美食家',
+    steps: 17,
+    target: 4800,
+    baseCoins: 60,
+    isMiniBoss: true,
+    badge: '小Boss·冷盘',
+    modifier: 'fast_fresh',
+    desc: '极速冷盘：订单鲜度缩至 5 步但飙升至 ×2.0 赏金，超时则降至 ×0.75！'
+  },
+  {
+    shift: 4,
+    name: '午夜猫猫派对',
+    steps: 17,
+    target: 8500,
+    baseCoins: 75,
+    badge: '第4幕·派对',
+    modifier: 'party_events',
+    desc: '开局伴随捣蛋毛线球（震碎爆 +¥750 & +10🪙），第 6/12 步必发星夜事件！'
+  },
+  {
+    shift: 5,
+    name: '星冠大赏',
+    steps: 18,
+    target: 15000,
+    baseCoins: 100,
+    isFinalBoss: true,
+    badge: '终极Boss',
+    modifier: 'grand_prix',
+    desc: '星冠决战：每 6 步追加美食评委加单（4 步内完单 ×2.5 营业额且 +2 步）！'
+  }
+];
+
+function getShiftConfig(shiftNum) {
+  const n = Math.max(1, Math.floor(Number(shiftNum) || 1));
+  if (n <= SHIFTS.length) return SHIFTS[n - 1];
+  const extra = n - 5;
+  const target = Math.round((15000 * Math.pow(1.65, extra)) / 100) * 100;
+  return {
+    shift: n,
+    name: `无尽午夜加时 #${extra}`,
+    steps: 18,
+    target,
+    baseCoins: 85 + extra * 10,
+    isEndless: true,
+    badge: `加时·第${n}幕`,
+    modifier: 'grand_prix',
+    desc: '无尽午夜加时：营业额目标指数级攀升，用成型流派冲刺传奇榜！'
+  };
+}
+
+const MAX_RELIC_SLOTS = 4;
+
+const RELIC_ARCHETYPES = {
+  cascade: { id: 'cascade', icon: '🏔️', name: '抽底雪崩流', color: '#1b6d8a', bg: '#e2f7ff' },
+  bank: { id: 'bank', icon: '🎱', name: '弹壁台球流', color: '#2b5ca8', bg: '#e6f0ff' },
+  trait: { id: 'trait', icon: '🧪', name: '异能催化流', color: '#7a3494', bg: '#f5e8ff' },
+  greed: { id: 'greed', icon: '👑', name: '贪婪豪赌流', color: '#a35610', bg: '#fff1d1' }
+};
+
+const RELICS = [
+  // Archetype 1: Cascade / Serve Build
+  {
+    id: 'rel_aftershock',
+    archetype: 'cascade',
+    rarity: 'common',
+    rarityLabel: '普通',
+    icon: '🌊',
+    name: '热盘余震',
+    price: 30,
+    desc: '每次点击出餐抽走甜品，在原位产生半径 135px 的内吸脉冲，把周围甜品拉拢相撞。'
+  },
+  {
+    id: 'rel_domino',
+    archetype: 'cascade',
+    rarity: 'rare',
+    rarityLabel: '稀有',
+    icon: '🔔',
+    name: '多米诺餐铃',
+    price: 45,
+    desc: '抽底雪崩判定窗由 2.6s 延长至 4.2s，且雪崩期间每次连合倍率额外 +0.5×！'
+  },
+  {
+    id: 'rel_tradeup',
+    archetype: 'cascade',
+    rarity: 'rare',
+    rarityLabel: '稀有',
+    icon: '🔥',
+    name: '以小换大炉',
+    price: 50,
+    desc: '每次点击出餐 ≥4 阶甜品，自动将罐内随机 1 颗最低阶甜品免费升 1 阶。'
+  },
+  {
+    id: 'rel_perpetual',
+    archetype: 'cascade',
+    rarity: 'legendary',
+    rarityLabel: '传说',
+    icon: '♾️',
+    name: '翻台永动机',
+    price: 70,
+    desc: '雪崩 2 连返还 +1 步取消每幕上限，且触发时立刻追加 1 份鲜度加倍订单！'
+  },
+  // Archetype 2: Bank-Shot / Pinball Build
+  {
+    id: 'rel_prism',
+    archetype: 'bank',
+    rarity: 'common',
+    rarityLabel: '普通',
+    icon: '💎',
+    name: '玻璃折光糖',
+    price: 30,
+    desc: '弹壁反弹后的首次合成营业额由 ×1.5 升至 ×2.0，且下颗待投甜品必定镀金！'
+  },
+  {
+    id: 'rel_bouncy',
+    archetype: 'bank',
+    rarity: 'common',
+    rarityLabel: '普通',
+    icon: '🍮',
+    name: '高弹舒芙蕾壁',
+    price: 35,
+    desc: '全甜品撞墙弹性 +0.25、最大抛射初速 +25%，允许二段弹壁（×2.8 营业额）！'
+  },
+  {
+    id: 'rel_bumpers',
+    archetype: 'bank',
+    rarity: 'rare',
+    rarityLabel: '稀有',
+    icon: '🧈',
+    name: '私藏黄油弹柱',
+    price: 50,
+    desc: '罐内永久安装 2 枚高弹黄油星柱；甜品每碰柱 +¥45 且该球合成 +35% 暴击！'
+  },
+  {
+    id: 'rel_ricochet',
+    archetype: 'bank',
+    rarity: 'legendary',
+    rarityLabel: '传说',
+    icon: '🏹',
+    name: '神枪跳阶箭',
+    price: 75,
+    desc: '经弹壁直接触发合成时，45% 概率奇迹跳升 +2 阶，并额外回复 35% 招牌技！'
+  },
+  // Archetype 3: Trait / Alchemy Build
+  {
+    id: 'rel_echo',
+    archetype: 'trait',
+    rarity: 'rare',
+    rarityLabel: '稀有',
+    icon: '⚗️',
+    name: '双重异能炉',
+    price: 50,
+    desc: '4~8 阶甜品不仅在合成时发动异能，在被点击出餐抽走瞬间也会再发动一次！'
+  },
+  {
+    id: 'rel_lemonade',
+    archetype: 'trait',
+    rarity: 'common',
+    rarityLabel: '普通',
+    icon: '🍋',
+    name: '柠檬汽水机',
+    price: 35,
+    desc: '4 阶柠檬塔清杂范围扩至 165px、蒸发最多 4 颗 1~2 阶，每颗爆 +¥90 与 +3🪙！'
+  },
+  {
+    id: 'rel_antigrav',
+    archetype: 'trait',
+    rarity: 'legendary',
+    rarityLabel: '传说',
+    icon: '🛸',
+    name: '月光反重力箱',
+    price: 70,
+    desc: '每投放 4 步触发 1.3s 全罐重力倒置洗牌，反重力期间所有合成享 ×2.2 营业额！'
+  },
+  {
+    id: 'rel_resonance',
+    archetype: 'trait',
+    rarity: 'common',
+    rarityLabel: '普通',
+    icon: '🧲',
+    name: '共鸣磁铃',
+    price: 30,
+    desc: '任意甜品发动异能时，为全罐同阶甜品施加 2.5s 柔和星磁引力牵引。'
+  },
+  // Archetype 4: High-Roller / Greed Build
+  {
+    id: 'rel_aged',
+    archetype: 'greed',
+    rarity: 'rare',
+    rarityLabel: '稀有',
+    icon: '📜',
+    name: '陈酿焦糖账本',
+    price: 45,
+    desc: '每过 1 步，罐内可出餐却暂不出手的甜品出餐价 +30%（最高 5 层 ×2.5）！'
+  },
+  {
+    id: 'rel_crown_aura',
+    archetype: 'greed',
+    rarity: 'legendary',
+    rarityLabel: '传说',
+    icon: '👑',
+    name: '星冠威压',
+    price: 75,
+    desc: '罐内每存在 1 颗 ≥6 阶甜品，全局合成与出餐营业额叠乘 ×1.35！'
+  },
+  {
+    id: 'rel_double_vip',
+    archetype: 'greed',
+    rarity: 'common',
+    rarityLabel: '普通',
+    icon: '🎀',
+    name: '双席 VIP 厅',
+    price: 35,
+    desc: '将快餐桌永久升级为第二张 VIP 桌，且全场 VIP 订单赏金与出餐额外 +40%！'
+  },
+  {
+    id: 'rel_interest',
+    archetype: 'greed',
+    rarity: 'common',
+    rarityLabel: '普通',
+    icon: '⚖️',
+    name: '金库复利秤',
+    price: 30,
+    desc: '背包内每持有 10🪙 秘方币，全局合成与出餐营业额 +7%（最高 +105%）！'
+  }
+];
+
+const DECK_MODS = [
+  {
+    id: 'mod_trim_t1',
+    icon: '🚫',
+    name: '筛除1阶蓝莓',
+    price: 40,
+    maxBuy: 1,
+    desc: '永久移除本局 1 阶蓝莓出率，比例并入 2~3 阶甜品，大幅提纯队列！'
+  },
+  {
+    id: 'mod_boost_t3',
+    icon: '🍵',
+    name: '抹茶原料浓缩',
+    price: 35,
+    maxBuy: 2,
+    desc: '本局投放池 3~4 阶出现权重翻倍，更快合成高阶大单！'
+  },
+  {
+    id: 'mod_gold_tray',
+    icon: '✨',
+    name: '镀金烤盘',
+    price: 30,
+    maxBuy: 2,
+    desc: '待投甜品镀金概率永久 +18%（镀金合成 ×2.5、出餐 ×1.8）！'
+  },
+  {
+    id: 'mod_rainbow',
+    icon: '🌈',
+    name: '星露浓缩瓶',
+    price: 35,
+    maxBuy: 2,
+    desc: '彩虹万能糖保底步数永久 -3 步，且立刻赠送 1 颗进队列！'
+  },
+  {
+    id: 'mod_steps',
+    icon: '⏳',
+    name: '延长夜班',
+    price: 25,
+    maxBuy: 99,
+    desc: '下一幕初始步数 +3 步，从容布阵冲击超高营业额！'
+  },
+  {
+    id: 'mod_tool',
+    icon: '🧰',
+    name: '紧急厨具补给',
+    price: 20,
+    maxBuy: 99,
+    desc: '立刻补充「🔔 摇一摇 +1」与「✨ 升阶勺 +1」！'
   }
 ];
 
@@ -519,6 +824,20 @@ const ACHIEVEMENTS = [
     name: '全品收藏家',
     desc: '甜品图鉴全部解锁 (9/9)',
     check: (s) => s.unlockedTiers.length >= 9
+  },
+  {
+    id: 'shift_clear_1',
+    tierImg: 4,
+    name: '夜班达人',
+    desc: '在主厨模式通关至少 1 幕夜宵营业',
+    check: (s) => (s.lifetimeStats.shiftsClearedTotal || 0) >= 1
+  },
+  {
+    id: 'shift_clear_5',
+    tierImg: 8,
+    name: '星冠大赏王',
+    desc: '完整通关 5 幕【星冠大赏】深夜闯关',
+    check: (s) => (s.lifetimeStats.bestShiftReached || 0) >= 5 && (s.lifetimeStats.fiveShiftClears || 0) >= 1
   }
 ];
 
@@ -555,6 +874,12 @@ module.exports = {
   PATRONS,
   CASCADE_MULTIPLIERS,
   SHOP_UPGRADES,
+  SHIFTS,
+  getShiftConfig,
+  MAX_RELIC_SLOTS,
+  RELIC_ARCHETYPES,
+  RELICS,
+  DECK_MODS,
   JAR_THEMES,
   JAR_THEME_LIST,
   ACHIEVEMENTS,

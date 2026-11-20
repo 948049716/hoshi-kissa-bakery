@@ -1618,6 +1618,35 @@ class StarlightAudio {
     });
   }
 
+  playShiftClear() {
+    // Warm triumphant patisserie register chime + major chord arpeggio
+    const notes = [523.25, 659.25, 783.99, 1046.5, 1318.51];
+    notes.forEach((f, i) => {
+      setTimeout(() => {
+        this._playTone(f, i === notes.length - 1 ? 'sine' : 'triangle', 0.115, 0.34, 0.006);
+      }, i * 62);
+    });
+  }
+
+  playCoinSpend() {
+    this._playTone(1174.66, 'sine', 0.09, 0.12, 0.003, 1567.98);
+    setTimeout(() => this._playTone(1760.0, 'triangle', 0.075, 0.15, 0.003), 48);
+  }
+
+  playBumperHit() {
+    this._playTone(880, 'triangle', 0.11, 0.14, 0.003, 1320);
+    this._playTone(1760, 'sine', 0.055, 0.09, 0.002);
+  }
+
+  playAntiGrav() {
+    const notes = [392.0, 523.25, 659.25, 987.77];
+    notes.forEach((f, i) => {
+      setTimeout(() => {
+        this._playTone(f, 'sine', 0.085, 0.28, 0.01, f * 1.18);
+      }, i * 55);
+    });
+  }
+
   getDebugState() {
     const info = this.getTrackInfo();
     return {

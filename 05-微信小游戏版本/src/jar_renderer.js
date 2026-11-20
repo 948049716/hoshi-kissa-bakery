@@ -546,7 +546,7 @@ function predictLandingY(tier, dropX, angle, entities, isWildcard = false) {
 
 function findAimMergeTarget(gameState, tier, dropX, landY, isWildcard, magnetLv) {
   const curR = isWildcard ? WILDCARD_RADIUS : TIERS[tier - 1].radius;
-  const lockPad = 14 + magnetLv * 6 + (gameState.feverTimer > 0 ? 14 : 0);
+  const lockPad = 5 + magnetLv * 8 + (gameState.feverTimer > 0 ? 14 : 0);
   let best = null;
   let bestDist = Infinity;
   for (let i = 0; i < gameState.entities.length; i++) {
@@ -669,6 +669,71 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
       UI.drawStar(ctx, mx, my, isFever ? 3.2 + (m % 3) : 2.1 + (m % 2) * 0.8, nowSec * (isFever ? 3 : 1.2) + m);
     }
   }
+
+  // Starlight Bake Zone spotlight (encourages dynamic left/right aiming across the jar)
+  if (gameState.running && !gameState.over && gameState.bakeZone) {
+    const bz = gameState.bakeZone;
+    const bx = bz.x - bz.w * 0.5;
+    const pulse = 0.72 + 0.28 * Math.sin(nowSec * 3.4);
+    const colGrad = ctx.createLinearGradient(0, JAR.neckY, 0, JAR.floorY);
+    colGrad.addColorStop(0, `rgba(255, 232, 132, ${0.06 * pulse})`);
+    colGrad.addColorStop(0.55, `rgba(255, 220, 108, ${0.15 * pulse})`);
+    colGrad.addColorStop(1, `rgba(255, 236, 150, ${0.22 * pulse})`);
+    ctx.fillStyle = colGrad;
+    ctx.fillRect(bx, JAR.neckY, bz.w, JAR.floorY - JAR.neckY);
+
+    ctx.save();
+    ctx.setLineDash([5, 5]);
+    ctx.strokeStyle = `rgba(255, 226, 128, ${0.34 * pulse})`;
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(bx, JAR.neckY + 2);
+    ctx.lineTo(bx, JAR.floorY - 4);
+    ctx.moveTo(bx + bz.w, JAR.neckY + 2);
+    ctx.lineTo(bx + bz.w, JAR.floorY - 4);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const pillY = JAR.dangerY + 14;
+    ctx.fillStyle = 'rgba(72, 42, 14, 0.78)';
+    ctx.strokeStyle = 'rgba(255, 226, 128, 0.78)';
+    ctx.lineWidth = 1.2;
+    UI.roundRectPath(ctx, bz.x - 35, pillY - 9, 70, 18, 9);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#ffe999';
+    ctx.font = UI.fontStr(9.5, 800);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('✨ 热区+35%', bz.x, pillY + 0.5);
+    ctx.restore();
+  }
+
+  // Same-Spot Overheat warning column (discourages mindless spamming at one exact X)
+  if (gameState.running && !gameState.over && gameState.sameSpotStreak >= 2 && gameState.lastDropX !== null) {
+    const sx = gameState.lastDropX;
+    const warnHot = gameState.sameSpotStreak >= 3;
+    const pulse = 0.65 + 0.35 * Math.sin(nowSec * 9);
+    ctx.save();
+    ctx.fillStyle = warnHot ? `rgba(255, 108, 78, ${0.18 * pulse})` : `rgba(255, 178, 92, ${0.11 * pulse})`;
+    ctx.fillRect(sx - 24, JAR.neckY, 48, 125);
+    if (warnHot) {
+      const py = JAR.neckY + 16;
+      const clampedX = Math.max(JAR.left + 44, Math.min(JAR.right - 44, sx));
+      ctx.fillStyle = 'rgba(138, 36, 22, 0.88)';
+      ctx.strokeStyle = 'rgba(255, 176, 128, 0.85)';
+      ctx.lineWidth = 1.2;
+      UI.roundRectPath(ctx, clampedX - 42, py - 9, 84, 18, 9);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#ffdfc4';
+      ctx.font = UI.fontStr(9.5, 800);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(gameState.sameSpotStreak >= 4 ? '🔥 连点偏移!' : '⚠️ 换个位置!', clampedX, py + 0.5);
+    }
+    ctx.restore();
+  }
   ctx.restore();
 
   // 3. Danger Overflow Line
@@ -786,17 +851,19 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
       }
     }
 
-    // Current hovering treat
-    if (gameState.dropCooldown <= 0.09) {
+    // Current hovering treat (translucent while waiting for previous drop to touch down)
+    const waitingDrop = !!(gameState.waitingForLanding || gameState.dropCooldown > 0.04);
+    if (gameState.curTier) {
       const visualAngle = aimAngle + gameState.dropSway * 0.45;
       ctx.save();
-      if (isAimCancelled) ctx.globalAlpha = 0.45;
+      if (isAimCancelled) ctx.globalAlpha = 0.35;
+      else if (waitingDrop) ctx.globalAlpha = 0.44;
       if (curIsWild) {
-        UI.drawRainbowWildcard(ctx, gameState.dropX, JAR.dropY, curR, visualAngle, nowSec, 1);
+        UI.drawRainbowWildcard(ctx, gameState.dropX, JAR.dropY, curR, visualAngle, nowSec, waitingDrop ? 0.55 : 1);
       } else {
-        if (curIsGold) UI.drawGoldenAura(ctx, gameState.dropX, JAR.dropY, curR, nowSec, 1);
+        if (curIsGold) UI.drawGoldenAura(ctx, gameState.dropX, JAR.dropY, curR, nowSec, waitingDrop ? 0.5 : 1);
         drawTierSprite(ctx, sprites, gameState.curTier, gameState.dropX, JAR.dropY, curR, visualAngle, 0, 0, 1, gameState.heldActionAnim);
-        if (gameState.heldActionAnim) {
+        if (gameState.heldActionAnim && !waitingDrop) {
           drawDessertActionFX(ctx, gameState.dropX, JAR.dropY, curR, gameState.curTier, gameState.heldActionAnim);
         }
       }

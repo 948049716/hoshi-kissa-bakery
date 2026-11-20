@@ -682,6 +682,7 @@
 
         if (collideBodyWithJar(a, jar, contacts)) {
           a.inContact = true;
+          a.hasCollided = true;
         }
 
         for (let j = i + 1; j < bodies.length; j++) {
@@ -690,19 +691,26 @@
 
           const isYarnPair = !!(a.isYarnBall || b.isYarnBall);
           const isWildPair = !isYarnPair && !!(a.isWildcard || b.isWildcard);
-          const canMerge = !isYarnPair && (isWildPair || a.tier === b.tier);
+          const aLanded = !!(a.hasCollided || a.bornFromMerge);
+          const bLanded = !!(b.hasCollided || b.bornFromMerge);
+          const midY = (a.y + b.y) * 0.5;
+          const canMerge =
+            !isYarnPair &&
+            (isWildPair || a.tier === b.tier) &&
+            (aLanded || bLanded) &&
+            midY >= jar.neckY - 6;
 
           const dx = b.x - a.x;
           const dy = b.y - a.y;
           const distSq = dx * dx + dy * dy;
-          const effMagnet = isWildPair ? Math.max(18, magnetRange * 1.15) : magnetRange;
+          const effMagnet = isWildPair ? (magnetRange > 0 ? Math.max(10, magnetRange * 1.05) : 5) : magnetRange;
           const rs = a.boundR + b.boundR + (canMerge ? effMagnet + 4 : 1);
           if (distSq > rs * rs) continue;
 
           if (canMerge) {
             const dist = Math.sqrt(distSq) || 0.001;
-            const wildCloseTouch = isWildPair && dist <= (a.r + b.r) * 1.03;
-            const sameCloseSnap = !isWildPair && dist <= (a.r + b.r) * 0.96 && a.age > 0.08 && b.age > 0.08;
+            const wildCloseTouch = isWildPair && dist <= (a.r + b.r) * 1.01;
+            const sameCloseSnap = !isWildPair && dist <= (a.r + b.r) * 0.94 && a.age > 0.06 && b.age > 0.06;
             if (wildCloseTouch || sameCloseSnap || testBodiesOverlap(a, b)) {
               a.merged = true;
               b.merged = true;
@@ -710,9 +718,9 @@
               break;
             }
 
-            // Silky same-tier / wildcard magnetic pull when nearby
+            // Silky same-tier / wildcard magnetic pull when magnet is active
             const surfaceGap = dist - (a.r + b.r);
-            if (surfaceGap < effMagnet && a.age > 0.06 && b.age > 0.06) {
+            if (effMagnet > 0 && surfaceGap < effMagnet && a.age > 0.06 && b.age > 0.06) {
               const strength = Math.max(0.12, Math.min(1, 1 - Math.max(0, surfaceGap) / effMagnet));
               const pull = magnetForce * (0.35 + 0.65 * strength * strength) * subDt;
               const ux = dx / dist;
@@ -735,6 +743,10 @@
           if (collideBodyPair(a, b, contacts)) {
             a.inContact = true;
             b.inContact = true;
+            if (aLanded || bLanded) {
+              a.hasCollided = true;
+              b.hasCollided = true;
+            }
           }
         }
       }

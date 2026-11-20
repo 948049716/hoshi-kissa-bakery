@@ -221,6 +221,11 @@ function createApp() {
     dropsUntilRainbow: 12,
     canHoldThisTurn: true,
     dropCooldown: 0,
+    lastDroppedId: null,
+    waitingForLanding: false,
+    lastDropX: null,
+    sameSpotStreak: 0,
+    bakeZone: { colIdx: 1, x: 178, w: 78, turnsLeft: 3 },
     heldActionCooldown: 1.6,
     heldActionAnim: null,
     perks: {},
@@ -237,7 +242,7 @@ function createApp() {
     rushLastTickSec: 6,
     activeEvent: null,
     lastEventKind: null,
-    nextEventDrops: 24,
+    nextEventDrops: 12,
     nextEventTimer: 18.0,
     meteorGoldenLeft: 0,
     shootingStars: [],
@@ -535,10 +540,39 @@ function createApp() {
     armOrUseTool(key) { armOrUseToolFn(key); },
     cancelToolMode() { cancelToolMode(); },
     swapHoldPocket() { swapHoldPocketFn(); },
+    adjustAimAngle(deltaRad) { adjustAimAngle(deltaRad); },
     skipOrder() { skipOrderFn(); },
     openBlessingModal() { openBlessingModalFn(); },
     applyBlessing(id) { applyBlessingFn(id); }
   };
+
+  const BAKE_ZONE_COLS = [96, 178, 262, 344];
+
+  function rotateBakeZone(excludeIdx = -1, avoidX = null) {
+    let candidates = [0, 1, 2, 3].filter((i) => i !== excludeIdx);
+    if (avoidX !== null) {
+      const far = candidates.filter((i) => Math.abs(BAKE_ZONE_COLS[i] - avoidX) > 48);
+      if (far.length > 0) candidates = far;
+    }
+    const nextIdx = candidates[Math.floor(Math.random() * candidates.length)];
+    gameState.bakeZone = {
+      colIdx: nextIdx,
+      x: BAKE_ZONE_COLS[nextIdx],
+      w: 78,
+      turnsLeft: 3
+    };
+  }
+
+  function isWaitingForLanding() {
+    if (!gameState.lastDroppedId) return false;
+    const ent = gameState.entities.find((e) => e.id === gameState.lastDroppedId);
+    if (!ent || ent.merged || ent.hasCollided) return false;
+    if (ent.age >= 0.85 || ent.y >= JAR.floorY - ent.r - 4) {
+      ent.hasCollided = true;
+      return false;
+    }
+    return true;
+  }
 
   function getDustMultiplier() {
     const lv = app.getUpgradeLevel('up_dust');
@@ -1251,6 +1285,9 @@ function createApp() {
       tier,
       isWildcard,
       isGolden,
+      hasCollided: !!bornFromMerge,
+      bornFromMerge: !!bornFromMerge,
+      inBakeZoneBonus: !!meta.inBakeZone,
       r: eqR,
       mass: eqR * eqR,
       x,
@@ -1283,13 +1320,60 @@ function createApp() {
 
   function dropCurrentTreat() {
     if (!gameState.running || gameState.over || gameState.paused) return;
-    if (gameState.activeToolMode || gameState.dropCooldown > 0) return;
+    if (gameState.activeToolMode || gameState.dropCooldown > 0 || isWaitingForLanding()) {
+      gameState.waitingForLanding = isWaitingForLanding();
+      return;
+    }
 
     audio.ensureCtx();
     clampDropX();
     const totalAngle = getAimTotalAngle();
     const curMeta = gameState.curMeta || { wildcard: false, golden: false };
-    createEntity(gameState.curTier, gameState.dropX, JAR.dropY, 0, 165, false, totalAngle, 0, curMeta);
+
+    const isSameSpot = gameState.lastDropX !== null && Math.abs(gameState.dropX - gameState.lastDropX) <= 24;
+    gameState.sameSpotStreak = isSameSpot ? gameState.sameSpotStreak + 1 : 0;
+    gameState.lastDropX = gameState.dropX;
+
+    let dropVx = 0;
+    let dropVr = 0;
+    if (gameState.sameSpotStreak === 3) {
+      app.showToast('⚠️ 一直点同一个地方很难连锁！试试左右换位或 ↺/↻ 倾角～');
+    } else if (gameState.sameSpotStreak >= 4) {
+      dropVx = (Math.random() < 0.5 ? -1 : 1) * (65 + Math.random() * 55);
+      dropVr = (Math.random() - 0.5) * 4.2;
+      spawnPopup(gameState.dropX, JAR.neckY + 14, '🔥 连点过热偏移!', '#ff9678', 13);
+    }
+
+    let inBakeZone = false;
+    const bz = gameState.bakeZone;
+    if (bz && gameState.sameSpotStreak < 4 && Math.abs(gameState.dropX - bz.x) <= bz.w * 0.5) {
+      inBakeZone = true;
+      const zoneDust = addRunStardust(2);
+      addScore(18 + gameState.curTier * 6);
+      addFeverEnergy(7);
+      spawnSparkleBurst(gameState.dropX, JAR.neckY + 28, '#ffe588', 12);
+      spawnPopup(gameState.dropX, JAR.neckY + 30, `🎯 星光位 +${zoneDust}⭐`, '#ffe98a', 14);
+      rotateBakeZone(bz.colIdx, gameState.dropX);
+    } else if (bz) {
+      bz.turnsLeft--;
+      if (bz.turnsLeft <= 0) {
+        rotateBakeZone(bz.colIdx, gameState.dropX);
+      }
+    }
+
+    const dropped = createEntity(
+      gameState.curTier,
+      gameState.dropX,
+      JAR.dropY,
+      dropVx,
+      310,
+      false,
+      totalAngle,
+      dropVr,
+      { ...curMeta, inBakeZone }
+    );
+    gameState.lastDroppedId = dropped.id;
+    gameState.waitingForLanding = true;
     gameState.dropsMadeThisRun++;
     audio.playDrop(curMeta.wildcard, curMeta.golden);
 
@@ -1323,7 +1407,7 @@ function createApp() {
     if (gameState.mode !== 'rush' && !gameState.activeEvent) {
       gameState.nextEventDrops--;
       if (gameState.nextEventDrops <= 0) {
-        gameState.nextEventDrops = 22 + Math.floor(Math.random() * 9);
+        gameState.nextEventDrops = 14 + Math.floor(Math.random() * 6);
         triggerShopEvent();
       }
     }
@@ -1333,9 +1417,9 @@ function createApp() {
     gameState.canHoldThisTurn = true;
     const isFever = gameState.feverTimer > 0;
     if (gameState.mode === 'rush') {
-      gameState.dropCooldown = isFever ? 0.06 : 0.09;
+      gameState.dropCooldown = isFever ? 0.14 : 0.18;
     } else {
-      gameState.dropCooldown = isFever ? 0.12 : 0.19;
+      gameState.dropCooldown = isFever ? 0.18 : 0.24;
     }
     gameState.heldActionAnim = null;
     gameState.heldActionCooldown = 1.5 + Math.random() * 1.5;
@@ -1412,8 +1496,8 @@ function createApp() {
     const shockLv = app.getPerkLevel('shockwave');
     const isFever = gameState.feverTimer > 0;
     const mugiBoost = saveData.selectedPatron === 'mugi' && nextTier >= 4 ? 1.3 : 1.0;
-    const blastRadius = bornR * (2.45 + shockLv * 0.55) + 46;
-    const baseForce = (95 + nextTier * 17 + shockLv * 52 + (isFever ? 32 : 0)) * mugiBoost;
+    const blastRadius = bornR * (2.35 + shockLv * 0.55) + 40;
+    const baseForce = (55 + nextTier * 18 + shockLv * 52 + (isFever ? 32 : 0)) * mugiBoost;
 
     for (const other of gameState.entities) {
       if (other.id === excludeId || other.merged) continue;
@@ -1439,10 +1523,10 @@ function createApp() {
   function stepPhysics(dt) {
     const magnetLv = app.getEffectiveMagnetLevel();
     const isFever = gameState.feverTimer > 0;
-    const magnetRange = 10 + magnetLv * 12 + (isFever ? 26 : 0);
-    const magnetForce = 480 + magnetLv * 280 + (isFever ? 640 : 0);
+    const magnetRange = magnetLv > 0 || isFever ? magnetLv * 14 + (isFever ? 28 : 0) : 0;
+    const magnetForce = magnetLv > 0 || isFever ? 420 + magnetLv * 280 + (isFever ? 640 : 0) : 0;
 
-    const result = Physics.stepWorld(gameState.entities, JAR, dt, 1680, { magnetRange, magnetForce });
+    const result = Physics.stepWorld(gameState.entities, JAR, dt, 1880, { magnetRange, magnetForce });
     const { mergePairs, impacts, debugContacts, magnetLinks } = result;
     gameState.lastDebugContacts = debugContacts;
     gameState.magnetLinks = magnetLinks || [];
@@ -1545,7 +1629,8 @@ function createApp() {
 
         if (isTwinWild) {
           const born = createEntity(5, mx, my, mvx, mvy - 30, true, 0, 0, { golden: true });
-          const pts = Math.round(320 * feverMult * comboBonus * chimeScoreMult);
+          const zoneMult = a.inBakeZoneBonus || b.inBakeZoneBonus ? 1.35 : 1.0;
+          const pts = Math.round(320 * feverMult * comboBonus * chimeScoreMult * zoneMult);
           addScore(pts);
           addRunStardust(24);
           addFeverEnergy(45);
@@ -1575,7 +1660,8 @@ function createApp() {
 
           const goldMult = isGoldenMerge ? 2.5 : 1;
           const critMult = isCrit ? 2.0 : 1;
-          const pts = Math.round(def.points * feverMult * comboBonus * goldMult * critMult * chimeScoreMult);
+          const zoneMult = a.inBakeZoneBonus || b.inBakeZoneBonus ? 1.35 : 1.0;
+          const pts = Math.round(def.points * feverMult * comboBonus * goldMult * critMult * chimeScoreMult * zoneMult);
           addScore(pts);
 
           let dustBase = nextTier >= 4 ? Math.max(1, Math.floor(nextTier / 2)) : 0;
@@ -1723,6 +1809,7 @@ function createApp() {
         ? Math.min(1, 0.35 + ((15.0 - gameState.rushTimer) / 15.0) * 0.65)
         : 0;
     audio.setDangerLevel(Math.max(overflowDanger, rushDanger));
+    gameState.waitingForLanding = isWaitingForLanding();
   }
 
   function updateDessertAnimations(dt) {
@@ -1950,7 +2037,7 @@ function createApp() {
 
     gameState.activeEvent = null;
     gameState.lastEventKind = null;
-    gameState.nextEventDrops = 22 + Math.floor(Math.random() * 9);
+    gameState.nextEventDrops = 10 + Math.floor(Math.random() * 5);
     gameState.nextEventTimer = 18.0;
     gameState.meteorGoldenLeft = 0;
     gameState.shootingStars = [];
@@ -1970,6 +2057,11 @@ function createApp() {
     gameState.holdMeta = null;
     gameState.canHoldThisTurn = true;
     gameState.dropCooldown = 0;
+    gameState.lastDroppedId = null;
+    gameState.waitingForLanding = false;
+    gameState.lastDropX = null;
+    gameState.sameSpotStreak = 0;
+    rotateBakeZone(-1);
     gameState.dangerDuration = 0;
     gameState.jarShakeAmp = 0;
     gameState.entities = [];
@@ -2471,6 +2563,11 @@ function createApp() {
       pendingBlessings: gameState.pendingBlessings,
       dropsUntilRainbow: gameState.dropsUntilRainbow,
       canHoldThisTurn: gameState.canHoldThisTurn,
+      aimAngle: +gameState.aimAngle.toFixed(3),
+      lastDropX: gameState.lastDropX,
+      sameSpotStreak: gameState.sameSpotStreak,
+      bakeZone: gameState.bakeZone ? { ...gameState.bakeZone } : null,
+      waitingForLanding: isWaitingForLanding(),
       curTier: gameState.curTier,
       curMeta: { ...gameState.curMeta },
       nextTier: gameState.nextTier,

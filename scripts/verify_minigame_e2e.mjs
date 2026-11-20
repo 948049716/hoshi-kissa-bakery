@@ -576,9 +576,9 @@ async function run() {
   const jb = st.jarBox;
   assert(jb && jb.scale > 0, 'jarBox computed');
   await dragSwipe(Math.round(jb.x + jb.w * 0.4), Math.round(jb.y + jb.h * 0.35), Math.round(jb.x + jb.w * 0.45), Math.round(jb.y + jb.h * 0.35));
-  await sleep(500);
+  await sleep(580);
   await dragSwipe(Math.round(jb.x + jb.w * 0.6), Math.round(jb.y + jb.h * 0.35), Math.round(jb.x + jb.w * 0.58), Math.round(jb.y + jb.h * 0.35));
-  await sleep(500);
+  await sleep(580);
 
   // Trigger Meteor -> Yarn Ball -> Toggle Debug Wireframe
   await evalJS(`window.__HOSHI_DEBUG__.triggerEvent('meteor')`);
@@ -600,7 +600,7 @@ async function run() {
 
   // Drop current treat so Rainbow Wildcard advances to active held dessert
   await dragSwipe(Math.round(jb.x + jb.w * 0.5), Math.round(jb.y + jb.h * 0.35), Math.round(jb.x + jb.w * 0.5), Math.round(jb.y + jb.h * 0.35));
-  await sleep(550);
+  await sleep(580);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.curMeta && st.curMeta.wildcard === true, 'Expected Rainbow Wildcard to advance to held treat');
 
@@ -612,7 +612,7 @@ async function run() {
   await screenshot('09b_rainbow_hold_375.png');
 
   await dragSwipe(Math.round(jb.x + jb.w * 0.35), Math.round(jb.y + jb.h * 0.35), Math.round(jb.x + jb.w * 0.35), Math.round(jb.y + jb.h * 0.35));
-  await sleep(550);
+  await sleep(580);
   await tapHit('mobile_hold_swap');
   await sleep(220);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
@@ -620,27 +620,81 @@ async function run() {
 
   const beforeWildScore = st.score;
   await dragSwipe(Math.round(jb.x + jb.w * 0.5), Math.round(jb.y + jb.h * 0.35), Math.round(jb.x + jb.w * 0.5), Math.round(jb.y + jb.h * 0.35));
-  await sleep(600);
+  await sleep(620);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.entities.some((e) => e.isWildcard) || st.score > beforeWildScore, 'Expected Rainbow Wildcard active in jar or merged cleanly');
+
+  // Mobile Aim Tilt Buttons + Mid-Air Rapid-Tap Guard + Bake Zone Rotation + Same-Spot Anti-Spam Check
+  await tapHit('aim_tilt_right');
+  await tapHit('aim_tilt_right');
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.aimAngle > 0.4, `Expected right tilt angle > 0.4, got ${st.aimAngle}`);
+  await tapHit('aim_tilt_left');
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.aimAngle < 0.35, `Expected left tilt button to reduce angle, got ${st.aimAngle}`);
+
+  // Fast rapid taps while treat is falling in mid-air must NOT spawn extra treats or merge mid-air
+  const dropsBeforeRapid = st.dropsMadeThisRun;
+  const rapidX = Math.round(jb.x + jb.w * 0.24);
+  const rapidY = Math.round(jb.y + jb.h * 0.32);
+  for (let t = 0; t < 3; t++) {
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: rapidX, y: rapidY, button: 'left', clickCount: 1 });
+    await sleep(30);
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: rapidX, y: rapidY, button: 'left', clickCount: 1 });
+    await sleep(35);
+  }
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.dropsMadeThisRun === dropsBeforeRapid + 1,
+    `Mid-air rapid taps must not spawn extra drops (expected ${dropsBeforeRapid + 1}, got ${st.dropsMadeThisRun})`
+  );
+  await sleep(600);
+
+  // Hit Starlight Bake Zone and verify bonus + rotation
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const prevBakeCol = st.bakeZone.colIdx;
+  const zoneScreenX = Math.round(jb.x + st.bakeZone.x * jb.scale);
+  const beforeZoneScore = st.score;
+  await dragSwipe(zoneScreenX, rapidY, zoneScreenX, rapidY);
+  await sleep(600);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.bakeZone.colIdx !== prevBakeCol, `Expected bakeZone to rotate after hit (col ${st.bakeZone.colIdx})`);
+  assert(st.score > beforeZoneScore, 'Expected Starlight Bake Zone drop to grant bonus score');
+
+  // Repeated same-spot drops build sameSpotStreak and reset once player moves aim
+  const spamColX = Math.round(jb.x + jb.w * 0.74);
+  for (let k = 0; k < 4; k++) {
+    await dragSwipe(spamColX, rapidY, spamColX, rapidY);
+    await sleep(600);
+  }
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.sameSpotStreak >= 3, `Expected sameSpotStreak >= 3 after 4 same-spot drops, got ${st.sameSpotStreak}`);
+  await dragSwipe(Math.round(jb.x + jb.w * 0.24), rapidY, Math.round(jb.x + jb.w * 0.24), rapidY);
+  await sleep(600);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.sameSpotStreak === 0, `Expected sameSpotStreak reset to 0 after changing drop column, got ${st.sameSpotStreak}`);
 
   // Trigger Chime Event -> Queue Blessing -> Open Blessing 3-Choice Modal
   await evalJS(`window.__HOSHI_DEBUG__.triggerEvent('chime')`);
   await sleep(160);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.activeEvent && st.activeEvent.kind === 'chime', 'Expected active chime event');
-  await evalJS(`window.__HOSHI_DEBUG__.queueBlessing('测试祝福奖励')`);
-  await sleep(180);
+  if (st.pendingBlessings <= 0) {
+    await evalJS(`window.__HOSHI_DEBUG__.queueBlessing('测试祝福奖励')`);
+    await sleep(180);
+  }
   await tapHit('open_blessing_btn');
   await sleep(260);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.activeModal === 'blessing', `Expected blessing modal, got ${st.activeModal}`);
   await screenshot('10_blessing_375.png');
-  const pickHit = st.hits.find((h) => h.id.startsWith('blessing_pick_'));
-  assert(pickHit, 'Expected blessing pick button');
-  await tapHit(pickHit.id);
-  await sleep(200);
-  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  for (let bGuard = 0; bGuard < 5 && st.activeModal === 'blessing'; bGuard++) {
+    const pickHit = st.hits.find((h) => h.id.startsWith('blessing_pick_'));
+    assert(pickHit, 'Expected blessing pick button');
+    await tapHit(pickHit.id);
+    await sleep(220);
+    st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  }
   assert(st.activeModal === null, 'Blessing modal closed after selection');
 
   // ==========================================================
@@ -658,9 +712,9 @@ async function run() {
   // Drop 2 treats so emergency gust has candies to blow away
   const rjb = st.jarBox;
   await dragSwipe(Math.round(rjb.x + rjb.w * 0.42), Math.round(rjb.y + rjb.h * 0.35), Math.round(rjb.x + rjb.w * 0.44), Math.round(rjb.y + rjb.h * 0.35));
-  await sleep(420);
+  await sleep(580);
   await dragSwipe(Math.round(rjb.x + rjb.w * 0.58), Math.round(rjb.y + rjb.h * 0.35), Math.round(rjb.x + rjb.w * 0.56), Math.round(rjb.y + rjb.h * 0.35));
-  await sleep(420);
+  await sleep(580);
 
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   const beforeGustTimer = st.rushTimer;

@@ -916,6 +916,30 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
 
     hits.add(`tool_${tl.key}`, tx - 4, ty - 4, toolSize + 8, toolSize + 20, () => app.armOrUseTool(tl.key));
   }
+
+  // Flanking Aim Tilt Pill Buttons (gives mobile players full angle control for slopes & tight wedges)
+  const tiltW = isWide ? 60 : 54;
+  const tiltH = 30;
+  const tiltY = toolsDockY + (toolSize - tiltH) * 0.5;
+  const leftTiltX = Math.max(8, dockStartX - tiltW - (isWide ? 24 : 18));
+  const rightTiltX = Math.min(width - tiltW - 8, dockStartX + dockTotalW + (isWide ? 24 : 18));
+  const tiltDisabled = !!gameState.activeToolMode;
+
+  UI.drawPillButton(ctx, leftTiltX, tiltY, tiltW, tiltH, {
+    style: gameState.aimAngle < -0.05 ? 'active' : 'wood',
+    text: '↺ 左倾',
+    fontSize: 10.5,
+    disabled: tiltDisabled
+  });
+  hits.add('aim_tilt_left', leftTiltX, tiltY, tiltW, tiltH, () => app.adjustAimAngle(-0.26));
+
+  UI.drawPillButton(ctx, rightTiltX, tiltY, tiltW, tiltH, {
+    style: gameState.aimAngle > 0.05 ? 'active' : 'wood',
+    text: '↻ 右倾',
+    fontSize: 10.5,
+    disabled: tiltDisabled
+  });
+  hits.add('aim_tilt_right', rightTiltX, tiltY, tiltW, tiltH, () => app.adjustAimAngle(0.26));
 }
 
 function renderMobileTopHud(ctx, x, y, w, h, app, hits, nowSec) {

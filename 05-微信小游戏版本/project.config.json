@@ -3,8 +3,8 @@
   "packOptions": {
     "ignore": [
       {
-        "type": "suffix",
-        "value": ".md"
+        "value": ".md",
+        "type": "suffix"
       }
     ],
     "include": []
@@ -33,11 +33,23 @@
       "outputPath": ""
     },
     "ignoreDevUnusedFiles": true,
-    "ignoreUploadUnusedFiles": true
+    "ignoreUploadUnusedFiles": true,
+    "compileWorklet": false,
+    "packNpmManually": false,
+    "packNpmRelationList": [],
+    "minifyWXSS": true,
+    "minifyWXML": true,
+    "localPlugins": false,
+    "disableUseStrict": false,
+    "useCompilerPlugins": false,
+    "condition": false
   },
   "compileType": "game",
   "libVersion": "3.5.8",
-  "appid": "touristappid",
+  "appid": "wx923bf8440b65a1af",
   "projectname": "hoshi-kissa-bakery-minigame",
-  "condition": {}
+  "condition": {},
+  "simulatorPluginLibVersion": {},
+  "isGameTourist": false,
+  "editorSetting": {}
 }

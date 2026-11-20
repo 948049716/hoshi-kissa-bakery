@@ -15,7 +15,7 @@ const CHROMIUM =
   process.env.CHROME_BIN ||
   ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p)) ||
   '/usr/bin/chromium';
-const OUT_DIR = '/tmp/minigame_verify';
+const OUT_DIR = process.env.VERIFY_OUT_DIR || '/tmp/minigame_verify';
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
 function sleep(ms) {
@@ -326,12 +326,16 @@ async function run() {
 
   const userDataDir = '/tmp/chrome_cdp_minigame_' + Date.now();
   fs.mkdirSync(userDataDir, { recursive: true });
+  let chrome = null;
+  let ws = null;
+  let chromeExit = null;
 
+  try {
   const cdpPort = 9280 + Math.floor(Math.random() * 60);
   console.log('Launching headless browser:', CHROMIUM);
   const chromeEnv = { ...process.env };
   delete chromeEnv.DBUS_SESSION_BUS_ADDRESS;
-  const chrome = spawn(
+  chrome = spawn(
     CHROMIUM,
     [
       '--headless=new',
@@ -353,7 +357,6 @@ async function run() {
   );
 
   let chromeStderr = '';
-  let chromeExit = null;
   chrome.stderr.on('data', (chunk) => {
     if (chromeStderr.length < 4000) chromeStderr += chunk.toString();
   });
@@ -391,14 +394,12 @@ async function run() {
     await sleep(200);
   }
   if (!wsUrl) {
-    try { chrome.kill('SIGKILL'); } catch (_) {}
-    try { server.close(); } catch (_) {}
     throw new Error(
       `Failed to connect to Chromium CDP (bin=${CHROMIUM}, exit=${chromeExit || 'still running'})\n${chromeStderr}`
     );
   }
 
-  const ws = new WebSocket(wsUrl);
+  ws = new WebSocket(wsUrl);
   await new Promise((res, rej) => {
     ws.addEventListener('open', res);
     ws.addEventListener('error', rej);
@@ -814,7 +815,12 @@ async function run() {
     `Expected coins payout >= base(35)+interest(${stepsBeforeEarlyClose * 4}), before=${coinsBeforeEarlyClose}, after=${st.coins}`
   );
   assert(
-    st.prepShop && st.prepShop.nextShiftNum === 2 && st.prepShop.relicOffers.length === 3 && st.prepShop.modOffers.length === 2,
+    st.prepShop &&
+      st.prepShop.nextShiftNum === 2 &&
+      Array.isArray(st.prepShop.nextHazards) &&
+      st.prepShop.nextHazards.includes('glaze_ring') &&
+      st.prepShop.relicOffers.length === 3 &&
+      st.prepShop.modOffers.length === 2,
     `Unexpected prepShop state: ${JSON.stringify(st.prepShop)}`
   );
   await checkCapsuleAndViewportBounds('iPhone SE Prep Shop Top 375x667', 375, 667, 0);
@@ -859,7 +865,7 @@ async function run() {
   await sleep(200);
 
   // Scroll Prep Shop body down to reach Deck Sculpting Mods and buy one
-  await dragSwipe(188, 520, 188, 220, 8);
+  await dragSwipe(188, 520, 188, 190, 8);
   await sleep(200);
   await checkCapsuleAndViewportBounds('iPhone SE Prep Shop Scrolled 375x667', 375, 667, 0);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
@@ -870,7 +876,7 @@ async function run() {
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.prepShop.modOffers.some((m) => m.bought), 'Expected Deck Mod offer marked bought');
 
-  // Launch Shift 2 & verify Hot-Oven Carry-Over
+  // Launch Shift 2 & verify Hot-Oven Carry-Over + Glaze Ring hazard
   await tapHit('prep_next_shift');
   await sleep(340);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
@@ -879,7 +885,7 @@ async function run() {
   assert(st.stepsLeft >= 16, `Expected >= 16 steps in Shift 2, got ${st.stepsLeft}`);
   assert(st.entities.length >= 2, `Expected Hot-Oven Carry-Over treats in Shift 2 jar, got ${st.entities.length}`);
 
-  // Verify Relics Mechanics: rel_bumpers (2 Butter Bumpers), rel_aged (agedStacks++), rel_antigrav (4th drop flips gravity!)
+  // Verify Relics Mechanics: rel_bumpers (2 Butter Bumpers) + Shift 2 glaze_ring, rel_aged (agedStacks++), rel_antigrav (4th drop flips gravity!)
   await evalJS(`
     window.__HOSHI_DEBUG__.equipRelic('rel_bumpers');
     window.__HOSHI_DEBUG__.equipRelic('rel_aged');
@@ -887,7 +893,12 @@ async function run() {
   `);
   await sleep(180);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.obstacles && st.obstacles.length === 2, `Expected 2 Butter Bumpers from rel_bumpers, got ${st.obstacles && st.obstacles.length}`);
+  const shift2Bumpers = (st.obstacles || []).filter((o) => o.type === 'bumper');
+  const shift2Rings = (st.obstacles || []).filter((o) => o.type === 'glaze_ring');
+  assert(
+    shift2Bumpers.length === 2 && shift2Rings.length === 1 && st.shiftHazards.includes('glaze_ring'),
+    `Expected 2 Butter Bumpers + 1 glaze_ring in Shift 2, got obstacles=${JSON.stringify(st.obstacles)}`
+  );
 
   // Spawn an isolated servable treat matching active order on the left, then drop 4 treats on the right
   const activeOrder = st.orders.find((o) => !o.completed);
@@ -926,6 +937,253 @@ async function run() {
   await sleep(160);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.activeModal === null, 'Relics modal closed cleanly');
+
+  // ==========================================================
+  // 3G. Phase 3 — Caramel Glaze Ring Patrol, Aim Highlight & Pass-Through Gilding (375x667)
+  // ==========================================================
+  await evalJS(`
+    window.__HOSHI_DEBUG__.startMode('chef');
+    window.__HOSHI_DEBUG__.setShift(2);
+  `);
+  await sleep(220);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.shift === 2 && st.shiftHazards.includes('glaze_ring'), `Expected Shift 2 glaze_ring, got ${JSON.stringify(st.shiftHazards)}`);
+  const ringT0 = st.obstacles.find((o) => o.type === 'glaze_ring');
+  assert(ringT0 && ringT0.y === 185 && ringT0.rx === 38, `Unexpected glaze_ring geometry: ${JSON.stringify(ringT0)}`);
+  await sleep(320);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const ringT1 = st.obstacles.find((o) => o.type === 'glaze_ring');
+  assert(
+    ringT1 && Math.abs(ringT1.x - ringT0.x) > 4 && ringT1.x >= 94 && ringT1.x <= 346,
+    `Expected glaze_ring to patrol smoothly within [95,345] (x0=${ringT0.x}, x1=${ringT1 && ringT1.x})`
+  );
+
+  // Snap ring to center x=220, hold vertical aim through ring, capture clean aim screenshot, then re-snap & release to gild!
+  await sleep(950);
+  await evalJS(`
+    window.__HOSHI_DEBUG__.clearEntities();
+    window.__HOSHI_DEBUG__.setGlazeRingX(220);
+  `);
+  await sleep(80);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const jb3g = st.jarBox;
+  const aimX3g = Math.round(jb3g.x + jb3g.w * 0.5);
+  const aimY3g = Math.round(jb3g.y + jb3g.h * 0.24);
+  const glazeHitsBefore = st.glazeHitsThisRun;
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: aimX3g, y: aimY3g, button: 'left', clickCount: 1 });
+  await sleep(120);
+  await evalJS(`window.__HOSHI_DEBUG__.setGlazeRingX(220)`);
+  await sleep(40);
+  await screenshot('15_glaze_ring_aim_375.png');
+  // Re-snap ring right before release since captureScreenshot takes ~300ms while ring patrols continuously
+  await evalJS(`window.__HOSHI_DEBUG__.setGlazeRingX(220)`);
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: aimX3g, y: aimY3g, button: 'left', clickCount: 1 });
+  await sleep(520);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.glazeHitsThisRun > glazeHitsBefore && st.entities.some((e) => e.isGolden),
+    `Expected dropped treat passing through glaze_ring to become golden (glazeHits=${st.glazeHitsThisRun}, entities=${JSON.stringify(st.entities)})`
+  );
+  console.log('[Phase 3G OK] Caramel Glaze Ring patrol, aim highlight & pass-through gilding verified');
+
+  // ==========================================================
+  // 3H. Phase 3 — Wooden Divider Collision, Split-Bay Layout, Anti-Tunneling & Non-WallBounce (375x667)
+  // ==========================================================
+  await evalJS(`window.__HOSHI_DEBUG__.setShift(3, { forceHazard: 'divider' })`);
+  await sleep(320);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.shift === 3 && st.shiftHazards.includes('divider'), `Expected Shift 3 divider hazard, got ${JSON.stringify(st.shiftHazards)}`);
+  const divOb = st.obstacles.find((o) => o.type === 'divider');
+  assert(
+    divOb && divOb.w === 14 && divOb.h === 155 && divOb.topY === 337 && divOb.bottomY === 492,
+    `Unexpected divider geometry: ${JSON.stringify(divOb)}`
+  );
+  const frozenOnShift3 = st.entities.filter((e) => e.frozenHp > 0);
+  assert(frozenOnShift3.length === 2, `Expected 2 frozen treats in Shift 3, got ${frozenOnShift3.length}`);
+  assert(
+    frozenOnShift3.some((e) => e.x < 213) && frozenOnShift3.some((e) => e.x > 227),
+    `Expected frozen treats split across left & right bays (positions=${JSON.stringify(frozenOnShift3.map((e) => [e.x, e.y]))})`
+  );
+  for (const ent of st.entities) {
+    assert(
+      !(ent.y > 337 && ent.x > 212 && ent.x < 228),
+      `Entity ${ent.id} overlapped divider centerline at (${ent.x}, ${ent.y})`
+    );
+  }
+  await checkCapsuleAndViewportBounds('iPhone SE Shift 3 Divider + Frozen 375x667', 375, 667, 0);
+  await screenshot('16_shift3_divider_frozen_375.png');
+
+  // High-speed anti-tunneling + non-wallBounce test against wooden divider
+  await evalJS(`
+    window.__HOSHI_DEBUG__.clearEntities();
+    window.__HOSHI_DEBUG__.spawnTestEntity(2, 165, 420, { vx: 780, vy: 0, isBankLaunched: true, preSettled: false });
+  `);
+  await sleep(340);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const fastDivEnt = st.entities[0];
+  assert(
+    fastDivEnt && fastDivEnt.x < 213 && fastDivEnt.wallBounces === 0,
+    `Expected fast treat blocked by divider without tunneling or false wallBounce (ent=${JSON.stringify(fastDivEnt)})`
+  );
+  console.log('[Phase 3H OK] Wooden Divider collision, split-bay layout, anti-tunneling & non-wallBounce verified');
+
+  // ==========================================================
+  // 3I. Phase 3 — Frozen Blocking (Merge/Serve/Scoop/Swap/Spoon) & All 3 Thaw Triggers (+¥120) + Shift Badge Modal (375x667)
+  // ==========================================================
+  await evalJS(`window.__HOSHI_DEBUG__.setShift(3, { forceHazard: 'divider' })`);
+  await sleep(220);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const qOrd3i = st.orders.find((o) => !o.completed);
+  const matchTier3i = (qOrd3i && qOrd3i.slots[0] && qOrd3i.slots[0].tier) || 3;
+  const ids3i = await evalJS(`(() => {
+    window.__HOSHI_DEBUG__.clearEntities();
+    const frozenId = window.__HOSHI_DEBUG__.spawnTestEntity(${matchTier3i}, 118, 448, { frozenHp: 1 });
+    const sameAdjId = window.__HOSHI_DEBUG__.spawnTestEntity(${matchTier3i}, 168, 448);
+    const otherBayId = window.__HOSHI_DEBUG__.spawnTestEntity(2, 318, 448);
+    return { frozenId, sameAdjId, otherBayId };
+  })()`);
+  await sleep(360);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const fEnt = st.entities.find((e) => e.id === ids3i.frozenId);
+  assert(
+    fEnt && fEnt.frozenHp === 1 && fEnt.isServable === false,
+    `Expected frozen treat to stay unmerged & non-servable (fEnt=${JSON.stringify(fEnt)})`
+  );
+  const serveBlocked = await evalJS(`window.__HOSHI_DEBUG__.serveById(${ids3i.frozenId})`);
+  assert(serveBlocked === false, 'Expected serveById on frozen treat to return false');
+
+  // Guard check: Mikan Scoop, Luna Swap, and Upgrade Spoon must reject frozen treat without consuming charge
+  const jb3i = st.jarBox;
+  const fScreenX = Math.round(jb3i.x + fEnt.x * jb3i.scale);
+  const fScreenY = Math.round(jb3i.y + fEnt.y * jb3i.scale);
+
+  await evalJS(`window.__HOSHI_DEBUG__.selectPatron('mikan'); window.__HOSHI_DEBUG__.chargeSkill();`);
+  await sleep(140);
+  await tapHit('chef_skill_btn');
+  await sleep(140);
+  await tapAt(fScreenX, fScreenY);
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.activeSkillMode === 'scoop' && st.skillEnergy === 100 && st.entities.some((e) => e.id === ids3i.frozenId && e.frozenHp === 1),
+    `Expected Mikan scoop blocked on frozen treat without consuming skillEnergy (mode=${st.activeSkillMode}, energy=${st.skillEnergy})`
+  );
+  await tapHit('cancel_tool');
+  await sleep(120);
+
+  await evalJS(`window.__HOSHI_DEBUG__.selectPatron('luna'); window.__HOSHI_DEBUG__.chargeSkill();`);
+  await sleep(140);
+  await tapHit('chef_skill_btn');
+  await sleep(140);
+  await tapAt(fScreenX, fScreenY);
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.activeSkillMode === 'swap_1' && st.skillEnergy === 100,
+    `Expected Luna swap blocked on frozen treat without consuming skillEnergy (mode=${st.activeSkillMode}, energy=${st.skillEnergy})`
+  );
+  await tapHit('cancel_tool');
+  await sleep(120);
+
+  const spoonsBefore = st.tools.spoon;
+  await tapHit('tool_spoon');
+  await sleep(140);
+  await tapAt(fScreenX, fScreenY);
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.tools.spoon === spoonsBefore && st.entities.some((e) => e.id === ids3i.frozenId && e.frozenHp === 1),
+    `Expected spoon blocked on frozen treat without consuming tool (before=${spoonsBefore}, after=${st.tools.spoon})`
+  );
+  await tapHit('cancel_tool');
+  await sleep(120);
+
+  // Thaw Trigger 1: Nearby Merge (<= 110px) -> frozenHp=0 + >= ¥120 shatter bounty
+  const revBeforeMergeThaw = st.shiftRevenue;
+  const shatBeforeMerge = st.iceShatteredThisRun;
+  const mergeThawFrozenId = await evalJS(`(() => {
+    window.__HOSHI_DEBUG__.clearEntities();
+    const fid = window.__HOSHI_DEBUG__.spawnTestEntity(4, 118, 446, { frozenHp: 1 });
+    window.__HOSHI_DEBUG__.spawnTestEntity(1, 168, 448);
+    window.__HOSHI_DEBUG__.spawnTestEntity(1, 184, 448);
+    return fid;
+  })()`);
+  await sleep(220);
+  await screenshot('17_frozen_shatter_375.png');
+  await sleep(260);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const mergeThawed = st.entities.find((e) => e.id === mergeThawFrozenId);
+  assert(
+    mergeThawed && mergeThawed.frozenHp === 0 && st.iceShatteredThisRun >= shatBeforeMerge + 1 && st.shiftRevenue >= revBeforeMergeThaw + 120,
+    `Expected 110px nearby merge to shatter ice & pay +¥120 (ent=${JSON.stringify(mergeThawed)}, shat=${st.iceShatteredThisRun}, revDelta=${st.shiftRevenue - revBeforeMergeThaw})`
+  );
+
+  // Thaw Trigger 2: Mugi Meteor Hammer (120px blast + direct hit thaw-before-upgrade)
+  const revBeforeMeteor = st.shiftRevenue;
+  const shatBeforeMeteor = st.iceShatteredThisRun;
+  const meteorIds = await evalJS(`(() => {
+    window.__HOSHI_DEBUG__.clearEntities();
+    const nearFrozenId = window.__HOSHI_DEBUG__.spawnTestEntity(5, 96, 446, { frozenHp: 1 });
+    const directFrozenId = window.__HOSHI_DEBUG__.spawnTestEntity(3, 166, 446, { frozenHp: 1 });
+    window.__HOSHI_DEBUG__.spawnTestEntity(1, 166, 384, { isMeteorShot: true, vy: 360, preSettled: false });
+    return { nearFrozenId, directFrozenId };
+  })()`);
+  await sleep(460);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const nearAfterM = st.entities.find((e) => e.id === meteorIds.nearFrozenId);
+  const directAfterM = st.entities.find((e) => e.id === meteorIds.directFrozenId);
+  assert(
+    nearAfterM &&
+      nearAfterM.frozenHp === 0 &&
+      directAfterM &&
+      directAfterM.frozenHp === 0 &&
+      directAfterM.tier === 4 &&
+      st.iceShatteredThisRun >= shatBeforeMeteor + 2 &&
+      st.shiftRevenue >= revBeforeMeteor + 240,
+    `Expected Mugi 120px meteor hammer to thaw nearby + thaw-before-upgrade direct target (near=${JSON.stringify(nearAfterM)}, direct=${JSON.stringify(directAfterM)}, shat=${st.iceShatteredThisRun})`
+  );
+
+  // Thaw Trigger 3: Shake tool (whole jar) -> shatters both bays + +¥240
+  const revBeforeShake = st.shiftRevenue;
+  const shatBeforeShake = st.iceShatteredThisRun;
+  const shakeIds = await evalJS(`(() => {
+    window.__HOSHI_DEBUG__.clearEntities();
+    const f1 = window.__HOSHI_DEBUG__.spawnTestEntity(4, 118, 446, { frozenHp: 1 });
+    const f2 = window.__HOSHI_DEBUG__.spawnTestEntity(5, 318, 446, { frozenHp: 1 });
+    return [f1, f2];
+  })()`);
+  await sleep(120);
+  await tapHit('tool_shake');
+  await sleep(260);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const shakeAfter1 = st.entities.find((e) => e.id === shakeIds[0]);
+  const shakeAfter2 = st.entities.find((e) => e.id === shakeIds[1]);
+  assert(
+    shakeAfter1 &&
+      shakeAfter1.frozenHp === 0 &&
+      shakeAfter2 &&
+      shakeAfter2.frozenHp === 0 &&
+      st.iceShatteredThisRun >= shatBeforeShake + 2 &&
+      st.shiftRevenue >= revBeforeShake + 240,
+    `Expected shake tool to shatter all frozen treats across jar (shat=${st.iceShatteredThisRun}, revDelta=${st.shiftRevenue - revBeforeShake})`
+  );
+
+  // Clickable top-left Shift Pill (play_shift_badge) -> Build Details Modal with Hazards & Boss Affixes
+  await evalJS(`window.__HOSHI_DEBUG__.setShift(3, { forceHazard: 'divider' })`);
+  await sleep(200);
+  await tapHit('play_shift_badge');
+  await sleep(240);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === 'relics', `Expected play_shift_badge to open relics modal, got ${st.activeModal}`);
+  await checkCapsuleAndViewportBounds('iPhone SE Shift 3 Build Details 375x667', 375, 667, 0);
+  await screenshot('18_build_details_hazards_375.png');
+  await dragSwipe(188, 500, 188, 260, 6);
+  await sleep(160);
+  await tapHit('modal_close');
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === null, 'Shift 3 Build Details modal closed cleanly');
+  console.log('[Phase 3I OK] Frozen guards, all 3 thaw triggers (+¥120) & play_shift_badge modal verified');
 
   // ==========================================================
   // 4. 90s Rush Mode: Tap-to-Serve +3.0s Extension, Emergency Gust & Settlement
@@ -990,14 +1248,250 @@ async function run() {
   await tapHit('victory_endless');
   await sleep(240);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.activeModal === 'prep_shop' && st.prepShop && st.prepShop.nextShiftNum === 6, 'Expected Prep Shop for Shift 6 Endless Overtime');
+  assert(
+    st.activeModal === 'prep_shop' &&
+      st.prepShop &&
+      st.prepShop.nextShiftNum === 6 &&
+      Array.isArray(st.prepShop.nextHazards) &&
+      st.prepShop.nextHazards.length === 2,
+    `Expected Prep Shop for Shift 6 Endless with 2 preview hazards, got ${JSON.stringify(st.prepShop)}`
+  );
   await tapHit('prep_next_shift');
   await sleep(320);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.activeModal === null && st.shift === 6 && st.shiftTarget > 15000, `Expected Shift 6 Endless target > 15000, got shift=${st.shift}, target=${st.shiftTarget}`);
+  assert(
+    st.activeModal === null &&
+      st.shift === 6 &&
+      st.shiftTarget > 15000 &&
+      st.shiftHazards.length === 2 &&
+      st.entities.filter((e) => e.frozenHp > 0).length === 2,
+    `Expected Shift 6 Endless target > 15000 + 2 hazards + 2 frozen, got shift=${st.shift}, target=${st.shiftTarget}, hazards=${JSON.stringify(st.shiftHazards)}`
+  );
+  const shift6Hazards = [...st.shiftHazards];
+  await evalJS(`window.__HOSHI_DEBUG__.setShift(7)`);
+  await sleep(220);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.shift === 7 &&
+      st.shiftHazards.length === 2 &&
+      st.shiftHazards.join(',') !== shift6Hazards.join(','),
+    `Expected Shift 7 Endless to rotate to distinct 2-hazard pair (s6=${shift6Hazards}, s7=${st.shiftHazards})`
+  );
 
   // ==========================================================
-  // 5. Desktop 1280x760 Play Screen + Chef 5-Shift, Prep Shop & Zen Checks
+  // 3J. Phase 3 — Stage Bumpers + rel_bumpers Synergy & Selling Preserves Stage Hazard (390x844)
+  // ==========================================================
+  await evalJS(`
+    window.__HOSHI_DEBUG__.startMode('chef');
+    window.__HOSHI_DEBUG__.setShift(3, { forceHazard: 'bumpers' });
+  `);
+  await sleep(220);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const stageBumpers = (st.obstacles || []).filter((o) => o.type === 'bumper');
+  assert(
+    stageBumpers.length === 2 && stageBumpers.every((b) => b.source === 'stage' && b.tipBase === 40 && b.grantsCrit === false),
+    `Expected 2 stage bumpers (+¥40, no crit), got ${JSON.stringify(stageBumpers)}`
+  );
+
+  // Drop treat onto left stage bumper -> verify tip & no bumperCrit
+  const revBeforeStageBump = st.shiftRevenue;
+  const stageBumpId = await evalJS(`(() => {
+    window.__HOSHI_DEBUG__.clearEntities();
+    return window.__HOSHI_DEBUG__.spawnTestEntity(2, 102, 224, { vy: 280, preSettled: false });
+  })()`);
+  await sleep(340);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const stageBumpEnt = st.entities.find((e) => e.id === stageBumpId);
+  assert(
+    stageBumpEnt && stageBumpEnt.bumperHits >= 1 && stageBumpEnt.bumperCrit === false && st.shiftRevenue >= revBeforeStageBump + 40,
+    `Expected stage bumper hit (+¥40, no crit), ent=${JSON.stringify(stageBumpEnt)}, revDelta=${st.shiftRevenue - revBeforeStageBump}`
+  );
+
+  // Equip rel_bumpers -> supercharged synergy (2 primary r=16 + 3rd center star bumper at (220,224), grantsCrit=true, +¥65)
+  await evalJS(`window.__HOSHI_DEBUG__.equipRelic('rel_bumpers')`);
+  await sleep(180);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const synBumpers = (st.obstacles || []).filter((o) => o.type === 'bumper');
+  assert(
+    synBumpers.length === 3 &&
+      synBumpers.every((b) => b.source === 'synergy' && b.grantsCrit === true) &&
+      synBumpers.some((b) => b.id === 'bumper_C' && b.x === 220 && b.y === 224),
+    `Expected 3 non-overlapping synergy bumpers with grantsCrit=true, got ${JSON.stringify(synBumpers)}`
+  );
+  const revBeforeSynBump = st.shiftRevenue;
+  const synBumpId = await evalJS(`(() => {
+    window.__HOSHI_DEBUG__.clearEntities();
+    return window.__HOSHI_DEBUG__.spawnTestEntity(2, 102, 222, { vy: 280, preSettled: false });
+  })()`);
+  await sleep(340);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const synBumpEnt = st.entities.find((e) => e.id === synBumpId);
+  assert(
+    synBumpEnt && synBumpEnt.bumperHits >= 1 && synBumpEnt.bumperCrit === true && st.shiftRevenue >= revBeforeSynBump + 65,
+    `Expected synergy bumper hit (+¥65 + bumperCrit=true), ent=${JSON.stringify(synBumpEnt)}, revDelta=${st.shiftRevenue - revBeforeSynBump}`
+  );
+
+  // Re-seed Shift 3 bumpers + synergy for clean visual screenshot
+  await evalJS(`window.__HOSHI_DEBUG__.setShift(3, { forceHazard: 'bumpers' })`);
+  await sleep(240);
+  await checkCapsuleAndViewportBounds('iPhone 14 Bumpers Synergy 390x844', 390, 844, 34);
+  await screenshot('19_bumpers_synergy_390.png');
+
+  // Unequipping / selling rel_bumpers MUST preserve stage bumpers!
+  await evalJS(`window.__HOSHI_DEBUG__.unequipRelic('rel_bumpers')`);
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const afterSellBumpers = (st.obstacles || []).filter((o) => o.type === 'bumper');
+  assert(
+    afterSellBumpers.length === 2 && afterSellBumpers.every((b) => b.source === 'stage'),
+    `Expected stage bumpers preserved after removing rel_bumpers, got ${JSON.stringify(afterSellBumpers)}`
+  );
+  console.log('[Phase 3J OK] Stage bumpers + rel_bumpers synergy & stage preservation verified');
+
+  // ==========================================================
+  // 3K. Phase 3 — fast_fresh 5-Step Window (×2.0) & Stale Penalty (×0.75) (390x844)
+  // ==========================================================
+  await evalJS(`window.__HOSHI_DEBUG__.setShift(3, { forceHazard: 'fast_fresh' })`);
+  await sleep(220);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.shiftHazards.includes('fast_fresh') &&
+      st.orders.length >= 2 &&
+      st.orders.every((o) => o.freshMax === 5 && o.freshSteps === 5 && o.freshMult === 2.0 && o.staleMult === 0.75),
+    `Expected fast_fresh orders (freshMax=5, freshMult=2.0, staleMult=0.75), got ${JSON.stringify(st.orders)}`
+  );
+
+  // Measure fresh (×2.0) serve payout vs stale (×0.75) serve payout on Quick Table
+  const quickOrdFresh = st.orders.find((o) => o.kind === 'quick' && !o.completed);
+  assert(quickOrdFresh, 'Expected quick order in fast_fresh shift');
+  const ffTier = quickOrdFresh.slots[0].tier;
+  const revBeforeFreshServe = st.shiftRevenue;
+  const freshEntId = await evalJS(`(() => {
+    window.__HOSHI_DEBUG__.clearEntities();
+    return window.__HOSHI_DEBUG__.spawnTestEntity(${ffTier}, 220, 445);
+  })()`);
+  await sleep(120);
+  const servedFresh = await evalJS(`window.__HOSHI_DEBUG__.serveById(${freshEntId})`);
+  assert(servedFresh === true, 'Expected fresh fast_fresh treat serve to succeed');
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const freshPayout = st.shiftRevenue - revBeforeFreshServe;
+
+  // Reset fast_fresh shift and drop 5 times so orders decay from 5 -> 0 steps (stale ×0.75)
+  await evalJS(`window.__HOSHI_DEBUG__.setShift(3, { forceHazard: 'fast_fresh' }); window.__HOSHI_DEBUG__.clearEntities();`);
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const jb3k = st.jarBox;
+  const dropsBeforeFF = st.dropsMadeThisRun;
+  for (let d = 0; d < 8; d++) {
+    await tapAt(Math.round(jb3k.x + jb3k.w * (0.28 + (d % 4) * 0.14)), Math.round(jb3k.y + jb3k.h * 0.24));
+    await sleep(240);
+    st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+    if (st.dropsMadeThisRun - dropsBeforeFF >= 5) break;
+  }
+  const staleQuick = st.orders.find((o) => o.kind === 'quick' && !o.completed);
+  assert(
+    staleQuick && staleQuick.freshSteps === 0,
+    `Expected fast_fresh order to reach freshSteps=0 after 5 drops, got ${JSON.stringify(staleQuick)}`
+  );
+  const revBeforeStaleServe = st.shiftRevenue;
+  const staleEntId = await evalJS(`(() => {
+    window.__HOSHI_DEBUG__.clearEntities();
+    return window.__HOSHI_DEBUG__.spawnTestEntity(${staleQuick.slots[0].tier}, 220, 445);
+  })()`);
+  await sleep(120);
+  const servedStale = await evalJS(`window.__HOSHI_DEBUG__.serveById(${staleEntId})`);
+  assert(servedStale === true, 'Expected stale fast_fresh treat serve to succeed');
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const stalePayout = st.shiftRevenue - revBeforeStaleServe;
+  assert(
+    freshPayout > stalePayout * 2.2,
+    `Expected fast_fresh ×2.0 payout (${freshPayout}) >> stale ×0.75 payout (${stalePayout})`
+  );
+  console.log(`[Phase 3K OK] fast_fresh verified: fresh=¥${freshPayout} (×2.0) vs stale=¥${stalePayout} (×0.75)`);
+
+  // ==========================================================
+  // 3L (Mobile 390x844). Phase 3 — Act 4, Act 5 Boss + Step-6 Judge Rush (freshSteps===4, ×2.5, +2 steps) & Build Details Modal
+  // ==========================================================
+  await evalJS(`window.__HOSHI_DEBUG__.setShift(4)`);
+  await sleep(220);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.shift === 4 &&
+      st.entities.some((e) => e.isYarnBall) &&
+      st.shiftHazards.length === 1 &&
+      (st.shiftHazards[0] === 'glaze_ring' || st.shiftHazards[0] === 'bumpers'),
+    `Expected Act 4 Yarn Ball + glaze_ring/bumpers, got hazards=${JSON.stringify(st.shiftHazards)}`
+  );
+
+  // Act 5 Boss: 2 frozen high-tier + divider + organic step-6 Judge Rush (must start with FULL 4 steps!)
+  await evalJS(`window.__HOSHI_DEBUG__.setShift(5, { forceHazard: 'divider' })`);
+  await sleep(220);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const s5Frozen = st.entities.filter((e) => e.frozenHp > 0);
+  assert(
+    st.shift === 5 &&
+      st.shiftModifier === 'grand_prix' &&
+      s5Frozen.length === 2 &&
+      s5Frozen.some((e) => e.tier === 4) &&
+      s5Frozen.some((e) => e.tier === 5),
+    `Expected Act 5 Boss with 2 frozen (T4,T5) & grand_prix, got frozen=${JSON.stringify(s5Frozen)}`
+  );
+
+  // Drop 6 treats organically to trigger step-6 Judge Rush & verify freshSteps === 4 (decay-order bugfix!)
+  await evalJS(`window.__HOSHI_DEBUG__.clearEntities()`);
+  await sleep(100);
+  const jb3l = st.jarBox;
+  for (let d = 0; d < 10; d++) {
+    await tapAt(Math.round(jb3l.x + jb3l.w * (d % 2 === 0 ? 0.30 : 0.70)), Math.round(jb3l.y + jb3l.h * 0.24));
+    await sleep(240);
+    st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+    if (st.shiftStepsUsed >= 6) break;
+  }
+  const judgeOrd = st.orders.find((o) => o.isJudgeRush && !o.completed);
+  assert(
+    judgeOrd && judgeOrd.freshSteps === 4 && judgeOrd.freshMax === 4 && judgeOrd.freshMult === 2.5,
+    `Expected step-6 Judge Rush to start with full freshSteps=4 & ×2.5 (stepsUsed=${st.shiftStepsUsed}, orders=${JSON.stringify(st.orders)})`
+  );
+
+  // Serve fresh Judge Rush order -> must award +2 steps & ×2.5 revenue!
+  const stepsBeforeJudge = st.stepsLeft;
+  const revBeforeJudge = st.shiftRevenue;
+  const judgeEntId = await evalJS(`(() => {
+    window.__HOSHI_DEBUG__.clearEntities();
+    return window.__HOSHI_DEBUG__.spawnTestEntity(${judgeOrd.slots[0].tier}, 122, 440);
+  })()`);
+  await sleep(120);
+  const servedJudge = await evalJS(`window.__HOSHI_DEBUG__.serveById(${judgeEntId})`);
+  assert(servedJudge === true, 'Expected Judge Rush order serve to succeed');
+  await sleep(180);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.stepsLeft === stepsBeforeJudge + 2 && st.shiftRevenue > revBeforeJudge,
+    `Expected fresh Judge Rush completion to refund +2 steps (before=${stepsBeforeJudge}, after=${st.stepsLeft})`
+  );
+
+  // Open Shift 5 Build Details Modal via play_shift_badge on iPhone 14 390x844
+  await evalJS(`
+    window.__HOSHI_DEBUG__.equipRelic('rel_bumpers');
+    window.__HOSHI_DEBUG__.setShift(5, { forceHazard: 'divider' });
+  `);
+  await sleep(220);
+  await tapHit('play_shift_badge');
+  await sleep(240);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === 'relics', `Expected iPhone 14 Shift 5 Build Details modal, got ${st.activeModal}`);
+  await checkCapsuleAndViewportBounds('iPhone 14 Shift 5 Build Details 390x844', 390, 844, 34);
+  await screenshot('22_build_details_iphone_390.png');
+  await dragSwipe(195, 580, 195, 280, 6);
+  await sleep(160);
+  await tapHit('modal_close');
+  await sleep(160);
+  console.log('[Phase 3L Mobile OK] Act 4, Act 5 Boss + Step-6 Judge Rush (freshSteps=4, +2 steps), Act 6/7 Endless & 390x844 modal verified');
+
+  // ==========================================================
+  // 5. Desktop 1280x760 Play Screen + Chef 5-Shift, Prep Shop, Phase 3 Boss & Zen Checks
   // ==========================================================
   await setViewport(1280, 760, false, 1);
   await navigate('?safeTop=8&safeBottom=0&capsule=1');
@@ -1008,10 +1502,12 @@ async function run() {
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.mode === 'chef' && st.running === true && st.shift === 1, 'Chef mode running on desktop at Shift 1');
   assert(st.hits.some((h) => h.id === 'wide_relics_bar'), 'Expected wide_relics_bar hit on desktop Chef HUD');
+  assert(st.hits.some((h) => h.id === 'wide_hazards_bar'), 'Expected wide_hazards_bar hit on desktop Chef HUD');
+  assert(st.hits.some((h) => h.id === 'play_shift_badge'), 'Expected play_shift_badge hit on desktop Chef HUD');
   await checkCapsuleAndViewportBounds('Desktop Chef HUD 1280x760', 1280, 760, 0);
   await screenshot('13_chef_desktop_1280.png');
 
-  // Desktop Early Close + 3-column Desktop Prep Shop Layout Verification
+  // Desktop Early Close + 3-column Desktop Prep Shop Layout Verification (with Next-Shift Preview!)
   await evalJS(`
     window.__HOSHI_DEBUG__.equipRelic('rel_bumpers');
     window.__HOSHI_DEBUG__.addShiftRevenue(1300);
@@ -1023,9 +1519,33 @@ async function run() {
   await tapHit('btn_close_shift_early');
   await sleep(260);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.activeModal === 'prep_shop', `Expected desktop prep_shop modal, got ${st.activeModal}`);
+  assert(
+    st.activeModal === 'prep_shop' && st.prepShop && Array.isArray(st.prepShop.nextHazards),
+    `Expected desktop prep_shop modal with nextHazards preview, got ${st.activeModal}`
+  );
   await checkCapsuleAndViewportBounds('Desktop Prep Shop 1280x760', 1280, 760, 0);
   await screenshot('13b_prep_shop_desktop_1280.png');
+
+  // 3L (Desktop 1280x760): Shift 5 Boss (Divider + Frozen + Judge Rush + rel_bumpers) & Build Details Modal
+  await evalJS(`
+    window.__HOSHI_DEBUG__.setShift(5, { forceHazard: 'divider' });
+    window.__HOSHI_DEBUG__.triggerJudgeRush();
+  `);
+  await sleep(280);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.shift === 5 && st.activeModal === null, 'Desktop Shift 5 Boss active');
+  await checkCapsuleAndViewportBounds('Desktop Shift 5 Boss 1280x760', 1280, 760, 0);
+  await screenshot('20_shift5_boss_desktop_1280.png');
+
+  await tapHit('wide_hazards_bar');
+  await sleep(240);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === 'relics', `Expected wide_hazards_bar to open relics modal, got ${st.activeModal}`);
+  await checkCapsuleAndViewportBounds('Desktop Build Details Modal 1280x760', 1280, 760, 0);
+  await screenshot('21_build_details_desktop_1280.png');
+  await tapHit('modal_close');
+  await sleep(160);
+  console.log('[Phase 3L Desktop OK] Desktop Shift 5 Boss & Build Details modal verified');
 
   await evalJS(`window.__HOSHI_DEBUG__.returnToLobby()`);
   await sleep(160);
@@ -1043,10 +1563,24 @@ async function run() {
 
   assert(errors.length === 0, `Runtime/Console errors detected: ${errors.join(' | ')}`);
   console.log('\n✅ ALL WECHAT MINI GAME E2E CHECKS PASSED WITH ZERO ERRORS!');
-
-  ws.close();
-  chrome.kill('SIGTERM');
-  server.close();
+  } finally {
+    try { if (ws) ws.close(); } catch (_) {}
+    try { server.close(); } catch (_) {}
+    if (chrome && chromeExit === null) {
+      await new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          try { chrome.kill('SIGKILL'); } catch (_) {}
+          resolve();
+        }, 1500);
+        chrome.once('exit', () => {
+          clearTimeout(timer);
+          resolve();
+        });
+        try { chrome.kill('SIGTERM'); } catch (_) { clearTimeout(timer); resolve(); }
+      });
+    }
+    try { fs.rmSync(userDataDir, { recursive: true, force: true }); } catch (_) {}
+  }
 }
 
 run().catch((err) => {

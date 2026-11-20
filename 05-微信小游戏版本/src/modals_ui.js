@@ -11,6 +11,7 @@ const {
   SHOP_UPGRADES,
   JAR_THEME_LIST,
   ACHIEVEMENTS,
+  SHIFT_HAZARDS,
   getShiftConfig,
   MAX_RELIC_SLOTS,
   RELIC_ARCHETYPES,
@@ -687,6 +688,7 @@ function renderPrepShopModal(ctx, metrics, app, hits) {
 
   const sum = shop.shiftSummary;
   const receiptH = sum ? 42 : 0;
+  const nextPreviewH = 44;
   const equippedH = 66;
   const relicCols = isWide ? 3 : 1;
   const relicGap = 8;
@@ -701,7 +703,15 @@ function renderPrepShopModal(ctx, metrics, app, hits) {
   const modsSectionH = 22 + modRows * modCardH + Math.max(0, modRows - 1) * modGap;
 
   const totalContentH =
-    (receiptH > 0 ? receiptH + 8 : 0) + equippedH + 10 + relicsSectionH + 10 + modsSectionH + 6;
+    (receiptH > 0 ? receiptH + 8 : 0) +
+    nextPreviewH +
+    8 +
+    equippedH +
+    10 +
+    relicsSectionH +
+    10 +
+    modsSectionH +
+    6;
   app.modalMaxScroll = Math.max(0, totalContentH - bodyH);
   app.modalScrollY = Math.max(0, Math.min(app.modalScrollY, app.modalMaxScroll));
 
@@ -738,6 +748,53 @@ function renderPrepShopModal(ctx, metrics, app, hits) {
       '#8b4c14'
     );
     curY += receiptH + 8;
+  }
+
+  // 3a-2. Next-Shift Hazard Preview Banner (lets players counter-build in Prep Shop!)
+  {
+    const prevW = f.iw - 6;
+    const nextHazIds = Array.isArray(shop.nextHazards) ? shop.nextHazards : [];
+    const previewBadges = nextHazIds.map((id) => (SHIFT_HAZARDS[id] ? SHIFT_HAZARDS[id].badge : id));
+    if (nextCfg.shift === 3 || nextCfg.shift >= 5) previewBadges.push('❄️冰封×2');
+    if (nextCfg.modifier === 'grand_prix') previewBadges.push('🏅评委急单');
+    if (nextCfg.modifier === 'party_events') previewBadges.push('🧶毛线球');
+    const badgeStr = previewBadges.length > 0 ? previewBadges.join(' · ') : '🌿无特殊机关';
+
+    UI.drawParchmentSheet(ctx, f.ix, curY, prevW, nextPreviewH, 10, '#f8f0ff', '#eadcf8', '#7d4ea3', 1.5);
+    const leftTitleW = isWide ? prevW * 0.48 : prevW * 0.50;
+    UI.drawFitText(
+      ctx,
+      `🔮 下幕预告 · 第${nextCfg.shift}幕【${nextCfg.name}】`,
+      f.ix + 9,
+      curY + 14,
+      leftTitleW,
+      10.8,
+      8.4,
+      900,
+      '#46245e'
+    );
+    // Right preview badge pill
+    const pillMaxW = prevW - leftTitleW - 22;
+    const pillX = f.ix + prevW - pillMaxW - 8;
+    ctx.save();
+    UI.roundRectPath(ctx, pillX, curY + 6, pillMaxW, 17, 8.5);
+    ctx.fillStyle = '#5e347d';
+    ctx.fill();
+    UI.drawFitText(ctx, badgeStr, pillX + pillMaxW * 0.5, curY + 14.8, pillMaxW - 10, 9.4, 7.6, 800, '#fff5d6', 'center');
+    ctx.restore();
+
+    UI.drawFitText(
+      ctx,
+      nextCfg.desc,
+      f.ix + 9,
+      curY + 32,
+      prevW - 18,
+      9.6,
+      7.8,
+      600,
+      '#5d3c73'
+    );
+    curY += nextPreviewH + 8;
   }
 
   // 3b. Equipped Relics Bar (4 Slots — tap equipped to sell for 50% refund!)
@@ -1009,48 +1066,126 @@ function renderRelicsModal(ctx, metrics, app, hits) {
   const clipRect = { x: f.ix - 2, y: bodyY, w: f.iw + 4, h: bodyH };
   app.modalScrollRect = clipRect;
 
+  // Build dynamic active shift hazards & Boss affixes list
+  const shiftAffixes = [];
+  const activeHazIds = Array.isArray(gameState.shiftHazards) ? gameState.shiftHazards : [];
+  for (const hid of activeHazIds) {
+    const hDef = SHIFT_HAZARDS[hid];
+    if (!hDef) continue;
+    shiftAffixes.push({
+      icon: hDef.icon,
+      title: hDef.name,
+      status: '激活中',
+      desc: hDef.desc,
+      color: hDef.color,
+      bg: hDef.bg
+    });
+  }
+  const frozenAlive = (gameState.entities || []).filter((e) => e && !e.merged && e.frozenHp > 0).length;
+  if (gameState.mode === 'chef' && (gameState.shift === 3 || gameState.shift >= 5 || frozenAlive > 0)) {
+    shiftAffixes.push({
+      icon: '❄️',
+      title: '冰封残局甜品',
+      status: frozenAlive > 0 ? `剩 ${frozenAlive} 颗` : '已全部破冰',
+      desc: '冰封期间不可合成/出餐/捞底/互换/用勺；周边 110px 合成、元气重锤(120px)或摇一摇破冰爆 +¥120！',
+      color: '#1b6d8a',
+      bg: '#e5f7ff'
+    });
+  }
+  if (gameState.mode === 'chef' && gameState.shiftModifier === 'grand_prix') {
+    const hasActiveRush = (gameState.orders || []).some((o) => o && !o.completed && o.isJudgeRush);
+    const stepsToJudge = 6 - ((gameState.shiftStepsUsed || 0) % 6);
+    shiftAffixes.push({
+      icon: '🏅',
+      title: '评委突击加单',
+      status: hasActiveRush ? '急单进行中' : `${stepsToJudge}步后抵达`,
+      desc: '每 6 步向 VIP 桌空降高阶评委急单，4 步鲜度内完成即享 ×2.5 营业额并返还 +2 步！',
+      color: '#a35610',
+      bg: '#fff2d2'
+    });
+  } else if (gameState.mode === 'chef' && gameState.shiftModifier === 'party_events') {
+    shiftAffixes.push({
+      icon: '🧶',
+      title: '午夜猫猫派对',
+      status: '第6/12步事件',
+      desc: '开局伴随捣蛋毛线球（震碎 +¥750 & +10🪙），第 6 / 12 步定时触发星夜事件！',
+      color: '#9c3672',
+      bg: '#ffeaf5'
+    });
+  }
+
   const equipped = (gameState.relics || []).map((id) => RELICS.find((r) => r.id === id)).filter(Boolean);
   const activeMods = DECK_MODS.filter((m) => app.getDeckModCount(m.id) > 0);
-  const totalH = 56 + 10 + Math.max(1, equipped.length) * 68 + 26 + Math.max(1, activeMods.length) * 44;
+
+  const affixSectionH = shiftAffixes.length > 0 ? 22 + shiftAffixes.length * 64 + 6 : 0;
+  const equippedSectionH = 22 + (equipped.length === 0 ? 64 : equipped.length * 68);
+  const modsSectionH = 22 + (activeMods.length === 0 ? 28 : activeMods.length * 44);
+  const totalH = 62 + affixSectionH + equippedSectionH + modsSectionH + 12;
+
   app.modalMaxScroll = Math.max(0, totalH - bodyH);
   app.modalScrollY = Math.max(0, Math.min(app.modalScrollY, app.modalMaxScroll));
 
   beginModalScrollBody(ctx, clipRect.x, clipRect.y, clipRect.w, clipRect.h, app.modalScrollY);
   let curY = bodyY;
+  const cardW = f.iw - 6;
 
   // Current Shift Info Card
-  UI.drawParchmentSheet(ctx, f.ix, curY, f.iw - 6, 52, 10, '#fff7dc', '#f9e6b3', '#c48823', 1.6);
-  UI.drawFitText(ctx, `🌙 第 ${shiftCfg.shift} 幕 · ${shiftCfg.name}（目标 ¥${gameState.shiftTarget}）`, f.ix + 10, curY + 15, f.iw - 26, 12, 9.5, 900, '#4A2C2A');
-  UI.drawWrappedText(ctx, shiftCfg.desc, f.ix + 10, curY + 26, f.iw - 26, 12.5, UI.fontStr(9.8, 600), '#7a491c', 'left', 2);
+  UI.drawParchmentSheet(ctx, f.ix, curY, cardW, 52, 10, '#fff7dc', '#f9e6b3', '#c48823', 1.6);
+  UI.drawFitText(ctx, `🌙 第 ${shiftCfg.shift} 幕 · ${shiftCfg.name}（目标 ¥${gameState.shiftTarget}）`, f.ix + 10, curY + 15, cardW - 20, 12, 9.5, 900, '#4A2C2A');
+  UI.drawWrappedText(ctx, shiftCfg.desc, f.ix + 10, curY + 26, cardW - 20, 12.5, UI.fontStr(9.8, 600), '#7a491c', 'left', 2);
   curY += 62;
 
+  // Active Shift Hazards & Boss Affixes Section
+  if (shiftAffixes.length > 0) {
+    UI.drawFitText(ctx, '⚡ 本幕激活机关 & Boss 词条', f.ix, curY + 8, cardW, 11.5, 9.5, 900, '#4A2C2A');
+    curY += 22;
+    for (const af of shiftAffixes) {
+      UI.drawParchmentSheet(ctx, f.ix, curY, cardW, 58, 10, af.bg || '#fffaf0', '#fffaf0', af.color || '#c48823', 1.5);
+      const pillW = 72;
+      UI.drawFitText(ctx, `${af.icon} ${af.title}`, f.ix + 10, curY + 15, cardW - pillW - 24, 11.8, 9.5, 900, '#4A2C2A');
+      // Status pill on top-right
+      ctx.save();
+      UI.roundRectPath(ctx, f.ix + cardW - pillW - 8, curY + 7, pillW, 16, 8);
+      ctx.fillStyle = af.color || '#a35610';
+      ctx.fill();
+      UI.drawFitText(ctx, af.status, f.ix + cardW - pillW * 0.5 - 8, curY + 15.5, pillW - 8, 9.2, 7.6, 800, '#fffdf5', 'center');
+      ctx.restore();
+
+      UI.drawWrappedText(ctx, af.desc, f.ix + 10, curY + 27, cardW - 20, 12.5, UI.fontStr(9.6, 600), '#5f3b28', 'left', 2);
+      curY += 64;
+    }
+    curY += 6;
+  }
+
   // Equipped Relics List
+  UI.drawFitText(ctx, `✨ 已装备流派秘方 (${equipped.length}/${MAX_RELIC_SLOTS})`, f.ix, curY + 8, cardW, 11.5, 9.5, 900, '#4A2C2A');
+  curY += 22;
   if (equipped.length === 0) {
-    UI.drawParchmentSheet(ctx, f.ix, curY, f.iw - 6, 56, 10, '#fffaf0', '#fffaf0', '#cba872', 1.4);
-    UI.drawFitText(ctx, '尚未装备流派秘方', f.ix + (f.iw - 6) * 0.5, curY + 20, f.iw - 26, 12.5, 10, 800, '#724640', 'center');
-    UI.drawFitText(ctx, '通关当前幕次后即可进入【🏪 后厨整备间】选购 16 张规则秘方！', f.ix + (f.iw - 6) * 0.5, curY + 38, f.iw - 26, 10, 8.5, 600, '#8f5b34', 'center');
-    curY += 66;
+    UI.drawParchmentSheet(ctx, f.ix, curY, cardW, 56, 10, '#fffaf0', '#fffaf0', '#cba872', 1.4);
+    UI.drawFitText(ctx, '尚未装备流派秘方', f.ix + cardW * 0.5, curY + 20, cardW - 20, 12.5, 10, 800, '#724640', 'center');
+    UI.drawFitText(ctx, '通关当前幕次后即可进入【🏪 后厨整备间】选购 16 张规则秘方！', f.ix + cardW * 0.5, curY + 38, cardW - 20, 10, 8.5, 600, '#8f5b34', 'center');
+    curY += 64;
   } else {
     for (const def of equipped) {
       const arch = RELIC_ARCHETYPES[def.archetype] || { icon: '✨', name: '秘方', color: '#8f4716', bg: '#fff4d8' };
-      UI.drawParchmentSheet(ctx, f.ix, curY, f.iw - 6, 62, 10, '#fffdf6', '#f7ead0', arch.color, 1.6);
-      UI.drawFitText(ctx, `${def.icon} ${def.name}  [${arch.icon}${arch.name}]`, f.ix + 10, curY + 16, f.iw - 26, 12, 9.5, 900, '#4A2C2A');
-      UI.drawWrappedText(ctx, def.desc, f.ix + 10, curY + 28, f.iw - 26, 13, UI.fontStr(10, 600), '#6d443a', 'left', 2);
+      UI.drawParchmentSheet(ctx, f.ix, curY, cardW, 62, 10, '#fffdf6', '#f7ead0', arch.color, 1.6);
+      UI.drawFitText(ctx, `${def.icon} ${def.name}  [${arch.icon}${arch.name}]`, f.ix + 10, curY + 16, cardW - 20, 12, 9.5, 900, '#4A2C2A');
+      UI.drawWrappedText(ctx, def.desc, f.ix + 10, curY + 28, cardW - 20, 13, UI.fontStr(10, 600), '#6d443a', 'left', 2);
       curY += 68;
     }
   }
 
   // Active Deck Mods
-  UI.drawFitText(ctx, '🧪 已生效原料池改造', f.ix, curY + 8, f.iw - 6, 11.5, 9.5, 900, '#4A2C2A');
+  UI.drawFitText(ctx, '🧪 已生效原料池改造', f.ix, curY + 8, cardW, 11.5, 9.5, 900, '#4A2C2A');
   curY += 22;
   if (activeMods.length === 0) {
-    UI.drawFitText(ctx, '暂无原料池改造（可在后厨整备间购买）', f.ix + 6, curY + 10, f.iw - 18, 10.5, 9, 600, '#8a684a');
+    UI.drawFitText(ctx, '暂无原料池改造（可在后厨整备间购买）', f.ix + 6, curY + 10, cardW - 12, 10.5, 9, 600, '#8a684a');
   } else {
     for (const m of activeMods) {
       const cnt = app.getDeckModCount(m.id);
-      UI.drawParchmentSheet(ctx, f.ix, curY, f.iw - 6, 38, 8, '#fffaf0', '#fffaf0', '#cba872', 1.3);
-      UI.drawFitText(ctx, `${m.icon} ${m.name} ×${cnt}`, f.ix + 10, curY + 13, f.iw - 26, 11, 9, 800, '#4A2C2A');
-      UI.drawFitText(ctx, m.desc, f.ix + 10, curY + 27, f.iw - 26, 9.5, 8, 600, '#724640');
+      UI.drawParchmentSheet(ctx, f.ix, curY, cardW, 38, 8, '#fffaf0', '#fffaf0', '#cba872', 1.3);
+      UI.drawFitText(ctx, `${m.icon} ${m.name} ×${cnt}`, f.ix + 10, curY + 13, cardW - 20, 11, 9, 800, '#4A2C2A');
+      UI.drawFitText(ctx, m.desc, f.ix + 10, curY + 27, cardW - 20, 9.5, 8, 600, '#724640');
       curY += 44;
     }
   }

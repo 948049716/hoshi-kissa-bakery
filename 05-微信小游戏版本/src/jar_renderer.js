@@ -5,7 +5,7 @@
  */
 'use strict';
 
-const { TIERS, WILDCARD_RADIUS, JAR, SOLO_EMOTES } = require('./constants');
+const { TIERS, WILDCARD_RADIUS, JAR, SOLO_EMOTES, SHIFT_HAZARDS } = require('./constants');
 const PHYSICS_SHAPES = require('./physics_shapes');
 const Physics = require('./physics');
 const UI = require('./ui_draw');
@@ -427,6 +427,468 @@ function drawEntityWorldPolys(ctx, entity, strokeStyle, lineWidth) {
   ctx.restore();
 }
 
+function drawDividerObstacle(ctx, ob) {
+  const hw = typeof ob.halfW === 'number' ? ob.halfW : (ob.w || 14) * 0.5;
+  const topY = typeof ob.topY === 'number' ? ob.topY : 337;
+  const capY = typeof ob.capY === 'number' ? ob.capY : topY + hw;
+  const bottomY = typeof ob.bottomY === 'number' ? ob.bottomY : JAR.floorY;
+  const flash = ob.hitFlash > 0 ? Math.min(1, ob.hitFlash / 0.32) : 0;
+
+  ctx.save();
+  // 1. Floor contact shadow
+  ctx.fillStyle = 'rgba(38, 18, 6, 0.38)';
+  UI.fillEllipse(ctx, ob.x, bottomY - 1, hw + 11, 5);
+  ctx.fill();
+
+  const tracePillar = () => {
+    ctx.beginPath();
+    ctx.moveTo(ob.x - hw, bottomY);
+    ctx.lineTo(ob.x - hw, capY);
+    ctx.arc(ob.x, capY, hw, Math.PI, Math.PI * 2, false);
+    ctx.lineTo(ob.x + hw, bottomY);
+    ctx.closePath();
+  };
+
+  // 2. Cylindrical beveled kissa wood fill
+  tracePillar();
+  const woodGrad = ctx.createLinearGradient(ob.x - hw, 0, ob.x + hw, 0);
+  woodGrad.addColorStop(0, '#73421e');
+  woodGrad.addColorStop(0.26, '#c98c50');
+  woodGrad.addColorStop(0.56, '#9e6231');
+  woodGrad.addColorStop(0.85, '#76441e');
+  woodGrad.addColorStop(1, '#593014');
+  ctx.fillStyle = woodGrad;
+  ctx.fill();
+
+  // 3. Clipped subtle vertical wood grain & warm bevel specular
+  ctx.save();
+  tracePillar();
+  ctx.clip();
+  ctx.strokeStyle = 'rgba(64, 32, 14, 0.24)';
+  ctx.lineWidth = 1.0;
+  for (let gx = -3; gx <= 4; gx += 3.5) {
+    ctx.beginPath();
+    ctx.moveTo(ob.x + gx, topY + 2);
+    ctx.bezierCurveTo(
+      ob.x + gx - 1.2,
+      topY + 48,
+      ob.x + gx + 1.2,
+      bottomY - 52,
+      ob.x + gx - 0.5,
+      bottomY
+    );
+    ctx.stroke();
+  }
+  ctx.strokeStyle = 'rgba(255, 224, 170, 0.20)';
+  ctx.beginPath();
+  ctx.moveTo(ob.x - hw + 3.2, capY + 2);
+  ctx.lineTo(ob.x - hw + 3.2, bottomY - 6);
+  ctx.stroke();
+
+  // Left specular highlight stripe
+  ctx.fillStyle = 'rgba(255, 232, 184, 0.36)';
+  ctx.fillRect(ob.x - hw + 1.5, capY - 2, 2.2, bottomY - capY);
+
+  if (flash > 0.02) {
+    ctx.fillStyle = `rgba(255, 236, 172, ${flash * 0.45})`;
+    ctx.fillRect(ob.x - hw, topY, hw * 2, bottomY - topY);
+  }
+  ctx.restore();
+
+  // 4. Outer kissa espresso contour
+  tracePillar();
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = flash > 0.12 ? '#78461c' : '#4A2C2A';
+  ctx.stroke();
+
+  // 5. Brass footplate collar at jar floor
+  const plateGrad = ctx.createLinearGradient(ob.x - hw - 2, bottomY - 8, ob.x + hw + 2, bottomY);
+  plateGrad.addColorStop(0, '#ffe495');
+  plateGrad.addColorStop(0.5, '#d99e36');
+  plateGrad.addColorStop(1, '#a96d1e');
+  ctx.fillStyle = plateGrad;
+  ctx.strokeStyle = '#4A2C2A';
+  ctx.lineWidth = 1.8;
+  UI.roundRectPath(ctx, ob.x - hw - 2, bottomY - 8, hw * 2 + 4, 8, 3);
+  ctx.fill();
+  ctx.stroke();
+
+  // 6. Top brass decorative rivet
+  const rivetGrad = ctx.createRadialGradient(ob.x - 0.8, capY + 6.2, 0.4, ob.x, capY + 7, 2.6);
+  rivetGrad.addColorStop(0, '#fff2ba');
+  rivetGrad.addColorStop(0.65, '#dfa438');
+  rivetGrad.addColorStop(1, '#945d14');
+  ctx.fillStyle = rivetGrad;
+  ctx.beginPath();
+  ctx.arc(ob.x, capY + 7, 2.4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.lineWidth = 1.1;
+  ctx.strokeStyle = '#4A2C2A';
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawBumperObstacle(ctx, ob, oi, nowSec) {
+  const source = ob.source || 'relic';
+  const isSynergy = source === 'synergy';
+  const isRelic = source === 'relic';
+  const flash = ob.hitFlash > 0 ? Math.min(1, ob.hitFlash / 0.36) : 0;
+  const sc = 1 + flash * 0.24;
+
+  ctx.save();
+  ctx.translate(ob.x, ob.y);
+  ctx.scale(sc, sc);
+
+  // Outer glow ring(s)
+  if (isSynergy) {
+    const pulse = 0.5 + 0.5 * Math.sin(nowSec * 6.5 + oi);
+    ctx.fillStyle = `rgba(255, 212, 86, ${0.24 + pulse * 0.14 + flash * 0.32})`;
+    ctx.beginPath();
+    ctx.arc(0, 0, ob.r + 8.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = `rgba(255, 240, 152, ${0.34 + flash * 0.36})`;
+    ctx.beginPath();
+    ctx.arc(0, 0, ob.r + 5.0, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.fillStyle = flash > 0.05 ? `rgba(255, 232, 120, ${0.45 + flash * 0.4})` : 'rgba(255, 216, 112, 0.24)';
+    ctx.beginPath();
+    ctx.arc(0, 0, ob.r + 5.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Dashed crit ring for relic & synergy bumpers
+  if (isRelic || isSynergy) {
+    ctx.save();
+    ctx.rotate(nowSec * (isSynergy ? 2.4 : 1.5) * (oi % 2 === 0 ? 1 : -1));
+    ctx.strokeStyle = isSynergy ? '#fff099' : 'rgba(255, 232, 110, 0.72)';
+    ctx.lineWidth = isSynergy ? 2.0 : 1.5;
+    ctx.setLineDash(isSynergy ? [5, 3.5] : [4, 3]);
+    ctx.beginPath();
+    ctx.arc(0, 0, ob.r + (isSynergy ? 5.8 : 4.5), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  // Main glossy butter-caramel dome
+  const bg = ctx.createRadialGradient(-4, -5, 2, 0, 0, ob.r);
+  if (isSynergy) {
+    bg.addColorStop(0, '#fffee8');
+    bg.addColorStop(0.55, '#ffcf4d');
+    bg.addColorStop(1, '#c45c10');
+  } else {
+    bg.addColorStop(0, '#fffce0');
+    bg.addColorStop(0.6, '#ffd262');
+    bg.addColorStop(1, '#c9781b');
+  }
+  ctx.fillStyle = bg;
+  ctx.beginPath();
+  ctx.arc(0, 0, ob.r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.lineWidth = isSynergy ? 2.6 : 2.4;
+  ctx.strokeStyle = flash > 0.1 ? '#fff7c4' : '#4A2C2A';
+  ctx.stroke();
+
+  // Inner spinning star emblem
+  ctx.fillStyle = isSynergy ? '#ffffff' : '#fff7d4';
+  UI.drawStar(ctx, 0, 0, ob.r * (isSynergy ? 0.52 : 0.48), nowSec * (isSynergy ? 2.4 : 1.6) + oi);
+
+  // Orbiting micro-stars for supercharged synergy bumpers
+  if (isSynergy) {
+    for (let k = 0; k < 2; k++) {
+      const a = nowSec * 2.8 + oi * 1.4 + k * Math.PI;
+      ctx.fillStyle = '#fff5b8';
+      UI.drawStar(ctx, Math.cos(a) * (ob.r + 6.5), Math.sin(a) * (ob.r + 6.5), 3.4, nowSec * 5 + k);
+    }
+  }
+  ctx.restore();
+}
+
+function drawGlazeRingLayer(ctx, ob, layer, nowSec, isAimHit) {
+  const rx = ob.rx || 38;
+  const ry = ob.ry || 13;
+  const flash = ob.hitFlash > 0 ? Math.min(1, ob.hitFlash / 0.45) : 0;
+  const pulse = 0.5 + 0.5 * Math.sin(nowSec * 5.2);
+
+  ctx.save();
+  ctx.translate(ob.x, ob.y);
+
+  const strokeHalfEllipse = (startA, endA) => {
+    ctx.save();
+    ctx.scale(1, ry / rx);
+    // 1. Dark kissa contour
+    ctx.beginPath();
+    ctx.arc(0, 0, rx, startA, endA, false);
+    ctx.strokeStyle = '#4A2C2A';
+    ctx.lineWidth = 7.4;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    // 2. Metallic caramel gold rim
+    const rimGrad = ctx.createLinearGradient(-rx, -rx, rx, rx);
+    rimGrad.addColorStop(0, '#fff5bf');
+    rimGrad.addColorStop(0.48, '#f5b436');
+    rimGrad.addColorStop(1, '#b06212');
+    ctx.beginPath();
+    ctx.arc(0, 0, rx, startA, endA, false);
+    ctx.strokeStyle = rimGrad;
+    ctx.lineWidth = 4.6;
+    ctx.stroke();
+
+    // 3. Inner bright highlight sheen
+    ctx.beginPath();
+    ctx.arc(0, 0, rx, startA, endA, false);
+    ctx.strokeStyle = flash > 0.08 ? 'rgba(255, 255, 240, 0.96)' : 'rgba(255, 252, 232, 0.82)';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    ctx.restore();
+  };
+
+  if (layer === 'back') {
+    // Soft caramel outer halo glow
+    ctx.save();
+    ctx.scale(1, 0.56);
+    const glowR = rx + 18 + flash * 10 + (isAimHit ? 5 : 0);
+    const glowGrad = ctx.createRadialGradient(0, 0, rx * 0.25, 0, 0, glowR);
+    glowGrad.addColorStop(0, `rgba(255, 224, 108, ${0.32 + flash * 0.34 + (isAimHit ? 0.16 : 0)})`);
+    glowGrad.addColorStop(0.65, `rgba(255, 182, 52, ${0.12 + flash * 0.18})`);
+    glowGrad.addColorStop(1, 'rgba(255, 182, 52, 0)');
+    ctx.fillStyle = glowGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, glowR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Translucent golden portal membrane
+    UI.fillEllipse(ctx, 0, 0, rx - 3, ry - 2);
+    ctx.fillStyle = `rgba(255, 240, 160, ${0.14 + 0.08 * pulse + flash * 0.3 + (isAimHit ? 0.12 : 0)})`;
+    ctx.fill();
+
+    // Back rim arc (top half behind falling desserts)
+    strokeHalfEllipse(Math.PI, Math.PI * 2);
+  } else {
+    // Front rim arc (bottom half in front of desserts passing through!)
+    strokeHalfEllipse(0, Math.PI);
+
+    // Pulsing outer aim focus halo when player aims through the ring
+    if (isAimHit) {
+      ctx.save();
+      ctx.scale(1, (ry + 3) / (rx + 5));
+      ctx.strokeStyle = `rgba(255, 240, 130, ${0.65 + 0.35 * pulse})`;
+      ctx.lineWidth = 2.2;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.arc(0, 0, rx + 5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
+    // 3 orbiting 4-point caramel sparkle stars
+    for (let k = 0; k < 3; k++) {
+      const a = nowSec * 1.9 + (k * Math.PI * 2) / 3;
+      const sx = Math.cos(a) * rx;
+      const sy = Math.sin(a) * ry;
+      ctx.fillStyle = k === 0 ? '#fff8cc' : '#ffe066';
+      UI.drawStar(ctx, sx, sy, 3.8 + (isAimHit ? 1.1 : 0), nowSec * 4.5 + k);
+    }
+  }
+
+  ctx.restore();
+}
+
+function drawFrozenShell(ctx, e, nowSec) {
+  const r = e.r;
+  const shimmer = 0.5 + 0.5 * Math.sin(nowSec * 3.2 + e.id);
+
+  ctx.save();
+  ctx.translate(e.x, e.y);
+
+  // 1. Outer frost mist radial glow
+  const mistGrad = ctx.createRadialGradient(0, 0, r * 0.55, 0, 0, r * 1.24);
+  mistGrad.addColorStop(0, 'rgba(195, 244, 255, 0.34)');
+  mistGrad.addColorStop(0.65, 'rgba(116, 206, 248, 0.14)');
+  mistGrad.addColorStop(1, 'rgba(116, 206, 248, 0)');
+  ctx.fillStyle = mistGrad;
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 1.24, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 2. Faceted octagonal crystal shell (translucent so pastry inside remains 100% readable!)
+  ctx.save();
+  ctx.rotate(e.angle);
+  const pts = [];
+  for (let k = 0; k < 8; k++) {
+    const a = (k * Math.PI) / 4 + Math.PI / 8;
+    const rad = k % 2 === 0 ? r * 1.09 : r * 1.02;
+    pts.push({ x: Math.cos(a) * rad, y: Math.sin(a) * rad });
+  }
+  const traceCrystal = () => {
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k].x, pts[k].y);
+    ctx.closePath();
+  };
+
+  traceCrystal();
+  const iceGrad = ctx.createLinearGradient(-r, -r, r, r);
+  iceGrad.addColorStop(0, 'rgba(232, 252, 255, 0.44)');
+  iceGrad.addColorStop(0.5, 'rgba(148, 222, 252, 0.24)');
+  iceGrad.addColorStop(1, 'rgba(74, 158, 224, 0.36)');
+  ctx.fillStyle = iceGrad;
+  ctx.fill();
+
+  // 3. Internal specular & shadow facet triangles
+  ctx.fillStyle = `rgba(255, 255, 255, ${0.32 + shimmer * 0.12})`;
+  ctx.beginPath();
+  ctx.moveTo(pts[5].x, pts[5].y);
+  ctx.lineTo(pts[6].x, pts[6].y);
+  ctx.lineTo(-r * 0.12, -r * 0.18);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.20)';
+  ctx.beginPath();
+  ctx.moveTo(pts[6].x, pts[6].y);
+  ctx.lineTo(pts[7].x, pts[7].y);
+  ctx.lineTo(r * 0.22, -r * 0.24);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = 'rgba(42, 112, 184, 0.18)';
+  ctx.beginPath();
+  ctx.moveTo(pts[1].x, pts[1].y);
+  ctx.lineTo(pts[2].x, pts[2].y);
+  ctx.lineTo(r * 0.18, r * 0.26);
+  ctx.closePath();
+  ctx.fill();
+
+  // Frost-edge seams
+  ctx.strokeStyle = 'rgba(224, 248, 255, 0.68)';
+  ctx.lineWidth = 1.1;
+  ctx.beginPath();
+  ctx.moveTo(pts[5].x * 0.92, pts[5].y * 0.92);
+  ctx.lineTo(-r * 0.12, -r * 0.18);
+  ctx.lineTo(pts[7].x * 0.92, pts[7].y * 0.92);
+  ctx.stroke();
+
+  // Double crystal rim stroke
+  traceCrystal();
+  ctx.strokeStyle = '#2b557a';
+  ctx.lineWidth = 2.5;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+
+  traceCrystal();
+  ctx.strokeStyle = '#d8f8ff';
+  ctx.lineWidth = 1.35;
+  ctx.stroke();
+  ctx.restore();
+
+  // 4. Top-right glacier lock medallion with procedural 6-spoke vector snowflake
+  const bx = r * 0.54;
+  const by = -r * 0.62;
+  ctx.fillStyle = 'rgba(24, 76, 124, 0.92)';
+  ctx.beginPath();
+  ctx.arc(bx, by, 9.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = '#b8f0ff';
+  ctx.stroke();
+
+  ctx.save();
+  ctx.translate(bx, by);
+  ctx.strokeStyle = '#eefcff';
+  ctx.lineWidth = 1.3;
+  ctx.lineCap = 'round';
+  const arm = 5.4;
+  for (let s = 0; s < 3; s++) {
+    const a = (s * Math.PI) / 3;
+    const ca = Math.cos(a);
+    const sa = Math.sin(a);
+    ctx.beginPath();
+    ctx.moveTo(-ca * arm, -sa * arm);
+    ctx.lineTo(ca * arm, sa * arm);
+    ctx.stroke();
+    // Small V-barbs near both tips
+    for (const dir of [-1, 1]) {
+      const tipX = dir * ca * (arm * 0.62);
+      const tipY = dir * sa * (arm * 0.62);
+      const b1 = a + (dir > 0 ? 2.45 : -0.69);
+      const b2 = a + (dir > 0 ? -2.45 : 0.69);
+      ctx.beginPath();
+      ctx.moveTo(tipX, tipY);
+      ctx.lineTo(tipX + Math.cos(b1) * 2.1, tipY + Math.sin(b1) * 2.1);
+      ctx.moveTo(tipX, tipY);
+      ctx.lineTo(tipX + Math.cos(b2) * 2.1, tipY + Math.sin(b2) * 2.1);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+
+  ctx.restore();
+}
+
+function drawInJarHazardBadges(ctx, gameState, nowSec) {
+  if (gameState.mode !== 'chef') return;
+  const hazards = Array.isArray(gameState.shiftHazards) ? gameState.shiftHazards : [];
+  let frozenAlive = 0;
+  for (let i = 0; i < gameState.entities.length; i++) {
+    const e = gameState.entities[i];
+    if (e && !e.merged && e.frozenHp > 0) frozenAlive++;
+  }
+  const isGrandPrix = gameState.shiftModifier === 'grand_prix';
+  if (hazards.length === 0 && frozenAlive === 0 && !isGrandPrix) return;
+
+  const baseY = JAR.dangerY + 5; // y = 117..135 (strictly below dangerY=112, 36px above glaze_ring)
+  const pillH = 18;
+  const drawPill = (x, y, w, bg, border, text, textCol) => {
+    ctx.save();
+    UI.roundRectPath(ctx, x, y, w, pillH, 9);
+    ctx.fillStyle = bg;
+    ctx.fill();
+    ctx.lineWidth = 1.3;
+    ctx.strokeStyle = border;
+    ctx.stroke();
+    UI.drawFitText(ctx, text, x + w * 0.5, y + pillH * 0.5 + 0.5, w - 10, 9.5, 7.8, 800, textCol, 'center');
+    ctx.restore();
+  };
+
+  // Left wall pills: active shift hazards (width 72px, leaving center 108..332 = 224px 100% open)
+  let ly = baseY;
+  for (let i = 0; i < hazards.length; i++) {
+    const def = SHIFT_HAZARDS[hazards[i]];
+    if (!def) continue;
+    const borderCol =
+      def.id === 'fast_fresh'
+        ? '#ff9d7a'
+        : def.id === 'divider'
+        ? '#e5b078'
+        : '#ffe07a';
+    drawPill(JAR.left + 6, ly, 72, 'rgba(42, 22, 12, 0.84)', borderCol, def.badge, '#fff4d4');
+    ly += pillH + 3;
+  }
+
+  // Right wall pills: live frozen count & Boss Critic Rush indicator
+  let ry = baseY;
+  if (frozenAlive > 0) {
+    drawPill(JAR.right - 6 - 72, ry, 72, 'rgba(18, 56, 92, 0.88)', '#9ce6ff', `❄️冰封×${frozenAlive}`, '#e6f9ff');
+    ry += pillH + 3;
+  }
+  if (isGrandPrix) {
+    const activeJudge = (gameState.orders || []).some((o) => o && !o.completed && o.isJudgeRush);
+    const stepsUsed = gameState.shiftStepsUsed || 0;
+    const stepsToNext = 6 - (stepsUsed % 6);
+    const pulse = activeJudge ? 0.5 + 0.5 * Math.sin(nowSec * 7) : 0;
+    const bg = activeJudge
+      ? `rgba(${Math.round(148 + pulse * 36)}, 48, 16, 0.90)`
+      : 'rgba(54, 28, 14, 0.84)';
+    const label = activeJudge ? '🏅评委急单!' : `🏅${stepsToNext}步急单`;
+    drawPill(JAR.right - 6 - 72, ry, 72, bg, '#ffe078', label, '#fff6d0');
+  }
+}
+
 function drawPhysicsDebugOverlay(ctx, gameState) {
   const polyPalette = [
     { stroke: 'rgba(72, 238, 255, 0.95)', fill: 'rgba(72, 238, 255, 0.14)' },
@@ -443,6 +905,49 @@ function drawPhysicsDebugOverlay(ctx, gameState) {
   ctx.setLineDash([4, 4]);
   ctx.stroke();
   ctx.setLineDash([]);
+
+  // Render obstacle collision bounds (divider SAT polygon, bumpers, glaze ring)
+  if (gameState.obstacles && gameState.obstacles.length > 0) {
+    for (let oi = 0; oi < gameState.obstacles.length; oi++) {
+      const ob = gameState.obstacles[oi];
+      if (!ob) continue;
+      if (ob.type === 'divider' && Physics.ensureDividerStaticBody) {
+        const divBody = Physics.ensureDividerStaticBody(ob);
+        const verts = divBody.worldPolys[0].verts;
+        ctx.beginPath();
+        for (let k = 0; k < verts.length; k++) {
+          if (k === 0) ctx.moveTo(verts[k].x, verts[k].y);
+          else ctx.lineTo(verts[k].x, verts[k].y);
+        }
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(255, 196, 92, 0.18)';
+        ctx.fill();
+        ctx.strokeStyle = '#ffcf66';
+        ctx.lineWidth = 1.8;
+        ctx.stroke();
+      } else if (ob.type === 'bumper') {
+        ctx.beginPath();
+        ctx.arc(ob.x, ob.y, ob.r, 0, Math.PI * 2);
+        ctx.strokeStyle = '#ffd86b';
+        ctx.lineWidth = 1.6;
+        ctx.setLineDash([3, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else if (ob.type === 'glaze_ring') {
+        ctx.save();
+        ctx.translate(ob.x, ob.y);
+        ctx.scale(1, (ob.ry || 13) / (ob.rx || 38));
+        ctx.beginPath();
+        ctx.arc(0, 0, ob.rx || 38, 0, Math.PI * 2);
+        ctx.strokeStyle = '#ffe570';
+        ctx.lineWidth = 1.6;
+        ctx.setLineDash([4, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+    }
+  }
 
   for (const e of gameState.entities) {
     if (!e.worldPolys) continue;
@@ -528,7 +1033,7 @@ function drawPhysicsDebugOverlay(ctx, gameState) {
   ctx.restore();
 }
 
-function predictLandingY(tier, dropX, angle, entities, isWildcard = false) {
+function predictLandingY(tier, dropX, angle, entities, isWildcard = false, obstacles = []) {
   const r = isWildcard ? WILDCARD_RADIUS : TIERS[tier - 1].radius;
   const shapeDef = isWildcard ? getShapeDef(1) : getShapeDef(tier);
   if (!shapeDef || !Physics) return JAR.floorY - r;
@@ -539,7 +1044,8 @@ function predictLandingY(tier, dropX, angle, entities, isWildcard = false) {
     JAR.dropY,
     angle,
     JAR,
-    entities
+    entities,
+    obstacles
   );
   return Math.max(JAR.dropY + 20, hitY);
 }
@@ -551,7 +1057,7 @@ function findAimMergeTarget(gameState, tier, dropX, landY, isWildcard, magnetLv)
   let bestDist = Infinity;
   for (let i = 0; i < gameState.entities.length; i++) {
     const e = gameState.entities[i];
-    if (e.merged || e.isYarnBall) continue;
+    if (e.merged || e.isYarnBall || e.frozenHp > 0) continue;
     const canMerge = isWildcard ? true : e.isWildcard || e.tier === tier;
     if (!canMerge) continue;
     const d = Math.hypot(e.x - dropX, e.y - landY);
@@ -757,45 +1263,15 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
   }
   ctx.restore();
 
-  // 3.5 Static Jar Obstacles (e.g., Butter Bumpers from rel_bumpers!)
-  if (gameState.obstacles && gameState.obstacles.length > 0) {
-    for (let oi = 0; oi < gameState.obstacles.length; oi++) {
-      const ob = gameState.obstacles[oi];
-      if (!ob || ob.type !== 'bumper') continue;
-      const flash = ob.hitFlash > 0 ? Math.min(1, ob.hitFlash / 0.36) : 0;
-      const sc = 1 + flash * 0.24;
-      ctx.save();
-      ctx.translate(ob.x, ob.y);
-      ctx.scale(sc, sc);
-      // Warm glow ring
-      ctx.fillStyle = flash > 0.05 ? `rgba(255, 232, 120, ${0.45 + flash * 0.4})` : 'rgba(255, 216, 112, 0.24)';
-      ctx.beginPath();
-      ctx.arc(0, 0, ob.r + 5.5, 0, Math.PI * 2);
-      ctx.fill();
-
-      const bg = ctx.createRadialGradient(-4, -5, 2, 0, 0, ob.r);
-      bg.addColorStop(0, '#fffce0');
-      bg.addColorStop(0.6, '#ffd262');
-      bg.addColorStop(1, '#c9781b');
-      ctx.fillStyle = bg;
-      ctx.beginPath();
-      ctx.arc(0, 0, ob.r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.lineWidth = 2.4;
-      ctx.strokeStyle = flash > 0.1 ? '#fff7c4' : '#4A2C2A';
-      ctx.stroke();
-
-      ctx.fillStyle = '#fff7d4';
-      UI.drawStar(ctx, 0, 0, ob.r * 0.48, nowSec * 1.6 + oi);
-      ctx.restore();
-    }
-  }
-
-  // 4. Dual-Mode Aim Trajectory (Quick Vertical Drop + Pull-Down Slingshot Bank-Shot)
+  // 3.4 Pre-compute aim trajectory once so glaze_ring back/front layers & aim line stay in sync
   let lockedTarget = null;
   const isTargetingMode = !!(gameState.activeToolMode || gameState.activeSkillMode);
   const canDropStep = gameState.mode !== 'chef' || gameState.stepsLeft > 0;
-  if (gameState.running && !gameState.over && !isTargetingMode && canDropStep) {
+  const canAim = !!(gameState.running && !gameState.over && !isTargetingMode && canDropStep);
+  let aimCtxData = null;
+  let aimGlazeInfo = null;
+
+  if (canAim) {
     const curMeta = gameState.curMeta || { wildcard: false, golden: false };
     const curIsWild = !!curMeta.wildcard;
     const curIsGold = !curIsWild && !!curMeta.golden;
@@ -807,14 +1283,14 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
     const isSling = !!(aim.active && aim.mode === 'sling' && !aim.cancelled);
     const isAimCancelled = !!(aim.cancelled || (gameState.touchAim.active && gameState.touchAim.cancelled));
     const isTouchAiming = !!((aim.active || gameState.touchAim.active) && !isAimCancelled);
-    const [lr, lg, lb] = theme.lockColor;
     const hasBouncy = Array.isArray(gameState.relics) && gameState.relics.includes('rel_bouncy');
     const hasPrism = Array.isArray(gameState.relics) && gameState.relics.includes('rel_prism');
 
+    let traj = null;
+    let landY = JAR.floorY - curR;
     if (isSling) {
-      // Slingshot Bank-Shot Trajectory Preview (1 bounce default, 2 with rel_bouncy!)
       const gScale = curIsWild ? 1.0 : (curTierDef.material && curTierDef.material.gravityScale) || 1.0;
-      const traj = Physics.predictBankShotTrajectory(
+      traj = Physics.predictBankShotTrajectory(
         curR,
         gameState.dropX,
         JAR.dropY + 4,
@@ -831,7 +1307,85 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
           obstacles: gameState.obstacles
         }
       );
-      if (traj.hitBody && !traj.hitBody.isYarnBall) {
+      if (!curIsWild && !curIsGold && traj.glazeHit && traj.glazeHit.ring) {
+        aimGlazeInfo = {
+          hit: true,
+          x: traj.glazeHit.x,
+          y: traj.glazeHit.y,
+          ringId: traj.glazeHit.ring.id
+        };
+      }
+    } else {
+      landY = predictLandingY(gameState.curTier, gameState.dropX, aimAngle, gameState.entities, curIsWild, gameState.obstacles);
+      if (!curIsWild && !curIsGold && !isAimCancelled && gameState.obstacles && gameState.obstacles.length > 0) {
+        for (let oi = 0; oi < gameState.obstacles.length; oi++) {
+          const ob = gameState.obstacles[oi];
+          if (ob && ob.type === 'glaze_ring') {
+            if (Math.abs(gameState.dropX - ob.x) <= (ob.rx || 38) - 1 && landY > ob.y) {
+              aimGlazeInfo = { hit: true, x: gameState.dropX, y: ob.y, ringId: ob.id };
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    aimCtxData = {
+      curMeta,
+      curIsWild,
+      curIsGold,
+      curTierDef,
+      curR,
+      curShape,
+      aimAngle,
+      aim,
+      isSling,
+      isAimCancelled,
+      isTouchAiming,
+      hasBouncy,
+      hasPrism,
+      traj,
+      landY
+    };
+  }
+
+  // 3.5 Static & Back-Layer Jar Obstacles (Glaze Ring back half, Wood Divider, Butter Bumpers)
+  if (gameState.obstacles && gameState.obstacles.length > 0) {
+    for (let oi = 0; oi < gameState.obstacles.length; oi++) {
+      const ob = gameState.obstacles[oi];
+      if (!ob) continue;
+      if (ob.type === 'glaze_ring') {
+        drawGlazeRingLayer(ctx, ob, 'back', nowSec, !!(aimGlazeInfo && aimGlazeInfo.ringId === ob.id));
+      } else if (ob.type === 'divider') {
+        drawDividerObstacle(ctx, ob);
+      } else if (ob.type === 'bumper') {
+        drawBumperObstacle(ctx, ob, oi, nowSec);
+      }
+    }
+  }
+
+  // 4. Dual-Mode Aim Trajectory (Quick Vertical Drop + Pull-Down Slingshot Bank-Shot)
+  if (aimCtxData) {
+    const {
+      curIsWild,
+      curIsGold,
+      curR,
+      curShape,
+      aimAngle,
+      aim,
+      isSling,
+      isAimCancelled,
+      isTouchAiming,
+      hasBouncy,
+      hasPrism,
+      traj,
+      landY
+    } = aimCtxData;
+    const [lr, lg, lb] = theme.lockColor;
+    const willGlaze = !!(aimGlazeInfo && aimGlazeInfo.hit);
+
+    if (isSling && traj) {
+      if (traj.hitBody && !traj.hitBody.isYarnBall && !(traj.hitBody.frozenHp > 0)) {
         if (curIsWild || traj.hitBody.isWildcard || traj.hitBody.tier === gameState.curTier) {
           lockedTarget = traj.hitBody;
         }
@@ -851,7 +1405,7 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
       ctx.arc(gameState.dropX, JAR.dropY + 4, arcR, Math.PI * 0.16, Math.PI * 0.84);
       ctx.stroke();
 
-      ctx.strokeStyle = hasBounce ? '#8ef5ff' : '#ffd86b';
+      ctx.strokeStyle = hasBounce ? '#8ef5ff' : willGlaze ? '#ffe46b' : '#ffd86b';
       ctx.lineWidth = 4.5;
       ctx.lineCap = 'round';
       const powerSpan = Math.PI * 0.68 * Math.max(0.1, aim.power);
@@ -870,13 +1424,23 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
         ctx.strokeStyle = lockedTarget
           ? hasBounce
             ? 'rgba(130, 246, 255, 0.96)'
+            : willGlaze
+            ? 'rgba(255, 224, 88, 0.96)'
             : `rgba(${lr}, ${lg}, ${lb}, 0.95)`
           : hasBounce
           ? 'rgba(136, 238, 255, 0.85)'
+          : willGlaze
+          ? 'rgba(255, 224, 88, 0.92)'
           : 'rgba(255, 224, 128, 0.85)';
-        ctx.lineWidth = hasBounce ? 3.2 : 2.8;
+        ctx.lineWidth = hasBounce || willGlaze ? 3.2 : 2.8;
         ctx.stroke();
         ctx.setLineDash([]);
+      }
+
+      // Glaze ring crossing sparkle marker on slingshot path
+      if (willGlaze) {
+        ctx.fillStyle = '#fff5b8';
+        UI.drawStar(ctx, aimGlazeInfo.x, aimGlazeInfo.y, 7.5 + Math.sin(nowSec * 12) * 1.4, nowSec * 5);
       }
 
       // Highlight reflection stars at all glass side-wall bounce points
@@ -905,56 +1469,63 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
         traj.endY,
         curR,
         aimAngle,
-        hasBounce ? 'rgba(136, 244, 255, 0.95)' : `rgba(${lr}, ${lg}, ${lb}, 0.9)`,
-        lockedTarget ? 2.4 : 1.7,
-        hasBounce ? 'rgba(136, 244, 255, 0.14)' : `rgba(${lr}, ${lg}, ${lb}, 0.12)`,
+        hasBounce ? 'rgba(136, 244, 255, 0.95)' : willGlaze ? 'rgba(255, 224, 88, 0.95)' : `rgba(${lr}, ${lg}, ${lb}, 0.9)`,
+        lockedTarget || willGlaze ? 2.4 : 1.7,
+        hasBounce ? 'rgba(136, 244, 255, 0.14)' : willGlaze ? 'rgba(255, 224, 88, 0.16)' : `rgba(${lr}, ${lg}, ${lb}, 0.12)`,
         [4, 4]
       );
 
-      // Callout badge for Bank-Shot or Lock-on
-      if (lockedTarget || hasBounce) {
+      // Callout badge for Bank-Shot, Glaze Ring Crossing, or Lock-on
+      if (lockedTarget || hasBounce || willGlaze) {
         const multLabel = bPoints.length >= 2 && hasBouncy ? '×2.8' : hasPrism ? '×2.0' : '×1.5';
-        const tagText = lockedTarget
-          ? hasBounce
-            ? `🎱 ${bPoints.length >= 2 ? '二段弹壁' : '弹壁可合成'} ${multLabel}!`
-            : curIsWild
-            ? '🌈 升阶+1!'
-            : '✦ 可合成!'
-          : bPoints.length >= 2
-          ? '🎱 二段折射'
-          : '🎱 弹壁折射';
-        const tagW = tagText.length * 7.8 + 18;
+        let tagText;
+        if (lockedTarget) {
+          if (hasBounce && willGlaze) tagText = '✨ 穿环弹壁合成!';
+          else if (hasBounce) tagText = `🎱 ${bPoints.length >= 2 ? '二段弹壁' : '弹壁可合成'} ${multLabel}!`;
+          else if (willGlaze) tagText = '✨ 穿环镀金合成!';
+          else if (curIsWild) tagText = '🌈 升阶+1!';
+          else tagText = '✦ 可合成!';
+        } else if (hasBounce && willGlaze) {
+          tagText = '🎱✨ 弹壁+镀金!';
+        } else if (willGlaze) {
+          tagText = '✨ 穿环镀金!';
+        } else {
+          tagText = bPoints.length >= 2 ? '🎱 二段折射' : '🎱 弹壁折射';
+        }
+        const tagW = Math.max(78, tagText.length * 8.2 + 18);
         const tagY = Math.max(JAR.neckY + 20, traj.endY - curR - 14);
         const tagX = Math.max(JAR.left + tagW * 0.5 + 4, Math.min(JAR.right - tagW * 0.5 - 4, traj.endX));
         ctx.save();
-        ctx.fillStyle = hasBounce ? 'rgba(16, 62, 88, 0.92)' : 'rgba(66, 36, 12, 0.9)';
-        ctx.strokeStyle = hasBounce ? '#9cf4ff' : `rgb(${lr}, ${lg}, ${lb})`;
+        ctx.fillStyle = hasBounce ? 'rgba(16, 62, 88, 0.92)' : willGlaze ? 'rgba(110, 58, 10, 0.92)' : 'rgba(66, 36, 12, 0.9)';
+        ctx.strokeStyle = hasBounce ? '#9cf4ff' : willGlaze ? '#ffe26a' : `rgb(${lr}, ${lg}, ${lb})`;
         ctx.lineWidth = 1.5;
         UI.roundRectPath(ctx, tagX - tagW * 0.5, tagY - 10, tagW, 20, 10);
         ctx.fill();
         ctx.stroke();
-        ctx.fillStyle = hasBounce ? '#dcfbff' : '#fff5be';
-        ctx.font = UI.fontStr(10.5, 800);
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(tagText, tagX, tagY);
+        UI.drawFitText(ctx, tagText, tagX, tagY, tagW - 10, 10.5, 8.5, 800, hasBounce ? '#dcfbff' : '#fff5be', 'center');
         ctx.restore();
       }
     } else {
       // Standard Quick Vertical Drop Preview
-      const landY = predictLandingY(gameState.curTier, gameState.dropX, aimAngle, gameState.entities, curIsWild);
       lockedTarget = findAimMergeTarget(gameState, gameState.curTier, gameState.dropX, landY, curIsWild, effectiveMagnetLv);
 
       ctx.save();
       if (isAimCancelled) ctx.globalAlpha = 0.25;
       ctx.beginPath();
-      ctx.setLineDash(lockedTarget ? [7, 4] : [6, 6]);
+      ctx.setLineDash(lockedTarget || willGlaze ? [7, 4] : [6, 6]);
       ctx.moveTo(gameState.dropX, JAR.dropY + curR * 0.9 + 2);
       ctx.lineTo(gameState.dropX, Math.max(JAR.dropY + curR, landY - curR * 0.65));
       if (lockedTarget) {
         const pulse = 0.72 + 0.28 * Math.sin(nowSec * 10);
-        ctx.strokeStyle = curIsWild ? `rgba(255, 168, 224, ${pulse})` : `rgba(${lr}, ${lg}, ${lb}, ${pulse})`;
+        ctx.strokeStyle = curIsWild
+          ? `rgba(255, 168, 224, ${pulse})`
+          : willGlaze
+          ? `rgba(255, 224, 88, ${pulse})`
+          : `rgba(${lr}, ${lg}, ${lb}, ${pulse})`;
         ctx.lineWidth = isTouchAiming ? 3.2 : 2.8;
+      } else if (willGlaze) {
+        ctx.strokeStyle = 'rgba(255, 224, 88, 0.92)';
+        ctx.lineWidth = isTouchAiming ? 3.0 : 2.5;
       } else {
         ctx.strokeStyle = curIsWild
           ? 'rgba(255, 186, 232, 0.72)'
@@ -967,6 +1538,11 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
       }
       ctx.stroke();
       ctx.setLineDash([]);
+
+      if (willGlaze && !isAimCancelled) {
+        ctx.fillStyle = '#fff5b8';
+        UI.drawStar(ctx, aimGlazeInfo.x, aimGlazeInfo.y, 7.2 + Math.sin(nowSec * 12) * 1.4, nowSec * 5);
+      }
       ctx.restore();
 
       if (landY > JAR.dropY + 26 && !isAimCancelled) {
@@ -982,28 +1558,50 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
           landY,
           curR,
           aimAngle,
-          lockedTarget ? `rgba(${lr}, ${lg}, ${lb}, 0.95)` : isTouchAiming ? theme.guideTouch : theme.guideLine,
-          lockedTarget ? 2.2 : 1.5,
-          lockedTarget ? `rgba(${lr}, ${lg}, ${lb}, 0.16)` : `rgba(${lr}, ${lg}, ${lb}, 0.06)`,
+          lockedTarget
+            ? `rgba(${lr}, ${lg}, ${lb}, 0.95)`
+            : willGlaze
+            ? 'rgba(255, 224, 88, 0.95)'
+            : isTouchAiming
+            ? theme.guideTouch
+            : theme.guideLine,
+          lockedTarget || willGlaze ? 2.2 : 1.5,
+          lockedTarget ? `rgba(${lr}, ${lg}, ${lb}, 0.16)` : willGlaze ? 'rgba(255, 224, 88, 0.16)' : `rgba(${lr}, ${lg}, ${lb}, 0.06)`,
           [4, 4]
         );
 
         if (lockedTarget) {
-          const tagText = curIsWild ? '🌈 升阶+1!' : curIsGold || lockedTarget.isGolden ? '✨ 黄金暴击!' : '✦ 可合成!';
+          const tagText = curIsWild
+            ? '🌈 升阶+1!'
+            : willGlaze
+            ? '✨ 穿环镀金合成!'
+            : curIsGold || lockedTarget.isGolden
+            ? '✨ 黄金暴击!'
+            : '✦ 可合成!';
+          const tagW = willGlaze ? 104 : 78;
           const tagY = Math.max(JAR.neckY + 20, landY - curR - 14);
-          const tagX = Math.max(JAR.left + 44, Math.min(JAR.right - 44, gameState.dropX));
+          const tagX = Math.max(JAR.left + tagW * 0.5 + 4, Math.min(JAR.right - tagW * 0.5 - 4, gameState.dropX));
           ctx.save();
-          ctx.fillStyle = curIsWild ? 'rgba(130, 32, 92, 0.9)' : 'rgba(66, 36, 12, 0.9)';
-          ctx.strokeStyle = curIsWild ? '#ffb8e6' : `rgb(${lr}, ${lg}, ${lb})`;
+          ctx.fillStyle = curIsWild ? 'rgba(130, 32, 92, 0.9)' : willGlaze ? 'rgba(110, 58, 10, 0.92)' : 'rgba(66, 36, 12, 0.9)';
+          ctx.strokeStyle = curIsWild ? '#ffb8e6' : willGlaze ? '#ffe26a' : `rgb(${lr}, ${lg}, ${lb})`;
           ctx.lineWidth = 1.5;
-          UI.roundRectPath(ctx, tagX - 38, tagY - 10, 76, 20, 10);
+          UI.roundRectPath(ctx, tagX - tagW * 0.5, tagY - 10, tagW, 20, 10);
           ctx.fill();
           ctx.stroke();
-          ctx.fillStyle = '#fff5be';
-          ctx.font = UI.fontStr(11, 700);
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(tagText, tagX, tagY);
+          UI.drawFitText(ctx, tagText, tagX, tagY, tagW - 8, 10.8, 8.8, 800, '#fff5be', 'center');
+          ctx.restore();
+        } else if (willGlaze) {
+          const tagW = 82;
+          const tagY = Math.max(JAR.dangerY + 26, aimGlazeInfo.y - 24);
+          const tagX = Math.max(JAR.left + tagW * 0.5 + 4, Math.min(JAR.right - tagW * 0.5 - 4, gameState.dropX));
+          ctx.save();
+          ctx.fillStyle = 'rgba(110, 58, 10, 0.92)';
+          ctx.strokeStyle = '#ffe26a';
+          ctx.lineWidth = 1.5;
+          UI.roundRectPath(ctx, tagX - tagW * 0.5, tagY - 9.5, tagW, 19, 9.5);
+          ctx.fill();
+          ctx.stroke();
+          UI.drawFitText(ctx, '✨ 穿环镀金!', tagX, tagY, tagW - 8, 10.5, 8.5, 800, '#fff6c4', 'center');
           ctx.restore();
         }
       }
@@ -1114,22 +1712,24 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
 
   const [lr, lg, lb] = theme.lockColor;
   for (const e of gameState.entities) {
+    const isFrozen = e.frozenHp > 0;
     const isHovered = (gameState.activeToolMode || gameState.activeSkillMode) && gameState.hoveredEntityId === e.id;
     const validTarget =
       isHovered &&
       !e.isYarnBall &&
+      !isFrozen &&
       ((gameState.activeToolMode === 'spoon' && !e.isWildcard && e.tier < 9) ||
         (gameState.activeSkillMode === 'scoop' && !e.isWildcard && e.tier <= 5) ||
         gameState.activeSkillMode === 'swap_1' ||
         (gameState.activeSkillMode === 'swap_2' && e.id !== gameState.swapFirstEntityId));
 
-    const isSouffle = !e.isWildcard && !e.isYarnBall && e.tier === 9;
-    const isVipServable = !e.isWildcard && !e.isYarnBall && vipWantedTiers.has(e.tier);
-    const isQuickServable = !e.isWildcard && !e.isYarnBall && quickWantedTiers.has(e.tier);
+    const isSouffle = !e.isWildcard && !e.isYarnBall && !isFrozen && e.tier === 9;
+    const isVipServable = !e.isWildcard && !e.isYarnBall && !isFrozen && vipWantedTiers.has(e.tier);
+    const isQuickServable = !e.isWildcard && !e.isYarnBall && !isFrozen && quickWantedTiers.has(e.tier);
     const isServable = isSouffle || isVipServable || isQuickServable;
 
     // T3 Matcha Resonance Wave Aura
-    if (e.resonanceTimer > 0) {
+    if (e.resonanceTimer > 0 && !isFrozen) {
       const rp = 0.5 + 0.5 * Math.sin(nowSec * 9);
       ctx.save();
       ctx.strokeStyle = `rgba(166, 232, 120, ${0.35 + rp * 0.35})`;
@@ -1143,7 +1743,7 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
     }
 
     // T6 Caramel Spin Mixer Swirl Arcs
-    if (e.spinBoostTimer > 0) {
+    if (e.spinBoostTimer > 0 && !isFrozen) {
       ctx.save();
       ctx.translate(e.x, e.y);
       ctx.rotate(nowSec * 11 * (e.spinBoostDir || 1));
@@ -1175,8 +1775,8 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
     } else if (e.isWildcard) {
       UI.drawRainbowWildcard(ctx, e.x, e.y, e.r, e.angle, nowSec, 1);
     } else {
-      if (e.isGolden) UI.drawGoldenAura(ctx, e.x, e.y, e.r, nowSec, 1);
-      if (e.bumperCrit && !e.isMeteorShot) {
+      if (e.isGolden && !isFrozen) UI.drawGoldenAura(ctx, e.x, e.y, e.r, nowSec, 1);
+      if (e.bumperCrit && !e.isMeteorShot && !isFrozen) {
         ctx.save();
         ctx.strokeStyle = 'rgba(255, 224, 96, 0.85)';
         ctx.lineWidth = 2.4;
@@ -1196,12 +1796,37 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
         ctx.stroke();
         ctx.restore();
       }
-      drawTierSprite(ctx, sprites, e.tier, e.x, e.y, e.r, e.angle, e.squishAmt, e.squishAngle, 1, e.anim);
-      if (e.isGolden) {
+      drawTierSprite(
+        ctx,
+        sprites,
+        e.tier,
+        e.x,
+        e.y,
+        e.r,
+        e.angle,
+        isFrozen ? e.squishAmt * 0.25 : e.squishAmt,
+        e.squishAngle,
+        1,
+        isFrozen ? null : e.anim
+      );
+      if (e.isGolden && !isFrozen) {
         ctx.save();
         const ga = nowSec * 2.5 + e.id;
         ctx.fillStyle = '#fff5b0';
         UI.drawStar(ctx, e.x + Math.cos(ga) * e.r * 0.88, e.y + Math.sin(ga) * e.r * 0.88, 4.2, nowSec * 5);
+        ctx.restore();
+      }
+      if (isFrozen) {
+        drawFrozenShell(ctx, e, nowSec);
+      } else if (e.frozenFlash > 0) {
+        // Brief frost-break shimmer halo right after thawing
+        const fa = Math.min(1, e.frozenFlash / 0.45);
+        ctx.save();
+        ctx.strokeStyle = `rgba(174, 242, 255, ${fa * 0.9})`;
+        ctx.lineWidth = 3.2;
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, e.r + 4 + (1 - fa) * 8, 0, Math.PI * 2);
+        ctx.stroke();
         ctx.restore();
       }
     }
@@ -1282,8 +1907,21 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
     if (validTarget) {
       const targetCol = gameState.activeSkillMode === 'swap_1' || gameState.activeSkillMode === 'swap_2' ? '#d8b4ff' : '#ffe169';
       drawEntityWorldPolys(ctx, e, targetCol, 3.2);
-    } else if (isHovered && (e.isYarnBall || (gameState.activeSkillMode === 'scoop' && (e.tier > 5 || e.isWildcard)))) {
+    } else if (
+      isHovered &&
+      (e.isYarnBall || isFrozen || (gameState.activeSkillMode === 'scoop' && (e.tier > 5 || e.isWildcard)))
+    ) {
       drawEntityWorldPolys(ctx, e, 'rgba(255, 100, 90, 0.82)', 2.4);
+    }
+  }
+
+  // 5.2 Front-Layer Glaze Ring Rim (drawn AFTER entities so pastries visually pass THROUGH the portal!)
+  if (gameState.obstacles && gameState.obstacles.length > 0) {
+    for (let oi = 0; oi < gameState.obstacles.length; oi++) {
+      const ob = gameState.obstacles[oi];
+      if (ob && ob.type === 'glaze_ring') {
+        drawGlazeRingLayer(ctx, ob, 'front', nowSec, !!(aimGlazeInfo && aimGlazeInfo.ringId === ob.id));
+      }
     }
   }
 
@@ -1306,7 +1944,7 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
   }
 
   for (const e of gameState.entities) {
-    if (e.anim && !e.isWildcard && !e.isYarnBall) {
+    if (e.anim && !e.isWildcard && !e.isYarnBall && !(e.frozenHp > 0)) {
       drawDessertActionFX(ctx, e.x, e.y, e.r, e.tier, e.anim);
     }
   }
@@ -1337,6 +1975,20 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
     ctx.fillStyle = p.color;
     if (p.star) {
       UI.drawStar(ctx, p.x, p.y, p.size * 1.4, p.life * 6);
+    } else if (p.shard) {
+      ctx.translate(p.x, p.y);
+      ctx.rotate(typeof p.rot === 'number' ? p.rot : p.life * 9);
+      const s = p.size;
+      ctx.beginPath();
+      ctx.moveTo(-s * 1.15, 0);
+      ctx.lineTo(0, -s * 0.52);
+      ctx.lineTo(s * 1.2, 0);
+      ctx.lineTo(0, s * 0.52);
+      ctx.closePath();
+      ctx.fill();
+      ctx.lineWidth = 1.0;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+      ctx.stroke();
     } else if (p.crumb) {
       ctx.translate(p.x, p.y);
       ctx.rotate(p.life * 10);
@@ -1349,6 +2001,9 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
     }
     ctx.restore();
   }
+
+  // 6.5 Non-Blocking In-Jar Active Hazard & Boss Affix Badges (visual-only, zero pointer capture)
+  drawInJarHazardBadges(ctx, gameState, nowSec);
 
   // 7. Glass Jar Specular Highlights & Themed Collar
   ctx.save();
@@ -1436,7 +2091,7 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
     const fadeOut = cb.life < 0.28 ? cb.life / 0.28 : 1;
     ctx.save();
     ctx.globalAlpha = Math.max(0, Math.min(1, fadeOut));
-    ctx.translate(JAR.canvasW * 0.5, 140 - elapsed * 10);
+    ctx.translate(JAR.canvasW * 0.5, 156 - elapsed * 8);
     ctx.scale(popIn, popIn);
     ctx.font = UI.fontStr(22, 900);
     ctx.textAlign = 'center';

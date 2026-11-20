@@ -16,6 +16,7 @@ const {
   CASCADE_MULTIPLIERS,
   SHOP_UPGRADES,
   SHIFTS,
+  SHIFT_HAZARDS,
   getShiftConfig,
   MAX_RELIC_SLOTS,
   RELICS,
@@ -210,6 +211,7 @@ function createApp() {
     shiftName: '暮色试营业',
     shiftBadge: '第1幕·试营',
     shiftModifier: null,
+    shiftHazards: [],
     shiftsClearedThisRun: 0,
     shiftRevenue: 0,
     displayShiftRevenue: 0,
@@ -241,6 +243,8 @@ function createApp() {
     dropsMadeThisRun: 0,
     soufflesMadeThisRun: 0,
     yarnBrokenThisRun: 0,
+    iceShatteredThisRun: 0,
+    glazeHitsThisRun: 0,
     servesCompleted: 0,
     bankShotsLanded: 0,
     serveCascadeTimer: 0,
@@ -618,11 +622,17 @@ function createApp() {
     getRelicDef(id) {
       return RELICS.find((r) => r.id === id) || null;
     },
+    hasShiftHazard(id) {
+      return Array.isArray(gameState.shiftHazards) && gameState.shiftHazards.includes(id);
+    },
+    getShiftHazardDefs() {
+      return (gameState.shiftHazards || []).map((id) => SHIFT_HAZARDS[id]).filter(Boolean);
+    },
     getDeckModCount(id) {
       return (gameState.deckMods && gameState.deckMods[id]) || 0;
     },
     hasSouffleAura() {
-      return gameState.entities.some((e) => !e.merged && !e.isWildcard && !e.isYarnBall && e.tier === 9);
+      return gameState.entities.some((e) => !e.merged && !e.isWildcard && !e.isYarnBall && !(e.frozenHp > 0) && e.tier === 9);
     },
     getSouffleAuraMult() {
       return this.hasSouffleAura() ? 2.0 : 1.0;
@@ -632,7 +642,7 @@ function createApp() {
       let highCount = 0;
       for (let i = 0; i < gameState.entities.length; i++) {
         const e = gameState.entities[i];
-        if (!e.merged && !e.isWildcard && !e.isYarnBall && e.tier >= 6) highCount++;
+        if (!e.merged && !e.isWildcard && !e.isYarnBall && !(e.frozenHp > 0) && e.tier >= 6) highCount++;
       }
       return highCount > 0 ? Math.pow(1.35, highCount) : 1.0;
     },
@@ -861,7 +871,7 @@ function createApp() {
       spawnPopup(JAR.canvasW / 2, 220, `🎁 摇+1·勺+1·招牌技满能 · +${gained}⭐!`, '#ffe57e', 17);
     } else if (id === 'cleanse') {
       const smalls = gameState.entities
-        .filter((e) => !e.isWildcard && !e.isYarnBall && e.tier <= 2)
+        .filter((e) => !e.isWildcard && !e.isYarnBall && !(e.frozenHp > 0) && e.tier <= 2)
         .sort((a, b) => a.y - b.y)
         .slice(0, 4);
       const removeIds = new Set(smalls.map((e) => e.id));
@@ -927,7 +937,7 @@ function createApp() {
     const kind = rawKind === 'quick' && app.hasRelic('rel_double_vip') ? 'vip' : rawKind;
     const isJudgeRush = !!opts.isJudgeRush;
     const doubleFresh = !!opts.doubleFresh;
-    const isFastFresh = gameState.mode === 'chef' && gameState.shiftModifier === 'fast_fresh';
+    const isFastFresh = gameState.mode === 'chef' && app.hasShiftHazard('fast_fresh');
     const maxMade = Math.max(4, gameState.maxTierRun);
     const doneCount = gameState.ordersCompleted;
     const activePatron = app.activePatron;
@@ -1009,7 +1019,7 @@ function createApp() {
   }
 
   function findServableMatch(entity) {
-    if (!entity || entity.merged || entity.isWildcard || entity.isYarnBall) return null;
+    if (!entity || entity.merged || entity.isWildcard || entity.isYarnBall || entity.frozenHp > 0) return null;
     if (entity.tier === 9) {
       return { kind: 'souffle', order: null, slotIdx: -1 };
     }
@@ -1095,7 +1105,7 @@ function createApp() {
   function triggerTradeUpRelic() {
     if (!app.hasRelic('rel_tradeup')) return;
     const candidates = gameState.entities.filter(
-      (e) => !e.merged && !e.isWildcard && !e.isYarnBall && e.tier < 8
+      (e) => !e.merged && !e.isWildcard && !e.isYarnBall && !(e.frozenHp > 0) && e.tier < 8
     );
     if (candidates.length === 0) return;
     const minTier = Math.min(...candidates.map((e) => e.tier));
@@ -1106,7 +1116,7 @@ function createApp() {
     const def = TIERS[nextTier - 1];
     pick.tier = nextTier;
     Physics.configureBodyShape(pick, getShapeDef(nextTier), def.radius, def.material);
-    Physics.clampBodyInsideJarPositional(pick, JAR);
+    Physics.clampBodyInsideJarPositional(pick, JAR, gameState.obstacles);
     pick.squishAmt = 0.24;
     pick.squishVel = 0;
     unlockTier(nextTier);
@@ -1176,10 +1186,10 @@ function createApp() {
       audio.playSupernova();
       platform.vibrateShort('heavy');
 
-      // Cleanse all T1~T2 treats in jar as celebration garnish!
+      // Cleanse all T1~T2 treats in jar as celebration garnish (excluding frozen treats)!
       let cleansed = 0;
       gameState.entities = gameState.entities.filter((other) => {
-        if (!other.isWildcard && !other.isYarnBall && other.tier <= 2) {
+        if (!other.isWildcard && !other.isYarnBall && !(other.frozenHp > 0) && other.tier <= 2) {
           cleansed++;
           spawnSparkleBurst(other.x, other.y, '#ffe899', 10);
           return false;
@@ -1244,10 +1254,11 @@ function createApp() {
         addCoins(8);
         coinNote = ' · +8🪙';
       }
-      // Shift 5 Judge Rush Order step reward (+2 steps!)
+      // Shift 5 Judge Rush Order step reward (+2 steps + cancel end-of-steps settle!)
       let stepNote = '';
       if (gameState.mode === 'chef' && ord.bonusSteps > 0 && isFresh) {
         gameState.stepsLeft += ord.bonusSteps;
+        gameState.shiftResolveDelay = 0;
         stepNote = ` · +${ord.bonusSteps}步!`;
         spawnPopup(JAR.canvasW * 0.5, 130, `🏅 评委赞赏! 步数 +${ord.bonusSteps}`, '#ffe570', 18);
       }
@@ -1370,14 +1381,118 @@ function createApp() {
   // =========================================================================
   // 4.0 Phase 2: 5-Shift Progression, Carry-Over & Inter-Shift Prep Shop
   // =========================================================================
+  const ENDLESS_HAZARD_PAIRS = [
+    ['glaze_ring', 'divider'],
+    ['bumpers', 'fast_fresh'],
+    ['glaze_ring', 'bumpers'],
+    ['divider', 'fast_fresh'],
+    ['glaze_ring', 'fast_fresh'],
+    ['divider', 'bumpers']
+  ];
+
+  function pickHazardsForShift(shiftNum, forcedHazards = null) {
+    if (forcedHazards !== null && forcedHazards !== undefined) {
+      let rawList = [];
+      if (Array.isArray(forcedHazards)) {
+        rawList = forcedHazards;
+      } else if (typeof forcedHazards === 'string') {
+        rawList = [forcedHazards];
+      } else if (typeof forcedHazards === 'object') {
+        if (Array.isArray(forcedHazards.forceHazards)) rawList = forcedHazards.forceHazards;
+        else if (Array.isArray(forcedHazards.forceHazard)) rawList = forcedHazards.forceHazard;
+        else if (typeof forcedHazards.forceHazard === 'string') rawList = [forcedHazards.forceHazard];
+      }
+      const unique = [];
+      for (const id of rawList) {
+        if (SHIFT_HAZARDS[id] && !unique.includes(id)) unique.push(id);
+      }
+      return unique;
+    }
+
+    const n = Math.max(1, Math.floor(Number(shiftNum) || 1));
+    if (n === 1) return [];
+    if (n === 2) return ['glaze_ring'];
+    if (n === 3) {
+      const pool = ['divider', 'bumpers', 'fast_fresh'];
+      return [pool[Math.floor(Math.random() * pool.length)]];
+    }
+    if (n === 4) {
+      const pool = ['glaze_ring', 'bumpers'];
+      return [pool[Math.floor(Math.random() * pool.length)]];
+    }
+    if (n === 5) {
+      const pool = ['glaze_ring', 'divider', 'bumpers'];
+      return [pool[Math.floor(Math.random() * pool.length)]];
+    }
+    const pair = ENDLESS_HAZARD_PAIRS[(n - 6) % ENDLESS_HAZARD_PAIRS.length];
+    return [...pair];
+  }
+
   function syncObstaclesForShift() {
+    const prevRing = (gameState.obstacles || []).find((o) => o && o.type === 'glaze_ring') || null;
     const obs = [];
-    if (app.hasRelic('rel_bumpers')) {
+    const hasStageGlaze = app.hasShiftHazard('glaze_ring');
+    const hasStageDivider = app.hasShiftHazard('divider');
+    const hasStageBumpers = app.hasShiftHazard('bumpers');
+    const hasRelicBumpers = app.hasRelic('rel_bumpers');
+
+    if (hasStageGlaze) {
+      obs.push({
+        id: 'glaze_ring',
+        type: 'glaze_ring',
+        x: prevRing ? prevRing.x : 220,
+        y: 185,
+        rx: 38,
+        ry: 13,
+        centerX: 220,
+        patrolAmp: 125,
+        speed: 0.95,
+        phase: prevRing ? prevRing.phase : 0,
+        hitFlash: prevRing ? prevRing.hitFlash : 0
+      });
+    }
+
+    if (hasStageDivider) {
+      obs.push({
+        id: 'divider_center',
+        type: 'divider',
+        x: 220,
+        w: 14,
+        halfW: 7,
+        h: 155,
+        topY: 337,
+        capY: 344,
+        bottomY: 492,
+        friction: 0.32,
+        restitution: 0.28,
+        hitFlash: 0
+      });
+    }
+
+    if (hasStageBumpers && hasRelicBumpers) {
+      const hasCenterClear = !hasStageGlaze || !hasStageDivider;
+      const primaryTip = hasCenterClear ? 65 : 85;
       obs.push(
-        { id: 'bumper_L', type: 'bumper', x: 102, y: 265, r: 15, restitution: 1.15, hitFlash: 0 },
-        { id: 'bumper_R', type: 'bumper', x: 338, y: 265, r: 15, restitution: 1.15, hitFlash: 0 }
+        { id: 'bumper_L', type: 'bumper', source: 'synergy', x: 102, y: 265, r: 16, restitution: 1.24, tipBase: primaryTip, grantsCrit: true, hitFlash: 0 },
+        { id: 'bumper_R', type: 'bumper', source: 'synergy', x: 338, y: 265, r: 16, restitution: 1.24, tipBase: primaryTip, grantsCrit: true, hitFlash: 0 }
+      );
+      if (!hasStageGlaze) {
+        obs.push({ id: 'bumper_C', type: 'bumper', source: 'synergy', x: 220, y: 224, r: 14, restitution: 1.22, tipBase: 65, grantsCrit: true, hitFlash: 0 });
+      } else if (!hasStageDivider) {
+        obs.push({ id: 'bumper_C', type: 'bumper', source: 'synergy', x: 220, y: 304, r: 14, restitution: 1.22, tipBase: 65, grantsCrit: true, hitFlash: 0 });
+      }
+    } else if (hasStageBumpers) {
+      obs.push(
+        { id: 'bumper_L', type: 'bumper', source: 'stage', x: 102, y: 265, r: 15, restitution: 1.15, tipBase: 40, grantsCrit: false, hitFlash: 0 },
+        { id: 'bumper_R', type: 'bumper', source: 'stage', x: 338, y: 265, r: 15, restitution: 1.15, tipBase: 40, grantsCrit: false, hitFlash: 0 }
+      );
+    } else if (hasRelicBumpers) {
+      obs.push(
+        { id: 'bumper_L', type: 'bumper', source: 'relic', x: 102, y: 265, r: 15, restitution: 1.15, tipBase: 45, grantsCrit: true, hitFlash: 0 },
+        { id: 'bumper_R', type: 'bumper', source: 'relic', x: 338, y: 265, r: 15, restitution: 1.15, tipBase: 45, grantsCrit: true, hitFlash: 0 }
       );
     }
+
     gameState.obstacles = obs;
   }
 
@@ -1419,12 +1534,15 @@ function createApp() {
 
   function openPrepShop(shiftSummary) {
     const { relicOffers, modOffers } = rollPrepShopOffers();
+    const nextShiftNum = gameState.shift + 1;
+    const nextHazards = pickHazardsForShift(nextShiftNum);
     gameState.prepShop = {
       shiftSummary,
       relicOffers,
       modOffers,
       rerollCost: 10,
-      nextShiftNum: gameState.shift + 1
+      nextShiftNum,
+      nextHazards
     };
     gameState.paused = true;
     app.openModal('prep_shop');
@@ -1577,7 +1695,7 @@ function createApp() {
     app.showToast('🔄 已刷新整备间货架！');
   }
 
-  function beginShift(shiftNum, isCarryOver = false, carriedOverride = null) {
+  function beginShift(shiftNum, isCarryOver = false, carriedOverride = null, forcedHazards = null) {
     const cfg = getShiftConfig(shiftNum);
     const carried = carriedOverride || (isCarryOver ? computeCarryOverPlan().carried : []);
 
@@ -1585,6 +1703,7 @@ function createApp() {
     gameState.shiftName = cfg.name;
     gameState.shiftBadge = cfg.badge;
     gameState.shiftModifier = cfg.modifier || null;
+    gameState.shiftHazards = pickHazardsForShift(cfg.shift, forcedHazards);
     gameState.shiftRevenue = 0;
     gameState.displayShiftRevenue = 0;
     gameState.shiftTarget = cfg.target;
@@ -1610,32 +1729,84 @@ function createApp() {
     gameState.popups = [];
     syncObstaclesForShift();
 
+    let frozenSeeded = 0;
     if (!isCarryOver || cfg.shift === 1) {
       spawnStarterBoard('chef');
     } else {
-      const slotsX = [126, 220, 314, 174, 266];
-      let slotIdx = 0;
-      for (const c of carried) {
-        const cx = slotsX[slotIdx % slotsX.length];
-        slotIdx++;
-        const r = TIERS[c.tier - 1].radius;
-        createEntity(c.tier, cx, JAR.floorY - r - 8, 0, 0, false, 0, 0, {
-          preSettled: true,
-          golden: !!c.isGolden
-        });
+      // Fresh starter ingredients tailored to each shift (including frozen Boss pieces!)
+      const extraSpecs =
+        cfg.shift === 2
+          ? [{ tier: 2 }, { tier: 3 }]
+          : cfg.shift === 3
+          ? [{ tier: 3, frozenHp: 1 }, { tier: 4, frozenHp: 1 }, { tier: 2 }]
+          : cfg.shift === 4
+          ? [{ tier: 4 }, { tier: 2 }]
+          : [{ tier: 4, frozenHp: 1 }, { tier: 5, frozenHp: 1 }, { tier: 3 }];
+      frozenSeeded = extraSpecs.filter((s) => s.frozenHp > 0).length;
+
+      const hasDivider = app.hasShiftHazard('divider');
+      if (hasDivider) {
+        // Divider-safe split-bay placement: strictly keep every treat inside Left [30,213] or Right [227,410]
+        let leftTopY = JAR.floorY - 6;
+        let rightTopY = JAR.floorY - 6;
+        const placeInChamber = (tier, chamber, metaOpts) => {
+          const r = TIERS[tier - 1].radius;
+          let cx;
+          let cy;
+          if (chamber === 'left') {
+            cx = Math.max(JAR.left + r + 5, Math.min(213 - r - 5, 122));
+            cy = Math.max(JAR.neckY + r + 28, leftTopY - r - 5);
+            leftTopY = cy - r - 4;
+          } else {
+            cx = Math.max(227 + r + 5, Math.min(JAR.right - r - 5, 318));
+            cy = Math.max(JAR.neckY + r + 28, rightTopY - r - 5);
+            rightTopY = cy - r - 4;
+          }
+          createEntity(tier, cx, cy, 0, 0, false, 0, 0, {
+            preSettled: true,
+            preSettledAge: cy < JAR.dangerY + r + 18 ? 0.35 : 1.0,
+            ...metaOpts
+          });
+        };
+
+        for (let ci = 0; ci < carried.length; ci++) {
+          const c = carried[ci];
+          placeInChamber(c.tier, ci % 2 === 0 ? 'left' : 'right', { golden: !!c.isGolden });
+        }
+        const frozenExtras = extraSpecs.filter((s) => s.frozenHp > 0);
+        const normalExtras = extraSpecs.filter((s) => !(s.frozenHp > 0));
+        for (let fi = 0; fi < frozenExtras.length; fi++) {
+          const fs = frozenExtras[fi];
+          placeInChamber(fs.tier, fi % 2 === 0 ? 'left' : 'right', { frozenHp: fs.frozenHp });
+        }
+        for (let ni = 0; ni < normalExtras.length; ni++) {
+          const ns = normalExtras[ni];
+          placeInChamber(ns.tier, leftTopY >= rightTopY ? 'left' : 'right', {});
+        }
+      } else {
+        const slotsX = [118, 322, 176, 264, 220];
+        let slotIdx = 0;
+        for (const c of carried) {
+          const cx = slotsX[slotIdx % slotsX.length];
+          slotIdx++;
+          const r = TIERS[c.tier - 1].radius;
+          createEntity(c.tier, cx, JAR.floorY - r - 8, 0, 0, false, 0, 0, {
+            preSettled: true,
+            golden: !!c.isGolden
+          });
+        }
+        for (const spec of extraSpecs) {
+          const cx = slotsX[slotIdx % slotsX.length];
+          slotIdx++;
+          const r = TIERS[spec.tier - 1].radius;
+          const baseOffset = spec.frozenHp > 0 ? 58 : 78;
+          createEntity(spec.tier, cx, JAR.floorY - r - baseOffset - slotIdx * 6, 0, 0, false, 0, 0, {
+            preSettled: true,
+            frozenHp: spec.frozenHp || 0
+          });
+        }
       }
-      // Fresh starter ingredients tailored to each shift
-      const extras = cfg.shift === 2 ? [2, 3] : cfg.shift === 3 ? [3, 3, 2] : cfg.shift === 4 ? [4, 2] : [3, 4];
-      for (const t of extras) {
-        const cx = slotsX[slotIdx % slotsX.length];
-        slotIdx++;
-        const r = TIERS[t - 1].radius;
-        createEntity(t, cx, JAR.floorY - r - 72 - slotIdx * 8, 0, 0, false, 0, 0, { preSettled: true });
-      }
-      // Shift 2 Golden Breeze: first treat in hand guaranteed golden!
-      if (cfg.modifier === 'golden_breeze' && gameState.curMeta && !gameState.curMeta.wildcard) {
-        gameState.curMeta.golden = true;
-      }
+
       // Shift 4 Midnight Cat Party: starts with a mischievous Yarn Ball (+¥750 & +10🪙)!
       if (cfg.modifier === 'party_events') {
         createYarnBallEntity(220, JAR.neckY + 56);
@@ -1652,9 +1823,25 @@ function createApp() {
 
     const activePatron = app.activePatron;
     if (cfg.shift > 1) {
-      showComboBanner(`🌙 第 ${cfg.shift} 幕 · ${cfg.name}`, `目标 ¥${cfg.target} · 步数 ${gameState.stepsMax}`, '#ffe570');
-      setPatronSpeech(activePatron, cfg.desc, 5.2);
-      app.showToast(`🚀 第 ${cfg.shift} 幕【${cfg.name}】开业！目标 ¥${cfg.target}`);
+      const hazDefs = app.getShiftHazardDefs();
+      const hazBadges = hazDefs.map((h) => h.badge);
+      if (frozenSeeded > 0) hazBadges.push(`❄️冰封×${frozenSeeded}`);
+      if (cfg.modifier === 'grand_prix') hazBadges.push('🏅评委急单');
+      const hazSummary = hazBadges.length > 0 ? ` · ${hazBadges.join(' · ')}` : '';
+      showComboBanner(
+        `🌙 第 ${cfg.shift} 幕 · ${cfg.name}`,
+        `目标 ¥${cfg.target} · 步数 ${gameState.stepsMax}${hazSummary}`,
+        '#ffe570'
+      );
+      const speechNote = hazDefs.length > 0
+        ? `本幕机关【${hazDefs.map((h) => h.icon + h.name).join(' + ')}】！${cfg.desc}`
+        : cfg.desc;
+      setPatronSpeech(activePatron, speechNote, 5.2);
+      app.showToast(
+        hazBadges.length > 0
+          ? `🚀 第${cfg.shift}幕【${cfg.name}】开业！${hazBadges.join(' · ')}`
+          : `🚀 第${cfg.shift}幕【${cfg.name}】开业！目标 ¥${cfg.target}`
+      );
     }
   }
 
@@ -1662,9 +1849,10 @@ function createApp() {
     const shop = gameState.prepShop;
     if (!shop) return;
     const carried = shop.shiftSummary ? shop.shiftSummary.carried : null;
+    const nextHazards = Array.isArray(shop.nextHazards) ? shop.nextHazards : null;
     audio.ensureCtx();
     audio.playStartCafe();
-    beginShift(shop.nextShiftNum, true, carried);
+    beginShift(shop.nextShiftNum, true, carried, nextHazards);
   }
 
   function enterEndlessOvertimeFn() {
@@ -1745,7 +1933,7 @@ function createApp() {
       anim: null
     };
     Physics.configureBodyShape(entity, shapeDef, eqR, { friction: 0.34, restitution: 0.42 });
-    Physics.clampBodyInsideJarPositional(entity, JAR);
+    Physics.clampBodyInsideJarPositional(entity, JAR, gameState.obstacles);
     gameState.entities.push(entity);
     return entity;
   }
@@ -1869,6 +2057,57 @@ function createApp() {
     return brokenCount;
   }
 
+  function spawnIceShatterParticles(x, y, r = 30) {
+    const colors = ['#e8fcff', '#a4e8ff', '#62c4f8', '#ffffff'];
+    for (let i = 0; i < 18; i++) {
+      const ang = (Math.PI * 2 * i) / 18 + (Math.random() - 0.5) * 0.35;
+      const spd = 90 + Math.random() * 170;
+      gameState.particles.push({
+        x: x + Math.cos(ang) * r * 0.45,
+        y: y + Math.sin(ang) * r * 0.45,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd - 55,
+        size: 3.6 + Math.random() * 3.8,
+        color: colors[i % colors.length],
+        life: 0.46 + Math.random() * 0.32,
+        maxLife: 0.78,
+        star: false,
+        crumb: false,
+        shard: true,
+        rot: Math.random() * Math.PI * 2,
+        vrot: (Math.random() - 0.5) * 14
+      });
+    }
+    spawnSparkleBurst(x, y, '#b8f2ff', 6);
+  }
+
+  function thawNearbyFrozenEntities(mx, my, range = 110, allJar = false) {
+    let thawedCount = 0;
+    for (let i = 0; i < gameState.entities.length; i++) {
+      const e = gameState.entities[i];
+      if (!e || e.merged || !(e.frozenHp > 0)) continue;
+      if (!allJar && Math.hypot(e.x - mx, e.y - my) > range) continue;
+      e.frozenHp = Math.max(0, e.frozenHp - 1);
+      if (e.frozenHp === 0) {
+        thawedCount++;
+        e.frozenFlash = 0.45;
+        e.vy = Math.min(e.vy, -85);
+        e.vx += (Math.random() - 0.5) * 90;
+        e.vr += (Math.random() - 0.5) * 4;
+        gameState.iceShatteredThisRun = (gameState.iceShatteredThisRun || 0) + 1;
+        audio.playIceShatter();
+        platform.vibrateShort('light');
+        const pts = Math.round(120 * app.getFeverMultiplier() * app.getGlobalRevenueMult());
+        addScore(pts);
+        spawnIceShatterParticles(e.x, e.y, e.r);
+        spawnShockwave(e.x, e.y, e.r * 2.2 + 24, '#a8ecff', 3.6);
+        spawnPopup(e.x, e.y - e.r * 0.55, `❄️ 破冰赏! +¥${pts}`, '#aef2ff', 16.5);
+        notifyTreatSynthesized(e.tier, e);
+      }
+    }
+    return thawedCount;
+  }
+
   function triggerRushEmergencyGust() {
     if (gameState.rushGustCooldown > 0 || gameState.entities.length === 0) return;
     const sorted = [...gameState.entities].sort((a, b) => a.aabbMinY - b.aabbMinY);
@@ -1938,7 +2177,12 @@ function createApp() {
       }
       spawnSparkleBurst(JAR.canvasW / 2, 320, '#ffd85d', 24);
       damageNearbyYarnBalls(JAR.canvasW / 2, JAR.canvasH / 2, 0, true);
-      app.showToast('🔔 叮铃！玻璃罐轻轻摇晃起来了！');
+      const thawed = thawNearbyFrozenEntities(JAR.canvasW / 2, JAR.canvasH / 2, 0, true);
+      app.showToast(
+        thawed > 0
+          ? `❄️ 摇一摇震碎了 ${thawed} 颗冰霜！破冰赏已到账！`
+          : '🔔 叮铃！玻璃罐轻轻摇晃起来了！'
+      );
       return;
     }
 
@@ -1967,9 +2211,9 @@ function createApp() {
       gameState.activeSkillMode = 'scoop';
       app.showToast('🥄 点击罐内任意 1~5 阶甜品，捞回罐口并引发抽底雪崩！');
     } else if (sk.id === 'swap') {
-      const swappable = gameState.entities.filter((e) => !e.merged && !e.isYarnBall);
+      const swappable = gameState.entities.filter((e) => !e.merged && !e.isYarnBall && !(e.frozenHp > 0));
       if (swappable.length < 2) {
-        app.showToast('🌙 罐内至少需要 2 颗甜品才能发动【星月移形】哦～');
+        app.showToast('🌙 罐内至少需要 2 颗未冰封甜品才能发动【星月移形】哦～');
         return;
       }
       gameState.activeSkillMode = 'swap_1';
@@ -2093,11 +2337,14 @@ function createApp() {
       tier,
       isWildcard,
       isGolden,
+      frozenHp: !isWildcard ? Math.max(0, Math.floor(meta.frozenHp || 0)) : 0,
+      frozenFlash: 0,
       isBankLaunched: !!meta.isBankLaunched,
       isMeteorShot: !!meta.isMeteorShot,
       wallBounces: 0,
       agedStacks: 0,
       bumperCrit: false,
+      bumperHits: 0,
       resonanceTimer: 0,
       spinBoostTimer: 0,
       spinBoostDir: 1,
@@ -2115,7 +2362,7 @@ function createApp() {
       squishAmt: bornFromMerge ? 0.25 : 0,
       squishVel: 0,
       squishAngle: bornFromMerge ? Math.PI * 0.5 : 0,
-      age: meta.preSettled ? 1.0 : 0,
+      age: typeof meta.preSettledAge === 'number' ? meta.preSettledAge : meta.preSettled ? 1.0 : 0,
       dangerTime: 0,
       inContact: false,
       merged: false,
@@ -2127,7 +2374,7 @@ function createApp() {
     };
     Physics.configureBodyShape(entity, shapeDef, eqR, mat);
     if (bornFromMerge || meta.preSettled) {
-      Physics.clampBodyInsideJarPositional(entity, JAR);
+      Physics.clampBodyInsideJarPositional(entity, JAR, gameState.obstacles);
     }
     gameState.entities.push(entity);
     if (!isWildcard) unlockTier(tier);
@@ -2178,6 +2425,16 @@ function createApp() {
     gameState.dropsMadeThisRun++;
     audio.playDrop(curMeta.wildcard, curMeta.golden || isMeteor);
 
+    // Decay freshSteps on existing Dual-Table Orders BEFORE spawning a step-6 Judge Rush Order
+    // so newly spawned Judge Rush Orders begin with their full 4-step fresh window!
+    if (gameState.orders && gameState.orders.length > 0) {
+      for (const ord of gameState.orders) {
+        if (ord && !ord.completed && ord.freshSteps > 0) {
+          ord.freshSteps = Math.max(0, ord.freshSteps - 1);
+        }
+      }
+    }
+
     // 4.0 Shift Step Budget (chef mode)
     if (gameState.mode === 'chef') {
       gameState.stepsLeft = Math.max(0, gameState.stepsLeft - 1);
@@ -2205,7 +2462,7 @@ function createApp() {
     // Relic: rel_aged — servable treats held in jar age +1 stack (+30% per stack, max 5)
     if (app.hasRelic('rel_aged')) {
       for (const e of gameState.entities) {
-        if (e.id === dropped.id || e.merged || e.isWildcard || e.isYarnBall || e.tier === 9) continue;
+        if (e.id === dropped.id || e.merged || e.isWildcard || e.isYarnBall || e.frozenHp > 0 || e.tier === 9) continue;
         if (findServableMatch(e)) {
           e.agedStacks = Math.min(5, (e.agedStacks || 0) + 1);
         }
@@ -2225,15 +2482,6 @@ function createApp() {
         }
         spawnSparkleBurst(JAR.canvasW * 0.5, 290, '#d6b2ff', 24);
         showComboBanner('🛸 月光反重力洗牌!', '1.3 秒重力倒置 · 期间全合成 ×2.2!', '#dfc2ff');
-      }
-    }
-
-    // Decay freshSteps on active Dual-Table Orders
-    if (gameState.orders && gameState.orders.length > 0) {
-      for (const ord of gameState.orders) {
-        if (ord && !ord.completed && ord.freshSteps > 0) {
-          ord.freshSteps = Math.max(0, ord.freshSteps - 1);
-        }
       }
     }
 
@@ -2380,7 +2628,7 @@ function createApp() {
     if (!mb || (!isEcho && mb.merged)) return 0;
     const victims = gameState.entities
       .filter((other) => {
-        if (other.id === mb.id || other.merged || other.isWildcard || other.isYarnBall) return false;
+        if (other.id === mb.id || other.merged || other.isWildcard || other.isYarnBall || other.frozenHp > 0) return false;
         if (other.tier > 2) return false;
         const dy = other.y - mb.y;
         const dist = Math.hypot(other.x - mb.x, dy);
@@ -2427,7 +2675,7 @@ function createApp() {
       const maxCount = hasLem ? 4 : 2;
       const perPts = hasLem ? 90 : 55;
       const targets = gameState.entities
-        .filter((e) => e.id !== born.id && !e.merged && !e.isWildcard && !e.isYarnBall && e.tier <= maxTierTarget)
+        .filter((e) => e.id !== born.id && !e.merged && !e.isWildcard && !e.isYarnBall && !(e.frozenHp > 0) && e.tier <= maxTierTarget)
         .map((e) => ({ e, d: Math.hypot(e.x - mx, e.y - my) }))
         .filter((it) => it.d <= range + eRadiusSafe(it.e))
         .sort((a, b) => a.d - b.d)
@@ -2534,22 +2782,43 @@ function createApp() {
       globalResonance,
       obstacles: gameState.obstacles
     });
-    const { mergePairs, impacts, wallBounces, meteorHits, bumperHits, debugContacts, magnetLinks } = result;
+    const { mergePairs, impacts, wallBounces, meteorHits, bumperHits, glazeHits, debugContacts, magnetLinks } = result;
     gameState.lastDebugContacts = debugContacts;
     gameState.magnetLinks = magnetLinks || [];
 
-    // Butter Bumper Pinball hits (rel_bumpers)
+    // Caramel Glaze Ring pass-through gilding hits
+    if (glazeHits && glazeHits.length > 0) {
+      for (const gh of glazeHits) {
+        if (gh.ring) gh.ring.hitFlash = 0.45;
+        gameState.glazeHitsThisRun = (gameState.glazeHitsThisRun || 0) + 1;
+        audio.playGlazeRing();
+        platform.vibrateShort('light');
+        spawnSparkleBurst(gh.x, gh.y, '#ffe47a', 18);
+        spawnShockwave(gh.x, gh.y, 58, '#ffe066', 3.2);
+        spawnPopup(gh.x, gh.y - 16, '✨ 星环镀金!', '#ffe878', 15);
+      }
+    }
+
+    // Butter Bumper Pinball hits (stage hazard / rel_bumpers / synergy)
     if (bumperHits && bumperHits.length > 0) {
       for (const bh of bumperHits) {
         if (bh.bumper) bh.bumper.hitFlash = 0.36;
-        if (bh.body) bh.body.bumperCrit = true;
+        const grantsCrit = !!(bh.bumper && bh.bumper.grantsCrit);
+        if (bh.body) {
+          bh.body.bumperHits = (bh.body.bumperHits || 0) + 1;
+          if (grantsCrit && !(bh.body.frozenHp > 0)) {
+            bh.body.bumperCrit = true;
+          }
+        }
         audio.playBumperHit();
         platform.vibrateShort('light');
-        const tip = Math.round(45 * app.getGlobalRevenueMult());
+        const baseTip = (bh.bumper && bh.bumper.tipBase) || 40;
+        const tip = Math.round(baseTip * app.getGlobalRevenueMult());
         addScore(tip);
         spawnSparkleBurst(bh.x, bh.y, '#ffe47a', 10);
         spawnShockwave(bh.x, bh.y, 40, '#ffd86b', 2.6);
-        spawnPopup(bh.x, bh.y - 16, `🧈 +¥${tip} 暴击蓄能!`, '#ffe588', 13);
+        const popTxt = grantsCrit ? `🧈 +¥${tip} 暴击蓄能!` : `🧈 +¥${tip} 弹柱小费!`;
+        spawnPopup(bh.x, bh.y - 16, popTxt, '#ffe588', 13);
       }
     }
 
@@ -2577,13 +2846,18 @@ function createApp() {
         spawnSparkleBurst(mh.x, mh.y, '#ff9852', 24);
         spawnShockwave(mh.x, mh.y, 128, '#ff9852', 4.4);
         damageNearbyYarnBalls(mh.x, mh.y, 125, false);
+        // Thaw frozen treats within 120px BEFORE upgrading direct hit target!
+        thawNearbyFrozenEntities(mh.x, mh.y, 120, false);
+        if (tgt.frozenHp > 0) {
+          thawNearbyFrozenEntities(tgt.x, tgt.y, 120, false);
+        }
         gameState.screenShake = Math.max(gameState.screenShake, 5.0);
         if (tgt.tier < 9) {
           const nextTier = tgt.tier + 1;
           const def = TIERS[nextTier - 1];
           tgt.tier = nextTier;
           Physics.configureBodyShape(tgt, getShapeDef(nextTier), def.radius, def.material);
-          Physics.clampBodyInsideJarPositional(tgt, JAR);
+          Physics.clampBodyInsideJarPositional(tgt, JAR, gameState.obstacles);
           tgt.squishAmt = 0.26;
           tgt.squishVel = 0;
           const pts = Math.round(def.points * 1.5 * app.getFeverMultiplier() * app.getGlobalRevenueMult());
@@ -2776,6 +3050,7 @@ function createApp() {
         }
 
         damageNearbyYarnBalls(mx, my, isMeteorMerge ? 135 : 95, false);
+        thawNearbyFrozenEntities(mx, my, isMeteorMerge ? 120 : 110, false);
 
         if (isTwinWild) {
           const born = createEntity(5, mx, my, mvx, mvy - 30, true, 0, 0, { golden: true });
@@ -2952,7 +3227,7 @@ function createApp() {
           showComboBanner('👑 星冠超新星!!', `+${pts} · 净化罐内小甜点`, '#ffe570');
           app.showToast('🌟 传说奇景！星冠猫神引发了甜品超新星！');
           gameState.entities = gameState.entities.filter((e) => {
-            if (!e.isWildcard && !e.isYarnBall && e.tier <= 2 && Math.hypot(e.x - mx, e.y - my) < 190) {
+            if (!e.isWildcard && !e.isYarnBall && !(e.frozenHp > 0) && e.tier <= 2 && Math.hypot(e.x - mx, e.y - my) < 190) {
               spawnSparkleBurst(e.x, e.y, '#9be0ff', 8);
               return false;
             }
@@ -2966,6 +3241,7 @@ function createApp() {
     for (const e of gameState.entities) {
       e.age += dt;
       if (e.yarnHitFlash > 0) e.yarnHitFlash = Math.max(0, e.yarnHitFlash - dt);
+      if (e.frozenFlash > 0) e.frozenFlash = Math.max(0, e.frozenFlash - dt);
       const speed = Math.hypot(e.vx, e.vy);
       if ((e.age < 0.75 && speed > 180) || e.isMeteorShot) {
         e.trail.push({ x: e.x, y: e.y });
@@ -3022,7 +3298,7 @@ function createApp() {
     let activeAnimCount = 0;
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
-      if (e.isWildcard || e.isYarnBall) {
+      if (e.isWildcard || e.isYarnBall || e.frozenHp > 0) {
         e.anim = null;
         continue;
       }
@@ -3035,7 +3311,21 @@ function createApp() {
 
     const neighborMap = new Map();
     const addPair = (a, b, cx, cy) => {
-      if (!a || !b || a.id === b.id || a.merged || b.merged || a.isWildcard || b.isWildcard || a.isYarnBall || b.isYarnBall) return;
+      if (
+        !a ||
+        !b ||
+        a.id === b.id ||
+        a.merged ||
+        b.merged ||
+        a.isWildcard ||
+        b.isWildcard ||
+        a.isYarnBall ||
+        b.isYarnBall ||
+        a.frozenHp > 0 ||
+        b.frozenHp > 0
+      ) {
+        return;
+      }
       if (!neighborMap.has(a.id)) neighborMap.set(a.id, []);
       if (!neighborMap.has(b.id)) neighborMap.set(b.id, []);
       const listA = neighborMap.get(a.id);
@@ -3052,10 +3342,10 @@ function createApp() {
 
     for (let i = 0; i < entities.length; i++) {
       const a = entities[i];
-      if (a.isWildcard || a.isYarnBall) continue;
+      if (a.isWildcard || a.isYarnBall || a.frozenHp > 0) continue;
       for (let j = i + 1; j < entities.length; j++) {
         const b = entities[j];
-        if (b.isWildcard || b.isYarnBall) continue;
+        if (b.isWildcard || b.isYarnBall || b.frozenHp > 0) continue;
         const dist = Math.hypot(b.x - a.x, b.y - a.y);
         if (dist <= (a.r + b.r) * 1.09 && dist > 1e-3) {
           addPair(a, b, (a.x * b.r + b.x * a.r) / (a.r + b.r), (a.y * b.r + b.y * a.r) / (a.r + b.r));
@@ -3066,7 +3356,7 @@ function createApp() {
     const styles = ['nuzzle', 'boop', 'chat'];
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
-      if (e.anim || e.merged || e.isWildcard || e.isYarnBall) continue;
+      if (e.anim || e.merged || e.isWildcard || e.isYarnBall || e.frozenHp > 0) continue;
       e.interactCooldown -= dt;
       e.soloCooldown -= dt;
       const settled = Math.hypot(e.vx, e.vy) < 75 && Math.abs(e.vr) < 2.4 && e.age > 0.35;
@@ -3080,6 +3370,7 @@ function createApp() {
             !item.neighbor.merged &&
             !item.neighbor.isWildcard &&
             !item.neighbor.isYarnBall &&
+            !(item.neighbor.frozenHp > 0) &&
             Math.hypot(item.neighbor.vx, item.neighbor.vy) < 75 &&
             item.neighbor.age > 0.35
         );
@@ -3234,6 +3525,8 @@ function createApp() {
     gameState.dropsMadeThisRun = 0;
     gameState.soufflesMadeThisRun = 0;
     gameState.yarnBrokenThisRun = 0;
+    gameState.iceShatteredThisRun = 0;
+    gameState.glazeHitsThisRun = 0;
     gameState.servesCompleted = 0;
     gameState.bankShotsLanded = 0;
     gameState.serveCascadeTimer = 0;
@@ -3242,6 +3535,7 @@ function createApp() {
 
     // Reset 5-Shift Roguelike state
     gameState.shift = 1;
+    gameState.shiftHazards = [];
     gameState.shiftsClearedThisRun = 0;
     gameState.shiftRevenue = 0;
     gameState.displayShiftRevenue = 0;
@@ -3414,6 +3708,10 @@ function createApp() {
       app.showToast('🧶 毛线球无法被厨艺技选中，请在附近合成 2 次或摇一摇震碎！');
       return;
     }
+    if (target.frozenHp > 0) {
+      app.showToast('❄️ 冰封甜品无法被厨艺技选中，请先在周边合成、用元气重锤或摇一摇破冰！');
+      return;
+    }
 
     if (gameState.activeSkillMode === 'scoop') {
       if (target.isWildcard || target.tier > 5) {
@@ -3454,7 +3752,7 @@ function createApp() {
     }
 
     if (gameState.activeSkillMode === 'swap_2') {
-      const first = gameState.entities.find((e) => e.id === gameState.swapFirstEntityId && !e.merged);
+      const first = gameState.entities.find((e) => e.id === gameState.swapFirstEntityId && !e.merged && !(e.frozenHp > 0));
       if (!first) {
         gameState.activeSkillMode = 'swap_1';
         gameState.swapFirstEntityId = null;
@@ -3476,8 +3774,8 @@ function createApp() {
       first.vy = -45;
       target.vx *= 0.2;
       target.vy = -45;
-      Physics.clampBodyInsideJarPositional(first, JAR);
-      Physics.clampBodyInsideJarPositional(target, JAR);
+      Physics.clampBodyInsideJarPositional(first, JAR, gameState.obstacles);
+      Physics.clampBodyInsideJarPositional(target, JAR, gameState.obstacles);
 
       audio.playChefSkill('luna');
       platform.vibrateShort('medium');
@@ -3501,6 +3799,10 @@ function createApp() {
       app.showToast('🧶 毛线球请在附近合成 2 次或使用【摇一摇】震碎！');
       return;
     }
+    if (target.frozenHp > 0) {
+      app.showToast('❄️ 冰封甜品无法使用升阶勺，请先在周边合成、用元气重锤或摇一摇破冰！');
+      return;
+    }
 
     if (gameState.activeToolMode === 'spoon') {
       if (target.isWildcard) {
@@ -3518,7 +3820,7 @@ function createApp() {
       target.tier = nextTier;
       target.creditedToOrder = false;
       Physics.configureBodyShape(target, getShapeDef(nextTier), def.radius, def.material);
-      Physics.clampBodyInsideJarPositional(target, JAR);
+      Physics.clampBodyInsideJarPositional(target, JAR, gameState.obstacles);
       target.squishAmt = 0.24;
       target.squishVel = 0;
       target.squishAngle = Math.PI * 0.5;
@@ -4012,8 +4314,12 @@ function createApp() {
       p.life -= dt;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
-      p.vy += (p.crumb ? 380 : 260) * dt;
+      p.vy += (p.crumb ? 380 : p.shard ? 320 : 260) * dt;
       if (p.crumb) p.vx *= 0.94;
+      if (p.shard) {
+        p.vx *= 0.98;
+        if (typeof p.vrot === 'number') p.rot = (p.rot || 0) + p.vrot * dt;
+      }
       if (p.life <= 0) gameState.particles.splice(i, 1);
     }
     for (let i = gameState.popups.length - 1; i >= 0; i--) {
@@ -4082,24 +4388,47 @@ function createApp() {
       runEndReason: gameState.runEndReason,
       score: gameState.score,
       stardust: gameState.stardust,
-      // 4.0 Phase 2 5-Shift Roguelike state
+      // 4.0 Phase 2 & 3 5-Shift Roguelike + Hazards state
       shift: gameState.shift,
       shiftName: gameState.shiftName,
+      shiftModifier: gameState.shiftModifier,
+      shiftHazards: [...(gameState.shiftHazards || [])],
+      activeHazards: [...(gameState.shiftHazards || [])],
       shiftsClearedThisRun: gameState.shiftsClearedThisRun,
       shiftRevenue: gameState.shiftRevenue,
       shiftTarget: gameState.shiftTarget,
       stepsLeft: gameState.stepsLeft,
       stepsMax: gameState.stepsMax,
+      shiftStepsUsed: gameState.shiftStepsUsed,
       shiftClearedFlag: gameState.shiftClearedFlag,
+      iceShatteredThisRun: gameState.iceShatteredThisRun || 0,
+      glazeHitsThisRun: gameState.glazeHitsThisRun || 0,
       coins: gameState.coins,
       relics: [...gameState.relics],
       deckMods: { ...gameState.deckMods },
-      obstacles: gameState.obstacles.map((o) => ({ id: o.id, type: o.type, x: o.x, y: o.y, r: o.r })),
+      obstacles: gameState.obstacles.map((o) => ({
+        id: o.id,
+        type: o.type,
+        source: o.source || null,
+        x: +o.x.toFixed(2),
+        y: typeof o.y === 'number' ? +o.y.toFixed(2) : null,
+        r: o.r || null,
+        w: o.w || null,
+        h: o.h || null,
+        rx: o.rx || null,
+        ry: o.ry || null,
+        topY: typeof o.topY === 'number' ? o.topY : null,
+        bottomY: typeof o.bottomY === 'number' ? o.bottomY : null,
+        tipBase: o.tipBase || null,
+        grantsCrit: !!o.grantsCrit,
+        hitFlash: +(o.hitFlash || 0).toFixed(2)
+      })),
       antigravTimer: +gameState.antigravTimer.toFixed(2),
       globalResonanceTimer: +gameState.globalResonanceTimer.toFixed(2),
       prepShop: gameState.prepShop
         ? {
             nextShiftNum: gameState.prepShop.nextShiftNum,
+            nextHazards: [...(gameState.prepShop.nextHazards || [])],
             rerollCost: gameState.prepShop.rerollCost,
             relicOffers: gameState.prepShop.relicOffers.map((o) => ({ ...o })),
             modOffers: gameState.prepShop.modOffers.map((o) => ({ ...o }))
@@ -4141,9 +4470,13 @@ function createApp() {
         kind: o.kind,
         isJudgeRush: !!o.isJudgeRush,
         freshSteps: o.freshSteps,
+        freshMax: o.freshMax,
+        freshMult: o.freshMult,
+        staleMult: o.staleMult || 1.0,
         completed: o.completed,
         slots: o.slots.map((s) => ({ tier: s.tier, done: s.done }))
       })),
+      popups: (gameState.popups || []).map((p) => ({ text: p.text, x: +p.x.toFixed(1), y: +p.y.toFixed(1) })),
       debugPhysics: gameState.debugPhysics,
       jarBox: app.lastJarBox,
       assetsLoaded: sprites.loadedCount,
@@ -4161,14 +4494,18 @@ function createApp() {
         isWildcard: !!e.isWildcard,
         isGolden: !!e.isGolden,
         isYarnBall: !!e.isYarnBall,
+        frozenHp: e.frozenHp || 0,
         isServable: !!findServableMatch(e),
         agedStacks: e.agedStacks || 0,
         bumperCrit: !!e.bumperCrit,
+        bumperHits: e.bumperHits || 0,
         wallBounces: e.wallBounces || 0,
         gravityScale: e.gravityScale || 1,
         yarnHp: e.isYarnBall ? e.yarnHp : 0,
         x: +e.x.toFixed(2),
         y: +e.y.toFixed(2),
+        vx: +e.vx.toFixed(2),
+        vy: +e.vy.toFixed(2),
         polyCount: e.worldPolys ? e.worldPolys.length : 0
       }))
     }),
@@ -4194,15 +4531,50 @@ function createApp() {
       }
       return true;
     },
+    unequipRelic: (id) => {
+      const idx = gameState.relics.indexOf(id);
+      if (idx === -1) return false;
+      gameState.relics.splice(idx, 1);
+      if (id === 'rel_bumpers') syncObstaclesForShift();
+      if (id === 'rel_double_vip') initOrders();
+      return true;
+    },
     triggerShiftClear: () => completeCurrentShift(true),
-    setShift: (n) => beginShift(Math.max(1, Number(n) || 1), true),
+    setShift: (n, forcedHazards = null) => beginShift(Math.max(1, Number(n) || 1), true, null, forcedHazards),
     chargeSkill: () => addSkillEnergy(100, true),
     spawnTestEntity: (tier, x, y, opts = {}) => {
       const ent = createEntity(tier, x, y, opts.vx || 0, opts.vy || 0, false, 0, 0, {
         preSettled: opts.preSettled !== false,
-        golden: !!opts.golden
+        golden: !!opts.golden,
+        frozenHp: opts.frozenHp || 0,
+        isMeteorShot: !!opts.isMeteorShot,
+        isBankLaunched: !!opts.isBankLaunched
       });
       return ent.id;
+    },
+    setGlazeRingX: (targetX) => {
+      const ring = (gameState.obstacles || []).find((o) => o && o.type === 'glaze_ring');
+      if (!ring) return false;
+      const cx = typeof ring.centerX === 'number' ? ring.centerX : 220;
+      const amp = typeof ring.patrolAmp === 'number' ? ring.patrolAmp : 125;
+      const clamped = Math.max(cx - amp, Math.min(cx + amp, Number(targetX) || cx));
+      ring.x = clamped;
+      ring.phase = Math.asin(Math.max(-1, Math.min(1, (clamped - cx) / (amp || 1))));
+      return true;
+    },
+    triggerJudgeRush: () => {
+      const rushOrd = generateTableOrder('vip', false, { isJudgeRush: true });
+      if (gameState.orders.length >= 2) gameState.orders[1] = rushOrd;
+      else gameState.orders.push(rushOrd);
+      gameState.order = rushOrd;
+      audio.playOrderStamp();
+      showComboBanner('🏅 美食评委突击加单!', '4 步内完成即享 ×2.5 营业额 + 2 步!', '#ffe570');
+      app.showToast('🏅 评委突击加单抵达 VIP 桌！4 步内上菜赏 ×2.5 并 +2 步！');
+      return rushOrd.uid;
+    },
+    clearEntities: () => {
+      gameState.entities = [];
+      gameState.dangerDuration = 0;
     },
     serveById: (id) => serveEntityById(id),
     selectPatron: (id) => {

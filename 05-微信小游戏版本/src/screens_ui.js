@@ -14,6 +14,7 @@ const {
   RELICS,
   MAX_RELIC_SLOTS,
   RELIC_ARCHETYPES,
+  SHIFT_HAZARDS,
   JAR,
   getChefRank
 } = require('./constants');
@@ -689,21 +690,38 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
     gameState.shift <= 5
       ? `🌟 第${gameState.shift}/5幕 · ${gameState.shiftName || '暮色试营业'}`
       : `🔥 无尽加时 · 第${gameState.shift}幕`;
+  const hasShiftAffix =
+    gameState.mode === 'chef' &&
+    ((Array.isArray(gameState.shiftHazards) && gameState.shiftHazards.length > 0) ||
+      gameState.shift === 3 ||
+      gameState.shift >= 5);
   const modeLabel =
     gameState.mode === 'rush'
       ? (modeMaxW < 85 ? '⚡狂欢' : '⚡ 90秒狂欢')
       : gameState.mode === 'zen'
       ? (modeMaxW < 85 ? '🍵经典' : '🍵 悠闲经典')
       : isWide
-      ? shiftTxtWide
+      ? (hasShiftAffix ? `${shiftTxtWide} ⚡` : shiftTxtWide)
       : modeMaxW < 85
-      ? shiftTxtShort
-      : `🌟 ${shiftTxtShort}`;
-  UI.drawPillButton(ctx, modeX, topY, Math.min(isWide ? 210 : 94, modeMaxW), btnS, {
+      ? (hasShiftAffix ? `${shiftTxtShort}⚡` : shiftTxtShort)
+      : `🌟 ${shiftTxtShort}${hasShiftAffix ? '⚡' : ''}`;
+  const modeW = Math.min(isWide ? 210 : 94, modeMaxW);
+  UI.drawPillButton(ctx, modeX, topY, modeW, btnS, {
     style: 'dark',
     text: modeLabel,
     fontSize: 11.5
   });
+  if (hasShiftAffix) {
+    ctx.save();
+    UI.roundRectPath(ctx, modeX, topY, modeW, btnS, Math.min(btnS * 0.5, 18));
+    ctx.strokeStyle = '#ffe07a';
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
+    ctx.restore();
+  }
+  if (gameState.mode === 'chef') {
+    hits.add('play_shift_badge', modeX, topY, modeW, btnS, () => app.openRelicsModal());
+  }
 
   // 2. Layout Stage & HUDs
   let jarContainer = null;
@@ -1356,7 +1374,7 @@ function drawMiniPreviewBox(ctx, x, y, size, tier, meta, sprites, nowSec, isHold
 }
 
 function hasTierReadyInJar(gameState, tier) {
-  return gameState.entities.some((e) => !e.merged && !e.isWildcard && !e.isYarnBall && e.tier === tier);
+  return gameState.entities.some((e) => !e.merged && !e.isWildcard && !e.isYarnBall && !(e.frozenHp > 0) && e.tier === tier);
 }
 
 function renderMobileSubBar(ctx, x, y, w, h, app, hits) {
@@ -1995,7 +2013,33 @@ function renderWideRightBoard(ctx, x, y, w, h, app, hits, nowSec) {
       () => app.openRelicsModal(),
       true
     );
-    nextSectionY += relBoxH + 12;
+    nextSectionY += relBoxH + 8;
+
+    // Compact 32px Clickable Active Shift Hazards & Boss Strip
+    const hazBarH = 32;
+    const hazIds = Array.isArray(gameState.shiftHazards) ? gameState.shiftHazards : [];
+    const hazTags = hazIds.map((id) => (SHIFT_HAZARDS[id] ? SHIFT_HAZARDS[id].badge : id));
+    const frozenCnt = (gameState.entities || []).filter((e) => e && !e.merged && e.frozenHp > 0).length;
+    if (frozenCnt > 0) hazTags.push(`❄️×${frozenCnt}`);
+    if (gameState.shiftModifier === 'grand_prix') hazTags.push('🏅急单');
+    const hasAffix = hazTags.length > 0;
+    UI.drawParchmentSheet(
+      ctx,
+      ix + 10,
+      nextSectionY,
+      iw - 20,
+      hazBarH,
+      8,
+      hasAffix ? '#fff3d4' : 'rgba(217, 184, 130, 0.2)',
+      hasAffix ? '#f9df9d' : 'rgba(217, 184, 130, 0.2)',
+      hasAffix ? '#c4821e' : '#c8a26a',
+      1.3
+    );
+    const hazLine = hasAffix ? `⚡ ${hazTags.join(' · ')}` : '🌿 本幕无特殊机关';
+    UI.drawFitText(ctx, hazLine, ix + 18, nextSectionY + hazBarH * 0.5 + 0.5, iw - 72, 10, 8.2, 800, hasAffix ? '#6b380a' : '#7b5a3c');
+    UI.drawFitText(ctx, '详情 ›', ix + iw - 16, nextSectionY + hazBarH * 0.5 + 0.5, 38, 9.2, 7.8, 800, '#8f4716', 'right');
+    hits.add('wide_hazards_bar', ix + 10, nextSectionY, iw - 20, hazBarH, () => app.openRelicsModal());
+    nextSectionY += hazBarH + 10;
   }
 
   // Evolution Ring 1..9

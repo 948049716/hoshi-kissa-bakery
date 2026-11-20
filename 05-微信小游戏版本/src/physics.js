@@ -14,6 +14,7 @@
   const STATIC_JAR = {
     id: 0,
     isStatic: true,
+    isJarWall: true,
     x: 0,
     y: 0,
     vx: 0,
@@ -468,7 +469,125 @@
     return true;
   }
 
-  function clampBodyInsideJarPositional(body, jar) {
+  function ensureDividerStaticBody(ob) {
+    const cx = ob.x;
+    const halfW = typeof ob.halfW === 'number' ? ob.halfW : (ob.w || 14) * 0.5;
+    const topY = ob.topY;
+    const capY = typeof ob.capY === 'number' ? ob.capY : topY + halfW;
+    const bottomY = ob.bottomY;
+    const key = `${cx}|${halfW}|${topY}|${capY}|${bottomY}`;
+    if (ob._staticBody && ob._staticBody._key === key) {
+      return ob._staticBody;
+    }
+
+    // 9-vertex CW strictly convex polygon (7-point semicircular top cap + 2 bottom corners)
+    const verts = [];
+    for (let k = 0; k <= 6; k++) {
+      const theta = Math.PI + (k * Math.PI) / 6;
+      verts.push({
+        x: cx + Math.cos(theta) * halfW,
+        y: capY + Math.sin(theta) * halfW
+      });
+    }
+    verts.push({ x: cx + halfW, y: bottomY });
+    verts.push({ x: cx - halfW, y: bottomY });
+
+    const n = verts.length;
+    const normals = [];
+    for (let i = 0; i < n; i++) {
+      const a = verts[i];
+      const b = verts[(i + 1) % n];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len = Math.hypot(dx, dy) || 1;
+      normals.push({ x: dy / len, y: -dx / len });
+    }
+
+    const polyCy = (topY + bottomY) * 0.5;
+    let boundR = 0;
+    for (let i = 0; i < n; i++) {
+      const d = Math.hypot(verts[i].x - cx, verts[i].y - polyCy);
+      if (d > boundR) boundR = d;
+    }
+
+    const body = {
+      _key: key,
+      id: -101,
+      isStatic: true,
+      isDivider: true,
+      x: cx,
+      y: polyCy,
+      vx: 0,
+      vy: 0,
+      angle: 0,
+      vr: 0,
+      invMass: 0,
+      invI: 0,
+      friction: typeof ob.friction === 'number' ? ob.friction : 0.32,
+      restitution: typeof ob.restitution === 'number' ? ob.restitution : 0.28,
+      worldPolys: [{ verts, normals, cx, cy: polyCy, boundR }],
+      aabbMinX: cx - halfW,
+      aabbMaxX: cx + halfW,
+      aabbMinY: topY,
+      aabbMaxY: bottomY
+    };
+    ob._staticBody = body;
+    return body;
+  }
+
+  function clampBodyOutsideDividers(body, obstacles) {
+    if (!Array.isArray(obstacles) || obstacles.length === 0) return false;
+    let moved = false;
+    for (let iter = 0; iter < 3; iter++) {
+      let iterMoved = false;
+      for (let oi = 0; oi < obstacles.length; oi++) {
+        const ob = obstacles[oi];
+        if (!ob || ob.type !== 'divider') continue;
+        const divBody = ensureDividerStaticBody(ob);
+        if (
+          body.aabbMaxX <= divBody.aabbMinX ||
+          body.aabbMinX >= divBody.aabbMaxX ||
+          body.aabbMaxY <= divBody.aabbMinY ||
+          body.aabbMinY >= divBody.aabbMaxY
+        ) {
+          continue;
+        }
+        const raw = [];
+        const wps = body.worldPolys;
+        const divPoly = divBody.worldPolys[0];
+        for (let p = 0; p < wps.length; p++) {
+          collideConvexPolys(divPoly, wps[p], raw);
+        }
+        if (raw.length === 0) continue;
+        let best = raw[0];
+        for (let k = 1; k < raw.length; k++) {
+          if (raw[k].pen > best.pen) best = raw[k];
+        }
+        if (best.pen > 0.05) {
+          let nx = best.nx;
+          let ny = best.ny;
+          let pen = best.pen;
+          // Never push downward into jar floor; eject horizontally into nearest bay instead
+          if (ny > 0.5) {
+            const halfW = typeof ob.halfW === 'number' ? ob.halfW : (ob.w || 14) * 0.5;
+            nx = body.x >= ob.x ? 1 : -1;
+            ny = 0;
+            pen = Math.max(pen, halfW + (body.r || 16) - Math.abs(body.x - ob.x));
+          }
+          body.x += nx * (pen + 0.25);
+          body.y += ny * (pen + 0.25);
+          updateBodyWorld(body);
+          iterMoved = true;
+          moved = true;
+        }
+      }
+      if (!iterMoved) break;
+    }
+    return moved;
+  }
+
+  function clampBodyToJarOnly(body, jar) {
+    let moved = false;
     for (let iter = 0; iter < 3; iter++) {
       updateBodyWorld(body);
       let maxPen = 0;
@@ -489,8 +608,25 @@
       if (maxPen <= 0.05) break;
       body.x += pushX;
       body.y += pushY;
+      moved = true;
     }
     updateBodyWorld(body);
+    return moved;
+  }
+
+  function clampBodyInsideJarPositional(body, jar, obstacles = null) {
+    const hasDivider = Array.isArray(obstacles) && obstacles.some((o) => o && o.type === 'divider');
+    if (hasDivider) {
+      updateBodyWorld(body);
+      for (let pass = 0; pass < 2; pass++) {
+        const mDiv = clampBodyOutsideDividers(body, obstacles);
+        const mJar = clampBodyToJarOnly(body, jar);
+        if (!mDiv && !mJar) break;
+      }
+      updateBodyWorld(body);
+      return;
+    }
+    clampBodyToJarOnly(body, jar);
   }
 
   function bodyTouchesJar(body, jar) {
@@ -608,7 +744,7 @@
     }
   }
 
-  function solvePositions(contacts, jar, bodies) {
+  function solvePositions(contacts, jar, bodies, obstacles = null) {
     const slop = 0.2;
     const beta = 0.45;
     const maxCorr = 6.0;
@@ -635,7 +771,7 @@
 
     for (let i = 0; i < bodies.length; i++) {
       if (!bodies[i].merged) {
-        clampBodyInsideJarPositional(bodies[i], jar);
+        clampBodyInsideJarPositional(bodies[i], jar, obstacles);
       }
     }
   }
@@ -644,7 +780,7 @@
    * Step the rigid-body world forward by `dt` seconds.
    * Order: Semi-implicit Euler (integrate forces -> tentative step -> detect contacts ->
    * PGS sequential impulse velocity solver -> positional stabilization).
-   * Returns { mergePairs, impacts, wallBounces, meteorHits, debugContacts, magnetLinks }.
+   * Returns { mergePairs, impacts, wallBounces, meteorHits, bumperHits, glazeHits, debugContacts, magnetLinks }.
    */
   function stepWorld(bodies, jar, dt, gravity = 1420, opts = {}) {
     const SUBSTEPS = 3;
@@ -663,10 +799,22 @@
     const wallBounces = [];
     const meteorHits = [];
     const bumperHits = [];
+    const glazeHits = [];
     let lastContacts = [];
     let lastMagnetLinks = [];
 
     for (let s = 0; s < SUBSTEPS; s++) {
+      // Advance patrolling Glaze Ring obstacles smoothly per substep
+      for (let oi = 0; oi < obstacles.length; oi++) {
+        const ob = obstacles[oi];
+        if (ob && ob.type === 'glaze_ring') {
+          ob.phase = (ob.phase || 0) + (typeof ob.speed === 'number' ? ob.speed : 0.95) * subDt;
+          const centerX = typeof ob.centerX === 'number' ? ob.centerX : 220;
+          const amp = typeof ob.patrolAmp === 'number' ? ob.patrolAmp : 125;
+          ob.x = centerX + Math.sin(ob.phase) * amp;
+        }
+      }
+
       // Collect active T3 resonance emitters for this substep
       const resonators = [];
       // 1. Integrate gravity into velocities & advance tentative positions/angles
@@ -692,6 +840,8 @@
         if (b.vr > 13) b.vr = 13;
         else if (b.vr < -13) b.vr = -13;
 
+        b._prevX = b.x;
+        b._prevY = b.y;
         b.x += b.vx * subDt;
         b.y += b.vy * subDt;
         b.angle += b.vr * subDt;
@@ -723,53 +873,116 @@
           a.hasCollided = true;
         }
 
-        // Static jar obstacles (e.g., Butter Bumpers from rel_bumpers / Shift 3)
+        // Static & trigger jar obstacles (Butter Bumpers, Wooden Divider, Caramel Glaze Ring)
         for (let oi = 0; oi < obstacles.length; oi++) {
           const ob = obstacles[oi];
-          if (!ob || ob.type !== 'bumper') continue;
-          const bdx = a.x - ob.x;
-          const bdy = a.y - ob.y;
-          const minD = a.r + ob.r;
-          const dSq = bdx * bdx + bdy * bdy;
-          if (dSq < minD * minD) {
-            const dist = Math.sqrt(dSq) || 0.001;
-            const nx = bdx / dist;
-            const ny = bdy / dist;
-            const pen = minD - dist;
-            a.x += nx * (pen + 0.4);
-            a.y += ny * (pen + 0.4);
-            updateBodyWorld(a);
-            a.inContact = true;
-            a.hasCollided = true;
+          if (!ob) continue;
 
-            const vn = a.vx * nx + a.vy * ny;
-            if (vn < 60) {
-              const e = ob.restitution || 1.15;
-              const bounceSpd = Math.max(210, -vn * e);
-              const tx = -ny;
-              const ty = nx;
-              const vt = a.vx * tx + a.vy * ty;
-              a.vx = nx * bounceSpd + tx * vt * 0.92;
-              a.vy = ny * bounceSpd + ty * vt * 0.92;
-              const maxSpd = 920;
+          if (ob.type === 'bumper') {
+            const bdx = a.x - ob.x;
+            const bdy = a.y - ob.y;
+            const minD = a.r + ob.r;
+            const dSq = bdx * bdx + bdy * bdy;
+            if (dSq < minD * minD) {
+              const dist = Math.sqrt(dSq) || 0.001;
+              const nx = bdx / dist;
+              const ny = bdy / dist;
+              const pen = minD - dist;
+              a.x += nx * (pen + 0.4);
+              a.y += ny * (pen + 0.4);
+              updateBodyWorld(a);
+              a.inContact = true;
+              a.hasCollided = true;
+
+              const vn = a.vx * nx + a.vy * ny;
+              if (vn < 60) {
+                const e = ob.restitution || 1.15;
+                const bounceSpd = Math.max(210, -vn * e);
+                const tx = -ny;
+                const ty = nx;
+                const vt = a.vx * tx + a.vy * ty;
+                a.vx = nx * bounceSpd + tx * vt * 0.92;
+                a.vy = ny * bounceSpd + ty * vt * 0.92;
+                const maxSpd = 920;
+                const spd = Math.hypot(a.vx, a.vy);
+                if (spd > maxSpd) {
+                  a.vx = (a.vx / spd) * maxSpd;
+                  a.vy = (a.vy / spd) * maxSpd;
+                }
+                a.vr += (nx >= 0 ? 1 : -1) * 3.5;
+
+                if (a.lastBumperHitAge === undefined || a.age - a.lastBumperHitAge > 0.1) {
+                  a.lastBumperHitAge = a.age;
+                  bumperHits.push({
+                    body: a,
+                    bumper: ob,
+                    x: ob.x + nx * ob.r,
+                    y: ob.y + ny * ob.r,
+                    nx,
+                    ny
+                  });
+                }
+              }
+            }
+          } else if (ob.type === 'divider') {
+            const halfW = typeof ob.halfW === 'number' ? ob.halfW : (ob.w || 14) * 0.5;
+            const capY = typeof ob.capY === 'number' ? ob.capY : ob.topY + halfW;
+
+            // High-speed anti-tunneling centerline check strictly below the top dome center
+            if (
+              typeof a._prevX === 'number' &&
+              typeof a._prevY === 'number' &&
+              (a._prevX - ob.x) * (a.x - ob.x) <= 0 &&
+              Math.abs(a._prevX - ob.x) >= 1.5
+            ) {
+              const denom = a.x - a._prevX;
+              const t = Math.abs(denom) > 1e-4 ? Math.max(0, Math.min(1, (ob.x - a._prevX) / denom)) : 0.5;
+              const crossY = a._prevY + (a.y - a._prevY) * t;
+              if (crossY > capY) {
+                const side = a._prevX < ob.x ? -1 : 1;
+                a.x = ob.x + side * (halfW + a.r * 0.92);
+                a.vx = side * Math.max(85, Math.abs(a.vx) * 0.42);
+                a.inContact = true;
+                a.hasCollided = true;
+                ob.hitFlash = Math.max(ob.hitFlash || 0, 0.25);
+                updateBodyWorld(a);
+              }
+            }
+
+            // Full 9-vertex convex polygon SAT contact + PGS integration
+            const divBody = ensureDividerStaticBody(ob);
+            if (collideBodyPair(divBody, a, contacts)) {
+              a.inContact = true;
+              a.hasCollided = true;
               const spd = Math.hypot(a.vx, a.vy);
-              if (spd > maxSpd) {
-                a.vx = (a.vx / spd) * maxSpd;
-                a.vy = (a.vy / spd) * maxSpd;
+              if (spd > 135) {
+                ob.hitFlash = Math.max(ob.hitFlash || 0, Math.min(0.32, spd / 1400));
               }
-              a.vr += (nx >= 0 ? 1 : -1) * 3.5;
-
-              if (a.lastBumperHitAge === undefined || a.age - a.lastBumperHitAge > 0.1) {
-                a.lastBumperHitAge = a.age;
-                bumperHits.push({
-                  body: a,
-                  bumper: ob,
-                  x: ob.x + nx * ob.r,
-                  y: ob.y + ny * ob.r,
-                  nx,
-                  ny
-                });
+              // Gentle dome roll-off nudge so treats never balance dead-center on the top cap
+              if (a.y < capY + 4 && Math.abs(a.x - ob.x) < 4.5 && Math.abs(a.vx) < 28) {
+                a.vx += (a.x >= ob.x ? 1 : -1) * 32;
               }
+            }
+          } else if (ob.type === 'glaze_ring') {
+            if (a.isGolden || a.isWildcard || a.isYarnBall || a.frozenHp > 0 || a.merged) continue;
+            const rx = ob.rx || 38;
+            const ry = ob.ry || 13;
+            const px = typeof a._prevX === 'number' ? a._prevX : a.x;
+            const py = typeof a._prevY === 'number' ? a._prevY : a.y;
+            let hitRing = false;
+            if ((py <= ob.y && a.y >= ob.y) || (py >= ob.y && a.y <= ob.y)) {
+              const dySeg = a.y - py;
+              const t = Math.abs(dySeg) > 1e-4 ? (ob.y - py) / dySeg : 0.5;
+              const crossX = px + (a.x - px) * t;
+              if (Math.abs(crossX - ob.x) <= rx + a.r * 0.2) {
+                hitRing = true;
+              }
+            } else if (Math.abs(a.x - ob.x) <= rx && Math.abs(a.y - ob.y) <= ry + 4) {
+              hitRing = true;
+            }
+            if (hitRing) {
+              a.isGolden = true;
+              glazeHits.push({ body: a, ring: ob, x: a.x, y: ob.y });
             }
           }
         }
@@ -779,12 +992,14 @@
           if (b.merged) continue;
 
           const isYarnPair = !!(a.isYarnBall || b.isYarnBall);
-          const isWildPair = !isYarnPair && !!(a.isWildcard || b.isWildcard);
+          const isFrozenPair = !!(a.frozenHp > 0 || b.frozenHp > 0);
+          const isWildPair = !isYarnPair && !isFrozenPair && !!(a.isWildcard || b.isWildcard);
           const aLanded = !!(a.hasCollided || a.bornFromMerge);
           const bLanded = !!(b.hasCollided || b.bornFromMerge);
           const midY = (a.y + b.y) * 0.5;
           const canMerge =
             !isYarnPair &&
+            !isFrozenPair &&
             (isWildPair || a.tier === b.tier) &&
             (aLanded || bLanded) &&
             midY >= jar.neckY - 6;
@@ -874,7 +1089,7 @@
       preStepContacts(contacts);
       solveVelocityContacts(contacts, VELOCITY_ITERS);
 
-      // 4. Collect strong impact telemetry & side-wall bank-shot bounces
+      // 4. Collect strong impact telemetry & side-wall bank-shot bounces (glass jar wall ONLY)
       for (let i = 0; i < contacts.length; i++) {
         const c = contacts[i];
         if (c.initialVn < -85 && c.jnAcc > 0) {
@@ -888,7 +1103,7 @@
             bodyB: c.b
           });
           if (
-            c.a.isStatic &&
+            c.a.isJarWall &&
             Math.abs(c.nx) > 0.85 &&
             Math.abs(c.ny) < 0.25 &&
             c.b.isBankLaunched &&
@@ -928,8 +1143,8 @@
         }
       }
 
-      // 6. Positional stabilization (split from velocity)
-      solvePositions(contacts, jar, bodies);
+      // 6. Positional stabilization (split from velocity, including divider safety clamp)
+      solvePositions(contacts, jar, bodies, obstacles);
 
       if (s === SUBSTEPS - 1) {
         lastContacts = contacts;
@@ -943,6 +1158,7 @@
       wallBounces,
       meteorHits,
       bumperHits,
+      glazeHits,
       debugContacts: lastContacts,
       magnetLinks: lastMagnetLinks
     };
@@ -953,7 +1169,7 @@
    * candidate shape dropped vertically at `(dropX, dropY, angle)` first contacts
    * either the curved glass jar or any existing pastry's exact polygon silhouette.
    */
-  function predictDropLandingY(shapeDef, eqRadius, dropX, startY, angle, jar, existingBodies) {
+  function predictDropLandingY(shapeDef, eqRadius, dropX, startY, angle, jar, existingBodies, obstacles = []) {
     const probe = {
       x: dropX,
       y: startY,
@@ -968,11 +1184,24 @@
       aabbMaxY: 0
     };
     probe.worldPolys = allocateWorldPolys(probe.localPolys);
+    const obsList = Array.isArray(obstacles) ? obstacles : [];
 
     const hitsAt = (testY) => {
       probe.y = testY;
       updateBodyWorld(probe);
       if (bodyTouchesJar(probe, jar)) return true;
+      for (let oi = 0; oi < obsList.length; oi++) {
+        const ob = obsList[oi];
+        if (!ob) continue;
+        if (ob.type === 'divider') {
+          if (testBodiesOverlap(probe, ensureDividerStaticBody(ob))) return true;
+        } else if (ob.type === 'bumper') {
+          const hitD = eqRadius * 0.94 + ob.r;
+          const bdx = probe.x - ob.x;
+          const bdy = probe.y - ob.y;
+          if (bdx * bdx + bdy * bdy < hitD * hitD) return true;
+        }
+      }
       for (let i = 0; i < existingBodies.length; i++) {
         const b = existingBodies[i];
         if (b.merged) continue;
@@ -1093,10 +1322,36 @@
     let vy = vy0;
     const bouncePoints = [];
     let hitBody = null;
+    let glazeHit = null;
+    let dividerBounced = false;
     const stepDt = 0.015;
     const maxSteps = maxBounces > 1 ? 62 : 50;
 
+    const checkGlazeSegment = (x0, y0, x1, y1) => {
+      if (glazeHit) return;
+      for (let oi = 0; oi < obstacles.length; oi++) {
+        const ob = obstacles[oi];
+        if (!ob || ob.type !== 'glaze_ring') continue;
+        const rx = ob.rx || 38;
+        const ry = ob.ry || 13;
+        const crossedY = (y0 <= ob.y && y1 >= ob.y) || (y0 >= ob.y && y1 <= ob.y);
+        if (crossedY && Math.abs(y1 - y0) > 1e-4) {
+          const gt = (ob.y - y0) / (y1 - y0);
+          const crossX = x0 + (x1 - x0) * gt;
+          if (Math.abs(crossX - ob.x) <= rx + r * 0.15) {
+            glazeHit = { x: crossX, y: ob.y, ring: ob };
+            return;
+          }
+        } else if (Math.abs(x1 - ob.x) <= rx && Math.abs(y1 - ob.y) <= ry) {
+          glazeHit = { x: x1, y: ob.y, ring: ob };
+          return;
+        }
+      }
+    };
+
     for (let step = 0; step < maxSteps; step++) {
+      const prevX = x;
+      const prevY = y;
       vy += gravity * gravityScale * stepDt;
       vx *= 0.996;
       vy *= 0.996;
@@ -1107,6 +1362,7 @@
       if (nx < minX) {
         const t = vx !== 0 ? Math.max(0, Math.min(1, (minX - x) / (nx - x))) : 0;
         const by = y + (ny - y) * t;
+        checkGlazeSegment(prevX, prevY, minX, by);
         x = minX + 0.5;
         y = by;
         if (bouncePoints.length < maxBounces && by < arcCy) {
@@ -1122,6 +1378,7 @@
       } else if (nx > maxX) {
         const t = vx !== 0 ? Math.max(0, Math.min(1, (maxX - x) / (nx - x))) : 0;
         const by = y + (ny - y) * t;
+        checkGlazeSegment(prevX, prevY, maxX, by);
         x = maxX - 0.5;
         y = by;
         if (bouncePoints.length < maxBounces && by < arcCy) {
@@ -1138,34 +1395,86 @@
 
       x = nx;
       y = ny;
+      checkGlazeSegment(prevX, prevY, x, y);
 
-      // Butter bumper reflection in preview
+      // Obstacles in preview (Butter Bumper + Wooden Divider)
+      let stopOnDivider = false;
       for (let oi = 0; oi < obstacles.length; oi++) {
         const ob = obstacles[oi];
-        if (!ob || ob.type !== 'bumper') continue;
-        const bdx = x - ob.x;
-        const bdy = y - ob.y;
-        const hitD = r + ob.r;
-        if (bdx * bdx + bdy * bdy <= hitD * hitD) {
-          const d = Math.hypot(bdx, bdy) || 1;
-          const bnx = bdx / d;
-          const bny = bdy / d;
-          x = ob.x + bnx * (hitD + 1);
-          y = ob.y + bny * (hitD + 1);
-          const vn = vx * bnx + vy * bny;
-          if (vn < 0) {
-            const e = ob.restitution || 1.15;
-            vx -= (1 + e) * vn * bnx;
-            vy -= (1 + e) * vn * bny;
-            const spd = Math.hypot(vx, vy);
-            if (spd > 920) {
-              vx = (vx / spd) * 920;
-              vy = (vy / spd) * 920;
+        if (!ob) continue;
+        if (ob.type === 'bumper') {
+          const bdx = x - ob.x;
+          const bdy = y - ob.y;
+          const hitD = r + ob.r;
+          if (bdx * bdx + bdy * bdy <= hitD * hitD) {
+            const d = Math.hypot(bdx, bdy) || 1;
+            const bnx = bdx / d;
+            const bny = bdy / d;
+            x = ob.x + bnx * (hitD + 1);
+            y = ob.y + bny * (hitD + 1);
+            const vn = vx * bnx + vy * bny;
+            if (vn < 0) {
+              const e = ob.restitution || 1.15;
+              vx -= (1 + e) * vn * bnx;
+              vy -= (1 + e) * vn * bny;
+              const spd = Math.hypot(vx, vy);
+              if (spd > 920) {
+                vx = (vx / spd) * 920;
+                vy = (vy / spd) * 920;
+              }
+            }
+            points.push({ x, y });
+          }
+        } else if (ob.type === 'divider') {
+          const halfW = typeof ob.halfW === 'number' ? ob.halfW : (ob.w || 14) * 0.5;
+          const capY = typeof ob.capY === 'number' ? ob.capY : ob.topY + halfW;
+          const hitD = r + halfW;
+
+          // Catch segment crossing of divider centerline below capY
+          if ((prevX - ob.x) * (x - ob.x) <= 0 && Math.abs(x - prevX) > 1e-4) {
+            const t = (ob.x - prevX) / (x - prevX);
+            const cyCross = prevY + (y - prevY) * t;
+            if (cyCross >= capY - r * 0.5) {
+              const side = prevX < ob.x ? -1 : 1;
+              x = ob.x + side * (hitD + 0.5);
+              y = cyCross;
+              points.push({ x, y });
+              if (!dividerBounced) {
+                dividerBounced = true;
+                vx = side * Math.abs(vx) * 0.35;
+                vy *= 0.86;
+              } else {
+                stopOnDivider = true;
+                break;
+              }
+              continue;
             }
           }
-          points.push({ x, y });
+
+          // Closest point on vertical capsule centerline (ob.x, capY..bottomY)
+          const cy = Math.max(capY, Math.min(ob.bottomY, y));
+          const ddx = x - ob.x;
+          const ddy = y - cy;
+          if (ddx * ddx + ddy * ddy <= hitD * hitD) {
+            const dist = Math.hypot(ddx, ddy);
+            const dnx = dist > 1e-4 ? ddx / dist : prevX < ob.x ? -1 : 1;
+            const dny = dist > 1e-4 ? ddy / dist : 0;
+            x = ob.x + dnx * (hitD + 0.6);
+            y = cy + dny * (hitD + 0.6);
+            points.push({ x, y });
+            const vn = vx * dnx + vy * dny;
+            if (!dividerBounced && vn < 0) {
+              dividerBounced = true;
+              vx -= 1.35 * vn * dnx;
+              vy -= 1.35 * vn * dny;
+            } else {
+              stopOnDivider = true;
+              break;
+            }
+          }
         }
       }
+      if (stopOnDivider) break;
 
       // Curved bottom corners & floor check
       if (y > arcCy && (x < leftArcCx || x > rightArcCx)) {
@@ -1216,7 +1525,8 @@
       bouncePoints,
       endX: last.x,
       endY: last.y,
-      hitBody
+      hitBody,
+      glazeHit
     };
   }
 
@@ -1240,6 +1550,7 @@
 module.exports = {
   configureBodyShape,
   updateBodyWorld,
+  ensureDividerStaticBody,
   clampBodyInsideJarPositional,
   stepWorld,
   predictDropLandingY,

@@ -1647,6 +1647,27 @@ class StarlightAudio {
     });
   }
 
+  playGlazeRing() {
+    // Glistening caramel starlight harp arpeggio
+    const notes = [1046.5, 1318.51, 1567.98, 2093.0];
+    notes.forEach((f, i) => {
+      setTimeout(() => {
+        this._playTone(f, i % 2 === 0 ? 'sine' : 'triangle', 0.075, 0.2, 0.004, f * 1.02);
+      }, i * 36);
+    });
+  }
+
+  playIceShatter() {
+    // Crystalline frost crack + sparkling glass chimes
+    const notes = [1760.0, 2349.32, 2637.02, 3135.96];
+    this._playTone(620, 'triangle', 0.11, 0.08, 0.002, 180);
+    notes.forEach((f, i) => {
+      setTimeout(() => {
+        this._playTone(f, 'sine', 0.068, 0.14, 0.002, f * 0.96);
+      }, i * 24);
+    });
+  }
+
   getDebugState() {
     const info = this.getTrackInfo();
     return {

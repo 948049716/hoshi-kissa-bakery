@@ -334,7 +334,7 @@ const PATRONS = [
       icon: '🔥',
       name: '元气重锤',
       shortLabel: '重锤',
-      desc: '下次抛射化为穿甲烈焰球：撞击首颗甜品直接升阶并震碎周边毛线球！'
+      desc: '下次抛射化为穿甲烈焰球：撞击首颗甜品直接升阶并震碎周边冰霜与毛线球！'
     },
     passiveDesc: '主动技【元气重锤】穿甲升阶；弹壁+40%分，3连回+20%技',
     shortPassive: '重锤·弹壁+40%',
@@ -435,9 +435,9 @@ const SHIFTS = [
     steps: 16,
     target: 2600,
     baseCoins: 45,
-    badge: '第2幕·星灯',
+    badge: '第2幕·星环',
     modifier: 'golden_breeze',
-    desc: '热炉传承保留最高 2 颗甜品，且开局第 1 颗必为镀金甜品！'
+    desc: '热炉传承保留最高 2 颗甜品 + ✨焦糖星环巡游，甜品穿过环心即刻镀金！'
   },
   {
     shift: 3,
@@ -446,9 +446,9 @@ const SHIFTS = [
     target: 4800,
     baseCoins: 60,
     isMiniBoss: true,
-    badge: '小Boss·冷盘',
-    modifier: 'fast_fresh',
-    desc: '极速冷盘：订单鲜度缩至 5 步但飙升至 ×2.0 赏金，超时则降至 ×0.75！'
+    badge: '小Boss·机关',
+    modifier: 'mini_boss',
+    desc: '开局含 2 颗 ❄️ 冰封残局甜品 + 随机小 Boss 机关（木隔板 / 黄油弹柱 / 极速冷盘）！'
   },
   {
     shift: 4,
@@ -458,7 +458,7 @@ const SHIFTS = [
     baseCoins: 75,
     badge: '第4幕·派对',
     modifier: 'party_events',
-    desc: '开局伴随捣蛋毛线球（震碎爆 +¥750 & +10🪙），第 6/12 步必发星夜事件！'
+    desc: '开局伴随捣蛋毛线球（震碎 +¥750 & +10🪙）+ 定时星夜事件 + 随机罐内机关！'
   },
   {
     shift: 5,
@@ -469,9 +469,48 @@ const SHIFTS = [
     isFinalBoss: true,
     badge: '终极Boss',
     modifier: 'grand_prix',
-    desc: '星冠决战：每 6 步追加美食评委加单（4 步内完单 ×2.5 营业额且 +2 步）！'
+    desc: '2 颗 ❄️ 冰封高阶残局 + 随机地形机关 + 每 6 步评委突击加单（4步完单 ×2.5 且 +2步）！'
   }
 ];
+
+const SHIFT_HAZARDS = {
+  glaze_ring: {
+    id: 'glaze_ring',
+    icon: '✨',
+    name: '焦糖星环',
+    badge: '✨焦糖环',
+    color: '#c47e12',
+    bg: '#fff4d4',
+    desc: '罐中上部巡游的星光圆环，甜品穿过环心即刻镀金（合成 ×2.5 / 出餐 ×1.8）！'
+  },
+  divider: {
+    id: 'divider',
+    icon: '🪵',
+    name: '木质分槽隔板',
+    badge: '🪵木隔板',
+    color: '#8f4f22',
+    bg: '#f8e6d0',
+    desc: '罐底中央立起半高木隔板分为左右双烘焙槽，拉弓弹壁跨越最爽！'
+  },
+  bumpers: {
+    id: 'bumpers',
+    icon: '🧈',
+    name: '双重黄油弹柱',
+    badge: '🧈黄油弹柱',
+    color: '#b56e10',
+    bg: '#fff1cc',
+    desc: '罐壁左右中段安装 2 枚高弹星柱，甜品撞柱高回弹并爆出 +¥40 弹射小费！'
+  },
+  fast_fresh: {
+    id: 'fast_fresh',
+    icon: '⏱️',
+    name: '极速冷盘',
+    badge: '⏱️极速冷盘',
+    color: '#b83c24',
+    bg: '#ffe5de',
+    desc: '订单鲜度窗缩至 5 步，鲜度内出餐暴涨 ×2.0 赏金，超时则降至 ×0.75！'
+  }
+};
 
 function getShiftConfig(shiftNum) {
   const n = Math.max(1, Math.floor(Number(shiftNum) || 1));
@@ -487,7 +526,7 @@ function getShiftConfig(shiftNum) {
     isEndless: true,
     badge: `加时·第${n}幕`,
     modifier: 'grand_prix',
-    desc: '无尽午夜加时：营业额目标指数级攀升，用成型流派冲刺传奇榜！'
+    desc: '无尽午夜加时：双机关轮换 + 冰封残局 + 评委突击加单，目标指数攀升！'
   };
 }
 
@@ -875,6 +914,7 @@ module.exports = {
   CASCADE_MULTIPLIERS,
   SHOP_UPGRADES,
   SHIFTS,
+  SHIFT_HAZARDS,
   getShiftConfig,
   MAX_RELIC_SLOTS,
   RELIC_ARCHETYPES,

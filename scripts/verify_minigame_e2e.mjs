@@ -593,15 +593,25 @@ async function run() {
   await checkCapsuleAndViewportBounds('iPhone SE Chef HUD 375x667', 375, 667, 0);
   await screenshot('08_chef_375.png');
 
+  async function waitForDropReady(timeoutMs = 2600) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const busy = await evalJS(`window.__HOSHI_DEBUG__.getState().waitingForLanding`);
+      if (!busy) break;
+      await sleep(60);
+    }
+    await sleep(160);
+  }
+
   // Hold swap + Drop via simulated touch aim inside jar
   await tapHit('mobile_hold_swap');
   await sleep(160);
   const jb = st.jarBox;
   assert(jb && jb.scale > 0, 'jarBox computed');
-  await dragSwipe(Math.round(jb.x + jb.w * 0.4), Math.round(jb.y + jb.h * 0.35), Math.round(jb.x + jb.w * 0.45), Math.round(jb.y + jb.h * 0.35));
-  await sleep(580);
-  await dragSwipe(Math.round(jb.x + jb.w * 0.6), Math.round(jb.y + jb.h * 0.35), Math.round(jb.x + jb.w * 0.58), Math.round(jb.y + jb.h * 0.35));
-  await sleep(580);
+  await dragSwipe(Math.round(jb.x + jb.w * 0.28), Math.round(jb.y + jb.h * 0.35), Math.round(jb.x + jb.w * 0.28), Math.round(jb.y + jb.h * 0.35));
+  await waitForDropReady();
+  await dragSwipe(Math.round(jb.x + jb.w * 0.72), Math.round(jb.y + jb.h * 0.35), Math.round(jb.x + jb.w * 0.72), Math.round(jb.y + jb.h * 0.35));
+  await waitForDropReady();
 
   // Trigger Meteor -> Yarn Ball -> Toggle Debug Wireframe
   await evalJS(`window.__HOSHI_DEBUG__.triggerEvent('meteor')`);
@@ -623,7 +633,7 @@ async function run() {
 
   // Drop current treat so Rainbow Wildcard advances to active held dessert
   await dragSwipe(Math.round(jb.x + jb.w * 0.5), Math.round(jb.y + jb.h * 0.35), Math.round(jb.x + jb.w * 0.5), Math.round(jb.y + jb.h * 0.35));
-  await sleep(580);
+  await waitForDropReady();
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.curMeta && st.curMeta.wildcard === true, 'Expected Rainbow Wildcard to advance to held treat');
 
@@ -635,7 +645,7 @@ async function run() {
   await screenshot('09b_rainbow_hold_375.png');
 
   await dragSwipe(Math.round(jb.x + jb.w * 0.35), Math.round(jb.y + jb.h * 0.35), Math.round(jb.x + jb.w * 0.35), Math.round(jb.y + jb.h * 0.35));
-  await sleep(580);
+  await waitForDropReady();
   await tapHit('mobile_hold_swap');
   await sleep(220);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
@@ -643,7 +653,7 @@ async function run() {
 
   const beforeWildScore = st.score;
   await dragSwipe(Math.round(jb.x + jb.w * 0.5), Math.round(jb.y + jb.h * 0.35), Math.round(jb.x + jb.w * 0.5), Math.round(jb.y + jb.h * 0.35));
-  await sleep(620);
+  await waitForDropReady();
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.entities.some((e) => e.isWildcard) || st.score > beforeWildScore, 'Expected Rainbow Wildcard active in jar or merged cleanly');
 
@@ -671,7 +681,7 @@ async function run() {
     st.dropsMadeThisRun === dropsBeforeRapid + 1,
     `Mid-air rapid taps must not spawn extra drops (expected ${dropsBeforeRapid + 1}, got ${st.dropsMadeThisRun})`
   );
-  await sleep(600);
+  await waitForDropReady();
 
   // Hit Starlight Bake Zone and verify bonus + rotation
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
@@ -679,7 +689,7 @@ async function run() {
   const zoneScreenX = Math.round(jb.x + st.bakeZone.x * jb.scale);
   const beforeZoneScore = st.score;
   await dragSwipe(zoneScreenX, rapidY, zoneScreenX, rapidY);
-  await sleep(600);
+  await waitForDropReady();
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.bakeZone.colIdx !== prevBakeCol, `Expected bakeZone to rotate after hit (col ${st.bakeZone.colIdx})`);
   assert(st.score > beforeZoneScore, 'Expected Starlight Bake Zone drop to grant bonus score');
@@ -688,12 +698,12 @@ async function run() {
   const spamColX = Math.round(jb.x + jb.w * 0.74);
   for (let k = 0; k < 4; k++) {
     await dragSwipe(spamColX, rapidY, spamColX, rapidY);
-    await sleep(600);
+    await waitForDropReady();
   }
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.sameSpotStreak >= 3, `Expected sameSpotStreak >= 3 after 4 same-spot drops, got ${st.sameSpotStreak}`);
   await dragSwipe(Math.round(jb.x + jb.w * 0.24), rapidY, Math.round(jb.x + jb.w * 0.24), rapidY);
-  await sleep(600);
+  await waitForDropReady();
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.sameSpotStreak === 0, `Expected sameSpotStreak reset to 0 after changing drop column, got ${st.sameSpotStreak}`);
 
@@ -715,7 +725,7 @@ async function run() {
     const pickHit = st.hits.find((h) => h.id.startsWith('blessing_pick_'));
     assert(pickHit, 'Expected blessing pick button');
     await tapHit(pickHit.id);
-    await sleep(220);
+    await sleep(240);
     st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   }
   assert(st.activeModal === null, 'Blessing modal closed after selection');
@@ -732,27 +742,35 @@ async function run() {
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.mode === 'rush' && st.rushTimer > 80, `Expected rush mode timer > 80, got ${st.rushTimer}`);
 
-  // Drop 2 treats so emergency gust has candies to blow away
+  // Drop treats across distinct columns until >= 2 entities sit in jar (even if identical tiers merge cleanly)
   const rjb = st.jarBox;
-  await dragSwipe(Math.round(rjb.x + rjb.w * 0.42), Math.round(rjb.y + rjb.h * 0.35), Math.round(rjb.x + rjb.w * 0.44), Math.round(rjb.y + rjb.h * 0.35));
-  await sleep(580);
-  await dragSwipe(Math.round(rjb.x + rjb.w * 0.58), Math.round(rjb.y + rjb.h * 0.35), Math.round(rjb.x + rjb.w * 0.56), Math.round(rjb.y + rjb.h * 0.35));
-  await sleep(580);
+  const rushCols = [0.34, 0.66, 0.48, 0.25];
+  for (let i = 0; i < rushCols.length; i++) {
+    const cx = Math.round(rjb.x + rjb.w * rushCols[i]);
+    const cy = Math.round(rjb.y + rjb.h * 0.35);
+    await dragSwipe(cx, cy, cx, cy);
+    await waitForDropReady();
+    st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+    if (st.entities.length >= 2 && i >= 1) break;
+  }
 
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   const beforeGustTimer = st.rushTimer;
   const beforeGustCount = st.entities.length;
-  assert(beforeGustCount >= 2, 'Expected treats inside jar before gust');
+  assert(beforeGustCount >= 2, `Expected treats inside jar before gust, got ${beforeGustCount}`);
   await evalJS(`window.__HOSHI_DEBUG__.triggerRushGust()`);
-  await sleep(260);
+  await sleep(300);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.over === false && st.rushTimer <= beforeGustTimer - 4.5, `Rush gust failed: over=${st.over}, timer=${st.rushTimer}`);
   assert(st.entities.length < beforeGustCount, 'Rush gust cleared top candies');
   await screenshot('11_rush_gust_390.png');
 
   await evalJS(`window.__HOSHI_DEBUG__.setRushTimer(0.12)`);
-  await sleep(450);
-  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  for (let g = 0; g < 35; g++) {
+    await sleep(80);
+    st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+    if (st.over && st.activeModal === 'gameover') break;
+  }
   assert(st.over === true && st.rushFinished === true && st.activeModal === 'gameover', 'Rush timer expiration opens settlement');
   await screenshot('12_rush_gameover_390.png');
 
@@ -770,7 +788,7 @@ async function run() {
   await checkCapsuleAndViewportBounds('Desktop Zen HUD 1280x760', 1280, 760, 0);
   const djb = st.jarBox;
   await dragSwipe(Math.round(djb.x + djb.w * 0.5), Math.round(djb.y + djb.h * 0.35), Math.round(djb.x + djb.w * 0.52), Math.round(djb.y + djb.h * 0.35));
-  await sleep(450);
+  await waitForDropReady();
   await screenshot('13_zen_desktop_1280.png');
 
   assert(errors.length === 0, `Runtime/Console errors detected: ${errors.join(' | ')}`);

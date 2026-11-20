@@ -689,8 +689,9 @@
           const b = bodies[j];
           if (b.merged) continue;
 
-          const isWildPair = !!(a.isWildcard || b.isWildcard);
-          const canMerge = isWildPair || a.tier === b.tier;
+          const isYarnPair = !!(a.isYarnBall || b.isYarnBall);
+          const isWildPair = !isYarnPair && !!(a.isWildcard || b.isWildcard);
+          const canMerge = !isYarnPair && (isWildPair || a.tier === b.tier);
 
           const dx = b.x - a.x;
           const dy = b.y - a.y;

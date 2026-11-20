@@ -260,62 +260,238 @@
     return PHYSICS_SHAPES[`tier_${tier}`];
   }
 
+  const YARN_BALL_RADIUS = 21;
+  const YARN_BALL_SRC = 'assets/processed/event_yarn_ball.webp';
+  const SHOP_SIGN_SRC = 'assets/processed/icon_shop_sign.webp';
+
   const PATRONS = [
     {
       id: 'mikan',
       name: '店长 · 小蜜柑',
+      shortName: '小蜜柑',
+      badge: '🧁',
+      cost: 0,
       type: 'img',
       src: 'assets/processed/chef_mikan.webp',
+      skillName: '招牌经营',
+      passiveDesc: '所有订单积分与星尘 +20%，每局开局额外赠送 +1 泡泡叉',
+      shortPassive: '订单+20% · 叉+1',
       greet: '刚出炉的星光面糊好香呀～请帮我准备这几份甜点吧！',
-      thanks: '太棒啦！香气飘满整条月光街道了呢～'
+      thanks: '太棒啦！香气飘满整条月光街道了呢～',
+      idleLines: [
+        '欢迎回到星夜吃茶！今晚也要烤出香喷喷的猫神舒芙蕾哦～',
+        '喵呜～用小铺的暖炉预热天赋，一开局就能更快进入星光狂热！',
+        '悄悄告诉你：把同阶甜点靠得近一点，甜蜜星磁会帮它们亲密合体哦！',
+        '如果罐子里滚进了毛线球，在它附近合成两次就能砰地爆出大礼！'
+      ]
     },
     {
       id: 'luna',
       name: '常客 · 眠眠星兔',
-      type: 'svg',
-      svg: `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-        <g stroke="#4A2C2A" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
-          <ellipse cx="34" cy="24" rx="10" ry="20" transform="rotate(-12 34 24)" fill="#F9F2E7"/>
-          <ellipse cx="34" cy="25" rx="5" ry="12" transform="rotate(-12 34 25)" fill="#F7B2BD" stroke="none"/>
-          <ellipse cx="66" cy="24" rx="10" ry="20" transform="rotate(12 66 24)" fill="#F9F2E7"/>
-          <ellipse cx="66" cy="25" rx="5" ry="12" transform="rotate(12 66 25)" fill="#F7B2BD" stroke="none"/>
-          <circle cx="50" cy="58" r="28" fill="#FFF9F0"/>
-          <ellipse cx="33" cy="63" rx="6" ry="3.5" fill="#F6A3AF" stroke="none"/>
-          <ellipse cx="67" cy="63" rx="6" ry="3.5" fill="#F6A3AF" stroke="none"/>
-          <path d="M35 55 Q40 50 45 55" fill="none"/>
-          <path d="M55 55 Q60 50 65 55" fill="none"/>
-          <path d="M47 62 Q50 66 53 62" fill="none"/>
-          <polygon points="50,33 52.5,38 58,38.5 54,42 55,47.5 50,44.8 45,47.5 46,42 42,38.5 47.5,38" fill="#FFD35B"/>
-          <path d="M32 82 Q50 92 68 82 Q64 94 50 94 Q36 94 32 82 Z" fill="#8C7AE6"/>
-        </g>
-      </svg>`,
+      shortName: '眠眠星兔',
+      badge: '🌙',
+      cost: 60,
+      type: 'img',
+      src: 'assets/processed/patron_luna.webp',
+      skillName: '星月睡意',
+      passiveDesc: '彩虹万能糖保底 -2 步，狂热持续 +2.0s，开局自带 Lv.1 甜蜜星磁',
+      shortPassive: '彩虹-2步 · 磁吸Lv1',
       greet: '唔…今晚的月亮好圆，好想吃软绵绵的甜点呀…',
-      thanks: '哇啊！吃到幸福的味道了，谢谢主厨！'
+      thanks: '哇啊！吃到幸福的味道了，谢谢主厨！',
+      idleLines: [
+        '呼啊～带我一起营业的话，彩虹万能糖会更常来拜访你哦…',
+        '在月光下摇晃玻璃罐，好像看着星星在罐子里打盹呢…',
+        '90 秒狂欢模式里，我的狂热延长时间超好用哦，冲呀～',
+        '软绵绵的棉花糖云朵…嗯？我没睡着，在帮你吸引同阶甜点啦！'
+      ]
     },
     {
       id: 'mugi',
       name: '面包迷 · 蜂蜜柴柴',
-      type: 'svg',
-      svg: `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-        <g stroke="#4A2C2A" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
-          <polygon points="24,42 20,16 42,30" fill="#E39D49"/>
-          <polygon points="76,42 80,16 58,30" fill="#E39D49"/>
-          <circle cx="50" cy="56" r="29" fill="#E8A44F"/>
-          <path d="M23 62 Q35 52 50 60 Q65 52 77 62 Q76 84 50 85 Q24 84 23 62 Z" fill="#FFF4DF" stroke="none"/>
-          <circle cx="50" cy="56" r="29" fill="none"/>
-          <circle cx="38" cy="48" r="3" fill="#FFF4DF" stroke="none"/>
-          <circle cx="62" cy="48" r="3" fill="#FFF4DF" stroke="none"/>
-          <circle cx="38" cy="57" r="3.2" fill="#4A2C2A" stroke="none"/>
-          <circle cx="62" cy="57" r="3.2" fill="#4A2C2A" stroke="none"/>
-          <ellipse cx="30" cy="64" rx="5.5" ry="3.2" fill="#F2948A" stroke="none"/>
-          <ellipse cx="70" cy="64" rx="5.5" ry="3.2" fill="#F2948A" stroke="none"/>
-          <ellipse cx="50" cy="61" rx="4.2" ry="3" fill="#4A2C2A" stroke="none"/>
-          <path d="M44 67 Q50 72 56 67" fill="none"/>
-          <path d="M32 82 Q50 93 68 82 L60 95 L50 88 L40 95 Z" fill="#E05D50"/>
-        </g>
-      </svg>`,
+      shortName: '蜂蜜柴柴',
+      badge: '🍯',
+      cost: 100,
+      type: 'img',
+      src: 'assets/processed/patron_mugi.webp',
+      skillName: '元气暴冲',
+      passiveDesc: '≥4阶合成星爆冲击波 +30%；每段 ≥3 连击额外回 +4⭐（90秒模式转为 +60 分）',
+      shortPassive: '气浪+30% · 连击回尘',
       greet: '汪呜！我闻着焦糖与奶香找过来了，拜托做这份套餐！',
-      thanks: '太满足啦！下次我还要带朋友们一起来！'
+      thanks: '太满足啦！下次我还要带朋友们一起来！',
+      idleLines: [
+        '汪呜！！今晚火力全开，用大冲击波把甜点全滚成多米诺大连锁吧！',
+        '3 连击以上就能不断赚星尘与冲榜加分，手速越快越爽快！',
+        '看见调皮毛线球就瞄准旁边猛猛合成，一举引爆它！',
+        '刚出炉的焦糖甜甜圈最香了！选 90 秒狂欢一起冲高分榜吧！'
+      ]
+    }
+  ];
+
+  const SHOP_UPGRADES = [
+    {
+      id: 'up_tools',
+      icon: '🧰',
+      name: '备货充沛',
+      costs: [40, 90, 160],
+      maxLv: 3,
+      shortTag: (lv) => `备货Lv.${lv}`,
+      desc: (lv) => {
+        if (lv === 0) return '下级效果：每局开局「摇一摇」道具 +1';
+        if (lv === 1) return '当前：开局 摇+1 · 下级：摇+1 且 泡泡叉+1';
+        if (lv === 2) return '当前：开局 摇+1 叉+1 · 下级：全道具各 +1';
+        return '已满级：每局开局 摇一摇+1 · 泡泡叉+1 · 升阶勺+1！';
+      }
+    },
+    {
+      id: 'up_fever',
+      icon: '🔥',
+      name: '暖炉预热',
+      costs: [50, 100, 180],
+      values: [0, 18, 32, 48],
+      maxLv: 3,
+      shortTag: (lv) => `暖炉Lv.${lv}`,
+      desc: (lv) => {
+        const vals = [0, 18, 32, 48];
+        if (lv === 0) return '下级效果：开局星光能量槽自带 18% 初始能量';
+        if (lv < 3) return `当前：开局自带 ${vals[lv]}% 能量 · 下级提升至 ${vals[lv + 1]}%`;
+        return '已满级：每局开局自带 48% 星光能量，极速开启首次狂热！';
+      }
+    },
+    {
+      id: 'up_combo',
+      icon: '⏱️',
+      name: '节奏节拍器',
+      costs: [60, 120, 200],
+      values: [0, 0.18, 0.36, 0.55],
+      maxLv: 3,
+      shortTag: (lv) => `节拍Lv.${lv}`,
+      desc: (lv) => {
+        const vals = [0, 0.18, 0.36, 0.55];
+        if (lv === 0) return '下级效果：全局基础连击判定窗口延长 +0.18 秒';
+        if (lv < 3) return `当前：连击窗口 +${vals[lv].toFixed(2)}s · 下级提升至 +${vals[lv + 1].toFixed(2)}s`;
+        return '已满级：全局基础连击判定窗口永久延长 +0.55 秒！';
+      }
+    },
+    {
+      id: 'up_dust',
+      icon: '✨',
+      name: '星尘糖霜壶',
+      costs: [45, 95, 170],
+      mults: [1, 1.15, 1.3, 1.5],
+      maxLv: 3,
+      shortTag: (lv) => `糖霜Lv.${lv}`,
+      desc: (lv) => {
+        const pcts = [0, 15, 30, 50];
+        if (lv === 0) return '下级效果：局内星尘与打烊永久星尘收益 +15%';
+        if (lv < 3) return `当前：星尘收益 +${pcts[lv]}% · 下级提升至 +${pcts[lv + 1]}%`;
+        return '已满级：局内与打烊结算永久星尘收益全面 +50%！';
+      }
+    }
+  ];
+
+  const JAR_THEMES = {
+    amber: {
+      id: 'amber',
+      icon: '🍯',
+      name: '经典星夜琥珀罐',
+      cost: 0,
+      desc: '暖金黄铜领口 + 深茶蓝星夜玻璃质感 + 暖金星光引导线。',
+      collar: ['#ffe495', '#d59c3b', '#8c5a18'],
+      collarHighlight: 'rgba(255, 250, 220, 0.72)',
+      glassTop: 'rgba(170, 225, 238, 0.14)',
+      glassMid: 'rgba(22, 60, 74, 0.24)',
+      glassBot: 'rgba(255, 228, 175, 0.14)',
+      rimGlow: 'rgba(255, 244, 214, 0.35)',
+      guideLine: 'rgba(255, 224, 132, 0.62)',
+      guideTouch: 'rgba(255, 232, 152, 0.88)',
+      lockColor: [255, 228, 102],
+      moteKind: 'star',
+      moteColor: 'rgba(255, 236, 178, 0.28)',
+      ambientRgb: '255, 232, 148'
+    },
+    sakura: {
+      id: 'sakura',
+      icon: '🌸',
+      name: '樱花琉璃罐',
+      cost: 80,
+      desc: '玫瑰金樱粉金属领口 + 暮樱透光渐变玻璃 + 飘落樱花瓣与樱粉锁定光环。',
+      collar: ['#ffd1e1', '#df86a5', '#b05675'],
+      collarHighlight: 'rgba(255, 238, 246, 0.82)',
+      glassTop: 'rgba(255, 206, 224, 0.2)',
+      glassMid: 'rgba(98, 42, 68, 0.24)',
+      glassBot: 'rgba(255, 186, 212, 0.2)',
+      rimGlow: 'rgba(255, 198, 220, 0.48)',
+      guideLine: 'rgba(255, 182, 212, 0.72)',
+      guideTouch: 'rgba(255, 198, 224, 0.92)',
+      lockColor: [255, 162, 206],
+      moteKind: 'petal',
+      moteColor: 'rgba(255, 192, 218, 0.45)',
+      ambientRgb: '255, 186, 214'
+    },
+    moonlight: {
+      id: 'moonlight',
+      icon: '🌊',
+      name: '深海月光瓶',
+      cost: 120,
+      desc: '秘银月白金属领口 + 冰海青蓝折射玻璃 + 荧光海星光点与冷月蓝锁定框。',
+      collar: ['#e6f7ff', '#87bddb', '#48779c'],
+      collarHighlight: 'rgba(240, 252, 255, 0.85)',
+      glassTop: 'rgba(164, 234, 255, 0.18)',
+      glassMid: 'rgba(16, 54, 86, 0.28)',
+      glassBot: 'rgba(128, 220, 255, 0.18)',
+      rimGlow: 'rgba(166, 232, 255, 0.46)',
+      guideLine: 'rgba(148, 226, 255, 0.72)',
+      guideTouch: 'rgba(182, 240, 255, 0.92)',
+      lockColor: [132, 226, 255],
+      moteKind: 'starfish',
+      moteColor: 'rgba(154, 236, 255, 0.42)',
+      ambientRgb: '150, 228, 255'
+    }
+  };
+  const JAR_THEME_LIST = [JAR_THEMES.amber, JAR_THEMES.sakura, JAR_THEMES.moonlight];
+
+  const ACHIEVEMENTS = [
+    {
+      id: 'first_run',
+      tierImg: 1,
+      name: '初开夜灯',
+      desc: '完成至少 1 局星夜营业',
+      check: (s) => (s.lifetimeStats.runsPlayed || 0) >= 1
+    },
+    {
+      id: 'combo_4',
+      tierImg: 3,
+      name: '多米诺乐手',
+      desc: '单局达成 4 连合以上',
+      check: (s) => (s.lifetimeStats.maxComboEver || 1) >= 4
+    },
+    {
+      id: 'yarn_3',
+      tierImg: 5,
+      name: '线团克星',
+      desc: '累计震碎 3 颗捣蛋毛线球',
+      check: (s) => (s.lifetimeStats.yarnBroken || 0) >= 3
+    },
+    {
+      id: 'rush_3000',
+      tierImg: 6,
+      name: '90秒狂欢王',
+      desc: '90秒狂欢模式突破 3,000 分',
+      check: (s) => (s.bestRush || 0) >= 3000
+    },
+    {
+      id: 'souffle_1',
+      tierImg: 9,
+      name: '猫神降临',
+      desc: '合出 9 阶【星冠猫神舒芙蕾】',
+      check: (s) => (s.lifetimeStats.soufflesMade || 0) >= 1 || s.unlockedTiers.includes(9)
+    },
+    {
+      id: 'comp_all',
+      tierImg: 7,
+      name: '全品收藏家',
+      desc: '甜品图鉴全部解锁 (9/9)',
+      check: (s) => s.unlockedTiers.length >= 9
     }
   ];
 
@@ -336,11 +512,42 @@
 
   // DOM References
   const cafeStageEl = document.getElementById('cafe-stage');
+  const lobbyScreenEl = document.getElementById('lobby-screen');
+  const playScreenEl = document.getElementById('play-screen');
   const canvas = document.getElementById('game-canvas');
   const ctx = canvas.getContext('2d');
   const ambientCanvas = document.getElementById('ambient-canvas');
   const ambientCtx = ambientCanvas.getContext('2d');
 
+  // Lobby DOM
+  const lobbyRankBadgeEl = document.getElementById('lobby-rank-badge');
+  const lobbyBankValueEl = document.getElementById('lobby-bank-value');
+  const btnLobbyBank = document.getElementById('btn-lobby-bank');
+  const btnLobbyBgm = document.getElementById('btn-lobby-bgm');
+  const btnLobbySfx = document.getElementById('btn-lobby-sfx');
+  const btnLobbyCompendium = document.getElementById('btn-lobby-compendium');
+  const btnLobbyCompM = document.getElementById('btn-lobby-comp-m');
+  const btnLobbyHelp = document.getElementById('btn-lobby-help');
+  const lobbyPatronPortraitBtn = document.getElementById('lobby-patron-portrait');
+  const lobbyPatronImgEl = document.getElementById('lobby-patron-img');
+  const lobbyPatronNameEl = document.getElementById('lobby-patron-name');
+  const lobbyPatronSkillNameEl = document.getElementById('lobby-patron-skill-name');
+  const lobbyPatronSpeechEl = document.getElementById('lobby-patron-speech');
+  const lobbyPatronPassiveEl = document.getElementById('lobby-patron-passive');
+  const lobbyPatronStripEl = document.getElementById('lobby-patron-strip');
+  const modeSelectEl = document.getElementById('mode-select');
+  const modeBestChefEl = document.getElementById('mode-best-chef');
+  const modeBestRushEl = document.getElementById('mode-best-rush');
+  const modeBestZenEl = document.getElementById('mode-best-zen');
+  const lobbyShopPreviewBtn = document.getElementById('lobby-shop-preview');
+  const lobbyThemeTagEl = document.getElementById('lobby-theme-tag');
+  const lobbyTalentsSummaryEl = document.getElementById('lobby-talents-summary');
+  const btnStartGame = document.getElementById('btn-start-game');
+  const btnOpenShop = document.getElementById('btn-open-shop');
+  const shopRedDotEl = document.getElementById('shop-red-dot');
+  const btnOpenCareer = document.getElementById('btn-open-career');
+
+  // Play Screen DOM
   const scoreEl = document.getElementById('score-value');
   const bestEl = document.getElementById('best-value');
   const stardustEl = document.getElementById('stardust-value');
@@ -360,6 +567,19 @@
   const orderRushLineEl = document.getElementById('order-rush-line');
   const orderRewardLineEl = document.getElementById('order-reward-line');
   const btnSkipOrder = document.getElementById('btn-skip-order');
+
+  const rushInfoBoxEl = document.getElementById('rush-info-box');
+  const rushClockValEl = document.getElementById('rush-clock-val');
+  const rushMilestoneLineEl = document.getElementById('rush-milestone-line');
+  const zenInfoBoxEl = document.getElementById('zen-info-box');
+  const zenMilestoneLineEl = document.getElementById('zen-milestone-line');
+
+  const jarRushPillEl = document.getElementById('jar-rush-pill');
+  const jarRushTimeEl = document.getElementById('jar-rush-time');
+  const eventBannerEl = document.getElementById('event-banner');
+  const eventBannerIconEl = document.getElementById('event-banner-icon');
+  const eventBannerTitleEl = document.getElementById('event-banner-title');
+  const eventBannerMetaEl = document.getElementById('event-banner-meta');
 
   const nextBubbleEl = document.getElementById('next-bubble');
   const nextImgEl = document.getElementById('next-img');
@@ -389,6 +609,9 @@
   const mOrderRushEl = document.getElementById('m-order-rush');
   const mOrderRewardEl = document.getElementById('m-order-reward');
   const mBtnSkipOrder = document.getElementById('m-btn-skip-order');
+  const mRushBarEl = document.getElementById('m-rush-bar');
+  const mRushTimerEl = document.getElementById('m-rush-timer');
+  const mRushMilestoneEl = document.getElementById('m-rush-milestone');
   const mPerksFloatEl = document.getElementById('m-perks-float');
 
   const targetBannerEl = document.getElementById('target-banner');
@@ -403,15 +626,29 @@
   const badgeFork = document.getElementById('badge-fork');
   const badgeSpoon = document.getElementById('badge-spoon');
 
+  const btnBackLobby = document.getElementById('btn-back-lobby');
   const btnDebugPhys = document.getElementById('btn-debug-phys');
   const btnBgm = document.getElementById('btn-bgm');
   const btnSfx = document.getElementById('btn-sfx');
   const btnCompendium = document.getElementById('btn-compendium');
   const btnRestart = document.getElementById('btn-restart');
 
-  const titleModal = document.getElementById('title-modal');
-  const modeSelectEl = document.getElementById('mode-select');
-  const btnStartGame = document.getElementById('btn-start-game');
+  // Modals DOM
+  const shopModal = document.getElementById('shop-modal');
+  const shopBankValueEl = document.getElementById('shop-bank-value');
+  const shopTabsEl = document.getElementById('shop-tabs');
+  const shopBodyEl = document.getElementById('shop-body');
+  const btnCloseShop = document.getElementById('btn-close-shop');
+
+  const careerModal = document.getElementById('career-modal');
+  const careerRankTextEl = document.getElementById('career-rank-text');
+  const careerModesRowEl = document.getElementById('career-modes-row');
+  const careerStatsGridEl = document.getElementById('career-stats-grid');
+  const careerAchGridEl = document.getElementById('career-ach-grid');
+  const btnCloseCareer = document.getElementById('btn-close-career');
+
+  const helpModal = document.getElementById('help-modal');
+  const btnCloseHelp = document.getElementById('btn-close-help');
 
   const blessingModal = document.getElementById('blessing-modal');
   const blessingHeadingEl = document.getElementById('blessing-heading');
@@ -425,44 +662,156 @@
   const btnCloseComp = document.getElementById('btn-close-comp');
 
   const gameoverModal = document.getElementById('gameover-modal');
+  const goHeadingEl = document.getElementById('go-heading');
   const goScoreEl = document.getElementById('go-score');
   const goBestEl = document.getElementById('go-best');
   const goNewBestEl = document.getElementById('go-new-best');
   const goMaxTierEl = document.getElementById('go-max-tier');
+  const goFourthLabelEl = document.getElementById('go-fourth-label');
+  const goFourthValEl = document.getElementById('go-fourth-val');
   const goOrdersEl = document.getElementById('go-orders');
   const goComboEl = document.getElementById('go-combo');
   const goRankEl = document.getElementById('go-rank');
+  const goBankEarnedEl = document.getElementById('go-bank-earned');
+  const goBankDetailEl = document.getElementById('go-bank-detail');
+  const goBankShopHintEl = document.getElementById('go-bank-shop-hint');
   const btnPlayAgain = document.getElementById('btn-play-again');
+  const btnGoLobby = document.getElementById('btn-go-lobby');
 
   const toastBannerEl = document.getElementById('toast-banner');
 
   const audio = new window.StarlightAudio();
 
-  // Persistent Player Save Data
+  // Persistent Player Save Data (3.0 backward-compatible migration)
   let saveData = loadSaveData();
   function loadSaveData() {
+    const defaults = {
+      bestChef: 0,
+      bestZen: 0,
+      bestRush: 0,
+      unlockedTiers: [1, 2, 3, 4],
+      bgmTrack: 'waltz',
+      sfxEnabled: true,
+      bankStardust: 30,
+      selectedPatron: 'mikan',
+      unlockedPatrons: ['mikan'],
+      equippedTheme: 'amber',
+      unlockedThemes: ['amber'],
+      shopUpgrades: { up_tools: 0, up_fever: 0, up_combo: 0, up_dust: 0 },
+      lifetimeStats: {
+        runsPlayed: 0,
+        ordersCompleted: 0,
+        soufflesMade: 0,
+        yarnBroken: 0,
+        maxComboEver: 1
+      }
+    };
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
+        const bestChef = Number(parsed.bestChef) || 0;
+        const bestZen = Number(parsed.bestZen) || 0;
+        const bestRush = Number(parsed.bestRush) || 0;
+        const unlockedPatrons = Array.isArray(parsed.unlockedPatrons)
+          ? Array.from(new Set(['mikan', ...parsed.unlockedPatrons.filter((id) => PATRONS.some((p) => p.id === id))]))
+          : ['mikan'];
+        const selectedPatron = unlockedPatrons.includes(parsed.selectedPatron) ? parsed.selectedPatron : 'mikan';
+        const unlockedThemes = Array.isArray(parsed.unlockedThemes)
+          ? Array.from(new Set(['amber', ...parsed.unlockedThemes.filter((id) => !!JAR_THEMES[id])]))
+          : ['amber'];
+        const equippedTheme = unlockedThemes.includes(parsed.equippedTheme) ? parsed.equippedTheme : 'amber';
+        const upRaw = parsed.shopUpgrades && typeof parsed.shopUpgrades === 'object' ? parsed.shopUpgrades : {};
+        const clampLv = (v) => Math.max(0, Math.min(3, Math.floor(Number(v) || 0)));
+        const stRaw = parsed.lifetimeStats && typeof parsed.lifetimeStats === 'object' ? parsed.lifetimeStats : {};
+
+        // Returning 2.x player migration gift (>= 60 ⭐ welcome bank fund)
+        let bankStardust;
+        if (typeof parsed.bankStardust === 'number' && Number.isFinite(parsed.bankStardust)) {
+          bankStardust = Math.max(0, Math.floor(parsed.bankStardust));
+        } else if (bestChef > 0 || bestZen > 0) {
+          bankStardust = Math.max(60, Math.min(260, 60 + Math.floor(Math.max(bestChef, bestZen) / 300)));
+        } else {
+          bankStardust = defaults.bankStardust;
+        }
+
         return {
-          bestChef: parsed.bestChef || 0,
-          bestZen: parsed.bestZen || 0,
+          bestChef,
+          bestZen,
+          bestRush,
           unlockedTiers: Array.isArray(parsed.unlockedTiers) ? parsed.unlockedTiers : [1, 2, 3, 4],
-          bgmTrack: parsed.bgmTrack === 'waltz' || parsed.bgmTrack === 'bossa' || parsed.bgmTrack === 'off'
-            ? parsed.bgmTrack
-            : 'waltz',
-          sfxEnabled: typeof parsed.sfxEnabled === 'boolean' ? parsed.sfxEnabled : true
+          bgmTrack:
+            parsed.bgmTrack === 'waltz' || parsed.bgmTrack === 'bossa' || parsed.bgmTrack === 'off'
+              ? parsed.bgmTrack
+              : 'waltz',
+          sfxEnabled: typeof parsed.sfxEnabled === 'boolean' ? parsed.sfxEnabled : true,
+          bankStardust,
+          selectedPatron,
+          unlockedPatrons,
+          equippedTheme,
+          unlockedThemes,
+          shopUpgrades: {
+            up_tools: clampLv(upRaw.up_tools),
+            up_fever: clampLv(upRaw.up_fever),
+            up_combo: clampLv(upRaw.up_combo),
+            up_dust: clampLv(upRaw.up_dust)
+          },
+          lifetimeStats: {
+            runsPlayed: Math.max(0, Math.floor(Number(stRaw.runsPlayed) || 0)),
+            ordersCompleted: Math.max(0, Math.floor(Number(stRaw.ordersCompleted) || 0)),
+            soufflesMade: Math.max(0, Math.floor(Number(stRaw.soufflesMade) || 0)),
+            yarnBroken: Math.max(0, Math.floor(Number(stRaw.yarnBroken) || 0)),
+            maxComboEver: Math.max(1, Math.floor(Number(stRaw.maxComboEver) || 1))
+          }
         };
       }
     } catch (_) {}
-    return { bestChef: 0, bestZen: 0, unlockedTiers: [1, 2, 3, 4], bgmTrack: 'waltz', sfxEnabled: true };
+    return defaults;
   }
 
   function persistSaveData() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(saveData));
     } catch (_) {}
+  }
+
+  function getSelectedPatron() {
+    return PATRONS.find((p) => p.id === saveData.selectedPatron) || PATRONS[0];
+  }
+
+  function getEquippedTheme() {
+    return JAR_THEMES[saveData.equippedTheme] || JAR_THEMES.amber;
+  }
+
+  function getUpgradeLevel(id) {
+    return (saveData.shopUpgrades && saveData.shopUpgrades[id]) || 0;
+  }
+
+  function getDustMultiplier() {
+    const lv = getUpgradeLevel('up_dust');
+    return SHOP_UPGRADES.find((u) => u.id === 'up_dust').mults[lv] || 1;
+  }
+
+  function addRunStardust(baseAmt) {
+    if (!baseAmt || baseAmt <= 0) return 0;
+    const gained = Math.max(1, Math.round(baseAmt * getDustMultiplier()));
+    gameState.stardust += gained;
+    return gained;
+  }
+
+  function hasAffordableShopItem() {
+    const bank = saveData.bankStardust || 0;
+    for (const up of SHOP_UPGRADES) {
+      const lv = getUpgradeLevel(up.id);
+      if (lv < up.maxLv && bank >= up.costs[lv]) return true;
+    }
+    for (const th of JAR_THEME_LIST) {
+      if (!saveData.unlockedThemes.includes(th.id) && bank >= th.cost) return true;
+    }
+    for (const p of PATRONS) {
+      if (!saveData.unlockedPatrons.includes(p.id) && bank >= p.cost) return true;
+    }
+    return false;
   }
 
   // Apply persisted audio preferences (BGM starts enabled by default on first user gesture)
@@ -472,28 +821,52 @@
 
   function syncAudioButtons() {
     const info = audio.getTrackInfo();
-    btnBgm.textContent = info.label;
-    btnBgm.classList.toggle('is-active', audio.bgmEnabled);
-    btnBgm.title = `背景音乐：${info.title} · 点击切换曲目或关闭 (圆舞曲 → 吃茶爵士 → 关，快捷键 M)`;
-    btnSfx.textContent = audio.sfxEnabled ? '🔊 音效: 开' : '🔇 音效: 关';
+    const bgmShort = info.id === 'off' ? '关' : info.id === 'bossa' ? '爵士' : '圆舞曲';
+    const bgmIcon = info.id === 'bossa' ? '☕' : '🎵';
+    const bgmHtml = `${bgmIcon} <span class="m-hide-text">${bgmShort}</span>`;
+    const bgmTitle = `背景音乐：${info.title} · 点击切换曲目或关闭 (圆舞曲 → 吃茶爵士 → 关，快捷键 M)`;
+    if (btnBgm) {
+      btnBgm.innerHTML = `${bgmIcon} ${bgmShort}`;
+      btnBgm.classList.toggle('is-active', audio.bgmEnabled);
+      btnBgm.title = bgmTitle;
+    }
+    if (btnLobbyBgm) {
+      btnLobbyBgm.innerHTML = bgmHtml;
+      btnLobbyBgm.classList.toggle('is-active', audio.bgmEnabled);
+      btnLobbyBgm.title = bgmTitle;
+    }
+
+    const sfxHtml = audio.sfxEnabled
+      ? '🔊<span class="m-hide-text"> 音效: 开</span>'
+      : '🔇<span class="m-hide-text"> 音效: 关</span>';
+    if (btnSfx) btnSfx.innerHTML = sfxHtml;
+    if (btnLobbySfx) btnLobbySfx.innerHTML = sfxHtml;
+  }
+
+  function isLobbyOpen() {
+    return lobbyScreenEl && lobbyScreenEl.classList.contains('is-active');
   }
 
   function syncAudioMood() {
     const overlayOpen =
-      titleModal.classList.contains('is-open') ||
+      isLobbyOpen() ||
+      shopModal.classList.contains('is-open') ||
+      careerModal.classList.contains('is-open') ||
+      helpModal.classList.contains('is-open') ||
       blessingModal.classList.contains('is-open') ||
       compendiumModal.classList.contains('is-open') ||
       gameoverModal.classList.contains('is-open');
     audio.setMuffled(overlayOpen);
   }
 
-  // Preload all base, solo-action, and neighbor-interaction sprite images cleanly
+  // Preload all base, solo-action, neighbor-interaction, and Plan B sprite images cleanly
   const spriteImages = {};
   const spriteActionImages = {};
   const spriteInteractImages = {};
+  let yarnBallImage = null;
   let assetsReady = false;
   function loadSprites() {
-    const loadOne = (url, targetMap, tier) =>
+    const loadOne = (url, onLoad) =>
       new Promise((resolve) => {
         if (!url) {
           resolve();
@@ -501,7 +874,7 @@
         }
         const img = new Image();
         img.onload = () => {
-          targetMap[tier] = img;
+          onLoad(img);
           resolve();
         };
         img.onerror = resolve;
@@ -510,10 +883,11 @@
 
     const promises = [];
     for (const t of TIERS) {
-      promises.push(loadOne(t.src, spriteImages, t.tier));
-      promises.push(loadOne(t.actSrc, spriteActionImages, t.tier));
-      promises.push(loadOne(t.intSrc, spriteInteractImages, t.tier));
+      promises.push(loadOne(t.src, (img) => (spriteImages[t.tier] = img)));
+      promises.push(loadOne(t.actSrc, (img) => (spriteActionImages[t.tier] = img)));
+      promises.push(loadOne(t.intSrc, (img) => (spriteInteractImages[t.tier] = img)));
     }
+    promises.push(loadOne(YARN_BALL_SRC, (img) => (yarnBallImage = img)));
     return Promise.all(promises).then(() => {
       assetsReady = true;
     });
@@ -521,13 +895,16 @@
 
   // Game State
   let gameState = {
-    mode: 'chef', // 'chef' or 'zen'
+    mode: 'chef', // 'chef' | 'rush' | 'zen'
     running: false,
     paused: false,
     over: false,
     score: 0,
     displayScore: 0,
     stardust: 30,
+    dropsMadeThisRun: 0,
+    soufflesMadeThisRun: 0,
+    yarnBrokenThisRun: 0,
     feverEnergy: 0, // 0..100
     feverTimer: 0, // seconds remaining when active
     feverMaxDuration: 10.0,
@@ -578,6 +955,19 @@
     blessingLastReason: '',
     blessingLockUntil: 0,
     zenNextMilestone: 500,
+    // 90s Rush Mode State
+    rushTimer: 90.0,
+    rushFinished: false,
+    rushGustCooldown: 0,
+    rushNextMilestone: 1800,
+    rushLastTickSec: 6,
+    // Shop Events State
+    activeEvent: null, // { kind: 'meteor'|'yarn'|'chime', timer, maxTimer }
+    lastEventKind: null,
+    nextEventDrops: 24,
+    nextEventTimer: 18.0,
+    meteorGoldenLeft: 0,
+    shootingStars: [],
     hitstopTimer: 0,
     screenShake: 0,
     jarFlash: 0,
@@ -595,8 +985,11 @@
     speechTimer: 0
   };
 
-  // Ambient Fireflies
-  const fireflies = Array.from({ length: 28 }, () => ({
+  let activeShopTab = 'upgrades';
+  let lobbySpeechIndex = 0;
+
+  // Ambient Fireflies / Sakura Petals / Moonlit Orbs
+  const fireflies = Array.from({ length: 30 }, () => ({
     x: Math.random(),
     y: Math.random(),
     vx: (Math.random() - 0.5) * 0.015,
@@ -623,7 +1016,7 @@
     toastBannerEl.textContent = msg;
     toastBannerEl.classList.add('visible');
     clearTimeout(toastTimeout);
-    toastTimeout = setTimeout(() => toastBannerEl.classList.remove('visible'), 2200);
+    toastTimeout = setTimeout(() => toastBannerEl.classList.remove('visible'), 2300);
   }
 
   function setPatronSpeech(patron, text, duration = 4.2) {
@@ -637,13 +1030,21 @@
     gameState.speechTimer = duration;
   }
 
-  // Perk & Special Drop Helpers
+  // Perk, Patron & Special Drop Helpers
   function getPerkLevel(id) {
     return gameState.perks[id] || 0;
   }
 
+  function getEffectiveMagnetLevel() {
+    const base = getPerkLevel('magnet');
+    const lunaBonus = saveData.selectedPatron === 'luna' ? 1 : 0;
+    return Math.min(4, base + lunaBonus);
+  }
+
   function getRainbowPityBase() {
-    return Math.max(5, 12 - getPerkLevel('rainbow') * 2);
+    const modeBase = gameState.mode === 'rush' ? 8 : 12;
+    const lunaBonus = saveData.selectedPatron === 'luna' ? 2 : 0;
+    return Math.max(4, modeBase - lunaBonus - getPerkLevel('rainbow') * 2);
   }
 
   function getFeverMultiplier() {
@@ -666,7 +1067,11 @@
     }
     const tier = pickDropTier();
     const goldenLv = getPerkLevel('golden');
-    const goldenChance = 0.09 + goldenLv * 0.1 + (gameState.feverTimer > 0 && goldenLv > 0 ? 0.12 : 0);
+    let goldenChance = 0.09 + goldenLv * 0.1 + (gameState.feverTimer > 0 && goldenLv > 0 ? 0.12 : 0);
+    if (gameState.meteorGoldenLeft > 0) {
+      gameState.meteorGoldenLeft--;
+      goldenChance = Math.max(goldenChance, 0.75);
+    }
     return {
       tier,
       meta: { wildcard: false, golden: Math.random() < goldenChance }
@@ -787,7 +1192,7 @@
 
   function openBlessingModal() {
     if (!gameState.running || gameState.over || gameState.pendingBlessings <= 0) return;
-    if (titleModal.classList.contains('is-open') || gameoverModal.classList.contains('is-open')) return;
+    if (isLobbyOpen() || gameoverModal.classList.contains('is-open')) return;
     if (compendiumModal.classList.contains('is-open')) closeCompendium();
     if (gameState.activeToolMode) cancelToolMode();
 
@@ -839,30 +1244,30 @@
       gameState.tools.shake++;
       gameState.tools.fork++;
       gameState.tools.spoon++;
-      gameState.stardust += 25;
-      spawnPopup(JAR.canvasW / 2, 220, '🎁 全道具+1 · +25⭐!', '#ffe57e', 19);
+      const gained = addRunStardust(25);
+      spawnPopup(JAR.canvasW / 2, 220, `🎁 全道具+1 · +${gained}⭐!`, '#ffe57e', 19);
     } else if (id === 'cleanse') {
       const smalls = gameState.entities
-        .filter((e) => !e.isWildcard && e.tier <= 2)
+        .filter((e) => !e.isWildcard && !e.isYarnBall && e.tier <= 2)
         .sort((a, b) => a.y - b.y)
         .slice(0, 4);
       const removeIds = new Set(smalls.map((e) => e.id));
       let gainedPts = 0;
-      let gainedDust = 0;
+      let gainedDustBase = 0;
       for (const s of smalls) {
         gainedPts += 40;
-        gainedDust += 6;
+        gainedDustBase += 6;
         spawnSparkleBurst(s.x, s.y, '#9be8ff', 14);
         spawnShockwave(s.x, s.y, 44, '#9be8ff', 2.8);
       }
       if (removeIds.size > 0) {
         gameState.entities = gameState.entities.filter((e) => !removeIds.has(e.id));
         addScore(gainedPts);
-        gameState.stardust += gainedDust;
+        addRunStardust(gainedDustBase);
         spawnPopup(JAR.canvasW / 2, 210, `🫧 吹散${removeIds.size}颗! +${gainedPts}分`, '#b6f4ff', 18);
       } else {
-        gameState.stardust += 20;
-        spawnPopup(JAR.canvasW / 2, 210, '🫧 罐内很清爽！赠送 +20⭐', '#b6f4ff', 17);
+        const gained = addRunStardust(20);
+        spawnPopup(JAR.canvasW / 2, 210, `🫧 罐内很清爽！赠送 +${gained}⭐`, '#b6f4ff', 17);
       }
     }
 
@@ -904,17 +1309,25 @@
     updateEvolutionRing();
   }
 
-  function getBestScore() {
-    return gameState.mode === 'chef' ? saveData.bestChef : saveData.bestZen;
+  function getBestScore(mode = gameState.mode) {
+    if (mode === 'rush') return saveData.bestRush || 0;
+    if (mode === 'zen') return saveData.bestZen || 0;
+    return saveData.bestChef || 0;
   }
 
-  function setBestScore(val) {
-    if (gameState.mode === 'chef') {
-      saveData.bestChef = Math.max(saveData.bestChef, val);
+  function setBestScore(val, mode = gameState.mode) {
+    if (mode === 'rush') {
+      saveData.bestRush = Math.max(saveData.bestRush || 0, val);
+    } else if (mode === 'zen') {
+      saveData.bestZen = Math.max(saveData.bestZen || 0, val);
     } else {
-      saveData.bestZen = Math.max(saveData.bestZen, val);
+      saveData.bestChef = Math.max(saveData.bestChef || 0, val);
     }
     persistSaveData();
+  }
+
+  function getCareerTopScore() {
+    return Math.max(saveData.bestChef || 0, saveData.bestRush || 0, saveData.bestZen || 0);
   }
 
   function getChefRank(score) {
@@ -970,7 +1383,12 @@
   function generateOrder() {
     const maxMade = gameState.maxTierRun;
     const orderNum = gameState.ordersCompleted;
-    const patron = PATRONS[(orderNum + Math.floor(Math.random() * PATRONS.length)) % PATRONS.length];
+    const activePatron = getSelectedPatron();
+    // Keep selected support patron featured on first order, rotate cafe guests on later orders
+    const patron =
+      orderNum === 0
+        ? activePatron
+        : PATRONS[(orderNum + Math.floor(Math.random() * PATRONS.length)) % PATRONS.length];
 
     let reqTiers = [];
     if (orderNum === 0) {
@@ -985,8 +1403,9 @@
     }
     reqTiers.sort((a, b) => a - b);
 
-    const rewardScore = reqTiers.reduce((acc, t) => acc + TIERS[t - 1].points * 6, 80);
-    const rewardDust = 16 + reqTiers.reduce((acc, t) => acc + t * 2, 0);
+    const mikanOrderMult = saveData.selectedPatron === 'mikan' ? 1.2 : 1.0;
+    const rewardScore = Math.round(reqTiers.reduce((acc, t) => acc + TIERS[t - 1].points * 6, 80) * mikanOrderMult);
+    const rewardDust = Math.round((16 + reqTiers.reduce((acc, t) => acc + t * 2, 0)) * mikanOrderMult);
     const rushMax = 10 + Math.max(...reqTiers);
 
     gameState.order = {
@@ -999,7 +1418,7 @@
       completed: false
     };
 
-    setPatronSpeech(patron, patron.greet, 4.5);
+    setPatronSpeech(activePatron, orderNum === 0 ? activePatron.greet : `${patron.shortName}点单啦：${patron.greet}`, 4.5);
     checkExistingBoardForOrder();
     renderOrder();
   }
@@ -1011,7 +1430,7 @@
     for (const slot of gameState.order.slots) {
       if (slot.done) continue;
       const match = gameState.entities.find(
-        (e) => !e.isWildcard && e.tier === slot.tier && !usedIds.has(e.id) && !e.creditedToOrder
+        (e) => !e.isWildcard && !e.isYarnBall && e.tier === slot.tier && !usedIds.has(e.id) && !e.creditedToOrder
       );
       if (match) {
         usedIds.add(match.id);
@@ -1051,14 +1470,14 @@
       const feverMult = getFeverMultiplier();
       const rushMult = isRush ? 1.6 : 1;
       const pts = Math.round(ord.rewardScore * feverMult * rushMult);
-      const dust = Math.round(ord.rewardDust * rushMult);
+      const dustBase = Math.round(ord.rewardDust * rushMult);
+      const dust = addRunStardust(dustBase);
 
       addScore(pts);
-      gameState.stardust += dust;
       addFeverEnergy(isRush ? 36 : 28);
       audio.playOrderComplete();
 
-      // Grant bonus random tool charge every 2 orders
+      // Grant bonus random tool charge every 2 orders & trigger Shop Event if idle
       let toolMsg = '';
       if (gameState.ordersCompleted % 2 === 0) {
         const pool = ['shake', 'fork', 'spoon'];
@@ -1066,15 +1485,23 @@
         gameState.tools[gift]++;
         const label = gift === 'shake' ? '摇一摇' : gift === 'fork' ? '泡泡叉' : '升阶勺';
         toolMsg = ` · +1 ${label}`;
+        if (!gameState.activeEvent) {
+          setTimeout(() => {
+            if (gameState.running && !gameState.over && !gameState.activeEvent) {
+              triggerShopEvent();
+            }
+          }, 1150);
+        }
       }
 
       if (isRush) {
         grantNextRainbow();
       }
 
+      const activePatron = getSelectedPatron();
       setPatronSpeech(
-        ord.patron,
-        isRush ? `${ord.patron.thanks} 极速出餐附赠彩虹万能糖哦！` : ord.patron.thanks,
+        activePatron,
+        isRush ? `${activePatron.thanks} 极速出餐附赠彩虹万能糖哦！` : activePatron.thanks,
         3.8
       );
       showToast(
@@ -1107,14 +1534,17 @@
   }
 
   function renderOrder() {
-    if (gameState.mode !== 'chef') {
-      orderBoxEl.style.display = 'none';
-      if (mOrderBarEl) mOrderBarEl.style.display = 'none';
-      return;
-    }
-    orderBoxEl.style.display = 'block';
-    if (mOrderBarEl) mOrderBarEl.style.display = 'flex';
-    if (!gameState.order) return;
+    const isChef = gameState.mode === 'chef';
+    const isRush = gameState.mode === 'rush';
+    const isZen = gameState.mode === 'zen';
+
+    orderBoxEl.style.display = isChef ? 'block' : 'none';
+    if (rushInfoBoxEl) rushInfoBoxEl.style.display = isRush ? 'flex' : 'none';
+    if (zenInfoBoxEl) zenInfoBoxEl.style.display = isZen ? 'flex' : 'none';
+    if (mOrderBarEl) mOrderBarEl.style.display = isChef ? 'flex' : 'none';
+    if (mRushBarEl) mRushBarEl.style.display = isRush ? 'flex' : 'none';
+
+    if (!isChef || !gameState.order) return;
 
     orderSlotsEl.innerHTML = '';
     if (mOrderSlotsEl) mOrderSlotsEl.innerHTML = '';
@@ -1163,8 +1593,10 @@
     if (gameState.score > getBestScore()) {
       setBestScore(gameState.score);
     }
+    if (!gameState.running || gameState.over) return;
+
     // Zen mode awards Roguelike 3-Choice Blessings at escalating score milestones
-    if (gameState.mode === 'zen' && gameState.running && !gameState.over) {
+    if (gameState.mode === 'zen') {
       while (gameState.score >= gameState.zenNextMilestone) {
         const hit = gameState.zenNextMilestone;
         gameState.zenNextMilestone =
@@ -1172,15 +1604,28 @@
         queueBlessing(`🍵 达成 ${hit} 分里程碑`);
       }
     }
+
+    // 90s Rush mode awards Blessings at 1,800 / 4,200 / 7,500 / +3,500 score milestones
+    if (gameState.mode === 'rush') {
+      while (gameState.score >= gameState.rushNextMilestone) {
+        const hit = gameState.rushNextMilestone;
+        gameState.rushNextMilestone =
+          hit < 4200 ? 4200 : hit < 7500 ? 7500 : hit + 3500;
+        queueBlessing(`⚡ 狂欢突破 ${hit} 分`);
+      }
+    }
   }
 
   function addFeverEnergy(amount) {
     if (gameState.feverTimer > 0) return;
     const feverLv = getPerkLevel('fever');
-    const boosted = amount * (1 + feverLv * 0.28);
+    const rushMult = gameState.mode === 'rush' ? 1.85 : 1.0;
+    const meteorMult = gameState.activeEvent && gameState.activeEvent.kind === 'meteor' ? 1.3 : 1.0;
+    const boosted = amount * (1 + feverLv * 0.28) * rushMult * meteorMult;
     gameState.feverEnergy = Math.min(100, gameState.feverEnergy + boosted);
     if (gameState.feverEnergy >= 100) {
-      const dur = 10.0 + feverLv * 3.5;
+      const lunaFeverBonus = saveData.selectedPatron === 'luna' ? 2.0 : 0;
+      const dur = 10.0 + feverLv * 3.5 + lunaFeverBonus;
       gameState.feverMaxDuration = dur;
       gameState.feverTimer = dur;
       gameState.feverBonusUsed = 0;
@@ -1191,10 +1636,271 @@
       audio.setFeverMode(true);
       if (cafeStageEl) cafeStageEl.classList.add('is-fever');
       showToast(`🔥 星光磁吸狂热启动！${dur.toFixed(0)}秒强力磁吸 · 连击最高 5× 积分！`);
-      setPatronSpeech(PATRONS[0], '哇啊——星光磁吸狂热开启啦！同阶甜点自动吸合、连击最高5倍冲呀！！', 4.8);
+      setPatronSpeech(
+        getSelectedPatron(),
+        '哇啊——星光磁吸狂热开启啦！同阶甜点自动吸合、连击最高5倍冲呀！！',
+        4.8
+      );
       spawnSparkleBurst(JAR.canvasW / 2, 240, '#ffdf6b', 36);
       spawnShockwave(JAR.canvasW / 2, 260, 190, '#ffd85d', 4.5);
       showComboBanner('🔥 星光磁吸狂热!', '极速投放 · 最高 5× 积分', '#ffe36e');
+
+      // Rush mode grants +1 Blessing every time Fever starts!
+      if (gameState.mode === 'rush') {
+        queueBlessing('🔥 狂热充能达成');
+      }
+    }
+  }
+
+  // ==================== 3.0 Shop Events & Rush Emergency Gust ====================
+  function createYarnBallEntity(x, y) {
+    const shapeDef = PHYSICS_SHAPES.event_yarn_ball || getShapeDef(1);
+    const eqR = YARN_BALL_RADIUS;
+    const entity = {
+      id: gameState.nextEntityId++,
+      tier: 0,
+      isWildcard: false,
+      isGolden: false,
+      isYarnBall: true,
+      yarnHp: 2,
+      yarnMaxHp: 2,
+      yarnHitFlash: 0,
+      r: eqR,
+      mass: eqR * eqR * 1.1,
+      x,
+      y,
+      vx: (Math.random() - 0.5) * 95,
+      vy: 85,
+      angle: Math.random() * Math.PI * 2,
+      vr: (Math.random() - 0.5) * 5,
+      squishAmt: 0.12,
+      squishVel: 0,
+      squishAngle: Math.PI * 0.5,
+      age: 0,
+      dangerTime: 0,
+      inContact: false,
+      merged: false,
+      creditedToOrder: false,
+      trail: [],
+      soloCooldown: 99,
+      interactCooldown: 99,
+      anim: null
+    };
+    Physics.configureBodyShape(entity, shapeDef, eqR, { friction: 0.34, restitution: 0.42 });
+    Physics.clampBodyInsideJarPositional(entity, JAR);
+    gameState.entities.push(entity);
+    return entity;
+  }
+
+  function hasYarnBallInJar() {
+    return gameState.entities.some((e) => e.isYarnBall && !e.merged);
+  }
+
+  function isJarNearDanger() {
+    return gameState.entities.some((e) => e.age > 0.6 && e.aabbMinY < JAR.dangerY + 40);
+  }
+
+  function triggerShopEvent(forcedKind = null) {
+    if (!gameState.running || gameState.over) return null;
+
+    let kind = forcedKind;
+    if (!kind) {
+      const candidates = ['meteor', 'yarn', 'chime'].filter((k) => k !== gameState.lastEventKind);
+      kind = candidates[Math.floor(Math.random() * candidates.length)];
+    }
+
+    // Safety guard: never drop a yarn ball when jar is near danger line or one already exists
+    if (kind === 'yarn' && !forcedKind && (isJarNearDanger() || hasYarnBallInJar())) {
+      kind = Math.random() < 0.5 ? 'meteor' : 'chime';
+    }
+
+    gameState.lastEventKind = kind;
+    audio.playEventStart(kind);
+    const activePatron = getSelectedPatron();
+
+    if (kind === 'meteor') {
+      gameState.activeEvent = { kind: 'meteor', timer: 12.0, maxTimer: 12.0 };
+      // 4 consecutive upcoming treats have 75% chance to be golden (starting with cur & next)
+      let remaining = 4;
+      if (!gameState.curMeta.wildcard && !gameState.curMeta.golden && remaining > 0) {
+        if (Math.random() < 0.75) gameState.curMeta.golden = true;
+        remaining--;
+      }
+      if (!gameState.nextMeta.wildcard && !gameState.nextMeta.golden && remaining > 0) {
+        if (Math.random() < 0.75) gameState.nextMeta.golden = true;
+        remaining--;
+      }
+      gameState.meteorGoldenLeft = remaining;
+
+      // Spawn 2 shimmering diagonal shooting stars across jar backdrop
+      gameState.shootingStars.push(
+        { x: JAR.right - 20, y: JAR.neckY + 26, vx: -360, vy: 135, life: 0.95, maxLife: 0.95 },
+        { x: JAR.right - 70, y: JAR.neckY + 58, vx: -320, vy: 125, life: 1.15, maxLife: 1.15 }
+      );
+      showComboBanner('🌠 流星许愿夜!', '接下来的甜点75%镀金 · 狂热充能 +30%', '#ffe888');
+      showToast('🌠 突发事件：流星许愿夜！黄金甜点雨与 +30% 狂热充能！');
+      setPatronSpeech(activePatron, '快许愿呀！流星把面糊都镀上亮晶晶的金糖霜啦～', 4.4);
+    } else if (kind === 'yarn') {
+      gameState.activeEvent = { kind: 'yarn', timer: 0, maxTimer: 0 };
+      const sx = 120 + Math.random() * 200;
+      createYarnBallEntity(sx, JAR.neckY + 24);
+      spawnSparkleBurst(sx, JAR.neckY + 28, '#ff9cb8', 18);
+      showComboBanner('🧶 猫咪捣蛋时间!', '附近合成2次或摇罐震碎爆 +180分 · +18⭐', '#ffa8c4');
+      showToast('🧶 突发事件：调皮毛线球滚进罐里啦！附近合成 2 次即可震碎拿大奖！');
+      setPatronSpeech(activePatron, '呀！毛线球滚进去了！在它旁边合两次就能砰地炸出星尘哦！', 4.6);
+    } else {
+      gameState.activeEvent = { kind: 'chime', timer: 14.0, maxTimer: 14.0 };
+      gameState.jarFlash = Math.max(gameState.jarFlash, 0.5);
+      spawnSparkleBurst(JAR.canvasW / 2, JAR.neckY + 30, '#ffe072', 24);
+      showComboBanner('🔔 黄金烘焙钟!', '14秒内全合成 +45% 得分 · 连击窗口 +0.5s', '#ffe26a');
+      showToast('🔔 突发事件：黄金烘焙钟敲响！14 秒暴击得分 +45%！');
+      setPatronSpeech(activePatron, '叮当～壁炉黄金钟响了！趁这 14 秒疯狂连锁清罐吧！', 4.4);
+    }
+
+    updateHUD();
+    return kind;
+  }
+
+  function damageNearbyYarnBalls(mx, my, range = 95, allJar = false) {
+    const yarnBalls = gameState.entities.filter((e) => e.isYarnBall && !e.merged);
+    if (yarnBalls.length === 0) return 0;
+
+    let brokenCount = 0;
+    const removedIds = new Set();
+    for (const yb of yarnBalls) {
+      const dist = allJar ? 0 : Math.hypot(yb.x - mx, yb.y - my);
+      if (!allJar && dist > range + yb.r * 0.5) continue;
+
+      yb.yarnHp--;
+      yb.yarnHitFlash = 0.45;
+      yb.vy -= 110;
+      yb.vx += (yb.x >= mx ? 1 : -1) * 75;
+      yb.vr += (Math.random() - 0.5) * 9;
+      applyDirectionalSquish(yb, 0, -1, 260);
+      spawnSparkleBurst(yb.x, yb.y, '#ff9ec2', 12);
+
+      if (yb.yarnHp > 0) {
+        audio.playYarnHit();
+        spawnPopup(yb.x, yb.y - 24, `🧶 脆度 ${yb.yarnHp}/2`, '#ffb6d0', 14);
+      } else {
+        removedIds.add(yb.id);
+        brokenCount++;
+        audio.playYarnBreak();
+
+        const pts = Math.round(180 * getFeverMultiplier());
+        const dust = addRunStardust(18);
+        addScore(pts);
+        addFeverEnergy(25);
+        gameState.yarnBrokenThisRun++;
+        saveData.lifetimeStats.yarnBroken = (saveData.lifetimeStats.yarnBroken || 0) + 1;
+        persistSaveData();
+
+        spawnSparkleBurst(yb.x, yb.y, '#ffb3cf', 22);
+        spawnSparkleBurst(yb.x, yb.y, '#ffe47a', 20);
+        spawnShockwave(yb.x, yb.y, 118, '#ff9ec2', 4.2);
+        spawnShockwave(yb.x, yb.y, 76, '#ffe47a', 2.8);
+        gameState.screenShake = Math.max(gameState.screenShake, 5.2);
+        gameState.jarFlash = Math.max(gameState.jarFlash, 0.5);
+        spawnPopup(yb.x, yb.y - 18, `🧶 爆裂! +${pts}分 +${dust}⭐`, '#ffe57e', 18);
+        showComboBanner('🧶 毛线球大爆裂!', `+${pts} 分 · +${dust} ⭐ · +25% 狂热`, '#ffb3d6');
+      }
+    }
+
+    if (removedIds.size > 0) {
+      gameState.entities = gameState.entities.filter((e) => !removedIds.has(e.id));
+      if (gameState.activeEvent && gameState.activeEvent.kind === 'yarn' && !hasYarnBallInJar()) {
+        gameState.activeEvent = null;
+      }
+    }
+    return brokenCount;
+  }
+
+  function triggerRushEmergencyGust() {
+    if (gameState.rushGustCooldown > 0 || gameState.entities.length === 0) return;
+
+    // Clear the highest 3~4 treats closest to the top opening
+    const sorted = [...gameState.entities].sort((a, b) => a.aabbMinY - b.aabbMinY);
+    const clearCount = Math.min(sorted.length, sorted.length >= 10 ? 4 : 3);
+    const toRemove = sorted.slice(0, clearCount);
+    const removeIds = new Set(toRemove.map((e) => e.id));
+
+    for (const e of toRemove) {
+      spawnSparkleBurst(e.x, e.y, '#9be8ff', 14);
+      spawnShockwave(e.x, e.y, 58, '#a6ecff', 3);
+    }
+    gameState.entities = gameState.entities.filter((e) => !removeIds.has(e.id));
+
+    // Deduct 5.0s safely (preserve at least 1.0s buffer if timer > 1s to prevent instant 0s loop)
+    if (gameState.rushTimer > 1.0) {
+      gameState.rushTimer = Math.max(1.0, gameState.rushTimer - 5.0);
+    }
+    gameState.rushGustCooldown = 2.5;
+    gameState.dangerDuration = 0;
+    gameState.screenShake = Math.max(gameState.screenShake, 6);
+    gameState.jarFlash = Math.max(gameState.jarFlash, 0.65);
+
+    if (gameState.activeEvent && gameState.activeEvent.kind === 'yarn' && !hasYarnBallInJar()) {
+      gameState.activeEvent = null;
+    }
+
+    audio.playWindGust();
+    showComboBanner('🌪️ 星风紧急吹散!', `清掉顶部 ${clearCount} 颗 · 扣除 5.0s`, '#ff9b82');
+    showToast(`🌪️ 触发星风吹散！清除顶部 ${clearCount} 颗甜品并扣除 5.0 秒`);
+    updateHUD();
+  }
+
+  function updateEventBannerUI() {
+    if (!eventBannerEl) return;
+    const ev = gameState.activeEvent;
+    if (!ev || !gameState.running || gameState.over) {
+      eventBannerEl.classList.remove('visible');
+      return;
+    }
+    eventBannerEl.dataset.kind = ev.kind;
+    if (ev.kind === 'meteor') {
+      eventBannerIconEl.textContent = '🌠';
+      eventBannerTitleEl.textContent = '流星许愿夜 · 镀金 & 充能+30%';
+      eventBannerMetaEl.textContent = `${Math.max(0, ev.timer).toFixed(1)}s`;
+    } else if (ev.kind === 'yarn') {
+      const yb = gameState.entities.find((e) => e.isYarnBall && !e.merged);
+      const hp = yb ? yb.yarnHp : 0;
+      eventBannerIconEl.textContent = '🧶';
+      eventBannerTitleEl.textContent = '猫咪捣蛋 · 附近合成震碎领大奖';
+      eventBannerMetaEl.textContent = `脆度 ×${hp}`;
+    } else {
+      eventBannerIconEl.textContent = '🔔';
+      eventBannerTitleEl.textContent = '黄金烘焙钟 · 得分+45% 连击延长';
+      eventBannerMetaEl.textContent = `${Math.max(0, ev.timer).toFixed(1)}s`;
+    }
+    eventBannerEl.classList.add('visible');
+  }
+
+  function updateRushTimerUI() {
+    const isRush = gameState.mode === 'rush' && gameState.running && !gameState.over;
+    const tStr = `${Math.max(0, gameState.rushTimer).toFixed(1)}s`;
+    const urgent = gameState.rushTimer <= 15.0;
+
+    if (jarRushPillEl) {
+      jarRushPillEl.style.display = isRush ? 'flex' : 'none';
+      jarRushPillEl.classList.toggle('is-urgent', urgent);
+    }
+    if (jarRushTimeEl) jarRushTimeEl.textContent = tStr;
+    if (rushClockValEl) {
+      rushClockValEl.textContent = tStr;
+      rushClockValEl.classList.toggle('is-urgent', urgent);
+    }
+    if (rushMilestoneLineEl) {
+      rushMilestoneLineEl.textContent = `🎁 下次祝福：${gameState.rushNextMilestone.toLocaleString()} 分 / 进狂热送 1 次`;
+    }
+    if (mRushTimerEl) {
+      mRushTimerEl.textContent = tStr;
+      mRushTimerEl.classList.toggle('is-urgent', urgent);
+    }
+    if (mRushMilestoneEl) {
+      mRushMilestoneEl.textContent = `🎁 ${gameState.rushNextMilestone}分`;
+    }
+    if (zenMilestoneLineEl && gameState.mode === 'zen') {
+      zenMilestoneLineEl.textContent = `🎁 下次三选一祝福：${gameState.zenNextMilestone.toLocaleString()} 分`;
     }
   }
 
@@ -1322,13 +2028,20 @@
     }
 
     renderActivePerks();
+    updateRushTimerUI();
+    updateEventBannerUI();
 
     // Tool Badges
     updateToolBadge(btnToolShake, badgeShake, 'shake');
     updateToolBadge(btnToolFork, badgeFork, 'fork');
     updateToolBadge(btnToolSpoon, badgeSpoon, 'spoon');
 
-    modeTagEl.textContent = gameState.mode === 'chef' ? '星夜主厨模式' : '悠闲经典模式';
+    modeTagEl.textContent =
+      gameState.mode === 'rush'
+        ? '⚡ 90秒狂欢模式'
+        : gameState.mode === 'zen'
+        ? '🍵 悠闲经典模式'
+        : '🌟 星夜主厨模式';
   }
 
   function updateToolBadge(btn, badgeEl, key) {
@@ -1383,6 +2096,8 @@
         e.vr += (Math.random() - 0.5) * 8;
       }
       spawnSparkleBurst(JAR.canvasW / 2, 320, '#ffd85d', 24);
+      // Shaking the jar also cracks Mischief Yarn Balls!
+      damageNearbyYarnBalls(JAR.canvasW / 2, JAR.canvasH / 2, 0, true);
       showToast('🔔 叮铃！玻璃罐轻轻摇晃起来了！');
       updateHUD();
       return;
@@ -1541,6 +2256,7 @@
     const curMeta = gameState.curMeta || { wildcard: false, golden: false };
     // Crisp zero-sway vertical launch: drops 100% along the aim guide line!
     createEntity(gameState.curTier, gameState.dropX, JAR.dropY, 0, 165, false, totalAngle, 0, curMeta);
+    gameState.dropsMadeThisRun++;
     audio.playDrop(curMeta.wildcard, curMeta.golden);
 
     // Decrement Rush Order steps
@@ -1573,10 +2289,24 @@
       showToast('🌈 星露蓄满！下一颗必出【彩虹万能糖】！');
     }
 
+    // Trigger Shop Event every 22~30 drops in Chef / Zen modes
+    if (gameState.mode !== 'rush' && !gameState.activeEvent) {
+      gameState.nextEventDrops--;
+      if (gameState.nextEventDrops <= 0) {
+        gameState.nextEventDrops = 22 + Math.floor(Math.random() * 9);
+        triggerShopEvent();
+      }
+    }
+
     gameState.aimAngle = 0;
     gameState.dropSway = 0;
     gameState.canHoldThisTurn = true;
-    gameState.dropCooldown = gameState.feverTimer > 0 ? 0.13 : 0.22;
+    const isFever = gameState.feverTimer > 0;
+    if (gameState.mode === 'rush') {
+      gameState.dropCooldown = isFever ? 0.06 : 0.09;
+    } else {
+      gameState.dropCooldown = isFever ? 0.12 : 0.19;
+    }
     gameState.heldActionAnim = null;
     gameState.heldActionCooldown = 1.5 + Math.random() * 1.5;
     clampDropX();
@@ -1678,8 +2408,9 @@
   function applyMergeShockwaveImpulse(mx, my, bornR, nextTier, excludeId) {
     const shockLv = getPerkLevel('shockwave');
     const isFever = gameState.feverTimer > 0;
+    const mugiBoost = saveData.selectedPatron === 'mugi' && nextTier >= 4 ? 1.3 : 1.0;
     const blastRadius = bornR * (2.45 + shockLv * 0.55) + 46;
-    const baseForce = 95 + nextTier * 17 + shockLv * 52 + (isFever ? 32 : 0);
+    const baseForce = (95 + nextTier * 17 + shockLv * 52 + (isFever ? 32 : 0)) * mugiBoost;
 
     for (const other of gameState.entities) {
       if (other.id === excludeId || other.merged) continue;
@@ -1692,7 +2423,7 @@
       const ux = dx / dist;
       const uy = dy / dist;
       const massFactor = Math.min(1.25, Math.max(0.42, 34 / Math.max(16, other.r)));
-      const imp = Math.min(265, baseForce * falloff * massFactor);
+      const imp = Math.min(310, baseForce * falloff * massFactor);
 
       // Protect treats close to the danger line from popping upward into overflow
       const nearTop = other.y < JAR.dangerY + 58;
@@ -1709,7 +2440,7 @@
 
   // Fixed-Timestep 2D Compound-Convex-Polygon Rigid-Body Physics + Silky Magnet + Merge Pipeline
   function stepPhysics(dt) {
-    const magnetLv = getPerkLevel('magnet');
+    const magnetLv = getEffectiveMagnetLevel();
     const isFever = gameState.feverTimer > 0;
     const magnetRange = 10 + magnetLv * 12 + (isFever ? 26 : 0);
     const magnetForce = 480 + magnetLv * 280 + (isFever ? 640 : 0);
@@ -1733,13 +2464,17 @@
           applyDirectionalSquish(imp.bodyA, -imp.nx, -imp.ny, imp.speed);
         }
         if (imp.speed > 135) {
-          const defB = TIERS[imp.bodyB.tier - 1];
+          const defB = imp.bodyB.isYarnBall ? null : TIERS[imp.bodyB.tier - 1];
           const intensity = Math.min(1, (imp.speed - 110) / 520);
-          const crumbCol = imp.bodyB.isWildcard
+          const crumbCol = imp.bodyB.isYarnBall
+            ? '#ffb5cf'
+            : imp.bodyB.isWildcard
             ? '#ffb5d8'
             : imp.bodyB.isGolden
             ? '#ffe27a'
-            : defB.crumbColor;
+            : defB
+            ? defB.crumbColor
+            : '#ffe3c4';
           spawnImpactCrumbs(imp.x, imp.y, imp.nx, imp.ny, crumbCol, intensity);
         }
       }
@@ -1747,9 +2482,9 @@
       if (strongest.speed > 100) {
         const intensity = Math.min(1, (strongest.speed - 85) / 480);
         const hitGlass = strongest.bodyA === null;
-        const sndTier = strongest.bodyA
-          ? Math.max(strongest.bodyA.tier, strongest.bodyB.tier)
-          : strongest.bodyB.tier;
+        const tierA = strongest.bodyA ? (strongest.bodyA.isYarnBall ? 3 : strongest.bodyA.tier) : 0;
+        const tierB = strongest.bodyB.isYarnBall ? 3 : strongest.bodyB.tier;
+        const sndTier = strongest.bodyA ? Math.max(tierA, tierB) : tierB;
         audio.playBounce(intensity, sndTier, hitGlass);
       }
     }
@@ -1760,6 +2495,10 @@
       const critLv = getPerkLevel('critJump');
       const goldenLv = getPerkLevel('golden');
       const rainbowLv = getPerkLevel('rainbow');
+      const upComboBonus = SHOP_UPGRADES.find((u) => u.id === 'up_combo').values[getUpgradeLevel('up_combo')] || 0;
+      const isChimeEvent = !!(gameState.activeEvent && gameState.activeEvent.kind === 'chime');
+      const chimeScoreMult = isChimeEvent ? 1.45 : 1.0;
+      const chimeComboBonus = isChimeEvent ? 0.5 : 0;
 
       gameState.entities = gameState.entities.filter((e) => !e.merged);
       for (const [a, b] of mergePairs) {
@@ -1778,16 +2517,27 @@
           0.3;
         const mVr = (a.vr + b.vr) * 0.22;
 
-        // Combo tracking with Combo Master perk
+        // Combo tracking with Combo Master perk + Kitchen Metronome + Golden Chime
         if (gameState.comboTimer <= 0) {
           gameState.comboCount = 1;
           gameState.comboRainbowGranted = false;
         } else {
           gameState.comboCount++;
         }
-        gameState.comboTimer = 1.72 + comboLv * 0.6;
+        gameState.comboTimer = 1.72 + comboLv * 0.6 + upComboBonus + chimeComboBonus;
         if (gameState.comboCount > gameState.maxCombo) {
           gameState.maxCombo = gameState.comboCount;
+        }
+
+        // Honey Shiba (mugi) passive: >=3 combo grants +4 ⭐ stardust (or +60 pts in 90s Rush!)
+        if (saveData.selectedPatron === 'mugi' && gameState.comboCount >= 3) {
+          if (gameState.mode === 'rush') {
+            addScore(60);
+            spawnPopup(mx + 26, my - 26, '🍯 +60分!', '#ffd27a', 13);
+          } else {
+            const mugiDust = addRunStardust(4);
+            spawnPopup(mx + 26, my - 26, `🍯 +${mugiDust}⭐`, '#ffd27a', 13);
+          }
         }
 
         const feverMult = getFeverMultiplier();
@@ -1811,12 +2561,15 @@
           grantNextRainbow(`${gameState.comboCount}连合奖励`);
         }
 
+        // Nearby merges crack & shatter Mischief Yarn Balls within 95px!
+        damageNearbyYarnBalls(mx, my, 95, false);
+
         if (isTwinWild) {
           // Two Rainbow Wildcards merge -> Twin Rainbow Miracle!
           const born = createEntity(5, mx, my, mvx, mvy - 30, true, 0, 0, { golden: true });
-          const pts = Math.round(320 * feverMult * comboBonus);
+          const pts = Math.round(320 * feverMult * comboBonus * chimeScoreMult);
           addScore(pts);
-          gameState.stardust += 24;
+          addRunStardust(24);
           addFeverEnergy(45);
           audio.playWildcard();
           spawnSparkleBurst(mx, my, '#ff99cc', 22);
@@ -1850,14 +2603,14 @@
 
           const goldMult = isGoldenMerge ? 2.5 : 1;
           const critMult = isCrit ? 2.0 : 1;
-          const pts = Math.round(def.points * feverMult * comboBonus * goldMult * critMult);
+          const pts = Math.round(def.points * feverMult * comboBonus * goldMult * critMult * chimeScoreMult);
           addScore(pts);
 
-          let dustGain = nextTier >= 4 ? Math.max(1, Math.floor(nextTier / 2)) : 0;
+          let dustBase = nextTier >= 4 ? Math.max(1, Math.floor(nextTier / 2)) : 0;
           if (isGoldenMerge) {
-            dustGain += 12 + goldenLv * 10;
+            dustBase += 12 + goldenLv * 10;
           }
-          if (dustGain > 0) gameState.stardust += dustGain;
+          const dustGain = dustBase > 0 ? addRunStardust(dustBase) : 0;
 
           addFeverEnergy(5.5 + nextTier * 2.3 + (isGoldenMerge ? 26 : 0) + (isWildMerge ? 14 : 0));
 
@@ -1902,8 +2655,8 @@
           }
 
           // Floating popup & center-top combo banner
-          let label = `+${pts}`;
-          let popColor = '#ffffff';
+          let label = isChimeEvent ? `🔔 +${pts}` : `+${pts}`;
+          let popColor = isChimeEvent ? '#ffe778' : '#ffffff';
           let popSize = 15;
           if (isCrit) {
             label = `⚡ 奇迹跳阶+2! +${pts}`;
@@ -1935,17 +2688,20 @@
           spawnPopup(mx, my - def.radius * 0.6, label, popColor, popSize);
 
           if (nextTier === 9) {
+            gameState.soufflesMadeThisRun++;
+            saveData.lifetimeStats.soufflesMade = (saveData.lifetimeStats.soufflesMade || 0) + 1;
+            persistSaveData();
             showToast('👑 奇迹诞生！合成传说级【星冠猫神舒芙蕾】！');
-            setPatronSpeech(PATRONS[0], '哇！！星冠猫神舒芙蕾诞生了！整座甜品屋都在发光！', 5.0);
+            setPatronSpeech(getSelectedPatron(), '哇！！星冠猫神舒芙蕾诞生了！整座甜品屋都在发光！', 5.0);
             showComboBanner('👑 星冠猫神诞生!', '传说级至高甜点!', '#ffe46b');
           }
 
           notifyTreatSynthesized(nextTier, born);
         } else {
           // Two Tier 9 Crown Cat Souffles (or Wildcard + Tier 9) -> Celestial Supernova!
-          const pts = Math.round((isWildMerge ? 1200 : 1800) * feverMult * comboBonus);
+          const pts = Math.round((isWildMerge ? 1200 : 1800) * feverMult * comboBonus * chimeScoreMult);
           addScore(pts);
-          gameState.stardust += 55;
+          addRunStardust(55);
           addFeverEnergy(65);
           audio.playSupernova();
           spawnSparkleBurst(mx, my, '#ffe378', 48);
@@ -1959,7 +2715,7 @@
           showToast('🌟 传说奇景！星冠猫神引发了甜品超新星！');
           // Gently clear tiny Tier 1~2 clutter around supernova
           gameState.entities = gameState.entities.filter((e) => {
-            if (!e.isWildcard && e.tier <= 2 && Math.hypot(e.x - mx, e.y - my) < 190) {
+            if (!e.isWildcard && !e.isYarnBall && e.tier <= 2 && Math.hypot(e.x - mx, e.y - my) < 190) {
               spawnSparkleBurst(e.x, e.y, '#9be0ff', 8);
               return false;
             }
@@ -1970,10 +2726,13 @@
       updateHUD();
     }
 
-    // Update age, drop trail, harmonic soft-body spring squish, and exact polygon-top overflow check
+    // Update age, drop trail, yarn flash, harmonic soft-body spring squish, and exact polygon-top overflow check
     let anyDanger = false;
     for (const e of gameState.entities) {
       e.age += dt;
+      if (e.yarnHitFlash > 0) {
+        e.yarnHitFlash = Math.max(0, e.yarnHitFlash - dt);
+      }
       // Record brief crisp watercolor ribbon trail for freshly falling treats
       if (e.age < 0.45 && e.vy > 140) {
         e.trail.push({ x: e.x, y: e.y });
@@ -2000,12 +2759,22 @@
     if (anyDanger) {
       gameState.dangerDuration += dt;
       if (gameState.dangerDuration > 2.65) {
-        triggerGameOver();
+        if (gameState.mode === 'rush') {
+          triggerRushEmergencyGust();
+        } else {
+          triggerGameOver();
+        }
       }
     } else {
       gameState.dangerDuration = Math.max(0, gameState.dangerDuration - dt * 2.2);
     }
-    audio.setDangerLevel(Math.max(0, Math.min(1, (gameState.dangerDuration - 0.45) / 2.1)));
+
+    const overflowDanger = Math.max(0, Math.min(1, (gameState.dangerDuration - 0.45) / 2.1));
+    const rushDanger =
+      gameState.mode === 'rush' && gameState.rushTimer <= 15.0
+        ? Math.min(1, 0.35 + ((15.0 - gameState.rushTimer) / 15.0) * 0.65)
+        : 0;
+    audio.setDangerLevel(Math.max(overflowDanger, rushDanger));
   }
 
   function triggerGameOver() {
@@ -2023,15 +2792,73 @@
     const isNewBest = gameState.score > 0 && gameState.score >= bestBefore;
     setBestScore(gameState.score);
 
+    // Compute 3.0 Permanent Stardust Bank Deposit
+    const scorePart = Math.floor(gameState.score / 260);
+    const dustPart = Math.floor(gameState.stardust * 0.35);
+    const souffleBonus = gameState.soufflesMadeThisRun > 0 ? 25 : 0;
+    const rushBonus = gameState.mode === 'rush' && gameState.rushFinished ? 10 : 0;
+    let rawEarned = scorePart + dustPart + souffleBonus + rushBonus;
+    let pityApplied = false;
+    if (gameState.dropsMadeThisRun >= 5 && rawEarned < 15) {
+      rawEarned = 15;
+      pityApplied = true;
+    }
+    const dustMult = getDustMultiplier();
+    const finalEarned = Math.round(rawEarned * dustMult);
+
+    saveData.bankStardust = (saveData.bankStardust || 0) + finalEarned;
+    saveData.lifetimeStats.runsPlayed = (saveData.lifetimeStats.runsPlayed || 0) + 1;
+    saveData.lifetimeStats.ordersCompleted = (saveData.lifetimeStats.ordersCompleted || 0) + gameState.ordersCompleted;
+    saveData.lifetimeStats.maxComboEver = Math.max(saveData.lifetimeStats.maxComboEver || 1, gameState.maxCombo);
+    persistSaveData();
+
+    if (goHeadingEl) {
+      goHeadingEl.textContent =
+        gameState.mode === 'rush' && gameState.rushFinished ? '⏰ 90秒狂欢结算' : '🌙 今夜打烊总结';
+    }
     goScoreEl.textContent = String(gameState.score);
     goBestEl.textContent = String(getBestScore());
     goNewBestEl.style.display = isNewBest ? 'inline-block' : 'none';
     goMaxTierEl.textContent = `${gameState.maxTierRun}阶 · ${TIERS[gameState.maxTierRun - 1].name}`;
-    goOrdersEl.textContent = String(gameState.ordersCompleted);
-    goComboEl.textContent = String(gameState.maxCombo);
+
+    if (goFourthLabelEl && goFourthValEl) {
+      if (gameState.mode === 'rush') {
+        goFourthLabelEl.textContent = '最高连击 / 击碎毛线球';
+        goFourthValEl.innerHTML = `${gameState.maxCombo}x · 🧶${gameState.yarnBrokenThisRun}`;
+      } else {
+        goFourthLabelEl.textContent = '完成订单 / 最高连击';
+        goFourthValEl.innerHTML = `<span id="go-orders">${gameState.ordersCompleted}</span> 单 · <span id="go-combo">${gameState.maxCombo}</span>x`;
+      }
+    } else {
+      goOrdersEl.textContent = String(gameState.ordersCompleted);
+      goComboEl.textContent = String(gameState.maxCombo);
+    }
     goRankEl.textContent = getChefRank(gameState.score);
 
+    if (goBankEarnedEl) {
+      goBankEarnedEl.textContent = `+${finalEarned} ⭐`;
+    }
+    if (goBankDetailEl) {
+      const parts = [];
+      if (pityApplied) {
+        parts.push('营业保底 15⭐');
+      } else {
+        parts.push(`得分+${scorePart}`);
+        if (dustPart > 0) parts.push(`余尘+${dustPart}`);
+        if (souffleBonus > 0) parts.push(`猫神+${souffleBonus}`);
+        if (rushBonus > 0) parts.push(`狂欢完赛+${rushBonus}`);
+      }
+      if (dustMult > 1) {
+        parts.push(`糖霜壶×${dustMult.toFixed(2).replace(/0$/, '')}`);
+      }
+      goBankDetailEl.textContent = `${parts.join(' · ')} → 已存入大厅星尘银行（当前余额：${saveData.bankStardust} ⭐）`;
+    }
+    if (goBankShopHintEl) {
+      goBankShopHintEl.style.display = hasAffordableShopItem() ? 'block' : 'none';
+    }
+
     updateHUD();
+    updateLobbyUI();
     gameoverModal.classList.add('is-open');
     syncAudioMood();
   }
@@ -2083,12 +2910,12 @@
   // Detects whether dropping right now will immediately land on / magnetically snap into a mergeable treat
   function findAimMergeTarget(tier, dropX, landY, isWildcard) {
     const curR = isWildcard ? WILDCARD_RADIUS : TIERS[tier - 1].radius;
-    const lockPad = 14 + getPerkLevel('magnet') * 6 + (gameState.feverTimer > 0 ? 14 : 0);
+    const lockPad = 14 + getEffectiveMagnetLevel() * 6 + (gameState.feverTimer > 0 ? 14 : 0);
     let best = null;
     let bestDist = Infinity;
     for (let i = 0; i < gameState.entities.length; i++) {
       const e = gameState.entities[i];
-      if (e.merged) continue;
+      if (e.merged || e.isYarnBall) continue;
       const canMerge = isWildcard ? true : e.isWildcard || e.tier === tier;
       if (!canMerge) continue;
       const d = Math.hypot(e.x - dropX, e.y - landY);
@@ -2409,6 +3236,99 @@
     c.restore();
   }
 
+  function drawSakuraPetal(c, x, y, r, rot) {
+    c.save();
+    c.translate(x, y);
+    c.rotate(rot);
+    c.beginPath();
+    c.moveTo(0, -r * 1.15);
+    c.bezierCurveTo(r * 0.95, -r * 0.65, r * 0.85, r * 0.75, 0, r * 1.1);
+    c.bezierCurveTo(-r * 0.85, r * 0.75, -r * 0.95, -r * 0.65, 0, -r * 1.15);
+    c.closePath();
+    c.fill();
+    c.restore();
+  }
+
+  function drawYarnBallEntity(c, e, nowSec) {
+    const shapeDef = PHYSICS_SHAPES.event_yarn_ball;
+    const hitFlash = e.yarnHitFlash > 0 ? Math.min(1, e.yarnHitFlash / 0.45) : 0;
+
+    c.save();
+    const jitterX = hitFlash > 0 ? Math.sin(nowSec * 90) * 3.2 * hitFlash : 0;
+    const jitterY = hitFlash > 0 ? Math.cos(nowSec * 82) * 2.4 * hitFlash : 0;
+    c.translate(e.x + jitterX, e.y + jitterY);
+
+    // Outer wrapped-yarn pulsing alert ring
+    const ringPulse = 0.55 + 0.45 * Math.sin(nowSec * 6.5);
+    c.save();
+    c.rotate(nowSec * 1.1);
+    c.strokeStyle =
+      hitFlash > 0.1
+        ? `rgba(255, 255, 255, ${0.85})`
+        : e.yarnHp === 1
+        ? `rgba(255, 118, 132, ${0.65 + 0.35 * ringPulse})`
+        : `rgba(255, 186, 210, ${0.45 + 0.35 * ringPulse})`;
+    c.lineWidth = e.yarnHp === 1 ? 2.6 : 2.0;
+    c.setLineDash([6, 4]);
+    c.beginPath();
+    c.arc(0, 0, e.r + 4.5, 0, Math.PI * 2);
+    c.stroke();
+    c.setLineDash([]);
+    c.restore();
+
+    // Sprite with CoM registration & squish
+    c.save();
+    if (Math.abs(e.squishAmt) > 0.002) {
+      c.rotate(e.squishAngle);
+      c.scale(1 - e.squishAmt, 1 + e.squishAmt * 0.82);
+      c.rotate(e.angle - e.squishAngle);
+    } else {
+      c.rotate(e.angle);
+    }
+    if (yarnBallImage && shapeDef) {
+      const scale = e.r / shapeDef.r_eq_px;
+      c.drawImage(
+        yarnBallImage,
+        -shapeDef.com_x * scale,
+        -shapeDef.com_y * scale,
+        shapeDef.width * scale,
+        shapeDef.height * scale
+      );
+    } else {
+      c.fillStyle = '#f28b99';
+      c.beginPath();
+      c.arc(0, 0, e.r, 0, Math.PI * 2);
+      c.fill();
+      c.strokeStyle = '#4A2C2A';
+      c.lineWidth = 2.5;
+      c.stroke();
+    }
+    if (hitFlash > 0.05) {
+      c.fillStyle = `rgba(255, 235, 240, ${hitFlash * 0.6})`;
+      c.beginPath();
+      c.arc(0, 0, e.r * 1.02, 0, Math.PI * 2);
+      c.fill();
+    }
+    c.restore();
+
+    // Upright HP corner badge (🧶×2 / 🧶×1)
+    const bx = e.r * 0.52;
+    const by = -e.r * 0.72;
+    c.fillStyle = e.yarnHp === 1 ? 'rgba(214, 52, 68, 0.94)' : 'rgba(64, 32, 24, 0.92)';
+    c.strokeStyle = e.yarnHp === 1 ? '#ffe388' : '#ffb8d0';
+    c.lineWidth = 1.5;
+    c.beginPath();
+    c.roundRect(bx - 19, by - 9, 38, 18, 9);
+    c.fill();
+    c.stroke();
+    c.fillStyle = '#fff8ec';
+    c.font = '900 10.5px sans-serif';
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillText(`🧶×${e.yarnHp}`, bx, by + 0.5);
+    c.restore();
+  }
+
   function renderGameCanvas(nowSec) {
     ctx.clearRect(0, 0, JAR.canvasW, JAR.canvasH);
 
@@ -2429,6 +3349,8 @@
     }
 
     const isFever = gameState.feverTimer > 0;
+    const isChime = !!(gameState.activeEvent && gameState.activeEvent.kind === 'chime');
+    const theme = getEquippedTheme();
 
     // 1. Soft floor shadow under glass jar on wooden counter
     const shadowGrad = ctx.createRadialGradient(220, JAR.floorY + 12, 20, 220, JAR.floorY + 12, 165);
@@ -2439,7 +3361,7 @@
     ctx.ellipse(220, JAR.floorY + 11, 155, 18, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // 2. Translucent glass chamber back-fill (+ vibrant Fever aurora & rising starlight motes)
+    // 2. Translucent glass chamber back-fill (themed + Fever aurora + Golden Chime glow + themed motes)
     ctx.save();
     traceJarInnerPath(ctx);
     ctx.closePath();
@@ -2450,22 +3372,71 @@
       bgGrad.addColorStop(0.5, `rgba(255, 168, 210, ${0.14 + (1 - shimmer) * 0.08})`);
       bgGrad.addColorStop(1, `rgba(146, 232, 218, ${0.18 + shimmer * 0.08})`);
     } else {
-      bgGrad.addColorStop(0, 'rgba(170, 225, 238, 0.14)');
-      bgGrad.addColorStop(0.6, 'rgba(22, 60, 74, 0.24)');
-      bgGrad.addColorStop(1, 'rgba(255, 228, 175, 0.14)');
+      bgGrad.addColorStop(0, theme.glassTop);
+      bgGrad.addColorStop(0.6, theme.glassMid);
+      bgGrad.addColorStop(1, theme.glassBot);
     }
     ctx.fillStyle = bgGrad;
     ctx.fill();
 
     ctx.clip();
-    const moteCount = isFever ? 12 : 5;
+    // Golden Chime warm fireplace hearth pulse
+    if (isChime) {
+      const hearth = 0.1 + 0.08 * Math.sin(nowSec * 5.2);
+      const chGrad = ctx.createRadialGradient(220, 290, 40, 220, 290, 230);
+      chGrad.addColorStop(0, `rgba(255, 214, 96, ${hearth * 0.5})`);
+      chGrad.addColorStop(1, `rgba(255, 168, 52, ${hearth * 1.4})`);
+      ctx.fillStyle = chGrad;
+      ctx.fillRect(JAR.left, JAR.neckY, JAR.right - JAR.left, JAR.floorY - JAR.neckY);
+    }
+
+    // Meteor Wish streaking shooting stars inside the night-sky jar glass
+    if (gameState.shootingStars.length > 0) {
+      for (const st of gameState.shootingStars) {
+        const a = Math.max(0, Math.min(1, st.life / st.maxLife));
+        ctx.save();
+        ctx.globalAlpha = a;
+        const tailX = st.x - st.vx * 0.18;
+        const tailY = st.y - st.vy * 0.18;
+        const g = ctx.createLinearGradient(st.x, st.y, tailX, tailY);
+        g.addColorStop(0, 'rgba(255, 248, 198, 0.95)');
+        g.addColorStop(0.5, 'rgba(255, 214, 96, 0.55)');
+        g.addColorStop(1, 'rgba(255, 214, 96, 0)');
+        ctx.strokeStyle = g;
+        ctx.lineWidth = 3.5;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(st.x, st.y);
+        ctx.lineTo(tailX, tailY);
+        ctx.stroke();
+        ctx.fillStyle = '#fff9d6';
+        drawStar(ctx, st.x, st.y, 7, nowSec * 8);
+        ctx.restore();
+      }
+    }
+
+    // Themed ambient particles inside the jar glass
+    const moteCount = isFever ? 12 : theme.id === 'amber' ? 6 : 9;
+    const spanY = JAR.floorY - JAR.neckY;
     for (let m = 0; m < moteCount; m++) {
-      const mx = JAR.left + 22 + ((m * 47 + Math.sin(nowSec * (isFever ? 1.4 : 0.7) + m) * 18) % (JAR.right - JAR.left - 44));
-      const my = JAR.floorY - (((nowSec * (isFever ? 65 : 22) + m * 59) % (JAR.floorY - JAR.neckY)));
-      ctx.fillStyle = isFever
-        ? (m % 2 === 0 ? 'rgba(255, 234, 138, 0.48)' : 'rgba(255, 182, 220, 0.44)')
-        : 'rgba(255, 236, 178, 0.22)';
-      drawStar(ctx, mx, my, isFever ? 3.2 + (m % 3) : 2.1 + (m % 2) * 0.8, nowSec * (isFever ? 3 : 1.2) + m);
+      const mx = JAR.left + 22 + ((m * 47 + Math.sin(nowSec * (isFever ? 1.4 : 0.8) + m) * 20) % (JAR.right - JAR.left - 44));
+      if (theme.moteKind === 'petal' && !isFever) {
+        // Sakura petals drift downward gently
+        const my = JAR.neckY + (((nowSec * 28 + m * 61) % spanY));
+        ctx.fillStyle = m % 2 === 0 ? 'rgba(255, 206, 226, 0.52)' : 'rgba(255, 174, 206, 0.42)';
+        drawSakuraPetal(ctx, mx, my, 4.2 + (m % 2) * 1.4, nowSec * 1.4 + m);
+      } else if (theme.moteKind === 'starfish' && !isFever) {
+        // Bioluminescent moonlit motes & starfish rise smoothly
+        const my = JAR.floorY - (((nowSec * 24 + m * 57) % spanY));
+        ctx.fillStyle = m % 2 === 0 ? 'rgba(154, 236, 255, 0.45)' : 'rgba(210, 248, 255, 0.38)';
+        drawStar(ctx, mx, my, 2.8 + (m % 3) * 0.9, nowSec * 1.1 + m);
+      } else {
+        const my = JAR.floorY - (((nowSec * (isFever ? 65 : 22) + m * 59) % spanY));
+        ctx.fillStyle = isFever
+          ? (m % 2 === 0 ? 'rgba(255, 234, 138, 0.48)' : 'rgba(255, 182, 220, 0.44)')
+          : theme.moteColor;
+        drawStar(ctx, mx, my, isFever ? 3.2 + (m % 3) : 2.1 + (m % 2) * 0.8, nowSec * (isFever ? 3 : 1.2) + m);
+      }
     }
     ctx.restore();
 
@@ -2489,15 +3460,19 @@
 
     if (dangerRatio > 0.08) {
       const rem = Math.max(0, 2.65 - gameState.dangerDuration).toFixed(1);
-      ctx.fillStyle = 'rgba(224, 62, 52, 0.92)';
+      ctx.fillStyle = gameState.mode === 'rush' ? 'rgba(224, 114, 38, 0.94)' : 'rgba(224, 62, 52, 0.92)';
       ctx.beginPath();
-      ctx.roundRect(156, JAR.dangerY - 22, 128, 20, 10);
+      ctx.roundRect(148, JAR.dangerY - 22, 144, 20, 10);
       ctx.fill();
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 12px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(`⚠️ 即将溢出 ${rem}s`, 220, JAR.dangerY - 12);
+      ctx.fillText(
+        gameState.mode === 'rush' ? `🌪️ 星风预警 ${rem}s` : `⚠️ 即将溢出 ${rem}s`,
+        220,
+        JAR.dangerY - 12
+      );
     }
     ctx.restore();
 
@@ -2514,8 +3489,9 @@
       lockedTarget = findAimMergeTarget(gameState.curTier, gameState.dropX, landY, curIsWild);
       const isAimCancelled = gameState.touchAim.active && gameState.touchAim.cancelled;
       const isTouchAiming = gameState.touchAim.active && !gameState.touchAim.cancelled;
+      const [lr, lg, lb] = theme.lockColor;
 
-      // Dashed guide line (turns bright pulsing gold/rainbow when locked onto a merge!)
+      // Dashed guide line (themed + turns bright pulsing when locked onto a merge!)
       ctx.save();
       if (isAimCancelled) ctx.globalAlpha = 0.25;
       ctx.beginPath();
@@ -2526,7 +3502,7 @@
         const pulse = 0.72 + 0.28 * Math.sin(nowSec * 10);
         ctx.strokeStyle = curIsWild
           ? `rgba(255, 168, 224, ${pulse})`
-          : `rgba(255, 228, 102, ${pulse})`;
+          : `rgba(${lr}, ${lg}, ${lb}, ${pulse})`;
         ctx.lineWidth = isTouchAiming ? 3.2 : 2.8;
       } else {
         ctx.strokeStyle = curIsWild
@@ -2534,8 +3510,8 @@
           : curIsGold
           ? 'rgba(255, 224, 102, 0.76)'
           : isTouchAiming
-          ? 'rgba(255, 232, 152, 0.85)'
-          : 'rgba(255, 224, 132, 0.58)';
+          ? theme.guideTouch
+          : theme.guideLine;
         ctx.lineWidth = isTouchAiming ? 2.4 : 1.8;
       }
       ctx.stroke();
@@ -2556,9 +3532,13 @@
           landY,
           curR,
           aimAngle,
-          lockedTarget ? 'rgba(255, 238, 118, 0.95)' : isTouchAiming ? 'rgba(255, 238, 170, 0.78)' : 'rgba(255, 232, 148, 0.52)',
+          lockedTarget
+            ? `rgba(${lr}, ${lg}, ${lb}, 0.95)`
+            : isTouchAiming
+            ? theme.guideTouch
+            : theme.guideLine,
           lockedTarget ? 2.2 : 1.5,
-          lockedTarget ? 'rgba(255, 232, 118, 0.16)' : 'rgba(255, 224, 132, 0.07)',
+          lockedTarget ? `rgba(${lr}, ${lg}, ${lb}, 0.16)` : `rgba(${lr}, ${lg}, ${lb}, 0.06)`,
           [4, 4]
         );
 
@@ -2573,7 +3553,7 @@
           const tagX = Math.max(JAR.left + 44, Math.min(JAR.right - 44, gameState.dropX));
           ctx.save();
           ctx.fillStyle = curIsWild ? 'rgba(130, 32, 92, 0.9)' : 'rgba(66, 36, 12, 0.9)';
-          ctx.strokeStyle = curIsWild ? '#ffb8e6' : '#ffe370';
+          ctx.strokeStyle = curIsWild ? '#ffb8e6' : `rgb(${lr}, ${lg}, ${lb})`;
           ctx.lineWidth = 1.5;
           ctx.beginPath();
           ctx.roundRect(tagX - 38, tagY - 10, 76, 20, 10);
@@ -2658,7 +3638,13 @@
     for (const e of gameState.entities) {
       if (!e.trail || e.trail.length < 2) continue;
       ctx.save();
-      const baseCol = e.isWildcard ? '#ff9fd6' : e.isGolden ? '#ffe26a' : TIERS[e.tier - 1].crumbColor;
+      const baseCol = e.isYarnBall
+        ? '#ffa8c4'
+        : e.isWildcard
+        ? '#ff9fd6'
+        : e.isGolden
+        ? '#ffe26a'
+        : TIERS[e.tier - 1].crumbColor;
       for (let i = 0; i < e.trail.length; i++) {
         const pt = e.trail[i];
         const frac = (i + 1) / e.trail.length;
@@ -2684,14 +3670,18 @@
     }
     ctx.restore();
 
+    const [lr, lg, lb] = theme.lockColor;
     for (const e of gameState.entities) {
       const isHovered = gameState.activeToolMode && gameState.hoveredEntityId === e.id;
       const validTarget =
         isHovered &&
+        !e.isYarnBall &&
         ((gameState.activeToolMode === 'fork' && !e.isWildcard && e.tier <= 4) ||
           (gameState.activeToolMode === 'spoon' && !e.isWildcard && e.tier < 9));
 
-      if (e.isWildcard) {
+      if (e.isYarnBall) {
+        drawYarnBallEntity(ctx, e, nowSec);
+      } else if (e.isWildcard) {
         drawRainbowWildcard(ctx, e.x, e.y, e.r, e.angle, nowSec, 1);
       } else {
         if (e.isGolden) {
@@ -2708,13 +3698,13 @@
         }
       }
 
-      // Highlight locked-on aim merge target with pulsing golden halo
+      // Highlight locked-on aim merge target with pulsing themed halo
       if (lockedTarget && lockedTarget.id === e.id) {
         ctx.save();
         const pulse = 0.65 + 0.35 * Math.sin(nowSec * 10);
         ctx.strokeStyle = gameState.curMeta.wildcard
           ? `rgba(255, 168, 224, ${pulse})`
-          : `rgba(255, 234, 108, ${pulse})`;
+          : `rgba(${lr}, ${lg}, ${lb}, ${pulse})`;
         ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.arc(e.x, e.y, e.r + 5 + Math.sin(nowSec * 10) * 2, 0, Math.PI * 2);
@@ -2730,14 +3720,14 @@
           gameState.activeToolMode === 'fork' ? '#91f2ff' : '#ffe169',
           3.2
         );
-      } else if (isHovered && gameState.activeToolMode === 'fork' && (e.tier > 4 || e.isWildcard)) {
+      } else if (isHovered && (e.isYarnBall || (gameState.activeToolMode === 'fork' && (e.tier > 4 || e.isWildcard)))) {
         drawEntityWorldPolys(ctx, e, 'rgba(255, 100, 90, 0.82)', 2.4);
       }
     }
 
     // 5.2 Render Solo Action Emotes & Neighbor Squeeze Interaction FX above treats
     for (const e of gameState.entities) {
-      if (e.anim && !e.isWildcard) {
+      if (e.anim && !e.isWildcard && !e.isYarnBall) {
         drawDessertActionFX(ctx, e.x, e.y, e.r, e.tier, e.anim);
       }
     }
@@ -2783,9 +3773,9 @@
       ctx.restore();
     }
 
-    // 7. Glass Jar Specular Highlights, Rim Outline & Brass Collar
+    // 7. Glass Jar Specular Highlights, Rim Outline & Themed Metal Collar
     ctx.save();
-    // Outer dark-sepia storybook glass outline + warm rim glow
+    // Outer dark-sepia storybook glass outline + themed/fever/chime rim glow
     traceJarInnerPath(ctx);
     ctx.lineWidth = 9 + (gameState.jarFlash > 0 ? gameState.jarFlash * 6 : 0);
     ctx.strokeStyle =
@@ -2793,7 +3783,9 @@
         ? `rgba(255, 238, 146, ${0.45 + gameState.jarFlash * 0.5})`
         : isFever
         ? 'rgba(255, 215, 92, 0.62)'
-        : 'rgba(255, 244, 214, 0.35)';
+        : isChime
+        ? `rgba(255, 214, 96, ${0.46 + 0.24 * Math.sin(nowSec * 6)})`
+        : theme.rimGlow;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     ctx.stroke();
@@ -2826,11 +3818,11 @@
     ctx.lineWidth = 4.5;
     ctx.stroke();
 
-    // Brass Neck Collar Rim at top of jar
+    // Themed Metal Neck Collar Rim at top of jar (Brass / Rose Gold / Mithril Silver)
     const collarGrad = ctx.createLinearGradient(JAR.left - 8, JAR.neckY - 14, JAR.left - 8, JAR.neckY + 10);
-    collarGrad.addColorStop(0, '#ffe495');
-    collarGrad.addColorStop(0.5, '#d59c3b');
-    collarGrad.addColorStop(1, '#8c5a18');
+    collarGrad.addColorStop(0, theme.collar[0]);
+    collarGrad.addColorStop(0.5, theme.collar[1]);
+    collarGrad.addColorStop(1, theme.collar[2]);
     ctx.fillStyle = collarGrad;
     ctx.strokeStyle = '#4A2C2A';
     ctx.lineWidth = 3;
@@ -2839,11 +3831,11 @@
     ctx.fill();
     ctx.stroke();
 
-    // Brass highlight line
+    // Collar metallic highlight line
     ctx.beginPath();
     ctx.moveTo(JAR.left + 6, JAR.neckY - 6);
     ctx.lineTo(JAR.right - 6, JAR.neckY - 6);
-    ctx.strokeStyle = 'rgba(255, 250, 220, 0.72)';
+    ctx.strokeStyle = theme.collarHighlight;
     ctx.lineWidth = 2;
     ctx.stroke();
     ctx.restore();
@@ -3248,7 +4240,7 @@
     let activeAnimCount = 0;
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
-      if (e.isWildcard) {
+      if (e.isWildcard || e.isYarnBall) {
         e.anim = null;
         continue;
       }
@@ -3265,7 +4257,7 @@
     // 4. Build map of touching/squeezed neighbors inside the jar
     const neighborMap = new Map();
     const addNeighborPair = (a, b, cx, cy) => {
-      if (!a || !b || a.id === b.id || a.merged || b.merged || a.isWildcard || b.isWildcard) return;
+      if (!a || !b || a.id === b.id || a.merged || b.merged || a.isWildcard || b.isWildcard || a.isYarnBall || b.isYarnBall) return;
       if (!neighborMap.has(a.id)) neighborMap.set(a.id, []);
       if (!neighborMap.has(b.id)) neighborMap.set(b.id, []);
       const listA = neighborMap.get(a.id);
@@ -3288,10 +4280,10 @@
 
     for (let i = 0; i < entities.length; i++) {
       const a = entities[i];
-      if (a.isWildcard) continue;
+      if (a.isWildcard || a.isYarnBall) continue;
       for (let j = i + 1; j < entities.length; j++) {
         const b = entities[j];
-        if (b.isWildcard) continue;
+        if (b.isWildcard || b.isYarnBall) continue;
         const dist = Math.hypot(b.x - a.x, b.y - a.y);
         if (dist <= (a.r + b.r) * 1.09 && dist > 1e-3) {
           const cx = (a.x * b.r + b.x * a.r) / (a.r + b.r);
@@ -3305,7 +4297,7 @@
     const styles = ['nuzzle', 'boop', 'chat'];
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
-      if (e.anim || e.merged || e.isWildcard) continue;
+      if (e.anim || e.merged || e.isWildcard || e.isYarnBall) continue;
 
       e.interactCooldown -= dt;
       e.soloCooldown -= dt;
@@ -3321,6 +4313,7 @@
             !item.neighbor.anim &&
             !item.neighbor.merged &&
             !item.neighbor.isWildcard &&
+            !item.neighbor.isYarnBall &&
             Math.hypot(item.neighbor.vx, item.neighbor.vy) < 75 &&
             item.neighbor.age > 0.35
         );
@@ -3392,11 +4385,17 @@
     const h = window.innerHeight;
     ambientCtx.clearRect(0, 0, w, h);
 
+    const theme = getEquippedTheme();
+    const isSakura = theme.id === 'sakura';
+
     for (const f of fireflies) {
-      f.x += f.vx * dt;
-      f.y += f.vy * dt;
+      f.x += (f.vx + (isSakura ? Math.sin(nowSec * 1.1 + f.phase) * 0.01 : 0)) * dt;
+      f.y += (isSakura ? Math.abs(f.vy) * 1.35 : f.vy) * dt;
       if (f.y < -0.05) {
         f.y = 1.05;
+        f.x = Math.random();
+      } else if (f.y > 1.05) {
+        f.y = -0.05;
         f.x = Math.random();
       }
       if (f.x < -0.05) f.x = 1.05;
@@ -3405,13 +4404,18 @@
       const glow = 0.25 + 0.45 * (0.5 + 0.5 * Math.sin(nowSec * 2.2 + f.phase));
       const px = f.x * w;
       const py = f.y * h;
-      const grad = ambientCtx.createRadialGradient(px, py, 0, px, py, f.r * 3.5);
-      grad.addColorStop(0, `rgba(255, 232, 148, ${glow})`);
-      grad.addColorStop(1, 'rgba(255, 232, 148, 0)');
-      ambientCtx.fillStyle = grad;
-      ambientCtx.beginPath();
-      ambientCtx.arc(px, py, f.r * 3.5, 0, Math.PI * 2);
-      ambientCtx.fill();
+      if (isSakura) {
+        ambientCtx.fillStyle = `rgba(${theme.ambientRgb}, ${glow * 0.85})`;
+        drawSakuraPetal(ambientCtx, px, py, f.r * 1.9, nowSec * 1.2 + f.phase);
+      } else {
+        const grad = ambientCtx.createRadialGradient(px, py, 0, px, py, f.r * 3.5);
+        grad.addColorStop(0, `rgba(${theme.ambientRgb}, ${glow})`);
+        grad.addColorStop(1, `rgba(${theme.ambientRgb}, 0)`);
+        ambientCtx.fillStyle = grad;
+        ambientCtx.beginPath();
+        ambientCtx.arc(px, py, f.r * 3.5, 0, Math.PI * 2);
+        ambientCtx.fill();
+      }
     }
   }
 
@@ -3426,6 +4430,8 @@
 
     if (gameState.running && !gameState.over && !gameState.paused) {
       if (gameState.dropCooldown > 0) gameState.dropCooldown = Math.max(0, gameState.dropCooldown - dt);
+      if (gameState.rushGustCooldown > 0) gameState.rushGustCooldown = Math.max(0, gameState.rushGustCooldown - dt);
+
       // Smooth pendulum sway decay on held dessert
       gameState.dropSway *= Math.exp(-dt * 11);
       if (Math.abs(gameState.dropSway) < 0.001) gameState.dropSway = 0;
@@ -3464,13 +4470,66 @@
         updateHUD();
       }
 
-      // Micro-hitstop freezes rigid bodies for 2~4 punchy frames on big merges/crits while FX keep blooming
-      if (gameState.hitstopTimer > 0) {
-        gameState.hitstopTimer = Math.max(0, gameState.hitstopTimer - dt);
-      } else {
-        stepPhysics(dt);
+      // Tick Shop Events (timed Meteor Wish / Golden Chime & Rush 18s cadence)
+      if (gameState.activeEvent) {
+        if (gameState.activeEvent.kind === 'yarn') {
+          if (!hasYarnBallInJar()) {
+            gameState.activeEvent = null;
+          }
+        } else {
+          gameState.activeEvent.timer = Math.max(0, gameState.activeEvent.timer - dt);
+          if (gameState.activeEvent.timer <= 0) {
+            const endedKind = gameState.activeEvent.kind;
+            gameState.activeEvent = null;
+            if (endedKind === 'chime') {
+              showToast('🔔 黄金烘焙钟余韵渐散，继续加油！');
+            }
+          }
+        }
+        updateEventBannerUI();
+      } else if (gameState.mode === 'rush') {
+        gameState.nextEventTimer -= dt;
+        if (gameState.nextEventTimer <= 0) {
+          gameState.nextEventTimer = 18.0;
+          triggerShopEvent();
+        }
       }
-      updateDessertAnimations(dt);
+
+      // Tick 90-Second Rush Mode Countdown & Final 5s Woodblock Ticks
+      if (gameState.mode === 'rush') {
+        gameState.rushTimer = Math.max(0, gameState.rushTimer - dt);
+        if (gameState.rushTimer <= 5.0 && gameState.rushTimer > 0) {
+          const secInt = Math.ceil(gameState.rushTimer);
+          if (secInt < gameState.rushLastTickSec) {
+            gameState.rushLastTickSec = secInt;
+            audio.playRushTick(secInt <= 3);
+          }
+        }
+        updateRushTimerUI();
+        if (gameState.rushTimer <= 0) {
+          gameState.rushFinished = true;
+          triggerGameOver();
+        }
+      }
+
+      // Micro-hitstop freezes rigid bodies for 2~4 punchy frames on big merges/crits while FX keep blooming
+      if (!gameState.over) {
+        if (gameState.hitstopTimer > 0) {
+          gameState.hitstopTimer = Math.max(0, gameState.hitstopTimer - dt);
+        } else {
+          stepPhysics(dt);
+        }
+        updateDessertAnimations(dt);
+      }
+    }
+
+    // Update streaking shooting stars FX
+    for (let i = gameState.shootingStars.length - 1; i >= 0; i--) {
+      const st = gameState.shootingStars[i];
+      st.life -= dt;
+      st.x += st.vx * dt;
+      st.y += st.vy * dt;
+      if (st.life <= 0) gameState.shootingStars.splice(i, 1);
     }
 
     // Decay screen shake & impact flash smoothly
@@ -3526,7 +4585,9 @@
       if (pop.life <= 0) gameState.popups.splice(i, 1);
     }
 
-    renderGameCanvas(nowSec);
+    if (!isLobbyOpen()) {
+      renderGameCanvas(nowSec);
+    }
     requestAnimationFrame(mainLoop);
   }
 
@@ -3553,6 +4614,10 @@
     const target = findEntityAt(x, y);
     if (!target) {
       showToast('请点击罐内的甜品哦～');
+      return;
+    }
+    if (target.isYarnBall) {
+      showToast('🧶 毛线球请在附近合成 2 次或使用【摇一摇】震碎爆大奖！');
       return;
     }
 
@@ -3597,6 +4662,11 @@
       const pts = Math.round(def.points * getFeverMultiplier());
       addScore(pts);
       unlockTier(nextTier);
+      if (nextTier === 9) {
+        gameState.soufflesMadeThisRun++;
+        saveData.lifetimeStats.soufflesMade = (saveData.lifetimeStats.soufflesMade || 0) + 1;
+        persistSaveData();
+      }
       audio.playTool('spoon');
       spawnSparkleBurst(target.x, target.y, '#ffe16e', 22);
       spawnShockwave(target.x, target.y, target.r * 2.0, '#ffe16e', 3.4);
@@ -3731,16 +4801,38 @@
       showToast(on ? `🎵 背景音乐已开启：${info.title}` : '🔇 背景音乐已关闭');
       return;
     }
+    if (ev.key === 'Escape') {
+      if (shopModal.classList.contains('is-open')) {
+        closeShop();
+        return;
+      }
+      if (careerModal.classList.contains('is-open')) {
+        closeCareer();
+        return;
+      }
+      if (helpModal.classList.contains('is-open')) {
+        closeHelp();
+        return;
+      }
+      if (compendiumModal.classList.contains('is-open')) {
+        closeCompendium();
+        return;
+      }
+    }
     if (ev.key === 'p' || ev.key === 'P') {
-      if (!titleModal.classList.contains('is-open')) {
+      if (!isLobbyOpen()) {
         ev.preventDefault();
         toggleDebugPhysics();
       }
       return;
     }
     if (!gameState.running || gameState.over) return;
-    if (compendiumModal.classList.contains('is-open')) {
-      if (ev.key === 'Escape') closeCompendium();
+    if (
+      shopModal.classList.contains('is-open') ||
+      careerModal.classList.contains('is-open') ||
+      helpModal.classList.contains('is-open') ||
+      compendiumModal.classList.contains('is-open')
+    ) {
       return;
     }
     if (blessingModal.classList.contains('is-open')) {
@@ -3791,6 +4883,399 @@
     }
   });
 
+  // ==================== 3.0 Bakery Lobby, Shop, Career & Help UI ====================
+  function applyStageTheme() {
+    if (cafeStageEl) {
+      cafeStageEl.dataset.theme = saveData.equippedTheme || 'amber';
+    }
+  }
+
+  function bounceLobbyPatronPortrait() {
+    if (!lobbyPatronPortraitBtn) return;
+    lobbyPatronPortraitBtn.classList.remove('is-boing');
+    void lobbyPatronPortraitBtn.offsetWidth;
+    lobbyPatronPortraitBtn.classList.add('is-boing');
+  }
+
+  function updateLobbyUI() {
+    applyStageTheme();
+
+    const bankVal = saveData.bankStardust || 0;
+    if (lobbyBankValueEl) lobbyBankValueEl.textContent = String(bankVal);
+    if (shopBankValueEl) shopBankValueEl.textContent = String(bankVal);
+    if (lobbyRankBadgeEl) lobbyRankBadgeEl.textContent = getChefRank(getCareerTopScore());
+
+    if (modeBestChefEl) modeBestChefEl.textContent = String(saveData.bestChef || 0);
+    if (modeBestRushEl) modeBestRushEl.textContent = String(saveData.bestRush || 0);
+    if (modeBestZenEl) modeBestZenEl.textContent = String(saveData.bestZen || 0);
+
+    // Sync mode card highlight
+    if (modeSelectEl) {
+      modeSelectEl.querySelectorAll('.lobby-mode-card').forEach((btn) => {
+        btn.classList.toggle('is-selected', btn.dataset.mode === gameState.mode);
+      });
+    }
+
+    // Active Patron Display
+    const patron = getSelectedPatron();
+    if (lobbyPatronImgEl) {
+      lobbyPatronImgEl.src = patron.src;
+      lobbyPatronImgEl.alt = patron.name;
+    }
+    if (lobbyPatronNameEl) lobbyPatronNameEl.textContent = `${patron.badge} ${patron.name}`;
+    if (lobbyPatronSkillNameEl) lobbyPatronSkillNameEl.textContent = patron.skillName;
+    if (lobbyPatronPassiveEl) lobbyPatronPassiveEl.textContent = patron.passiveDesc;
+    if (lobbyPatronSpeechEl) {
+      const lines = patron.idleLines || [patron.greet];
+      lobbyPatronSpeechEl.textContent = lines[lobbySpeechIndex % lines.length];
+    }
+
+    // 3-Patron Switcher Strip
+    if (lobbyPatronStripEl) {
+      lobbyPatronStripEl.innerHTML = '';
+      PATRONS.forEach((p) => {
+        const unlocked = saveData.unlockedPatrons.includes(p.id);
+        const selected = saveData.selectedPatron === p.id;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `patron-chip-btn${selected ? ' is-selected' : ''}${unlocked ? '' : ' is-locked'}`;
+        btn.dataset.patronId = p.id;
+        btn.innerHTML = `
+          <img src="${p.src}" alt="${p.shortName}" />
+          <div class="patron-chip-meta">
+            <strong>${p.shortName}</strong>
+            <span>${unlocked ? (selected ? '✦ 已出战' : p.shortPassive) : `🔒 ${p.cost}⭐`}</span>
+          </div>
+        `;
+        btn.addEventListener('click', () => {
+          audio.ensureCtx();
+          if (unlocked) {
+            if (saveData.selectedPatron !== p.id) {
+              saveData.selectedPatron = p.id;
+              lobbySpeechIndex = 0;
+              persistSaveData();
+              audio.playPatronSelect();
+              updateLobbyUI();
+              bounceLobbyPatronPortrait();
+              showToast(`${p.badge} 已切换助阵搭档：${p.name}（${p.skillName}）`);
+            } else {
+              pokeLobbyPatron();
+            }
+          } else {
+            openShop('patrons');
+          }
+        });
+        lobbyPatronStripEl.appendChild(btn);
+      });
+    }
+
+    // Shop Preview Strip
+    const theme = getEquippedTheme();
+    if (lobbyThemeTagEl) {
+      lobbyThemeTagEl.textContent = `${theme.icon} ${theme.name}`;
+    }
+    if (lobbyTalentsSummaryEl) {
+      const activeTags = SHOP_UPGRADES.filter((u) => getUpgradeLevel(u.id) > 0).map((u) =>
+        u.shortTag(getUpgradeLevel(u.id))
+      );
+      lobbyTalentsSummaryEl.textContent =
+        activeTags.length > 0
+          ? `已激活天赋：${activeTags.join(' · ')}`
+          : '厨房天赋：尚未升级（点击进入吃茶小铺解锁！）';
+    }
+
+    if (shopRedDotEl) {
+      shopRedDotEl.classList.toggle('visible', hasAffordableShopItem());
+    }
+  }
+
+  function pokeLobbyPatron() {
+    audio.ensureCtx();
+    audio.playPatronSelect();
+    lobbySpeechIndex++;
+    const patron = getSelectedPatron();
+    const lines = patron.idleLines || [patron.greet];
+    if (lobbyPatronSpeechEl) {
+      lobbyPatronSpeechEl.textContent = lines[lobbySpeechIndex % lines.length];
+    }
+    bounceLobbyPatronPortrait();
+  }
+
+  function showLobbyScreen() {
+    if (playScreenEl) playScreenEl.classList.remove('is-active');
+    if (lobbyScreenEl) lobbyScreenEl.classList.add('is-active');
+    updateLobbyUI();
+    syncAudioMood();
+  }
+
+  function showPlayScreen() {
+    if (lobbyScreenEl) lobbyScreenEl.classList.remove('is-active');
+    if (playScreenEl) playScreenEl.classList.add('is-active');
+    syncAudioMood();
+    setTimeout(() => buildEvolutionRing(), 60);
+  }
+
+  function returnToLobby() {
+    gameState.running = false;
+    gameState.paused = false;
+    cancelToolMode();
+    audio.setFeverMode(false);
+    audio.setDangerLevel(0);
+    if (cafeStageEl) cafeStageEl.classList.remove('is-fever');
+    blessingModal.classList.remove('is-open');
+    gameoverModal.classList.remove('is-open');
+    compendiumModal.classList.remove('is-open');
+    if (eventBannerEl) eventBannerEl.classList.remove('visible');
+    if (jarRushPillEl) jarRushPillEl.style.display = 'none';
+    showLobbyScreen();
+  }
+
+  // Patisserie Shop Modal
+  function openShop(tab = activeShopTab) {
+    activeShopTab = tab;
+    renderShop();
+    shopModal.classList.add('is-open');
+    syncAudioMood();
+  }
+
+  function closeShop() {
+    shopModal.classList.remove('is-open');
+    updateLobbyUI();
+    syncAudioMood();
+  }
+
+  function renderShop() {
+    if (shopBankValueEl) shopBankValueEl.textContent = String(saveData.bankStardust || 0);
+    if (shopTabsEl) {
+      shopTabsEl.querySelectorAll('.shop-tab').forEach((t) => {
+        t.classList.toggle('is-active', t.dataset.tab === activeShopTab);
+      });
+    }
+    if (!shopBodyEl) return;
+
+    shopBodyEl.innerHTML = '';
+    const bank = saveData.bankStardust || 0;
+
+    if (activeShopTab === 'upgrades') {
+      shopBodyEl.className = 'shop-body';
+      SHOP_UPGRADES.forEach((up) => {
+        const lv = getUpgradeLevel(up.id);
+        const isMax = lv >= up.maxLv;
+        const cost = isMax ? 0 : up.costs[lv];
+        const canBuy = !isMax && bank >= cost;
+        const pipsHtml = Array.from({ length: up.maxLv }, (_, idx) => `<span class="lv-pip${idx < lv ? ' is-on' : ''}"></span>`).join('');
+
+        const card = document.createElement('div');
+        card.className = `shop-card${isMax ? ' is-equipped' : ''}`;
+        card.innerHTML = `
+          <div class="shop-card-top">
+            <div class="shop-card-icon">${up.icon}</div>
+            <div class="shop-card-head">
+              <div class="shop-card-title">${up.name} (Lv.${lv}/${up.maxLv})</div>
+              <div class="shop-lv-pips">${pipsHtml}</div>
+            </div>
+          </div>
+          <div class="shop-card-desc">${up.desc(lv)}</div>
+          <button class="wood-btn shop-buy-btn${isMax ? ' is-max' : ''}" data-shop-id="${up.id}" type="button" ${isMax || !canBuy ? 'disabled' : ''}>
+            ${isMax ? '✓ 已升至满级' : `⭐ ${cost} 永久星尘升级`}
+          </button>
+        `;
+        const btn = card.querySelector('.shop-buy-btn');
+        if (!isMax) {
+          btn.addEventListener('click', () => buyUpgrade(up.id));
+        }
+        shopBodyEl.appendChild(card);
+      });
+    } else if (activeShopTab === 'themes') {
+      shopBodyEl.className = 'shop-body is-three-col';
+      JAR_THEME_LIST.forEach((th) => {
+        const owned = saveData.unlockedThemes.includes(th.id);
+        const equipped = saveData.equippedTheme === th.id;
+        const canBuy = !owned && bank >= th.cost;
+
+        const card = document.createElement('div');
+        card.className = `shop-card${equipped ? ' is-equipped' : ''}`;
+        card.innerHTML = `
+          <div class="shop-card-top">
+            <div class="shop-card-icon"><div class="theme-swatch theme-${th.id}"></div></div>
+            <div class="shop-card-head">
+              <div class="shop-card-title">${th.icon} ${th.name}</div>
+              <span class="patron-skill-pill">${equipped ? '✦ 使用中' : owned ? '已拥有' : `${th.cost} ⭐`}</span>
+            </div>
+          </div>
+          <div class="shop-card-desc">${th.desc}</div>
+          <button class="wood-btn shop-buy-btn${equipped ? ' is-equipped-btn' : ''}" data-shop-id="${th.id}" type="button" ${equipped || (!owned && !canBuy) ? 'disabled' : ''}>
+            ${equipped ? '✓ 当前装备中' : owned ? '✨ 立即换装' : `⭐ ${th.cost} 解锁并换装`}
+          </button>
+        `;
+        const btn = card.querySelector('.shop-buy-btn');
+        if (!equipped) {
+          btn.addEventListener('click', () => buyOrEquipTheme(th.id));
+        }
+        shopBodyEl.appendChild(card);
+      });
+    } else {
+      shopBodyEl.className = 'shop-body is-three-col';
+      PATRONS.forEach((p) => {
+        const owned = saveData.unlockedPatrons.includes(p.id);
+        const selected = saveData.selectedPatron === p.id;
+        const canBuy = !owned && bank >= p.cost;
+
+        const card = document.createElement('div');
+        card.className = `shop-card${selected ? ' is-equipped' : ''}`;
+        card.innerHTML = `
+          <div class="shop-card-top">
+            <div class="shop-card-icon"><img src="${p.src}" alt="${p.name}" /></div>
+            <div class="shop-card-head">
+              <div class="shop-card-title">${p.badge} ${p.shortName}</div>
+              <span class="patron-skill-pill">${p.skillName}</span>
+            </div>
+          </div>
+          <div class="shop-card-desc">${p.passiveDesc}</div>
+          <button class="wood-btn shop-buy-btn${selected ? ' is-equipped-btn' : ''}" data-shop-id="${p.id}" type="button" ${selected || (!owned && !canBuy) ? 'disabled' : ''}>
+            ${selected ? '✓ 当前出战中' : owned ? '🐾 切换出战' : `⭐ ${p.cost} 邀请入店`}
+          </button>
+        `;
+        const btn = card.querySelector('.shop-buy-btn');
+        if (!selected) {
+          btn.addEventListener('click', () => buyOrSelectPatron(p.id));
+        }
+        shopBodyEl.appendChild(card);
+      });
+    }
+  }
+
+  function buyUpgrade(id) {
+    const up = SHOP_UPGRADES.find((u) => u.id === id);
+    if (!up) return;
+    const lv = getUpgradeLevel(id);
+    if (lv >= up.maxLv) return;
+    const cost = up.costs[lv];
+    if ((saveData.bankStardust || 0) < cost) {
+      showToast(`⭐ 永久星尘不足（需要 ${cost} ⭐）`);
+      return;
+    }
+    audio.ensureCtx();
+    saveData.bankStardust -= cost;
+    saveData.shopUpgrades[id] = lv + 1;
+    persistSaveData();
+    audio.playShopBuy();
+    showToast(`🏪 升级成功！【${up.name}】升至 Lv.${lv + 1}！`);
+    renderShop();
+    updateLobbyUI();
+  }
+
+  function buyOrEquipTheme(id) {
+    const th = JAR_THEMES[id];
+    if (!th) return;
+    audio.ensureCtx();
+    const owned = saveData.unlockedThemes.includes(id);
+    if (!owned) {
+      if ((saveData.bankStardust || 0) < th.cost) {
+        showToast(`⭐ 永久星尘不足（需要 ${th.cost} ⭐）`);
+        return;
+      }
+      saveData.bankStardust -= th.cost;
+      saveData.unlockedThemes.push(id);
+      saveData.equippedTheme = id;
+      persistSaveData();
+      audio.playShopBuy();
+      showToast(`✨ 已解锁并换上【${th.name}】！`);
+    } else {
+      saveData.equippedTheme = id;
+      persistSaveData();
+      audio.playPatronSelect();
+      showToast(`${th.icon} 已切换玻璃罐主题：${th.name}`);
+    }
+    renderShop();
+    updateLobbyUI();
+  }
+
+  function buyOrSelectPatron(id) {
+    const p = PATRONS.find((item) => item.id === id);
+    if (!p) return;
+    audio.ensureCtx();
+    const owned = saveData.unlockedPatrons.includes(id);
+    if (!owned) {
+      if ((saveData.bankStardust || 0) < p.cost) {
+        showToast(`⭐ 永久星尘不足（需要 ${p.cost} ⭐）`);
+        return;
+      }
+      saveData.bankStardust -= p.cost;
+      saveData.unlockedPatrons.push(id);
+      saveData.selectedPatron = id;
+      lobbySpeechIndex = 0;
+      persistSaveData();
+      audio.playShopBuy();
+      showToast(`${p.badge} 欢迎新搭档【${p.name}】加入星夜吃茶！`);
+    } else {
+      saveData.selectedPatron = id;
+      lobbySpeechIndex = 0;
+      persistSaveData();
+      audio.playPatronSelect();
+      showToast(`${p.badge} 已切换助阵搭档：${p.name}`);
+    }
+    renderShop();
+    updateLobbyUI();
+  }
+
+  // Career Modal (营业履历)
+  function openCareer() {
+    if (careerRankTextEl) careerRankTextEl.textContent = getChefRank(getCareerTopScore());
+    if (careerModesRowEl) {
+      careerModesRowEl.innerHTML = `
+        <div class="career-mode-tile"><span>🌟 星夜主厨最高</span><strong>${saveData.bestChef || 0}</strong></div>
+        <div class="career-mode-tile"><span>⚡ 90秒狂欢最高</span><strong>${saveData.bestRush || 0}</strong></div>
+        <div class="career-mode-tile"><span>🍵 悠闲经典最高</span><strong>${saveData.bestZen || 0}</strong></div>
+      `;
+    }
+    const st = saveData.lifetimeStats || {};
+    if (careerStatsGridEl) {
+      careerStatsGridEl.innerHTML = `
+        <div class="career-stat-mini"><span>累计营业</span><strong>${st.runsPlayed || 0} 局</strong></div>
+        <div class="career-stat-mini"><span>完成心愿单</span><strong>${st.ordersCompleted || 0} 单</strong></div>
+        <div class="career-stat-mini"><span>最高连击</span><strong>${st.maxComboEver || 1}x</strong></div>
+        <div class="career-stat-mini"><span>猫神舒芙蕾</span><strong>${st.soufflesMade || 0} 个</strong></div>
+        <div class="career-stat-mini"><span>击碎毛线球</span><strong>${st.yarnBroken || 0} 颗</strong></div>
+      `;
+    }
+    if (careerAchGridEl) {
+      careerAchGridEl.innerHTML = '';
+      ACHIEVEMENTS.forEach((ach) => {
+        const done = ach.check(saveData);
+        const t = TIERS[ach.tierImg - 1];
+        const card = document.createElement('div');
+        card.className = `career-ach-card${done ? '' : ' is-locked'}`;
+        card.innerHTML = `
+          <img src="${t.src}" alt="${ach.name}" />
+          <div class="career-ach-meta">
+            <strong>${done ? '✓ ' : ''}${ach.name}</strong>
+            <span>${ach.desc}</span>
+          </div>
+        `;
+        careerAchGridEl.appendChild(card);
+      });
+    }
+    careerModal.classList.add('is-open');
+    syncAudioMood();
+  }
+
+  function closeCareer() {
+    careerModal.classList.remove('is-open');
+    syncAudioMood();
+  }
+
+  // Help Modal (玩法说明)
+  function openHelp() {
+    helpModal.classList.add('is-open');
+    syncAudioMood();
+  }
+
+  function closeHelp() {
+    helpModal.classList.remove('is-open');
+    syncAudioMood();
+  }
+
   // Compendium Modal
   function openCompendium() {
     if (blessingModal.classList.contains('is-open')) closeBlessingModal(true);
@@ -3826,10 +5311,18 @@
     gameState.score = 0;
     gameState.displayScore = 0;
     gameState.stardust = 30;
-    gameState.feverEnergy = 0;
+    gameState.dropsMadeThisRun = 0;
+    gameState.soufflesMadeThisRun = 0;
+    gameState.yarnBrokenThisRun = 0;
+
+    // Apply Kitchen Upgrade: up_fever (Initial Starlight Fever Energy 18% / 32% / 48%)
+    const upFeverLv = getUpgradeLevel('up_fever');
+    const startFeverEnergy = SHOP_UPGRADES.find((u) => u.id === 'up_fever').values[upFeverLv] || 0;
+    gameState.feverEnergy = startFeverEnergy;
     gameState.feverTimer = 0;
     gameState.feverMaxDuration = 10.0;
     gameState.feverBonusUsed = 0;
+
     gameState.comboCount = 0;
     gameState.comboTimer = 0;
     gameState.comboRainbowGranted = false;
@@ -3837,7 +5330,15 @@
     gameState.ordersCompleted = 0;
     gameState.maxTierRun = 4;
     gameState.seenThisRun = new Set([1, 2, 3, 4]);
-    gameState.tools = { shake: 2, fork: 2, spoon: 1 };
+
+    // Apply Kitchen Upgrade: up_tools & Mikan Patron Passive (+1 Fork)
+    const upToolsLv = getUpgradeLevel('up_tools');
+    gameState.tools = {
+      shake: 2 + (upToolsLv >= 1 ? 1 : 0),
+      fork: 2 + (upToolsLv >= 2 ? 1 : 0) + (saveData.selectedPatron === 'mikan' ? 1 : 0),
+      spoon: 1 + (upToolsLv >= 3 ? 1 : 0)
+    };
+
     gameState.activeToolMode = null;
     gameState.dropX = 220;
     gameState.prevDropX = 220;
@@ -3854,7 +5355,23 @@
       blessingReadyBtn.classList.remove('is-fresh');
       delete blessingReadyBtn.dataset.count;
     }
+
+    // Mode milestones & 90s Rush timer init
     gameState.zenNextMilestone = 500;
+    gameState.rushTimer = 90.0;
+    gameState.rushFinished = false;
+    gameState.rushGustCooldown = 0;
+    gameState.rushNextMilestone = 1800;
+    gameState.rushLastTickSec = 6;
+
+    // Shop Events state init
+    gameState.activeEvent = null;
+    gameState.lastEventKind = null;
+    gameState.nextEventDrops = 22 + Math.floor(Math.random() * 9);
+    gameState.nextEventTimer = 18.0;
+    gameState.meteorGoldenLeft = 0;
+    gameState.shootingStars = [];
+
     gameState.hitstopTimer = 0;
     gameState.screenShake = 0;
     gameState.jarFlash = 0;
@@ -3888,16 +5405,32 @@
     audio.setDangerLevel(0);
     if (cafeStageEl) cafeStageEl.classList.remove('is-fever');
     blessingModal.classList.remove('is-open');
-    titleModal.classList.remove('is-open');
+    shopModal.classList.remove('is-open');
+    careerModal.classList.remove('is-open');
+    helpModal.classList.remove('is-open');
     gameoverModal.classList.remove('is-open');
-    syncAudioMood();
+
+    showPlayScreen();
     audio.unlock();
 
+    const activePatron = getSelectedPatron();
     if (mode === 'chef') {
       generateOrder();
+    } else if (mode === 'rush') {
+      gameState.order = null;
+      setPatronSpeech(
+        activePatron,
+        `⚡ 90秒狂欢开跑！${activePatron.shortName}助阵全速冲分，溢罐自动吹散不秒死！`,
+        5.0
+      );
+      renderOrder();
     } else {
       gameState.order = null;
-      setPatronSpeech(PATRONS[0], '悠闲经典模式开启！每达成积分里程碑可抽取三选一星夜秘方祝福哦～', 5.0);
+      setPatronSpeech(
+        activePatron,
+        `悠闲经典模式开启！${activePatron.shortName}陪你慢慢叠搭，达标积分即可抽取三选一祝福～`,
+        5.0
+      );
       renderOrder();
     }
 
@@ -3906,9 +5439,8 @@
   }
 
   // Unlock Web Audio & smoothly start cozy café BGM on the player's first gesture
-  // (iOS Safari / mobile WebViews require touchend or click; pointerdown alone is ignored)
   function handleAudioGestureUnlock(ev) {
-    if (ev && ev.target && ev.target.closest && ev.target.closest('#btn-bgm')) return;
+    if (ev && ev.target && ev.target.closest && ev.target.closest('#btn-bgm, #btn-lobby-bgm')) return;
     audio.unlock();
   }
   window.addEventListener('pointerdown', handleAudioGestureUnlock, { passive: true });
@@ -3927,15 +5459,86 @@
   document.addEventListener('gesturechange', (ev) => ev.preventDefault(), { passive: false });
   document.addEventListener('dblclick', (ev) => ev.preventDefault(), { passive: false });
 
-  // UI Event Bindings
-  modeSelectEl.addEventListener('click', (ev) => {
-    const btn = ev.target.closest('.mode-option');
-    if (!btn) return;
-    modeSelectEl.querySelectorAll('.mode-option').forEach((b) => b.classList.remove('is-selected'));
-    btn.classList.add('is-selected');
-    gameState.mode = btn.dataset.mode;
-  });
+  // Shared Audio Toggle Handlers (both Lobby and Play bars stay synced)
+  function handleToggleSfx() {
+    audio.ensureCtx();
+    const nextEnabled = !audio.sfxEnabled;
+    audio.setSfxEnabled(nextEnabled);
+    saveData.sfxEnabled = nextEnabled;
+    persistSaveData();
+    syncAudioButtons();
+    showToast(nextEnabled ? '🔊 游戏音效已开启' : '🔇 游戏音效已关闭');
+  }
 
+  function handleCycleBgm() {
+    audio.ensureCtx();
+    audio.cycleBGMTrack();
+    saveData.bgmTrack = audio.bgmTrack;
+    persistSaveData();
+    syncAudioButtons();
+    const info = audio.getTrackInfo();
+    if (info.id === 'off') {
+      showToast('🔇 背景音乐已关闭（可随时点击或按 M 重新开启）');
+    } else {
+      showToast(`🎵 当前背景音乐：${info.title}`);
+    }
+  }
+
+  // Lobby Event Bindings
+  if (modeSelectEl) {
+    modeSelectEl.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('.lobby-mode-card');
+      if (!btn) return;
+      audio.ensureCtx();
+      audio.playTilt();
+      gameState.mode = btn.dataset.mode;
+      updateLobbyUI();
+    });
+  }
+
+  if (lobbyPatronPortraitBtn) {
+    lobbyPatronPortraitBtn.addEventListener('click', pokeLobbyPatron);
+  }
+  if (btnLobbyBank) btnLobbyBank.addEventListener('click', () => openShop('upgrades'));
+  if (lobbyShopPreviewBtn) lobbyShopPreviewBtn.addEventListener('click', () => openShop('themes'));
+  if (btnOpenShop) btnOpenShop.addEventListener('click', () => openShop('upgrades'));
+  if (btnOpenCareer) btnOpenCareer.addEventListener('click', openCareer);
+  if (btnLobbyHelp) btnLobbyHelp.addEventListener('click', openHelp);
+  if (btnLobbyCompendium) btnLobbyCompendium.addEventListener('click', openCompendium);
+  if (btnLobbyCompM) btnLobbyCompM.addEventListener('click', openCompendium);
+  if (btnLobbyBgm) btnLobbyBgm.addEventListener('click', handleCycleBgm);
+  if (btnLobbySfx) btnLobbySfx.addEventListener('click', handleToggleSfx);
+
+  if (shopTabsEl) {
+    shopTabsEl.addEventListener('click', (ev) => {
+      const tab = ev.target.closest('.shop-tab');
+      if (!tab) return;
+      activeShopTab = tab.dataset.tab;
+      renderShop();
+    });
+  }
+  if (btnCloseShop) btnCloseShop.addEventListener('click', closeShop);
+  if (shopModal) {
+    shopModal.addEventListener('click', (ev) => {
+      if (ev.target === shopModal) closeShop();
+    });
+  }
+
+  if (btnCloseCareer) btnCloseCareer.addEventListener('click', closeCareer);
+  if (careerModal) {
+    careerModal.addEventListener('click', (ev) => {
+      if (ev.target === careerModal) closeCareer();
+    });
+  }
+
+  if (btnCloseHelp) btnCloseHelp.addEventListener('click', closeHelp);
+  if (helpModal) {
+    helpModal.addEventListener('click', (ev) => {
+      if (ev.target === helpModal) closeHelp();
+    });
+  }
+
+  // Play Screen Event Bindings
   btnStartGame.addEventListener('click', () => {
     audio.ensureCtx();
     startNewRun(gameState.mode);
@@ -3948,8 +5551,23 @@
     audio.playStartCafe();
   });
 
+  if (btnGoLobby) {
+    btnGoLobby.addEventListener('click', () => {
+      audio.ensureCtx();
+      returnToLobby();
+    });
+  }
+
+  if (btnBackLobby) {
+    btnBackLobby.addEventListener('click', () => {
+      audio.ensureCtx();
+      returnToLobby();
+      showToast('🏠 已回到星夜吃茶大厅');
+    });
+  }
+
   btnRestart.addEventListener('click', () => {
-    if (!gameState.running && titleModal.classList.contains('is-open')) return;
+    if (isLobbyOpen()) return;
     audio.ensureCtx();
     startNewRun(gameState.mode);
     audio.playStartCafe();
@@ -3987,29 +5605,8 @@
     btnDebugPhys.addEventListener('click', () => toggleDebugPhysics());
   }
 
-  btnSfx.addEventListener('click', () => {
-    audio.ensureCtx();
-    const nextEnabled = !audio.sfxEnabled;
-    audio.setSfxEnabled(nextEnabled);
-    saveData.sfxEnabled = nextEnabled;
-    persistSaveData();
-    syncAudioButtons();
-    showToast(nextEnabled ? '🔊 游戏音效已开启' : '🔇 游戏音效已关闭');
-  });
-
-  btnBgm.addEventListener('click', () => {
-    audio.ensureCtx();
-    audio.cycleBGMTrack();
-    saveData.bgmTrack = audio.bgmTrack;
-    persistSaveData();
-    syncAudioButtons();
-    const info = audio.getTrackInfo();
-    if (info.id === 'off') {
-      showToast('🔇 背景音乐已关闭（可随时点击或按 M 重新开启）');
-    } else {
-      showToast(`🎵 当前背景音乐：${info.title}`);
-    }
-  });
+  btnSfx.addEventListener('click', handleToggleSfx);
+  btnBgm.addEventListener('click', handleCycleBgm);
 
   btnCompendium.addEventListener('click', openCompendium);
   btnCloseComp.addEventListener('click', closeCompendium);
@@ -4017,18 +5614,26 @@
     if (ev.target === compendiumModal) closeCompendium();
   });
 
-  // Inspection hook for automated E2E physics & 2.0 feature verification
+  // Inspection hook for automated E2E physics & 3.0 Plan B verification
   window.__HOSHI_DEBUG__ = {
     getState: () => ({
+      lobbyOpen: isLobbyOpen(),
+      mode: gameState.mode,
       running: gameState.running,
       paused: gameState.paused,
       over: gameState.over,
       score: gameState.score,
       stardust: gameState.stardust,
+      dropsMadeThisRun: gameState.dropsMadeThisRun,
       feverEnergy: +gameState.feverEnergy.toFixed(1),
       feverTimer: +gameState.feverTimer.toFixed(2),
+      rushTimer: +gameState.rushTimer.toFixed(2),
+      rushFinished: gameState.rushFinished,
+      activeEvent: gameState.activeEvent ? { ...gameState.activeEvent } : null,
+      yarnBrokenThisRun: gameState.yarnBrokenThisRun,
       comboCount: gameState.comboCount,
       maxCombo: gameState.maxCombo,
+      tools: { ...gameState.tools },
       perks: { ...gameState.perks },
       pendingBlessings: gameState.pendingBlessings,
       blessingModalOpen: blessingModal.classList.contains('is-open'),
@@ -4045,6 +5650,8 @@
         tier: e.tier,
         isWildcard: !!e.isWildcard,
         isGolden: !!e.isGolden,
+        isYarnBall: !!e.isYarnBall,
+        yarnHp: e.isYarnBall ? e.yarnHp : 0,
         x: +e.x.toFixed(2),
         y: +e.y.toFixed(2),
         angle: +e.angle.toFixed(3),
@@ -4054,6 +5661,7 @@
         polyCount: e.worldPolys ? e.worldPolys.length : 0
       }))
     }),
+    getSaveData: () => JSON.parse(JSON.stringify(saveData)),
     getAudioState: () => audio.getDebugState(),
     togglePhysicsDebug: (val) => toggleDebugPhysics(val),
     setCurTier: (tier) => {
@@ -4090,15 +5698,32 @@
     openBlessing: () => {
       if (gameState.pendingBlessings <= 0) gameState.pendingBlessings = 1;
       openBlessingModal();
-    }
+    },
+    triggerEvent: (kind) => triggerShopEvent(kind),
+    triggerRushGust: () => triggerRushEmergencyGust(),
+    setRushTimer: (sec) => {
+      gameState.rushTimer = Math.max(0, Number(sec) || 0);
+      updateRushTimerUI();
+    },
+    addBankStardust: (amt) => {
+      saveData.bankStardust = Math.max(0, (saveData.bankStardust || 0) + (Number(amt) || 0));
+      persistSaveData();
+      updateLobbyUI();
+      if (shopModal.classList.contains('is-open')) renderShop();
+    },
+    startMode: (mode) => startNewRun(mode),
+    returnToLobby: () => returnToLobby(),
+    openShop: (tab = 'upgrades') => openShop(tab)
   };
 
   // Boot Sequence
   syncAudioButtons();
+  updateLobbyUI();
   syncAudioMood();
   resizeCanvases();
   loadSprites().then(() => {
     buildEvolutionRing();
+    updateLobbyUI();
     updateHUD();
     requestAnimationFrame(mainLoop);
   });

@@ -3,6 +3,7 @@
 Extract and post-process game sprites, tool medallions, mascot portrait,
 and seamless bakery room backdrop from generated artwork.
 """
+import argparse
 import json
 from collections import deque
 from pathlib import Path
@@ -10,12 +11,15 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
-ART_DIR = Path(
-    "/home/antigravity/.gemini/jetski/brain/v1/default/jetski_remote_agents_3p/6fe16085-d461-4180-bf81-d33fb8a364e4"
-)
-OUT_DIR = Path("/home/antigravity/hoshi-kissa-bakery/assets/processed")
-RAW_DIR = Path("/home/antigravity/hoshi-kissa-bakery/assets/raw")
+SCRIPT_DIR = Path(__file__).resolve().parent
+SRC_ROOT = SCRIPT_DIR.parent
+REPO_ROOT = SRC_ROOT.parent
+OUT_DIR = SRC_ROOT / "assets/processed"
+PNG_DIR = REPO_ROOT / "02-游戏素材-精修透明PNG"
+RAW_DIR = REPO_ROOT / "03-游戏素材-原始原图与WebP"
+ART_DIR = RAW_DIR
 OUT_DIR.mkdir(parents=True, exist_ok=True)
+PNG_DIR.mkdir(parents=True, exist_ok=True)
 RAW_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -522,10 +526,97 @@ def build_clean_bakery_backdrop():
     final_bg.save("/tmp/verify_bakery_bg.jpg", quality=92)
 
 
+def extract_plan_b_assets():
+    """
+    Slice 1024x1024 2x2 Plan B sprite sheet into:
+      - patron_luna.webp  (top-left, max 256x256)
+      - patron_mugi.webp  (top-right, max 256x256)
+      - event_yarn_ball.webp (bottom-left, max 192x192)
+      - icon_shop_sign.webp  (bottom-right, max 192x192)
+    """
+    src = RAW_DIR / "plan_b_sprites_sheet.jpg"
+    if not src.exists():
+        raise FileNotFoundError(f"Missing Plan B sprite sheet: {src}")
+    img = Image.open(src).convert("RGB")
+    w, h = img.size
+    mx, my = w // 2, h // 2
+
+    specs = [
+        ("patron_luna", (0, 0, mx, my), 256, 86),
+        ("patron_mugi", (mx, 0, w, my), 256, 86),
+        ("event_yarn_ball", (0, my, mx, h), 192, 86),
+        ("icon_shop_sign", (mx, my, w, h), 192, 86),
+    ]
+
+    verify = Image.new("RGBA", (880, 260), (22, 30, 46, 255))
+    draw = ImageDraw.Draw(verify)
+    report = []
+
+    for idx, (name, box, max_dim, webp_q) in enumerate(specs):
+        cell = img.crop(box)
+        rgba = floodfill_remove_bg(
+            np.array(cell),
+            bg_dist_thresh=30.0,
+            decontam_thresh=110.0,
+            keep_main_only=True,
+        )
+        bbox = rgba.getbbox()
+        if bbox:
+            rgba = rgba.crop(bbox)
+
+        if name == "event_yarn_ball":
+            # Punch out tiny enclosed white hole inside the decorative bottom-left yarn curl loop
+            arr_y = np.array(rgba)
+            yh, yw = arr_y.shape[:2]
+            yy, xx = np.mgrid[0:yh, 0:yw]
+            rgb_y = arr_y[:, :, :3].astype(np.float32)
+            luma_y = 0.299 * rgb_y[:, :, 0] + 0.587 * rgb_y[:, :, 1] + 0.114 * rgb_y[:, :, 2]
+            sat_y = rgb_y.max(axis=2) - rgb_y.min(axis=2)
+            hole = (xx < yw * 0.30) & (yy > yh * 0.60) & (luma_y > 225) & (sat_y < 24)
+            arr_y[hole, 3] = 0
+            rgba = Image.fromarray(arr_y, mode="RGBA")
+
+        scale = min(1.0, float(max_dim) / max(rgba.size))
+        if scale < 1.0:
+            new_sz = (
+                max(1, int(round(rgba.width * scale))),
+                max(1, int(round(rgba.height * scale))),
+            )
+            rgba = rgba.resize(new_sz, Image.Resampling.LANCZOS)
+
+        png_path = PNG_DIR / f"{name}.png"
+        webp_path = OUT_DIR / f"{name}.webp"
+        rgba.save(png_path)
+        rgba.save(webp_path, quality=webp_q, method=6)
+        kb = webp_path.stat().st_size / 1024.0
+        report.append((name, rgba.size, round(kb, 1)))
+
+        # Place on dark verification canvas to check zero white halo
+        px = 20 + idx * 215 + (190 - rgba.width) // 2
+        py = 36 + (190 - rgba.height) // 2
+        thumb = rgba.copy()
+        thumb.thumbnail((184, 184), Image.Resampling.LANCZOS)
+        px = 20 + idx * 215 + (190 - thumb.width) // 2
+        py = 44 + (184 - thumb.height) // 2
+        verify.alpha_composite(thumb, (px, py))
+        draw.text((24 + idx * 215, 14), f"{name} ({kb:.1f}KB)", fill=(255, 232, 168, 255))
+
+    verify.convert("RGB").save("/tmp/verify_plan_b_assets.jpg", quality=92)
+    print("Plan B assets extracted:", report)
+    return report
+
+
 if __name__ == "__main__":
-    meta = extract_desserts()
-    extract_mascot_and_tools()
-    build_clean_bakery_backdrop()
-    with open(OUT_DIR / "sprites_meta.json", "w") as f:
-        json.dump(meta, f, indent=2)
-    print("Extraction v3 complete!")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--plan-b", action="store_true", help="Extract only 3.0 Plan B 2x2 sprite sheet")
+    args = parser.parse_args()
+    if args.plan_b:
+        extract_plan_b_assets()
+    else:
+        meta = extract_desserts()
+        extract_mascot_and_tools()
+        build_clean_bakery_backdrop()
+        extract_plan_b_assets()
+        with open(OUT_DIR / "sprites_meta.json", "w") as f:
+            json.dump(meta, f, indent=2)
+        print("Extraction complete!")

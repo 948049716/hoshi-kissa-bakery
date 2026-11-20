@@ -608,8 +608,9 @@ class StarlightAudio {
 
   _currentStepDurationSec(track) {
     let bpm = this.feverMode ? track.bpmFever : track.bpmNormal;
-    if (!this.feverMode && this.dangerLevel > 0.25) {
-      bpm *= 1 + (this.dangerLevel - 0.25) * 0.09; // Gentle +6.7% urgency max
+    if (this.dangerLevel > 0.25) {
+      const lift = this.feverMode ? 0.055 : 0.095;
+      bpm *= 1 + (this.dangerLevel - 0.25) * lift;
     }
     // 1 step = 1 eighth note (half a quarter-note beat)
     return 60 / bpm / 2;
@@ -1396,6 +1397,109 @@ class StarlightAudio {
         this._playTone(f, 'triangle', 0.09, 0.38, 0.015);
       }, i * 140);
     });
+  }
+
+  /**
+   * 3.0 Plan B SFX — 100% Web Audio C-Major Procedural Synthesis
+   */
+  playShopBuy() {
+    // Crisp wooden café register brass ding + warm major chord confirmation
+    this._playTone(1318.51, 'sine', 0.12, 0.28, 0.004);
+    this._playTone(2637.02, 'sine', 0.045, 0.18, 0.003);
+    setTimeout(() => {
+      this._playTone(1046.5, 'triangle', 0.1, 0.32, 0.006);
+      this._playTone(1567.98, 'sine', 0.095, 0.36, 0.006);
+      this._playTone(2093.0, 'sine', 0.065, 0.38, 0.008);
+    }, 68);
+  }
+
+  playPatronSelect() {
+    // Playful soft cat-paw kneading two-syllable chirp
+    this._playTone(587.33, 'sine', 0.09, 0.095, 0.005, 740);
+    setTimeout(() => {
+      this._playTone(880.0, 'triangle', 0.095, 0.14, 0.005, 1046.5);
+    }, 58);
+  }
+
+  playEventStart(kind) {
+    if (kind === 'meteor') {
+      // Shimmering descending + ascending celesta/harp arpeggio
+      const notes = [2093.0, 1760.0, 1567.98, 1318.51, 1567.98, 2093.0, 2637.02];
+      notes.forEach((f, i) => {
+        setTimeout(() => {
+          this._playTone(f, 'sine', 0.085, 0.32, 0.005);
+        }, i * 44);
+      });
+    } else if (kind === 'yarn') {
+      // Playful mischievous cat meow pitch-glide synth
+      this._playTone(620, 'triangle', 0.11, 0.13, 0.012, 920);
+      setTimeout(() => {
+        this._playTone(920, 'sine', 0.1, 0.19, 0.008, 520);
+      }, 105);
+      setTimeout(() => {
+        this._playTone(783.99, 'sine', 0.065, 0.12, 0.006, 987.77);
+      }, 240);
+    } else if (kind === 'chime') {
+      // Warm golden bakery oven brass bell harmonics
+      this._playTone(783.99, 'sine', 0.12, 0.72, 0.006);
+      this._playTone(1567.98, 'triangle', 0.07, 0.58, 0.005);
+      this._playTone(2349.32, 'sine', 0.04, 0.38, 0.004);
+      setTimeout(() => {
+        this._playTone(1046.5, 'sine', 0.11, 0.76, 0.006);
+        this._playTone(2093.0, 'sine', 0.055, 0.5, 0.004);
+      }, 170);
+    }
+  }
+
+  playYarnHit() {
+    // Soft elastic wool thump + playful pluck
+    this._playTone(260, 'sine', 0.14, 0.12, 0.004, 135);
+    this._playTone(587.33, 'triangle', 0.075, 0.09, 0.004, 783.99);
+  }
+
+  playYarnBreak() {
+    // Joyful crispy candy-confetti pop + sparkle celebration chord
+    this._playTone(360, 'sine', 0.14, 0.1, 0.004, 760);
+    const notes = [783.99, 1046.5, 1318.51, 1567.98, 2093.0];
+    notes.forEach((f, i) => {
+      setTimeout(() => {
+        this._playTone(f, i % 2 === 0 ? 'triangle' : 'sine', 0.1, 0.3, 0.005);
+      }, 24 + i * 38);
+    });
+  }
+
+  playRushTick(urgent = false) {
+    // Gentle wooden block tick for final 5s Rush countdown
+    const f = urgent ? 1174.66 : 880.0;
+    this._playTone(f, 'triangle', urgent ? 0.11 : 0.08, 0.075, 0.003, f * 0.86);
+    if (urgent) {
+      this._playTone(f * 1.5, 'sine', 0.05, 0.06, 0.002);
+    }
+  }
+
+  playWindGust() {
+    // Airy starlight gust sweeping away top treats in 90s Rush mode
+    this._playTone(440, 'sine', 0.1, 0.24, 0.015, 880);
+    setTimeout(() => this._playTone(659.25, 'triangle', 0.09, 0.22, 0.01, 1318.51), 60);
+    if (this.sfxEnabled && this.ctx && this._noiseBuffer) {
+      const ctx = this.ctx;
+      const now = ctx.currentTime;
+      const src = ctx.createBufferSource();
+      src.buffer = this._noiseBuffer;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(900, now);
+      bp.frequency.exponentialRampToValueAtTime(2600, now + 0.26);
+      bp.Q.value = 1.4;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.linearRampToValueAtTime(0.11, now + 0.05);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+      src.connect(bp);
+      bp.connect(g);
+      g.connect(this._sfxBus || ctx.destination);
+      src.start(now, 0, 0.35);
+    }
   }
 
   getDebugState() {

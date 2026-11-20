@@ -11,7 +11,11 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
-PROC_DIR = Path("/home/antigravity/hoshi-kissa-bakery/assets/processed")
+SCRIPT_DIR = Path(__file__).resolve().parent
+SRC_ROOT = SCRIPT_DIR.parent
+REPO_ROOT = SRC_ROOT.parent
+PROC_DIR = SRC_ROOT / "assets/processed"
+PNG_DIR = REPO_ROOT / "02-游戏素材-精修透明PNG"
 
 
 def cross2(o, a, b):
@@ -271,7 +275,7 @@ def main():
     ]
 
     for tier in range(1, 10):
-        img = Image.open(PROC_DIR / f"tier_{tier}.png").convert("RGBA")
+        img = Image.open(PNG_DIR / f"tier_{tier}.png").convert("RGBA")
         w, h = img.size
         alpha = np.array(img)[:, :, 3]
         mask = alpha > 128
@@ -341,16 +345,70 @@ def main():
             fill=(255, 228, 160, 255),
         )
 
+    # Also extract Plan B Mischief Yarn Ball rigid-body collider (core yarn sphere, excluding thin loose yarn tail)
+    yarn_png = PNG_DIR / "event_yarn_ball.png"
+    if yarn_png.exists():
+        y_img = Image.open(yarn_png).convert("RGBA")
+        yw, yh = y_img.size
+        y_mask = np.array(y_img)[:, :, 3] > 128
+        yy, xx = np.mgrid[0:yh, 0:yw]
+        # Exclude bottom-left decorative thin yarn tail so the collider tightly hugs the round yarn sphere
+        core_mask = y_mask & ~((xx < yw * 0.33) & (yy > yh * 0.65)) & ~(xx < yw * 0.17)
+        cx, cy, r_eq, inertia_k = compute_mask_inertial_props(core_mask, 0)
+        p_yarn = hull_from_mask(core_mask, max_verts=14)
+        polys_norm = []
+        max_bound_norm = 0.0
+        if p_yarn:
+            pn = []
+            for vx, vy in p_yarn:
+                nx = (vx - cx) / r_eq
+                ny = (vy - cy) / r_eq
+                max_bound_norm = max(max_bound_norm, math.hypot(nx, ny))
+                pn.append([round(nx, 4), round(ny, 4)])
+            polys_norm.append(pn)
+        all_nx = [v[0] for p in polys_norm for v in p]
+        all_ny = [v[1] for p in polys_norm for v in p]
+        shapes_data["event_yarn_ball"] = {
+            "width": yw,
+            "height": yh,
+            "com_x": round(cx, 2),
+            "com_y": round(cy, 2),
+            "r_eq_px": round(r_eq, 2),
+            "inertia_k": round(inertia_k, 4),
+            "bound_r_norm": round(max_bound_norm, 4),
+            "min_x_norm": round(min(all_nx), 4),
+            "max_x_norm": round(max(all_nx), 4),
+            "min_y_norm": round(min(all_ny), 4),
+            "max_y_norm": round(max(all_ny), 4),
+            "polygons": polys_norm,
+        }
+
+        # Visual check image for yarn ball collider
+        yv = Image.new("RGBA", (320, 320), (18, 24, 38, 255))
+        yd = ImageDraw.Draw(yv)
+        r_vis = 96.0
+        sc = r_vis / r_eq
+        ys = y_img.resize((int(round(yw * sc)), int(round(yh * sc))), Image.Resampling.LANCZOS)
+        yv.alpha_composite(ys, (int(round(160 - cx * sc)), int(round(160 - cy * sc))))
+        for pn in polys_norm:
+            pts = [(160 + v[0] * r_vis, 160 + v[1] * r_vis) for v in pn]
+            yd.line(pts + [pts[0]], fill=(72, 238, 255, 240), width=2)
+            for px, py in pts:
+                yd.ellipse([px - 2.5, py - 2.5, px + 2.5, py + 2.5], fill=(255, 212, 74, 240))
+        yd.ellipse([156, 156, 164, 164], fill=(255, 70, 70, 255), outline=(255, 255, 255, 255))
+        yv.convert("RGB").save("/tmp/verify_yarn_mesh.jpg", quality=94)
+
     out_json = PROC_DIR / "physics_shapes.json"
     out_json.write_text(json.dumps(shapes_data, indent=2), encoding="utf-8")
-    out_js = PROC_DIR.parent.parent / "physics_shapes.js"
+    (PNG_DIR / "physics_shapes.json").write_text(json.dumps(shapes_data, indent=2), encoding="utf-8")
+    out_js = SRC_ROOT / "physics_shapes.js"
     out_js.write_text(
         "// Auto-generated from sprite alpha contours by scripts/extract_physics_shapes.py\n"
         "window.HOSHI_PHYSICS_SHAPES = " + json.dumps(shapes_data, separators=(",", ":")) + ";\n",
         encoding="utf-8",
     )
     verify.convert("RGB").save("/tmp/verify_physics_meshes.jpg", quality=94)
-    print(f"Generated {out_json}, {out_js}, and /tmp/verify_physics_meshes.jpg")
+    print(f"Generated {out_json}, {out_js}, and /tmp/verify_physics_meshes.jpg (shapes: {list(shapes_data.keys())})")
 
 
 if __name__ == "__main__":

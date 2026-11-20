@@ -2274,7 +2274,8 @@ function createApp() {
   let lastFrameMs = Date.now();
   const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (fn) => setTimeout(() => fn(Date.now()), 16);
 
-  function mainLoop() {
+  let mainLoopErrorLogged = false;
+  function runFrame() {
     const nowMs = Date.now();
     const dt = Math.max(0.001, Math.min(0.033, (nowMs - lastFrameMs) / 1000));
     lastFrameMs = nowMs;
@@ -2414,8 +2415,19 @@ function createApp() {
 
     const { topY, headerH } = ScreensUI.computeTopHeaderGeometry(metrics);
     ScreensUI.renderToast(ctx, metrics.width, topY + headerH, app);
+  }
 
-    raf(mainLoop);
+  function mainLoop() {
+    try {
+      runFrame();
+    } catch (err) {
+      if (!mainLoopErrorLogged) {
+        mainLoopErrorLogged = true;
+        console.error('[HoshiKissa] mainLoop error:', err);
+      }
+    } finally {
+      raf(mainLoop);
+    }
   }
 
   // Lifecycle & WeChat Share setup
@@ -2458,8 +2470,13 @@ function createApp() {
       perks: { ...gameState.perks },
       pendingBlessings: gameState.pendingBlessings,
       dropsUntilRainbow: gameState.dropsUntilRainbow,
+      canHoldThisTurn: gameState.canHoldThisTurn,
       curTier: gameState.curTier,
       curMeta: { ...gameState.curMeta },
+      nextTier: gameState.nextTier,
+      nextMeta: { ...gameState.nextMeta },
+      holdTier: gameState.holdTier,
+      holdMeta: gameState.holdMeta ? { ...gameState.holdMeta } : null,
       debugPhysics: gameState.debugPhysics,
       jarBox: app.lastJarBox,
       assetsLoaded: sprites.loadedCount,
@@ -2500,6 +2517,7 @@ function createApp() {
       gameState.rushTimer = Math.max(0, Number(sec) || 0);
     },
     triggerFever: () => addFeverEnergy(100),
+    grantRainbow: () => grantNextRainbow('测试彩虹糖'),
     queueBlessing: (r = '测试祝福') => queueBlessing(r),
     openBlessing: () => app.openBlessingModal(),
     togglePhysicsDebug: (val) => app.toggleDebugPhysics(val),

@@ -224,7 +224,7 @@ function drawTierSprite(ctx, sprites, tier, x, y, r, angle, squishAmt = 0, squis
     img = sprites.int[tier];
   }
 
-  if (!img) {
+  if (!img || !img.width || !img.height) {
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.fillStyle = def.color;
@@ -302,7 +302,7 @@ function drawYarnBallEntity(ctx, yarnBallImg, e, nowSec) {
   } else {
     ctx.rotate(e.angle);
   }
-  if (yarnBallImg && shapeDef) {
+  if (yarnBallImg && yarnBallImg.width > 0 && yarnBallImg.height > 0 && shapeDef) {
     const scale = e.r / shapeDef.r_eq_px;
     ctx.drawImage(
       yarnBallImg,

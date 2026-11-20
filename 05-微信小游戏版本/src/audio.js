@@ -470,27 +470,31 @@ class StarlightAudio {
 
   _rampParam(param, target, timeSec = 0.35, exponential = true) {
     if (!this.ctx || !param) return;
-    const now = this.ctx.currentTime;
-    const safeCur = exponential ? Math.max(0.0001, param.value) : param.value;
-    const safeTarget = exponential ? Math.max(0.0001, target) : target;
-    param.cancelScheduledValues(now);
-    param.setValueAtTime(safeCur, now);
-    if (exponential) {
-      param.exponentialRampToValueAtTime(safeTarget, now + Math.max(0.02, timeSec));
-    } else {
-      param.linearRampToValueAtTime(safeTarget, now + Math.max(0.02, timeSec));
-    }
+    try {
+      const now = this.ctx.currentTime;
+      const safeCur = exponential ? Math.max(0.0001, param.value) : param.value;
+      const safeTarget = exponential ? Math.max(0.0001, target) : target;
+      param.cancelScheduledValues(now);
+      param.setValueAtTime(safeCur, now);
+      if (exponential) {
+        param.exponentialRampToValueAtTime(safeTarget, now + Math.max(0.02, timeSec));
+      } else {
+        param.linearRampToValueAtTime(safeTarget, now + Math.max(0.02, timeSec));
+      }
+    } catch (_) {}
   }
 
   _duckBGM(factor = 0.64, holdSec = 0.55, releaseSec = 0.7) {
     if (!this.ctx || !this._bgmDuckGain || !this.bgmEnabled) return;
-    const now = this.ctx.currentTime;
-    const cur = Math.max(0.05, this._bgmDuckGain.gain.value);
-    this._bgmDuckGain.gain.cancelScheduledValues(now);
-    this._bgmDuckGain.gain.setValueAtTime(cur, now);
-    this._bgmDuckGain.gain.exponentialRampToValueAtTime(Math.max(0.15, factor), now + 0.08);
-    this._bgmDuckGain.gain.setValueAtTime(Math.max(0.15, factor), now + 0.08 + holdSec);
-    this._bgmDuckGain.gain.exponentialRampToValueAtTime(1.0, now + 0.08 + holdSec + releaseSec);
+    try {
+      const now = this.ctx.currentTime;
+      const cur = Math.max(0.05, this._bgmDuckGain.gain.value);
+      this._bgmDuckGain.gain.cancelScheduledValues(now);
+      this._bgmDuckGain.gain.setValueAtTime(cur, now);
+      this._bgmDuckGain.gain.exponentialRampToValueAtTime(Math.max(0.15, factor), now + 0.08);
+      this._bgmDuckGain.gain.setValueAtTime(Math.max(0.15, factor), now + 0.08 + holdSec);
+      this._bgmDuckGain.gain.exponentialRampToValueAtTime(1.0, now + 0.08 + holdSec + releaseSec);
+    } catch (_) {}
   }
 
   // ==================== Public State Controls ====================
@@ -610,24 +614,26 @@ class StarlightAudio {
 
   startBGM() {
     if (!this.bgmEnabled || this.bgmTrack === 'off' || this.tabHidden) return;
-    const ctx = this.ensureCtx();
-    if (!ctx) return;
-    if (this._schedTimer) {
-      clearInterval(this._schedTimer);
-      this._schedTimer = null;
-    }
+    try {
+      const ctx = this.ensureCtx();
+      if (!ctx) return;
+      if (this._schedTimer) {
+        clearInterval(this._schedTimer);
+        this._schedTimer = null;
+      }
 
-    this._isPlayingBGM = true;
-    this._nextNoteTime = ctx.currentTime + 0.08;
-    this._gainBoostedAtRunning = ctx.state === 'running';
+      this._isPlayingBGM = true;
+      this._nextNoteTime = ctx.currentTime + 0.08;
+      this._gainBoostedAtRunning = ctx.state === 'running';
 
-    // Smooth cozy fade-in so music blooms gently (linear ramp avoids mobile WebView exponential underflow)
-    this._rampParam(this._bgmMasterGain.gain, this._targetBGMGain(), this._fadeInDone ? 0.35 : 0.75, false);
-    this._rampParam(this._bgmToneFilter.frequency, this.muffled ? 580 : 12500, 0.35, true);
-    this._fadeInDone = true;
+      // Smooth cozy fade-in so music blooms gently (linear ramp avoids mobile WebView exponential underflow)
+      this._rampParam(this._bgmMasterGain.gain, this._targetBGMGain(), this._fadeInDone ? 0.35 : 0.75, false);
+      this._rampParam(this._bgmToneFilter.frequency, this.muffled ? 580 : 12500, 0.35, true);
+      this._fadeInDone = true;
 
-    this._schedTimer = setInterval(() => this._schedulerTick(), 35);
-    this._schedulerTick();
+      this._schedTimer = setInterval(() => this._schedulerTick(), 35);
+      this._schedulerTick();
+    } catch (_) {}
   }
 
   stopBGM(fade = true) {
@@ -637,14 +643,16 @@ class StarlightAudio {
     }
     this._isPlayingBGM = false;
     this._gainBoostedAtRunning = false;
-    if (this.ctx && this._bgmMasterGain) {
-      if (fade) {
-        this._rampParam(this._bgmMasterGain.gain, 0.0001, 0.28, true);
-      } else {
-        this._bgmMasterGain.gain.cancelScheduledValues(this.ctx.currentTime);
-        this._bgmMasterGain.gain.setValueAtTime(0.0001, this.ctx.currentTime);
+    try {
+      if (this.ctx && this._bgmMasterGain) {
+        if (fade) {
+          this._rampParam(this._bgmMasterGain.gain, 0.0001, 0.28, true);
+        } else {
+          this._bgmMasterGain.gain.cancelScheduledValues(this.ctx.currentTime);
+          this._bgmMasterGain.gain.setValueAtTime(0.0001, this.ctx.currentTime);
+        }
       }
-    }
+    } catch (_) {}
   }
 
   _currentStepDurationSec(track) {
@@ -659,35 +667,37 @@ class StarlightAudio {
 
   _schedulerTick() {
     if (!this.bgmEnabled || this.tabHidden || !this.ctx) return;
-    if (!this._externalCtx && this.ctx.state && this.ctx.state !== 'running') return;
+    try {
+      if (!this._externalCtx && this.ctx.state && this.ctx.state !== 'running') return;
 
-    if (!this._externalCtx && (!this._gainBoostedAtRunning || this._bgmMasterGain.gain.value < 0.01)) {
-      this._gainBoostedAtRunning = true;
-      this._rampParam(this._bgmMasterGain.gain, this._targetBGMGain(), 0.28, false);
-    }
-
-    const track = this.TRACKS[this.bgmTrack] || this.TRACKS.waltz;
-    const now = this.ctx.currentTime;
-    const lookahead = 0.14; // Schedule 140ms ahead on exact Web Audio clock
-
-    // Recover cleanly if browser throttled background timers (prevent note bursts!)
-    if (this._nextNoteTime < now - 0.25) {
-      this._nextNoteTime = now + 0.06;
-    }
-
-    let guard = 0;
-    while (this._nextNoteTime < now + lookahead && guard < 12) {
-      this._scheduleTrackStep(track, this._stepIndex, this._nextNoteTime);
-      const stepSec = this._currentStepDurationSec(track);
-      this._nextNoteTime += stepSec;
-      this._stepIndex++;
-      const totalSteps = track.bars.length * track.stepsPerBar;
-      if (this._stepIndex >= totalSteps) {
-        this._stepIndex = 0;
-        this._cycleCount++;
+      if (!this._externalCtx && (!this._gainBoostedAtRunning || this._bgmMasterGain.gain.value < 0.01)) {
+        this._gainBoostedAtRunning = true;
+        this._rampParam(this._bgmMasterGain.gain, this._targetBGMGain(), 0.28, false);
       }
-      guard++;
-    }
+
+      const track = this.TRACKS[this.bgmTrack] || this.TRACKS.waltz;
+      const now = this.ctx.currentTime;
+      const lookahead = 0.14; // Schedule 140ms ahead on exact Web Audio clock
+
+      // Recover cleanly if browser throttled background timers (prevent note bursts!)
+      if (this._nextNoteTime < now - 0.25) {
+        this._nextNoteTime = now + 0.06;
+      }
+
+      let guard = 0;
+      while (this._nextNoteTime < now + lookahead && guard < 12) {
+        this._scheduleTrackStep(track, this._stepIndex, this._nextNoteTime);
+        const stepSec = this._currentStepDurationSec(track);
+        this._nextNoteTime += stepSec;
+        this._stepIndex++;
+        const totalSteps = track.bars.length * track.stepsPerBar;
+        if (this._stepIndex >= totalSteps) {
+          this._stepIndex = 0;
+          this._cycleCount++;
+        }
+        guard++;
+      }
+    } catch (_) {}
   }
 
   /**
@@ -1236,24 +1246,25 @@ class StarlightAudio {
     if (!this.sfxEnabled) return;
     const ctx = this.ensureCtx();
     if (!ctx) return;
+    try {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, now);
+      if (endFreq) {
+        osc.frequency.exponentialRampToValueAtTime(Math.max(40, endFreq), now + duration);
+      }
 
-    const now = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, now);
-    if (endFreq) {
-      osc.frequency.exponentialRampToValueAtTime(Math.max(40, endFreq), now + duration);
-    }
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.linearRampToValueAtTime(gainPeak, now + attack);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
 
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.linearRampToValueAtTime(gainPeak, now + attack);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-
-    osc.connect(gain);
-    gain.connect(this._sfxBus || ctx.destination);
-    osc.start(now);
-    osc.stop(now + duration + 0.02);
+      osc.connect(gain);
+      gain.connect(this._sfxBus || ctx.destination);
+      osc.start(now);
+      osc.stop(now + duration + 0.02);
+    } catch (_) {}
   }
 
   /**
@@ -1523,23 +1534,25 @@ class StarlightAudio {
     this._playTone(440, 'sine', 0.1, 0.24, 0.015, 880);
     setTimeout(() => this._playTone(659.25, 'triangle', 0.09, 0.22, 0.01, 1318.51), 60);
     if (this.sfxEnabled && this.ctx && this._noiseBuffer) {
-      const ctx = this.ctx;
-      const now = ctx.currentTime;
-      const src = ctx.createBufferSource();
-      src.buffer = this._noiseBuffer;
-      const bp = ctx.createBiquadFilter();
-      bp.type = 'bandpass';
-      bp.frequency.setValueAtTime(900, now);
-      bp.frequency.exponentialRampToValueAtTime(2600, now + 0.26);
-      bp.Q.value = 1.4;
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, now);
-      g.gain.linearRampToValueAtTime(0.11, now + 0.05);
-      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
-      src.connect(bp);
-      bp.connect(g);
-      g.connect(this._sfxBus || ctx.destination);
-      src.start(now, 0, 0.35);
+      try {
+        const ctx = this.ctx;
+        const now = ctx.currentTime;
+        const src = ctx.createBufferSource();
+        src.buffer = this._noiseBuffer;
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.setValueAtTime(900, now);
+        bp.frequency.exponentialRampToValueAtTime(2600, now + 0.26);
+        bp.Q.value = 1.4;
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.0001, now);
+        g.gain.linearRampToValueAtTime(0.11, now + 0.05);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+        src.connect(bp);
+        bp.connect(g);
+        g.connect(this._sfxBus || ctx.destination);
+        src.start(now, 0, 0.35);
+      } catch (_) {}
     }
   }
 

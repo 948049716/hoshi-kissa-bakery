@@ -81,7 +81,7 @@ function drawHeartIcon(ctx, x, y, size, color) {
 }
 
 function drawCoverImage(ctx, img, x, y, w, h, focusY = 0.5) {
-  if (!img || !img.width || !img.height) return;
+  if (!img || !img.width || !img.height || w <= 0 || h <= 0) return;
   const iw = img.width;
   const ih = img.height;
   const scale = Math.max(w / iw, h / ih);
@@ -93,7 +93,7 @@ function drawCoverImage(ctx, img, x, y, w, h, focusY = 0.5) {
 }
 
 function drawContainImage(ctx, img, cx, cy, maxW, maxH) {
-  if (!img || !img.width || !img.height) return;
+  if (!img || !img.width || !img.height || maxW <= 0 || maxH <= 0) return;
   const scale = Math.min(maxW / img.width, maxH / img.height);
   const dw = img.width * scale;
   const dh = img.height * scale;
@@ -331,6 +331,37 @@ function drawFitText(ctx, text, x, y, maxWidth, baseSize, minSize, weight, color
   ctx.restore();
 }
 
+// Convert HSL (h: deg, s: 0..100, l: 0..100) to rgb(r, g, b) because iOS WeChat native Canvas 2D rejects hsl(...) in addColorStop
+function hslToRgbColor(h, s, l) {
+  const hue = ((Number(h) || 0) % 360 + 360) % 360;
+  const sat = Math.max(0, Math.min(100, Number(s) || 0)) / 100;
+  const lit = Math.max(0, Math.min(100, Number(l) || 0)) / 100;
+  const c = (1 - Math.abs(2 * lit - 1)) * sat;
+  const hp = hue / 60;
+  const x = c * (1 - Math.abs((hp % 2) - 1));
+  let r1 = 0;
+  let g1 = 0;
+  let b1 = 0;
+  if (hp < 1) {
+    r1 = c; g1 = x;
+  } else if (hp < 2) {
+    r1 = x; g1 = c;
+  } else if (hp < 3) {
+    g1 = c; b1 = x;
+  } else if (hp < 4) {
+    g1 = x; b1 = c;
+  } else if (hp < 5) {
+    r1 = x; b1 = c;
+  } else {
+    r1 = c; b1 = x;
+  }
+  const m = lit - c * 0.5;
+  const r = Math.max(0, Math.min(255, Math.round((r1 + m) * 255)));
+  const g = Math.max(0, Math.min(255, Math.round((g1 + m) * 255)));
+  const b = Math.max(0, Math.min(255, Math.round((b1 + m) * 255)));
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
 // Procedural Rainbow Wildcard Konpeito Star Candy (used both inside Jar AND UI Previews!)
 function drawRainbowWildcard(ctx, x, y, r, angle, nowSec, alpha = 1) {
   ctx.save();
@@ -352,10 +383,10 @@ function drawRainbowWildcard(ctx, x, y, r, angle, nowSec, alpha = 1) {
   const pts = 7;
   const grad = ctx.createLinearGradient(-r, -r, r, r);
   const hueShift = (nowSec * 90) % 360;
-  grad.addColorStop(0, `hsl(${hueShift}, 92%, 82%)`);
-  grad.addColorStop(0.35, `hsl(${(hueShift + 65) % 360}, 95%, 80%)`);
-  grad.addColorStop(0.7, `hsl(${(hueShift + 150) % 360}, 85%, 78%)`);
-  grad.addColorStop(1, `hsl(${(hueShift + 240) % 360}, 88%, 82%)`);
+  grad.addColorStop(0, hslToRgbColor(hueShift, 92, 82));
+  grad.addColorStop(0.35, hslToRgbColor(hueShift + 65, 95, 80));
+  grad.addColorStop(0.7, hslToRgbColor(hueShift + 150, 85, 78));
+  grad.addColorStop(1, hslToRgbColor(hueShift + 240, 88, 82));
 
   ctx.beginPath();
   for (let i = 0; i < pts * 2; i++) {
@@ -509,6 +540,7 @@ class HitRegistry {
 module.exports = {
   FONT_FAMILY,
   fontStr,
+  hslToRgbColor,
   roundRectPath,
   fillEllipse,
   drawStar,

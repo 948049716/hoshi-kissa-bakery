@@ -37,7 +37,7 @@ concurrency:
 jobs:
   verify:
     name: E2E 自动化验证
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -52,6 +52,11 @@ jobs:
           for f in 05-微信小游戏版本/game.js 05-微信小游戏版本/src/*.js scripts/*.mjs; do
             node --check "$f"
           done
+
+      - name: Check headless browser binary
+        run: |
+          which google-chrome chromium chromium-browser || true
+          echo "CHROME_BIN=${CHROME_BIN:-unset}"
 
       - name: Run headless Chrome Mini Game E2E suite
         run: node scripts/verify_minigame_e2e.mjs

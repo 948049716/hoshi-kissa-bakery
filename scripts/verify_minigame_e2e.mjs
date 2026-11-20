@@ -12,7 +12,8 @@ const MINIGAME_DIR = path.join(REPO_ROOT, '05-微信小游戏版本');
 
 const CHROMIUM =
   process.env.CHROME_PATH ||
-  ['/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome'].find((p) => fs.existsSync(p)) ||
+  process.env.CHROME_BIN ||
+  ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p)) ||
   '/usr/bin/chromium';
 const OUT_DIR = '/tmp/minigame_verify';
 fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -327,6 +328,7 @@ async function run() {
   fs.mkdirSync(userDataDir, { recursive: true });
 
   const cdpPort = 9280 + Math.floor(Math.random() * 60);
+  console.log('Launching headless browser:', CHROMIUM);
   const chrome = spawn(
     CHROMIUM,
     [
@@ -334,6 +336,7 @@ async function run() {
       '--no-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
+      '--remote-debugging-address=127.0.0.1',
       `--remote-debugging-port=${cdpPort}`,
       `--user-data-dir=${userDataDir}`,
       '--window-size=1280,760',
@@ -342,8 +345,20 @@ async function run() {
     { stdio: ['ignore', 'pipe', 'pipe'] }
   );
 
+  let chromeStderr = '';
+  let chromeExit = null;
+  chrome.stderr.on('data', (chunk) => {
+    if (chromeStderr.length < 4000) chromeStderr += chunk.toString();
+  });
+  chrome.on('error', (err) => {
+    chromeStderr += `\n[spawn error] ${err.message}`;
+  });
+  chrome.on('exit', (code, sig) => {
+    chromeExit = `code=${code}, sig=${sig}`;
+  });
+
   let wsUrl = null;
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 80; i++) {
     try {
       const res = await fetch(`http://127.0.0.1:${cdpPort}/json/list`);
       const pages = await res.json();
@@ -354,7 +369,11 @@ async function run() {
     } catch (_) {}
     await sleep(150);
   }
-  if (!wsUrl) throw new Error('Failed to connect to Chromium CDP');
+  if (!wsUrl) {
+    throw new Error(
+      `Failed to connect to Chromium CDP (bin=${CHROMIUM}, exit=${chromeExit || 'still running'})\n${chromeStderr}`
+    );
+  }
 
   const ws = new WebSocket(wsUrl);
   await new Promise((res, rej) => {

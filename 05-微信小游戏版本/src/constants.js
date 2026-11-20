@@ -10,11 +10,14 @@ const TIERS = [
     name: '蓝莓星露糖',
     en: 'Blueberry Dewdrop',
     radius: 16,
-    points: 2,
+    points: 15,
+    servePoints: 30,
     color: '#4674d6',
     crumbColor: '#b7dcff',
-    material: { friction: 0.18, restitution: 0.24 },
-    lore: '凝结了午夜星露的晶莹蓝莓糖，酸甜清冽，是所有甜点的起点。',
+    material: { friction: 0.12, restitution: 0.22, gravityScale: 1.0, massMult: 1.0 },
+    traitName: '轻滑滚珠',
+    traitDesc: '极低摩擦易钻缝，是铺垫底层的起点小糖。',
+    lore: '凝结了午夜星露的晶莹蓝莓糖，酸甜清冽，顺着缝隙咕噜滚动。',
     src: 'assets/tier_1.png',
     actSrc: 'assets/tier_1_act.png',
     intSrc: 'assets/tier_1_int.png',
@@ -25,11 +28,14 @@ const TIERS = [
     name: '蜜桃泡芙球',
     en: 'Peach Cream Puff',
     radius: 22,
-    points: 6,
+    points: 35,
+    servePoints: 65,
     color: '#eb8861',
     crumbColor: '#ffe3c4',
-    material: { friction: 0.20, restitution: 0.22 },
-    lore: '蓬松金黄的泡芙球里挤满白桃鲜奶油，脸颊总是红扑扑的。',
+    material: { friction: 0.18, restitution: 0.52, gravityScale: 1.0, massMult: 1.0 },
+    traitName: '弹壁精灵',
+    traitDesc: '高弹性耐反弹，经玻璃壁弹射合成额外 +30% 积分！',
+    lore: '蓬松金黄的泡芙球里挤满白桃鲜奶油，撞到玻璃壁会 Q 弹回旋。',
     src: 'assets/tier_2.png',
     actSrc: 'assets/tier_2_act.png',
     intSrc: 'assets/tier_2_int.png',
@@ -40,11 +46,14 @@ const TIERS = [
     name: '抹茶猫耳团子',
     en: 'Matcha Kitty Dango',
     radius: 28,
-    points: 14,
+    points: 70,
+    servePoints: 130,
     color: '#7da85c',
     crumbColor: '#cde6a8',
-    material: { friction: 0.22, restitution: 0.20 },
-    lore: '揉进宇治抹茶粉的软糯猫猫团子，在月光下会轻轻抖动小耳朵。',
+    material: { friction: 0.22, restitution: 0.24, gravityScale: 1.0, massMult: 1.0 },
+    traitName: '猫耳共鸣',
+    traitDesc: '合出后释放 1.8 秒柔磁共鸣波，拉近周边同阶甜品！',
+    lore: '揉进宇治抹茶粉的软糯猫猫团子，在月光下抖动耳朵呼唤同伴。',
     src: 'assets/tier_3.png',
     actSrc: 'assets/tier_3_act.png',
     intSrc: 'assets/tier_3_int.png',
@@ -55,11 +64,14 @@ const TIERS = [
     name: '柠檬蜂蜜布丁塔',
     en: 'Lemon Honey Tart',
     radius: 35,
-    points: 28,
+    points: 130,
+    servePoints: 250,
     color: '#f2c849',
     crumbColor: '#ffe38c',
-    material: { friction: 0.25, restitution: 0.18 },
-    lore: '香脆黄油塔皮盛满蜂蜜柠檬凝乳，咬一口就像咬住一束星光。',
+    material: { friction: 0.26, restitution: 0.18, gravityScale: 1.0, massMult: 1.0 },
+    traitName: '酸甜清杂',
+    traitDesc: '合成瞬间蒸发周边最多 2 颗 1 阶蓝莓，转化为积分与厨艺能！',
+    lore: '香脆黄油塔皮盛满蜂蜜柠檬凝乳，酸甜气泡能一扫底层小糖。',
     src: 'assets/tier_4.png',
     actSrc: 'assets/tier_4_act.png',
     intSrc: 'assets/tier_4_int.png',
@@ -70,11 +82,14 @@ const TIERS = [
     name: '草莓奶油大福',
     en: 'Strawberry Daifuku',
     radius: 43,
-    points: 52,
+    points: 240,
+    servePoints: 440,
     color: '#f29eb6',
     crumbColor: '#ffd4e3',
-    material: { friction: 0.24, restitution: 0.19 },
-    lore: '冰凉Q弹的樱粉麻薯裹着雪白淡奶油，头顶一颗娇嫩甜草莓。',
+    material: { friction: 0.24, restitution: 0.20, gravityScale: 1.0, massMult: 1.0 },
+    traitName: '软糯聚拢',
+    traitDesc: '合成时释放内吸涡流，将周围甜品向中心拢聚引发连合！',
+    lore: '冰凉 Q 弹的樱粉麻薯裹着雪白奶油，把身旁伙伴温柔抱在一起。',
     src: 'assets/tier_5.png',
     actSrc: 'assets/tier_5_act.png',
     intSrc: 'assets/tier_5_int.png',
@@ -85,11 +100,14 @@ const TIERS = [
     name: '焦糖星云甜甜圈',
     en: 'Caramel Star Donut',
     radius: 52,
-    points: 96,
+    points: 420,
+    servePoints: 760,
     color: '#b86228',
     crumbColor: '#eab074',
-    material: { friction: 0.22, restitution: 0.19 },
-    lore: '淋满海盐琥珀焦糖与可可流心的松软甜甜圈，点缀星星糖片。',
+    material: { friction: 0.22, restitution: 0.22, gravityScale: 1.0, massMult: 1.0 },
+    traitName: '焦糖陀螺',
+    traitDesc: '合出后高速旋搅 1.4 秒，拨动卡位甜品打破死锁！',
+    lore: '淋满海盐琥珀焦糖与可可流心的松软甜甜圈，出炉时会欢快打转。',
     src: 'assets/tier_6.png',
     actSrc: 'assets/tier_6_act.png',
     intSrc: 'assets/tier_6_int.png',
@@ -100,11 +118,14 @@ const TIERS = [
     name: '星夜猫猫马卡龙',
     en: 'Cosmic Kitty Macaron',
     radius: 62,
-    points: 168,
+    points: 720,
+    servePoints: 1200,
     color: '#9b7fd6',
     crumbColor: '#e2d5ff',
-    material: { friction: 0.21, restitution: 0.18 },
-    lore: '薰衣草紫杏仁饼壳夹着梦幻奶霜夹心，安静地做着甜美的梦。',
+    material: { friction: 0.21, restitution: 0.22, gravityScale: 0.52, massMult: 0.72 },
+    traitName: '云端微浮',
+    traitDesc: '仅受 52% 重力轻盈悬浮，不压死底层，抽走易造大塌方！',
+    lore: '薰衣草紫杏仁饼壳夹着云朵奶霜，像小气球一样轻飘飘地浮着。',
     src: 'assets/tier_7.png',
     actSrc: 'assets/tier_7_act.png',
     intSrc: 'assets/tier_7_int.png',
@@ -115,11 +136,14 @@ const TIERS = [
     name: '皇家栗子蒙布朗',
     en: 'Royal Mont Blanc',
     radius: 73,
-    points: 290,
+    points: 1200,
+    servePoints: 1950,
     color: '#8f5936',
     crumbColor: '#d9a97c',
-    material: { friction: 0.27, restitution: 0.16 },
-    lore: '层层交织的糖炒栗蓉与香草奶霜，点缀金箔，醇厚而温柔。',
+    material: { friction: 0.27, restitution: 0.16, gravityScale: 1.08, massMult: 1.75 },
+    traitName: '重锤碾压',
+    traitDesc: '高密度重体！下坠时直接压碎正下方最多 2 颗 1~2 阶杂碎！',
+    lore: '层层交织的糖炒栗蓉分量十足，稳稳压碎脚下的小糖碎屑。',
     src: 'assets/tier_8.png',
     actSrc: 'assets/tier_8_act.png',
     intSrc: 'assets/tier_8_int.png',
@@ -130,10 +154,13 @@ const TIERS = [
     name: '星冠猫神舒芙蕾',
     en: 'Crown Cat Soufflé',
     radius: 86,
-    points: 540,
+    points: 2400,
+    servePoints: 3200,
     color: '#f5be58',
     crumbColor: '#ffea99',
-    material: { friction: 0.26, restitution: 0.16 },
+    material: { friction: 0.26, restitution: 0.16, gravityScale: 1.0, massMult: 1.35 },
+    traitName: '猫神双择',
+    traitDesc: '留罐提供全局 ×2.0 积分光环；随时点击献礼爆出 +3200 分并清杂！',
     lore: '星夜吃茶的传说级至高甜点！戴着宝石皇冠与天使奶油翼的猫神舒芙蕾。',
     src: 'assets/tier_9.png',
     actSrc: 'assets/tier_9_act.png',
@@ -228,7 +255,7 @@ const BLESSINGS = [
     tag: '即时补给',
     maxLv: 99,
     repeatable: true,
-    desc: () => '立刻补充 摇一摇+1 · 泡泡叉+1 · 升阶勺+1，并赠送 +25 ⭐ 星尘币！'
+    desc: () => '立刻补充 摇一摇+1 · 升阶勺+1 · 招牌厨艺技满能，并赠送 +25 ⭐！'
   },
   {
     id: 'cleanse',
@@ -249,16 +276,23 @@ const PATRONS = [
     badge: '🧁',
     cost: 0,
     src: 'assets/chef_mikan.png',
-    skillName: '招牌经营',
-    passiveDesc: '所有订单积分与星尘 +20%，每局开局额外赠送 +1 泡泡叉',
-    shortPassive: '订单+20%·叉+1',
-    greet: '刚出炉的星光面糊好香呀～请帮我准备这几份甜点吧！',
-    thanks: '太棒啦！香气飘满整条月光街道了呢～',
+    skillName: '金勺捞底',
+    activeSkill: {
+      id: 'scoop',
+      icon: '🥄',
+      name: '金勺捞底',
+      shortLabel: '捞底',
+      desc: '点选罐内 1~5 阶甜品捞回待投区，原位触发抽底雪崩！'
+    },
+    passiveDesc: '主动技【金勺捞底】捞出底层甜品造雪崩；VIP 订单赏金 +25%',
+    shortPassive: '捞底·VIP+25%',
+    greet: '刚出炉的星光面糊好香呀～亮金铃的甜品直接点它就能上菜哦！',
+    thanks: '太棒啦！抽底上菜一气呵成，香气飘满月光街道啦～',
     idleLines: [
-      '欢迎回到星夜吃茶！今晚也要烤出香喷喷的猫神舒芙蕾哦～',
-      '喵呜～用小铺的暖炉预热天赋，一开局就能更快进入星光狂热！',
-      '把同阶甜点靠得近一点，甜蜜星磁会帮它们亲密合体哦！',
-      '如果罐子里滚进了毛线球，在它附近合成两次就能砰地爆出大礼！'
+      '欢迎回到星夜吃茶！下拉拉弓还能把甜品撞墙弹进深处缝隙哦～',
+      '看到罐里亮起 🔔 金铃的甜品了吗？点击它上菜，还能引发抽底雪崩！',
+      '我的招牌技【金勺捞底】能把压在底下的甜品捞回来重扔哦～',
+      '4 阶柠檬塔合出时会用气泡蒸发周围蓝莓，超适合清理罐底！'
     ]
   },
   {
@@ -268,16 +302,23 @@ const PATRONS = [
     badge: '🌙',
     cost: 60,
     src: 'assets/patron_luna.png',
-    skillName: '星月睡意',
-    passiveDesc: '彩虹万能糖保底 -2 步，狂热持续 +2.0s，开局自带 Lv.1 甜蜜星磁',
-    shortPassive: '彩虹-2步·磁吸',
-    greet: '唔…今晚的月亮好圆，好想吃软绵绵的甜点呀…',
+    skillName: '星月移形',
+    activeSkill: {
+      id: 'swap',
+      icon: '🌙',
+      name: '星月移形',
+      shortLabel: '移形',
+      desc: '依次点选罐内任意两颗甜品瞬间互换位置，跨罐撮合大连锁！'
+    },
+    passiveDesc: '主动技【星月移形】互换两颗甜品；彩虹保底-2步 + 开局星磁',
+    shortPassive: '移形·磁吸',
+    greet: '唔…今晚的月亮好圆，点选我的星月移形就能帮它们换位置哦…',
     thanks: '哇啊！吃到幸福的味道了，谢谢主厨！',
     idleLines: [
-      '呼啊～带我一起营业的话，彩虹万能糖会更常来拜访你哦…',
-      '在月光下摇晃玻璃罐，好像看着星星在罐子里打盹呢…',
-      '90 秒狂欢模式里，我的狂热延长时间超好用哦，冲呀～',
-      '软绵绵的棉花糖云朵…嗯？我在帮你吸引同阶甜点啦！'
+      '呼啊～攒满厨艺能就能用【星月移形】把两颗甜品直接对调位置哦…',
+      '7 阶猫猫马卡龙只有一半重力，会轻飘飘地浮在半空呢…',
+      '90 秒狂欢里每次点击出餐都能直接 +3.0 秒续命，冲呀～',
+      '带我营业会自带微弱甜蜜星磁，让同阶甜品悄悄靠在一起！'
     ]
   },
   {
@@ -287,19 +328,28 @@ const PATRONS = [
     badge: '🍯',
     cost: 100,
     src: 'assets/patron_mugi.png',
-    skillName: '元气暴冲',
-    passiveDesc: '≥4阶合成星爆冲击波 +30%；每段 ≥3 连击额外回 +4⭐（90秒模式 +60 分）',
-    shortPassive: '气浪+30%·连击赏',
-    greet: '汪呜！我闻着焦糖与奶香找过来了，拜托做这份套餐！',
+    skillName: '元气重锤',
+    activeSkill: {
+      id: 'meteor_shot',
+      icon: '🔥',
+      name: '元气重锤',
+      shortLabel: '重锤',
+      desc: '下次抛射化为穿甲烈焰球：撞击首颗甜品直接升阶并震碎周边毛线球！'
+    },
+    passiveDesc: '主动技【元气重锤】穿甲升阶；弹壁+40%分，3连回+20%技',
+    shortPassive: '重锤·弹壁+40%',
+    greet: '汪呜！下拉拉弓撞墙弹射打台球，再来一发元气重锤吧！',
     thanks: '太满足啦！下次我还要带朋友们一起来！',
     idleLines: [
-      '汪呜！！今晚火力全开，用大冲击波把甜点全滚成多米诺大连锁吧！',
-      '3 连击以上就能不断赚星尘与冲榜加分，手速越快越爽快！',
-      '看见调皮毛线球就瞄准旁边猛猛合成，一举引爆它！',
-      '刚出炉的焦糖甜甜圈最香了！选 90 秒狂欢一起冲高分榜吧！'
+      '汪呜！！把蜜桃泡芙球拉弓往玻璃壁上弹，一杆钻进缝隙连合超爽！',
+      '激活我的【元气重锤】，下一次发射撞到谁就帮谁强行升阶！',
+      '3 连击以上能狂回厨艺能，源源不断放技能轰炸全场！',
+      '8 阶栗子蒙布朗超重，砸下来能把底下的小蓝莓直接压碎变分！'
     ]
   }
 ];
+
+const CASCADE_MULTIPLIERS = [1.0, 1.4, 1.9, 2.5, 3.2];
 
 const SHOP_UPGRADES = [
   {
@@ -311,9 +361,9 @@ const SHOP_UPGRADES = [
     shortTag: (lv) => `备货Lv.${lv}`,
     desc: (lv) => {
       if (lv === 0) return '下级效果：每局开局「摇一摇」道具 +1';
-      if (lv === 1) return '当前：开局 摇+1 · 下级：摇+1 且 泡泡叉+1';
-      if (lv === 2) return '当前：开局 摇+1 叉+1 · 下级：全道具各 +1';
-      return '已满级：每局开局 摇一摇+1 · 泡泡叉+1 · 升阶勺+1！';
+      if (lv === 1) return '当前：开局 摇+1 · 下级：摇+1 且 升阶勺+1';
+      if (lv === 2) return '当前：开局 摇+1 勺+1 · 下级：摇+2 且 升阶勺+1';
+      return '已满级：每局开局 摇一摇+2 · 升阶勺+1！';
     }
   },
   {
@@ -321,14 +371,14 @@ const SHOP_UPGRADES = [
     icon: '🔥',
     name: '暖炉预热',
     costs: [50, 100, 180],
-    values: [0, 18, 32, 48],
+    values: [0, 20, 38, 55],
     maxLv: 3,
     shortTag: (lv) => `暖炉Lv.${lv}`,
     desc: (lv) => {
-      const vals = [0, 18, 32, 48];
-      if (lv === 0) return '下级效果：开局星光能量槽自带 18% 初始能量';
+      const vals = [0, 20, 38, 55];
+      if (lv === 0) return '下级效果：开局自带 20% 厨艺技与星光初始能量';
       if (lv < 3) return `当前：开局自带 ${vals[lv]}% 能量 · 下级提升至 ${vals[lv + 1]}%`;
-      return '已满级：每局开局自带 48% 星光能量，极速开启首次狂热！';
+      return '已满级：每局开局自带 55% 厨艺与狂热初始能量，极速放招牌技！';
     }
   },
   {
@@ -336,14 +386,14 @@ const SHOP_UPGRADES = [
     icon: '⏱️',
     name: '节奏节拍器',
     costs: [60, 120, 200],
-    values: [0, 0.18, 0.36, 0.55],
+    values: [0, 0.25, 0.50, 0.80],
     maxLv: 3,
     shortTag: (lv) => `节拍Lv.${lv}`,
     desc: (lv) => {
-      const vals = [0, 0.18, 0.36, 0.55];
-      if (lv === 0) return '下级效果：全局基础连击判定窗口延长 +0.18 秒';
-      if (lv < 3) return `当前：连击窗口 +${vals[lv].toFixed(2)}s · 下级提升至 +${vals[lv + 1].toFixed(2)}s`;
-      return '已满级：全局基础连击判定窗口永久延长 +0.55 秒！';
+      const vals = [0, 0.25, 0.50, 0.80];
+      if (lv === 0) return '下级效果：连击与抽底雪崩判定窗延长 +0.25 秒';
+      if (lv < 3) return `当前：连击与雪崩窗 +${vals[lv].toFixed(2)}s · 下级提升至 +${vals[lv + 1].toFixed(2)}s`;
+      return '已满级：全局连击与抽底雪崩窗口永久延长 +0.80 秒！';
     }
   },
   {
@@ -503,6 +553,7 @@ module.exports = {
   ASSET_PATHS,
   BLESSINGS,
   PATRONS,
+  CASCADE_MULTIPLIERS,
   SHOP_UPGRADES,
   JAR_THEMES,
   JAR_THEME_LIST,

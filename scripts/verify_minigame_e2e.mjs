@@ -613,122 +613,159 @@ async function run() {
   await sleep(340);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.mode === 'chef' && st.running === true && st.lobbyOpen === false, 'Started chef mode');
+  assert(st.entities.length === 4, `Expected 4 pre-populated starter treats, got ${st.entities.length}`);
+  assert(st.orders && st.orders.length === 2, `Expected Dual-Table orders (2), got ${st.orders && st.orders.length}`);
+  assert(st.entities.some((e) => e.isServable), 'Expected starter T3 to be immediately servable with bell halo');
   await checkCapsuleAndViewportBounds('iPhone SE Chef HUD 375x667', 375, 667, 0);
   await screenshot('08_chef_375.png');
 
-  async function waitForDropReady(timeoutMs = 2600) {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      const busy = await evalJS(`window.__HOSHI_DEBUG__.getState().waitingForLanding`);
-      if (!busy) break;
-      await sleep(60);
-    }
-    await sleep(160);
+  async function waitForCooldown() {
+    await sleep(240);
   }
 
-  // Hold swap + Drop via simulated touch aim inside jar
-  await tapHit('mobile_hold_swap');
-  await sleep(160);
   const jb = st.jarBox;
   assert(jb && jb.scale > 0, 'jarBox computed');
-  await dragSwipe(Math.round(jb.x + jb.w * 0.28), Math.round(jb.y + jb.h * 0.35), Math.round(jb.x + jb.w * 0.28), Math.round(jb.y + jb.h * 0.35));
-  await waitForDropReady();
-  await dragSwipe(Math.round(jb.x + jb.w * 0.72), Math.round(jb.y + jb.h * 0.35), Math.round(jb.x + jb.w * 0.72), Math.round(jb.y + jb.h * 0.35));
-  await waitForDropReady();
+
+  // 3A. True Tap-to-Serve on starter T3 -> triggers removal, score, skillEnergy, and Serve Cascade window!
+  const starterT3 = st.entities.find((e) => e.isServable);
+  assert(starterT3, 'Expected a servable starter treat');
+  const t3ScreenX = Math.round(jb.x + starterT3.x * jb.scale);
+  const t3ScreenY = Math.round(jb.y + starterT3.y * jb.scale);
+  const scoreBeforeServe = st.score;
+  await tapAt(t3ScreenX, t3ScreenY);
+  await sleep(220);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.servesCompleted >= 1, `Expected servesCompleted >= 1 after tap-to-serve, got ${st.servesCompleted}`);
+  assert(st.score > scoreBeforeServe, 'Expected tap-to-serve to award score');
+  assert(st.skillEnergy >= 30, `Expected tap-to-serve to charge skillEnergy >= 30, got ${st.skillEnergy}`);
+  assert(st.serveCascadeTimer > 0, `Expected Serve Cascade Avalanche window active, got ${st.serveCascadeTimer}`);
+  assert(!st.entities.some((e) => e.id === starterT3.id), 'Served treat must be physically removed from jar');
+
+  // 3B. Pull-Down Direct-Aim Slingshot Bank-Shot (preview screenshot + actual wall bounce!)
+  const slingStartX = Math.round(jb.x + jb.w * 0.5);
+  const slingStartY = Math.round(jb.y + jb.h * 0.25);
+  const slingEndX = Math.round(jb.x + jb.w * 0.14);
+  const slingEndY = Math.round(jb.y + jb.h * 0.52);
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: slingStartX, y: slingStartY, button: 'left', clickCount: 1 });
+  for (let sIdx = 1; sIdx <= 8; sIdx++) {
+    const t = sIdx / 8;
+    await send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: Math.round(slingStartX + (slingEndX - slingStartX) * t),
+      y: Math.round(slingStartY + (slingEndY - slingStartY) * t),
+      button: 'left'
+    });
+    await sleep(22);
+  }
+  await sleep(100);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.aim && st.aim.active && st.aim.mode === 'sling', `Expected slingshot aim mode active, got ${JSON.stringify(st.aim)}`);
+  await screenshot('08b_slingshot_aim_375.png');
+  const dropsBeforeSling = st.dropsMadeThisRun;
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: slingEndX, y: slingEndY, button: 'left', clickCount: 1 });
+  await sleep(520);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.dropsMadeThisRun === dropsBeforeSling + 1, 'Slingshot release must launch treat');
+
+  // Hold swap + Quick vertical tap-drop
+  await tapHit('mobile_hold_swap');
+  await sleep(160);
+  await tapAt(Math.round(jb.x + jb.w * 0.72), Math.round(jb.y + jb.h * 0.30));
+  await waitForCooldown();
 
   // Trigger Meteor -> Yarn Ball -> Toggle Debug Wireframe
   await evalJS(`window.__HOSHI_DEBUG__.triggerEvent('meteor')`);
-  await sleep(220);
+  await sleep(200);
   await evalJS(`window.__HOSHI_DEBUG__.triggerEvent('yarn')`);
   await evalJS(`window.__HOSHI_DEBUG__.togglePhysicsDebug(true)`);
-  await sleep(350);
+  await sleep(340);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.entities.length >= 2, `Expected dropped entities >= 2, got ${st.entities.length}`);
+  assert(st.entities.length >= 3, `Expected dropped entities >= 3, got ${st.entities.length}`);
   assert(st.entities.some((e) => e.isYarnBall && e.yarnHp === 2), 'Expected active yarn ball with yarnHp=2');
   await screenshot('09_physics_yarn_375.png');
   await evalJS(`window.__HOSHI_DEBUG__.togglePhysicsDebug(false)`);
 
-  // Rainbow Wildcard E2E (covers NEXT preview, active held treat, HOLD swap, and jar drop under iOS color guard)
+  // 3C. Rainbow Wildcard E2E (covers NEXT preview, active held treat, HOLD swap, and jar drop under iOS color guard)
   await evalJS(`window.__HOSHI_DEBUG__.grantRainbow()`);
-  await sleep(220);
+  await sleep(200);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.nextMeta && st.nextMeta.wildcard === true, 'Expected Rainbow Wildcard in NEXT preview');
 
-  // Drop current treat so Rainbow Wildcard advances to active held dessert
-  await dragSwipe(Math.round(jb.x + jb.w * 0.5), Math.round(jb.y + jb.h * 0.35), Math.round(jb.x + jb.w * 0.5), Math.round(jb.y + jb.h * 0.35));
-  await waitForDropReady();
+  await tapAt(Math.round(jb.x + jb.w * 0.5), Math.round(jb.y + jb.h * 0.28));
+  await waitForCooldown();
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.curMeta && st.curMeta.wildcard === true, 'Expected Rainbow Wildcard to advance to held treat');
 
-  // Swap Rainbow Wildcard into HOLD preview box, drop 1 treat to refresh hold, swap back, then drop Rainbow
   await tapHit('mobile_hold_swap');
-  await sleep(220);
+  await sleep(200);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.holdMeta && st.holdMeta.wildcard === true, 'Expected Rainbow Wildcard inside HOLD preview');
   await screenshot('09b_rainbow_hold_375.png');
 
-  await dragSwipe(Math.round(jb.x + jb.w * 0.35), Math.round(jb.y + jb.h * 0.35), Math.round(jb.x + jb.w * 0.35), Math.round(jb.y + jb.h * 0.35));
-  await waitForDropReady();
+  await tapAt(Math.round(jb.x + jb.w * 0.35), Math.round(jb.y + jb.h * 0.28));
+  await waitForCooldown();
   await tapHit('mobile_hold_swap');
-  await sleep(220);
+  await sleep(200);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.curMeta && st.curMeta.wildcard === true, 'Expected Rainbow Wildcard swapped back to held treat');
 
   const beforeWildScore = st.score;
-  await dragSwipe(Math.round(jb.x + jb.w * 0.5), Math.round(jb.y + jb.h * 0.35), Math.round(jb.x + jb.w * 0.5), Math.round(jb.y + jb.h * 0.35));
-  await waitForDropReady();
+  await tapAt(Math.round(jb.x + jb.w * 0.5), Math.round(jb.y + jb.h * 0.28));
+  await sleep(420);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.entities.some((e) => e.isWildcard) || st.score > beforeWildScore, 'Expected Rainbow Wildcard active in jar or merged cleanly');
 
-  // Mobile Aim Tilt Buttons + Mid-Air Rapid-Tap Guard + Bake Zone Rotation + Same-Spot Anti-Spam Check
-  await tapHit('aim_tilt_right');
-  await tapHit('aim_tilt_right');
+  // 3D. 9-Tier Dessert Traits Check (T7 Cosmic Macaron low-gravity float + T4 Lemon Tart blueberry cleanse)
+  const macId = await evalJS(`window.__HOSHI_DEBUG__.spawnTestEntity(7, 220, 260)`);
+  await sleep(140);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.aimAngle > 0.4, `Expected right tilt angle > 0.4, got ${st.aimAngle}`);
-  await tapHit('aim_tilt_left');
-  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.aimAngle < 0.35, `Expected left tilt button to reduce angle, got ${st.aimAngle}`);
+  const macEnt = st.entities.find((e) => e.id === macId);
+  assert(macEnt && macEnt.gravityScale < 0.7, `Expected T7 Macaron buoyant gravityScale < 0.7, got ${macEnt && macEnt.gravityScale}`);
 
-  // Fast rapid taps while treat is falling in mid-air must NOT spawn extra treats or merge mid-air
-  const dropsBeforeRapid = st.dropsMadeThisRun;
-  const rapidX = Math.round(jb.x + jb.w * 0.24);
-  const rapidY = Math.round(jb.y + jb.h * 0.32);
-  for (let t = 0; t < 3; t++) {
-    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: rapidX, y: rapidY, button: 'left', clickCount: 1 });
-    await sleep(30);
-    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: rapidX, y: rapidY, button: 'left', clickCount: 1 });
-    await sleep(35);
+  // 3E. Active Chef Signature Skills Check (Luna Swap -> Mugi Meteor -> Mikan Scoop)
+  await evalJS(`window.__HOSHI_DEBUG__.selectPatron('luna'); window.__HOSHI_DEBUG__.chargeSkill();`);
+  await sleep(180);
+  await tapHit('chef_skill_btn');
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeSkillMode === 'swap_1', `Expected Luna swap_1 mode, got ${st.activeSkillMode}`);
+  const swappable = st.entities.filter((e) => !e.isYarnBall);
+  assert(swappable.length >= 2, 'Need >= 2 swappable entities for Luna skill test');
+  const swA = swappable[0];
+  const swB = swappable[swappable.length - 1];
+  await tapAt(Math.round(jb.x + swA.x * jb.scale), Math.round(jb.y + swA.y * jb.scale));
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeSkillMode === 'swap_2', `Expected Luna swap_2 mode after 1st tap, got ${st.activeSkillMode}`);
+  await tapAt(Math.round(jb.x + swB.x * jb.scale), Math.round(jb.y + swB.y * jb.scale));
+  await sleep(180);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeSkillMode === null && st.skillEnergy === 0, 'Expected Luna swap to complete and consume skillEnergy');
+
+  // Mugi Meteor Shot arming
+  await evalJS(`window.__HOSHI_DEBUG__.selectPatron('mugi'); window.__HOSHI_DEBUG__.chargeSkill();`);
+  await sleep(160);
+  await tapHit('chef_skill_btn');
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.nextShotMeteor === true && st.skillEnergy === 0, 'Expected Mugi Meteor Shot armed');
+
+  // Mikan Gold Scoop
+  await evalJS(`window.__HOSHI_DEBUG__.selectPatron('mikan'); window.__HOSHI_DEBUG__.chargeSkill();`);
+  await sleep(160);
+  await tapHit('chef_skill_btn');
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeSkillMode === 'scoop', `Expected Mikan scoop mode, got ${st.activeSkillMode}`);
+  const scoopTarget = st.entities.find((e) => !e.isYarnBall && !e.isWildcard && e.tier <= 5);
+  if (scoopTarget) {
+    await tapAt(Math.round(jb.x + scoopTarget.x * jb.scale), Math.round(jb.y + scoopTarget.y * jb.scale));
+    await sleep(180);
+    st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+    assert(st.activeSkillMode === null && st.serveCascadeTimer > 0, 'Expected Mikan scoop to exit targeting and open cascade window');
+  } else {
+    await tapHit('cancel_tool');
   }
-  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(
-    st.dropsMadeThisRun === dropsBeforeRapid + 1,
-    `Mid-air rapid taps must not spawn extra drops (expected ${dropsBeforeRapid + 1}, got ${st.dropsMadeThisRun})`
-  );
-  await waitForDropReady();
-
-  // Hit Starlight Bake Zone and verify bonus + rotation
-  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  const prevBakeCol = st.bakeZone.colIdx;
-  const zoneScreenX = Math.round(jb.x + st.bakeZone.x * jb.scale);
-  const beforeZoneScore = st.score;
-  await dragSwipe(zoneScreenX, rapidY, zoneScreenX, rapidY);
-  await waitForDropReady();
-  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.bakeZone.colIdx !== prevBakeCol, `Expected bakeZone to rotate after hit (col ${st.bakeZone.colIdx})`);
-  assert(st.score > beforeZoneScore, 'Expected Starlight Bake Zone drop to grant bonus score');
-
-  // Repeated same-spot drops build sameSpotStreak and reset once player moves aim
-  const spamColX = Math.round(jb.x + jb.w * 0.74);
-  for (let k = 0; k < 4; k++) {
-    await dragSwipe(spamColX, rapidY, spamColX, rapidY);
-    await waitForDropReady();
-  }
-  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.sameSpotStreak >= 3, `Expected sameSpotStreak >= 3 after 4 same-spot drops, got ${st.sameSpotStreak}`);
-  await dragSwipe(Math.round(jb.x + jb.w * 0.24), rapidY, Math.round(jb.x + jb.w * 0.24), rapidY);
-  await waitForDropReady();
-  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.sameSpotStreak === 0, `Expected sameSpotStreak reset to 0 after changing drop column, got ${st.sameSpotStreak}`);
 
   // Trigger Chime Event -> Queue Blessing -> Open Blessing 3-Choice Modal
   await evalJS(`window.__HOSHI_DEBUG__.triggerEvent('chime')`);
@@ -754,7 +791,7 @@ async function run() {
   assert(st.activeModal === null, 'Blessing modal closed after selection');
 
   // ==========================================================
-  // 4. 90s Rush Mode, Emergency Star-Wind Gust, & Settlement
+  // 4. 90s Rush Mode: Tap-to-Serve +3.0s Extension, Emergency Gust & Settlement
   // ==========================================================
   await setViewport(390, 844, true, 2);
   await navigate('?safeTop=47&safeBottom=34&capsule=1');
@@ -764,20 +801,18 @@ async function run() {
   await sleep(280);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.mode === 'rush' && st.rushTimer > 80, `Expected rush mode timer > 80, got ${st.rushTimer}`);
+  await checkCapsuleAndViewportBounds('iPhone 14 Rush HUD 390x844', 390, 844, 34);
 
-  // Drop treats across distinct columns until >= 2 entities sit in jar (even if identical tiers merge cleanly)
+  // Tap-to-Serve starter T3 in Rush mode -> must add +3.0s!
+  const rushServable = st.entities.find((e) => e.isServable);
+  assert(rushServable, 'Expected servable starter treat in Rush mode');
   const rjb = st.jarBox;
-  const rushCols = [0.34, 0.66, 0.48, 0.25];
-  for (let i = 0; i < rushCols.length; i++) {
-    const cx = Math.round(rjb.x + rjb.w * rushCols[i]);
-    const cy = Math.round(rjb.y + rjb.h * 0.35);
-    await dragSwipe(cx, cy, cx, cy);
-    await waitForDropReady();
-    st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-    if (st.entities.length >= 2 && i >= 1) break;
-  }
-
+  const beforeServeRushT = st.rushTimer;
+  await tapAt(Math.round(rjb.x + rushServable.x * rjb.scale), Math.round(rjb.y + rushServable.y * rjb.scale));
+  await sleep(220);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.rushTimer > beforeServeRushT + 2.0, `Expected Rush tap-to-serve to add +3.0s (before=${beforeServeRushT}, after=${st.rushTimer})`);
+
   const beforeGustTimer = st.rushTimer;
   const beforeGustCount = st.entities.length;
   assert(beforeGustCount >= 2, `Expected treats inside jar before gust, got ${beforeGustCount}`);
@@ -798,10 +833,21 @@ async function run() {
   await screenshot('12_rush_gameover_390.png');
 
   // ==========================================================
-  // 5. Desktop 1280x760 Play Screen + Zen Mode Check
+  // 5. Desktop 1280x760 Play Screen + Chef & Zen Checks
   // ==========================================================
   await setViewport(1280, 760, false, 1);
   await navigate('?safeTop=8&safeBottom=0&capsule=1');
+  await tapHit('mode_chef');
+  await sleep(120);
+  await tapHit('btn_start');
+  await sleep(300);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.mode === 'chef' && st.running === true, 'Chef mode running on desktop');
+  await checkCapsuleAndViewportBounds('Desktop Chef HUD 1280x760', 1280, 760, 0);
+  await screenshot('13_chef_desktop_1280.png');
+
+  await evalJS(`window.__HOSHI_DEBUG__.returnToLobby()`);
+  await sleep(160);
   await tapHit('mode_zen');
   await sleep(120);
   await tapHit('btn_start');
@@ -810,9 +856,9 @@ async function run() {
   assert(st.mode === 'zen' && st.running === true, 'Zen mode running on desktop');
   await checkCapsuleAndViewportBounds('Desktop Zen HUD 1280x760', 1280, 760, 0);
   const djb = st.jarBox;
-  await dragSwipe(Math.round(djb.x + djb.w * 0.5), Math.round(djb.y + djb.h * 0.35), Math.round(djb.x + djb.w * 0.52), Math.round(djb.y + djb.h * 0.35));
-  await waitForDropReady();
-  await screenshot('13_zen_desktop_1280.png');
+  await tapAt(Math.round(djb.x + djb.w * 0.5), Math.round(djb.y + djb.h * 0.35));
+  await waitForCooldown();
+  await screenshot('14_zen_desktop_1280.png');
 
   assert(errors.length === 0, `Runtime/Console errors detected: ${errors.join(' | ')}`);
   console.log('\n✅ ALL WECHAT MINI GAME E2E CHECKS PASSED WITH ZERO ERRORS!');

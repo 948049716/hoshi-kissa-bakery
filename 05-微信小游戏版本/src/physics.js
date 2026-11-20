@@ -71,11 +71,15 @@
   }
 
   function configureBodyShape(body, shapeDef, eqRadius, material) {
+    const massMult = material && typeof material.massMult === 'number' ? material.massMult : 1.0;
+    const gravityScale = material && typeof material.gravityScale === 'number' ? material.gravityScale : 1.0;
     body.r = eqRadius;
     body.shapeDef = shapeDef;
     body.boundR = shapeDef.bound_r_norm * eqRadius;
-    body.mass = eqRadius * eqRadius;
+    body.mass = eqRadius * eqRadius * massMult;
     body.invMass = 1 / body.mass;
+    body.massMult = massMult;
+    body.gravityScale = gravityScale;
     // Polar moment of inertia I = m * k * r_eq^2 (boosted slightly by 1.15 for smooth playful tumbling)
     body.inertia = body.mass * shapeDef.inertia_k * eqRadius * eqRadius * 1.15;
     body.invI = 1 / body.inertia;
@@ -432,9 +436,14 @@
     }
 
     const mu = Math.sqrt(body.friction * STATIC_JAR.friction);
-    const e = Math.max(body.restitution, STATIC_JAR.restitution);
+    const baseE = Math.max(body.restitution, STATIC_JAR.restitution);
     for (let i = 0; i < kept.length; i++) {
       const c = kept[i];
+      const isSideWall = Math.abs(c.nx) > 0.85 && Math.abs(c.ny) < 0.25;
+      const bankE =
+        isSideWall && body.isBankLaunched && body.age < 1.8
+          ? Math.max(baseE, body.tier === 2 ? 0.78 : 0.64)
+          : baseE;
       contactsOut.push({
         a: STATIC_JAR,
         b: body,
@@ -443,8 +452,8 @@
         nx: c.nx,
         ny: c.ny,
         pen: c.pen,
-        mu,
-        restitution: e,
+        mu: isSideWall && body.isBankLaunched && body.age < 1.8 ? mu * 0.35 : mu,
+        restitution: bankE,
         jnAcc: 0,
         jtAcc: 0,
         bias: 0,
@@ -635,7 +644,7 @@
    * Step the rigid-body world forward by `dt` seconds.
    * Order: Semi-implicit Euler (integrate forces -> tentative step -> detect contacts ->
    * PGS sequential impulse velocity solver -> positional stabilization).
-   * Returns { mergePairs, impacts, debugContacts, magnetLinks }.
+   * Returns { mergePairs, impacts, wallBounces, meteorHits, debugContacts, magnetLinks }.
    */
   function stepWorld(bodies, jar, dt, gravity = 1420, opts = {}) {
     const SUBSTEPS = 3;
@@ -644,24 +653,40 @@
 
     const magnetRange = typeof opts.magnetRange === 'number' ? opts.magnetRange : 10;
     const magnetForce = typeof opts.magnetForce === 'number' ? opts.magnetForce : 460;
+    const gravityDir = typeof opts.gravityDir === 'number' ? opts.gravityDir : 1;
 
     const mergePairs = [];
     const impacts = [];
+    const wallBounces = [];
+    const meteorHits = [];
     let lastContacts = [];
     let lastMagnetLinks = [];
 
     for (let s = 0; s < SUBSTEPS; s++) {
+      // Collect active T3 resonance emitters for this substep
+      const resonators = [];
       // 1. Integrate gravity into velocities & advance tentative positions/angles
       for (let i = 0; i < bodies.length; i++) {
         const b = bodies[i];
         if (b.merged) continue;
-        b.vy += gravity * subDt;
+        const gScale = typeof b.gravityScale === 'number' ? b.gravityScale : 1.0;
+        b.vy += gravity * gScale * gravityDir * subDt;
         b.vx *= 0.9985;
         b.vy *= 0.9985;
         b.vr *= 0.994;
 
-        if (b.vr > 12) b.vr = 12;
-        else if (b.vr < -12) b.vr = -12;
+        if (b.spinBoostTimer > 0) {
+          b.spinBoostTimer = Math.max(0, b.spinBoostTimer - subDt);
+          const targetVr = (b.spinBoostDir || 1) * 11.0;
+          b.vr += (targetVr - b.vr) * Math.min(1, subDt * 14);
+        }
+        if (b.resonanceTimer > 0) {
+          b.resonanceTimer = Math.max(0, b.resonanceTimer - subDt);
+          resonators.push(b);
+        }
+
+        if (b.vr > 13) b.vr = 13;
+        else if (b.vr < -13) b.vr = -13;
 
         b.x += b.vx * subDt;
         b.y += b.vy * subDt;
@@ -703,14 +728,36 @@
           const dx = b.x - a.x;
           const dy = b.y - a.y;
           const distSq = dx * dx + dy * dy;
-          const effMagnet = isWildPair ? (magnetRange > 0 ? Math.max(10, magnetRange * 1.05) : 5) : magnetRange;
+
+          // T3 Matcha Kitty resonance field boosts magnet range for nearby matching pairs
+          let nearResonance = !!(a.resonanceTimer > 0 || b.resonanceTimer > 0);
+          if (!nearResonance && canMerge && resonators.length > 0) {
+            const mx = (a.x + b.x) * 0.5;
+            const my = (a.y + b.y) * 0.5;
+            for (let rIdx = 0; rIdx < resonators.length; rIdx++) {
+              const resB = resonators[rIdx];
+              const rdx = mx - resB.x;
+              const rdy = my - resB.y;
+              if (rdx * rdx + rdy * rdy <= 105 * 105) {
+                nearResonance = true;
+                break;
+              }
+            }
+          }
+
+          let effMagnet = isWildPair ? (magnetRange > 0 ? Math.max(10, magnetRange * 1.05) : 5) : magnetRange;
+          let pairMagnetForce = magnetForce;
+          if (nearResonance && canMerge) {
+            effMagnet = Math.max(effMagnet, 42);
+            pairMagnetForce = Math.max(pairMagnetForce, 580);
+          }
           const rs = a.boundR + b.boundR + (canMerge ? effMagnet + 4 : 1);
           if (distSq > rs * rs) continue;
 
           if (canMerge) {
             const dist = Math.sqrt(distSq) || 0.001;
             const wildCloseTouch = isWildPair && dist <= (a.r + b.r) * 1.01;
-            const sameCloseSnap = !isWildPair && dist <= (a.r + b.r) * 0.94 && a.age > 0.06 && b.age > 0.06;
+            const sameCloseSnap = !isWildPair && dist <= (a.r + b.r) * 0.94 && a.age > 0.05 && b.age > 0.05;
             if (wildCloseTouch || sameCloseSnap || testBodiesOverlap(a, b)) {
               a.merged = true;
               b.merged = true;
@@ -720,9 +767,9 @@
 
             // Silky same-tier / wildcard magnetic pull when magnet is active
             const surfaceGap = dist - (a.r + b.r);
-            if (effMagnet > 0 && surfaceGap < effMagnet && a.age > 0.06 && b.age > 0.06) {
+            if (effMagnet > 0 && surfaceGap < effMagnet && a.age > 0.05 && b.age > 0.05) {
               const strength = Math.max(0.12, Math.min(1, 1 - Math.max(0, surfaceGap) / effMagnet));
-              const pull = magnetForce * (0.35 + 0.65 * strength * strength) * subDt;
+              const pull = pairMagnetForce * (0.35 + 0.65 * strength * strength) * subDt;
               const ux = dx / dist;
               const uy = dy / dist;
               const invTotal = a.invMass + b.invMass || 1;
@@ -734,7 +781,7 @@
               b.vy -= uy * pull * shareB;
 
               if (magnetLinks) {
-                magnetLinks.push({ a, b, strength, isWild: isWildPair });
+                magnetLinks.push({ a, b, strength, isWild: isWildPair, isResonance: nearResonance && magnetRange === 0 });
               }
             }
             continue;
@@ -747,6 +794,14 @@
               a.hasCollided = true;
               b.hasCollided = true;
             }
+            // Mugi's Meteor Shot first-contact detection
+            if (a.isMeteorShot && !b.isYarnBall && !b.isWildcard) {
+              a.isMeteorShot = false;
+              meteorHits.push({ shooter: a, target: b, x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5 });
+            } else if (b.isMeteorShot && !a.isYarnBall && !a.isWildcard) {
+              b.isMeteorShot = false;
+              meteorHits.push({ shooter: b, target: a, x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5 });
+            }
           }
         }
       }
@@ -755,7 +810,7 @@
       preStepContacts(contacts);
       solveVelocityContacts(contacts, VELOCITY_ITERS);
 
-      // 4. Collect strong impact telemetry
+      // 4. Collect strong impact telemetry & side-wall bank-shot bounces
       for (let i = 0; i < contacts.length; i++) {
         const c = contacts[i];
         if (c.initialVn < -85 && c.jnAcc > 0) {
@@ -768,13 +823,33 @@
             bodyA: c.a.isStatic ? null : c.a,
             bodyB: c.b
           });
+          if (
+            c.a.isStatic &&
+            Math.abs(c.nx) > 0.85 &&
+            Math.abs(c.ny) < 0.25 &&
+            c.b.isBankLaunched &&
+            c.b.age < 1.9
+          ) {
+            if (c.b.lastWallBounceAge === undefined || c.b.age - c.b.lastWallBounceAge > 0.08) {
+              c.b.wallBounces = (c.b.wallBounces || 0) + 1;
+              c.b.lastWallBounceAge = c.b.age;
+              wallBounces.push({
+                body: c.b,
+                x: c.px,
+                y: c.py,
+                nx: c.nx,
+                ny: c.ny,
+                count: c.b.wallBounces
+              });
+            }
+          }
         }
       }
 
       // 5. Gentle micro-damping only for nearly stationary pastries (keeps slopes & rolling lively!)
       for (let i = 0; i < bodies.length; i++) {
         const b = bodies[i];
-        if (b.merged || !b.inContact) continue;
+        if (b.merged || !b.inContact || b.spinBoostTimer > 0) continue;
         const linSpdSq = b.vx * b.vx + b.vy * b.vy;
         const angSpd = Math.abs(b.vr);
         if (linSpdSq < 55 && angSpd < 0.24) {
@@ -801,6 +876,8 @@
     return {
       mergePairs,
       impacts,
+      wallBounces,
+      meteorHits,
       debugContacts: lastContacts,
       magnetLinks: lastMagnetLinks
     };
@@ -916,12 +993,160 @@
     return { leftExtent: -minX, rightExtent: maxX };
   }
 
+  /**
+   * Forward-trace an angled slingshot/bank-shot launch inside the jar (with up to 1 glass wall reflection)
+   * so players get a crisp dotted aiming arc and exact merge lock-on preview around corners.
+   */
+  function predictBankShotTrajectory(
+    eqRadius,
+    originX,
+    originY,
+    vx0,
+    vy0,
+    jar,
+    existingBodies,
+    gravity = 1880,
+    gravityScale = 1.0,
+    tier = 1
+  ) {
+    const r = eqRadius * 0.94;
+    const minX = jar.left + r;
+    const maxX = jar.right - r;
+    const leftArcCx = jar.left + jar.cornerR;
+    const rightArcCx = jar.right - jar.cornerR;
+    const arcCy = jar.floorY - jar.cornerR;
+    const wallRest = tier === 2 ? 0.78 : 0.64;
+
+    const points = [{ x: originX, y: originY }];
+    let x = originX;
+    let y = originY;
+    let vx = vx0;
+    let vy = vy0;
+    let bouncePoint = null;
+    let hitBody = null;
+    const stepDt = 0.015;
+    const maxSteps = 50;
+
+    for (let step = 0; step < maxSteps; step++) {
+      vy += gravity * gravityScale * stepDt;
+      vx *= 0.996;
+      vy *= 0.996;
+      const nx = x + vx * stepDt;
+      const ny = y + vy * stepDt;
+
+      // Side-wall reflection (up to 1 clear bank-shot bounce)
+      if (nx < minX) {
+        const t = vx !== 0 ? Math.max(0, Math.min(1, (minX - x) / (nx - x))) : 0;
+        const by = y + (ny - y) * t;
+        x = minX + 0.5;
+        y = by;
+        if (!bouncePoint && by < arcCy) {
+          bouncePoint = { x: minX, y: by };
+          points.push({ x: minX, y: by });
+          vx = Math.abs(vx) * wallRest;
+          vy *= 0.92;
+          continue;
+        } else {
+          points.push({ x: minX, y: by });
+          break;
+        }
+      } else if (nx > maxX) {
+        const t = vx !== 0 ? Math.max(0, Math.min(1, (maxX - x) / (nx - x))) : 0;
+        const by = y + (ny - y) * t;
+        x = maxX - 0.5;
+        y = by;
+        if (!bouncePoint && by < arcCy) {
+          bouncePoint = { x: maxX, y: by };
+          points.push({ x: maxX, y: by });
+          vx = -Math.abs(vx) * wallRest;
+          vy *= 0.92;
+          continue;
+        } else {
+          points.push({ x: maxX, y: by });
+          break;
+        }
+      }
+
+      x = nx;
+      y = ny;
+
+      // Curved bottom corners & floor check
+      if (y > arcCy && (x < leftArcCx || x > rightArcCx)) {
+        const cx = x < leftArcCx ? leftArcCx : rightArcCx;
+        const dx = x - cx;
+        const dy = y - arcCy;
+        const dist = Math.hypot(dx, dy);
+        if (dist >= jar.cornerR - r) {
+          const clampDist = Math.max(1, jar.cornerR - r);
+          x = cx + (dx / (dist || 1)) * clampDist;
+          y = arcCy + (dy / (dist || 1)) * clampDist;
+          points.push({ x, y });
+          break;
+        }
+      }
+      if (y >= jar.floorY - r) {
+        y = jar.floorY - r;
+        points.push({ x, y });
+        break;
+      }
+
+      // Existing bodies hit test
+      let collided = false;
+      for (let i = 0; i < existingBodies.length; i++) {
+        const b = existingBodies[i];
+        if (b.merged) continue;
+        const dx = x - b.x;
+        const dy = y - b.y;
+        const hitDist = b.r + eqRadius * 0.94;
+        if (dx * dx + dy * dy <= hitDist * hitDist) {
+          const d = Math.hypot(dx, dy) || 1;
+          x = b.x + (dx / d) * hitDist;
+          y = b.y + (dy / d) * hitDist;
+          hitBody = b;
+          collided = true;
+          break;
+        }
+      }
+
+      points.push({ x, y });
+      if (collided) break;
+    }
+
+    const last = points[points.length - 1];
+    return {
+      points,
+      bouncePoint,
+      endX: last.x,
+      endY: last.y,
+      hitBody
+    };
+  }
+
+  /**
+   * Check whether the jar neck spawn spot is clear enough for an immediate follow-up launch
+   * (replaces the sluggish full-fall waitingForLanding lock).
+   */
+  function isSpawnClear(dropX, dropY, r, existingBodies) {
+    for (let i = 0; i < existingBodies.length; i++) {
+      const b = existingBodies[i];
+      if (b.merged) continue;
+      if (b.y > dropY + r + b.r + 6) continue;
+      const dx = b.x - dropX;
+      const dy = b.y - dropY;
+      const minDist = (b.r + r) * 0.88;
+      if (dx * dx + dy * dy < minDist * minDist) return false;
+    }
+    return true;
+  }
+
 module.exports = {
   configureBodyShape,
   updateBodyWorld,
   clampBodyInsideJarPositional,
   stepWorld,
   predictDropLandingY,
+  predictBankShotTrajectory,
+  isSpawnClear,
   pointInBody,
   getRotatedHalfExtentsX
 };

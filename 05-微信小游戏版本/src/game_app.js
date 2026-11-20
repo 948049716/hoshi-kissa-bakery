@@ -13,6 +13,7 @@ const {
   ASSET_PATHS,
   BLESSINGS,
   PATRONS,
+  CASCADE_MULTIPLIERS,
   SHOP_UPGRADES,
   JAR_THEMES,
   JAR_THEME_LIST,
@@ -44,7 +45,7 @@ function createApp() {
     createAudioContext: platform.createAudioContext
   });
 
-  // Load Persistent Save Data (3.0 backward-compatible migration)
+  // Load Persistent Save Data (4.0 backward-compatible migration)
   let saveData = loadSaveData();
   function loadSaveData() {
     const defaults = {
@@ -63,6 +64,9 @@ function createApp() {
       lifetimeStats: {
         runsPlayed: 0,
         ordersCompleted: 0,
+        servesTotal: 0,
+        bankShotsTotal: 0,
+        maxAvalancheEver: 0,
         soufflesMade: 0,
         yarnBroken: 0,
         maxComboEver: 1
@@ -119,6 +123,9 @@ function createApp() {
       lifetimeStats: {
         runsPlayed: Math.max(0, Math.floor(Number(stRaw.runsPlayed) || 0)),
         ordersCompleted: Math.max(0, Math.floor(Number(stRaw.ordersCompleted) || 0)),
+        servesTotal: Math.max(0, Math.floor(Number(stRaw.servesTotal) || 0)),
+        bankShotsTotal: Math.max(0, Math.floor(Number(stRaw.bankShotsTotal) || 0)),
+        maxAvalancheEver: Math.max(0, Math.floor(Number(stRaw.maxAvalancheEver) || 0)),
         soufflesMade: Math.max(0, Math.floor(Number(stRaw.soufflesMade) || 0)),
         yarnBroken: Math.max(0, Math.floor(Number(stRaw.yarnBroken) || 0)),
         maxComboEver: Math.max(1, Math.floor(Number(stRaw.maxComboEver) || 1))
@@ -178,7 +185,7 @@ function createApp() {
     return Promise.all(jobs);
   }
 
-  // Mutable Game State
+  // Mutable Game State (4.0 Phase 1)
   const gameState = {
     mode: 'chef',
     running: false,
@@ -190,6 +197,16 @@ function createApp() {
     dropsMadeThisRun: 0,
     soufflesMadeThisRun: 0,
     yarnBrokenThisRun: 0,
+    servesCompleted: 0,
+    bankShotsLanded: 0,
+    serveCascadeTimer: 0,
+    serveCascadeMerges: 0,
+    maxAvalancheRun: 0,
+    skillEnergy: 0,
+    stepSkillGain: 0,
+    activeSkillMode: null, // 'scoop' | 'swap_1' | 'swap_2' | null
+    swapFirstEntityId: null,
+    nextShotMeteor: false,
     feverEnergy: 0,
     feverTimer: 0,
     feverMaxDuration: 10.0,
@@ -201,13 +218,27 @@ function createApp() {
     ordersCompleted: 0,
     maxTierRun: 1,
     seenThisRun: new Set([1, 2, 3, 4]),
-    tools: { shake: 2, fork: 2, spoon: 1 },
-    toolCosts: { shake: 22, fork: 25, spoon: 35 },
+    tools: { shake: 2, spoon: 1 },
+    toolCosts: { shake: 22, spoon: 35 },
     activeToolMode: null,
     dropX: 220,
     prevDropX: 220,
     aimAngle: 0,
     dropSway: 0,
+    aim: {
+      active: false,
+      mode: 'drop', // 'drop' | 'sling'
+      anchorX: 220,
+      anchorY: 160,
+      curX: 220,
+      curY: 160,
+      power: 0,
+      launchVx: 0,
+      launchVy: 320,
+      angle: 0,
+      cancelled: false,
+      stretchBand: 0
+    },
     touchAim: { active: false, cancelled: false, lastStableX: 220 },
     debugPhysics: false,
     lastDebugContacts: [],
@@ -222,10 +253,6 @@ function createApp() {
     canHoldThisTurn: true,
     dropCooldown: 0,
     lastDroppedId: null,
-    waitingForLanding: false,
-    lastDropX: null,
-    sameSpotStreak: 0,
-    bakeZone: { colIdx: 1, x: 178, w: 78, turnsLeft: 3 },
     heldActionCooldown: 1.6,
     heldActionAnim: null,
     perks: {},
@@ -234,11 +261,11 @@ function createApp() {
     blessingLastReason: '',
     blessingSubText: '',
     blessingLockUntil: 0,
-    zenNextMilestone: 500,
+    zenNextMilestone: 600,
     rushTimer: 90.0,
     rushFinished: false,
     rushGustCooldown: 0,
-    rushNextMilestone: 1800,
+    rushNextMilestone: 2000,
     rushLastTickSec: 6,
     activeEvent: null,
     lastEventKind: null,
@@ -246,6 +273,7 @@ function createApp() {
     nextEventTimer: 18.0,
     meteorGoldenLeft: 0,
     shootingStars: [],
+    flyingServes: [],
     hitstopTimer: 0,
     screenShake: 0,
     jarFlash: 0,
@@ -257,6 +285,7 @@ function createApp() {
     entities: [],
     particles: [],
     popups: [],
+    orders: [],
     order: null,
     skipCooldown: 0,
     hoveredEntityId: null,
@@ -537,6 +566,22 @@ function createApp() {
       }
     },
 
+    hasSouffleAura() {
+      return gameState.entities.some((e) => !e.merged && !e.isWildcard && !e.isYarnBall && e.tier === 9);
+    },
+    getSouffleAuraMult() {
+      return this.hasSouffleAura() ? 2.0 : 1.0;
+    },
+    isEntityServable(entity) {
+      return findServableMatch(entity);
+    },
+    serveEntity(entityId) {
+      return serveEntityById(entityId);
+    },
+    activateChefSkill() {
+      activateChefSkillFn();
+    },
+
     armOrUseTool(key) { armOrUseToolFn(key); },
     cancelToolMode() { cancelToolMode(); },
     swapHoldPocket() { swapHoldPocketFn(); },
@@ -546,32 +591,29 @@ function createApp() {
     applyBlessing(id) { applyBlessingFn(id); }
   };
 
-  const BAKE_ZONE_COLS = [96, 178, 262, 344];
-
-  function rotateBakeZone(excludeIdx = -1, avoidX = null) {
-    let candidates = [0, 1, 2, 3].filter((i) => i !== excludeIdx);
-    if (avoidX !== null) {
-      const far = candidates.filter((i) => Math.abs(BAKE_ZONE_COLS[i] - avoidX) > 48);
-      if (far.length > 0) candidates = far;
-    }
-    const nextIdx = candidates[Math.floor(Math.random() * candidates.length)];
-    gameState.bakeZone = {
-      colIdx: nextIdx,
-      x: BAKE_ZONE_COLS[nextIdx],
-      w: 78,
-      turnsLeft: 3
-    };
+  function getComboUpgradeBonus() {
+    const up = SHOP_UPGRADES.find((u) => u.id === 'up_combo');
+    return (up && up.values[app.getUpgradeLevel('up_combo')]) || 0;
   }
 
-  function isWaitingForLanding() {
-    if (!gameState.lastDroppedId) return false;
-    const ent = gameState.entities.find((e) => e.id === gameState.lastDroppedId);
-    if (!ent || ent.merged || ent.hasCollided) return false;
-    if (ent.age >= 0.85 || ent.y >= JAR.floorY - ent.r - 4) {
-      ent.hasCollided = true;
-      return false;
+  function addSkillEnergy(amount, ignoreStepCap = false) {
+    if (!amount || amount <= 0 || gameState.skillEnergy >= 100) return 0;
+    let delta = amount;
+    if (!ignoreStepCap) {
+      const remCap = Math.max(0, 70 - gameState.stepSkillGain);
+      delta = Math.min(delta, remCap);
+      gameState.stepSkillGain += delta;
     }
-    return true;
+    if (delta <= 0) return 0;
+    const prev = gameState.skillEnergy;
+    gameState.skillEnergy = Math.min(100, gameState.skillEnergy + delta);
+    if (prev < 100 && gameState.skillEnergy >= 100) {
+      const sk = app.activePatron.activeSkill;
+      audio.playBlessingReady();
+      app.showToast(`🌟 招牌技【${sk.icon} ${sk.name}】已充能完毕！点底部中央发动！`);
+      spawnSparkleBurst(JAR.canvasW / 2, JAR.floorY - 12, '#ffe47a', 18);
+    }
+    return delta;
   }
 
   function getDustMultiplier() {
@@ -710,10 +752,10 @@ function createApp() {
       }
     } else if (id === 'toolbox') {
       gameState.tools.shake++;
-      gameState.tools.fork++;
       gameState.tools.spoon++;
+      addSkillEnergy(100, true);
       const gained = addRunStardust(25);
-      spawnPopup(JAR.canvasW / 2, 220, `🎁 全道具+1 · +${gained}⭐!`, '#ffe57e', 19);
+      spawnPopup(JAR.canvasW / 2, 220, `🎁 摇+1·勺+1·招牌技满能 · +${gained}⭐!`, '#ffe57e', 17);
     } else if (id === 'cleanse') {
       const smalls = gameState.entities
         .filter((e) => !e.isWildcard && !e.isYarnBall && e.tier <= 2)
@@ -723,7 +765,7 @@ function createApp() {
       let gainedPts = 0;
       let gainedDustBase = 0;
       for (const s of smalls) {
-        gainedPts += 40;
+        gainedPts += 45;
         gainedDustBase += 6;
         spawnSparkleBurst(s.x, s.y, '#9be8ff', 14);
         spawnShockwave(s.x, s.y, 44, '#9be8ff', 2.8);
@@ -772,138 +814,305 @@ function createApp() {
     }
   }
 
-  // Orders (Chef Mode)
-  function generateOrder() {
-    const maxMade = gameState.maxTierRun;
-    const orderNum = gameState.ordersCompleted;
+  // =========================================================================
+  // 4.0 Dual-Table Orders & True Tap-to-Serve + Cascade Avalanche System
+  // =========================================================================
+  let nextOrderUid = 1;
+
+  function generateTableOrder(kind, isInitial = false) {
+    const maxMade = Math.max(4, gameState.maxTierRun);
+    const doneCount = gameState.ordersCompleted;
     const activePatron = app.activePatron;
-    const patron =
-      orderNum === 0
-        ? activePatron
-        : PATRONS[(orderNum + Math.floor(Math.random() * PATRONS.length)) % PATRONS.length];
+    const patron = isInitial
+      ? activePatron
+      : PATRONS[(doneCount + (kind === 'vip' ? 1 : 0) + Math.floor(Math.random() * PATRONS.length)) % PATRONS.length];
 
     let reqTiers = [];
-    if (orderNum === 0) {
-      reqTiers = [3, 4];
-    } else if (orderNum < 3) {
-      reqTiers = [3 + Math.floor(Math.random() * 2), 4 + Math.floor(Math.random() * 2)];
+    if (kind === 'quick') {
+      if (isInitial) {
+        // Matches the pre-populated starter T3 so players discover Tap-to-Serve immediately!
+        reqTiers = [3];
+      } else {
+        const cap = Math.min(5, Math.max(4, maxMade - 1));
+        const t = 3 + Math.floor(Math.random() * (cap - 2));
+        reqTiers = [t];
+      }
     } else {
-      const cap = Math.min(8, Math.max(5, maxMade));
-      const tA = 3 + Math.floor(Math.random() * Math.min(3, cap - 2));
-      const tB = Math.min(8, Math.max(4, Math.min(cap, tA + 1 + Math.floor(Math.random() * 2))));
-      reqTiers = [tA, tB];
-    }
-    reqTiers.sort((a, b) => a - b);
-
-    const mikanOrderMult = saveData.selectedPatron === 'mikan' ? 1.2 : 1.0;
-    const rewardScore = Math.round(reqTiers.reduce((acc, t) => acc + TIERS[t - 1].points * 6, 80) * mikanOrderMult);
-    const rewardDust = Math.round((16 + reqTiers.reduce((acc, t) => acc + t * 2, 0)) * mikanOrderMult);
-    const rushMax = 10 + Math.max(...reqTiers);
-
-    gameState.order = {
-      patron,
-      slots: reqTiers.map((tier) => ({ tier, done: false })),
-      rewardScore,
-      rewardDust,
-      rushDropsLeft: rushMax,
-      rushDropsMax: rushMax,
-      completed: false
-    };
-
-    setPatronSpeech(activePatron, orderNum === 0 ? activePatron.greet : `${patron.shortName}点单啦：${patron.greet}`, 4.5);
-    checkExistingBoardForOrder();
-  }
-
-  function checkExistingBoardForOrder() {
-    if (!gameState.order || gameState.order.completed || gameState.mode !== 'chef') return;
-    const usedIds = new Set();
-    for (const slot of gameState.order.slots) {
-      if (slot.done) continue;
-      const match = gameState.entities.find(
-        (e) => !e.isWildcard && !e.isYarnBall && e.tier === slot.tier && !usedIds.has(e.id) && !e.creditedToOrder
-      );
-      if (match) {
-        usedIds.add(match.id);
-        match.creditedToOrder = true;
-        slot.done = true;
+      // VIP Table: high-tier single OR delicious 2-piece combo platter
+      if (isInitial) {
+        reqTiers = [3, 4];
+      } else if (Math.random() < 0.58) {
+        const cap = Math.min(6, Math.max(4, maxMade));
+        const tA = 3 + Math.floor(Math.random() * Math.max(1, Math.min(2, cap - 3)));
+        const tB = Math.min(6, Math.max(4, tA + 1 + (Math.random() < 0.35 ? 1 : 0)));
+        reqTiers = [tA, tB].sort((a, b) => a - b);
+      } else {
+        const tHigh = Math.min(7, Math.max(5, Math.min(maxMade + 1, 5 + Math.floor(doneCount / 3))));
+        reqTiers = [tHigh];
       }
     }
-    checkOrderComplete();
+
+    const mikanVipMult = saveData.selectedPatron === 'mikan' && kind === 'vip' ? 1.25 : 1.0;
+    const baseBonusScore = Math.round(
+      reqTiers.reduce((acc, t) => acc + TIERS[t - 1].servePoints * (kind === 'vip' ? 0.55 : 0.35), kind === 'vip' ? 140 : 60) *
+        mikanVipMult
+    );
+    const rewardDust = Math.round(
+      ((kind === 'vip' ? 22 : 10) + reqTiers.reduce((acc, t) => acc + t * 2, 0)) * mikanVipMult
+    );
+    const freshMax = kind === 'vip' ? 8 : 6;
+
+    return {
+      uid: nextOrderUid++,
+      kind, // 'quick' | 'vip'
+      label: kind === 'vip' ? 'VIP桌' : '快餐桌',
+      patron,
+      slots: reqTiers.map((tier) => ({ tier, done: false })),
+      bonusScore: baseBonusScore,
+      rewardDust,
+      freshSteps: freshMax,
+      freshMax,
+      freshMult: kind === 'vip' ? 1.5 : 1.35,
+      completed: false
+    };
+  }
+
+  function initOrders() {
+    if (gameState.mode === 'zen') {
+      gameState.orders = [];
+      gameState.order = null;
+      return;
+    }
+    const quick = generateTableOrder('quick', true);
+    const vip = generateTableOrder('vip', true);
+    gameState.orders = [quick, vip];
+    gameState.order = vip;
+  }
+
+  function findServableMatch(entity) {
+    if (!entity || entity.merged || entity.isWildcard || entity.isYarnBall) return null;
+    if (entity.tier === 9) {
+      return { kind: 'souffle', order: null, slotIdx: -1 };
+    }
+    if (!gameState.orders || gameState.orders.length === 0) return null;
+
+    // Prioritize VIP table (higher reward & multi-slot progression), then Quick table
+    let best = null;
+    for (let oi = 0; oi < gameState.orders.length; oi++) {
+      const ord = gameState.orders[oi];
+      if (!ord || ord.completed) continue;
+      const slotIdx = ord.slots.findIndex((s) => !s.done && s.tier === entity.tier);
+      if (slotIdx === -1) continue;
+      if (!best) {
+        best = { kind: ord.kind, order: ord, slotIdx };
+      } else if (ord.kind === 'vip' && best.kind !== 'vip') {
+        best = { kind: ord.kind, order: ord, slotIdx };
+      } else if (ord.kind === best.kind && ord.freshSteps > best.order.freshSteps) {
+        best = { kind: ord.kind, order: ord, slotIdx };
+      }
+    }
+    return best;
+  }
+
+  function findServableEntityAt(x, y, pad = 12) {
+    for (let i = gameState.entities.length - 1; i >= 0; i--) {
+      const e = gameState.entities[i];
+      if (e.merged) continue;
+      if (!findServableMatch(e)) continue;
+      if (Physics.pointInBody(e, x, y, pad)) return e;
+      const d = Math.hypot(e.x - x, e.y - y);
+      if (d <= e.r + pad) return e;
+    }
+    return null;
+  }
+
+  function wakeNeighborsAfterRemoval(rx, ry, removedR) {
+    const wakeRadius = removedR * 3.4 + 45;
+    for (const other of gameState.entities) {
+      if (other.merged) continue;
+      const dx = other.x - rx;
+      const dy = other.y - ry;
+      const dist = Math.hypot(dx, dy);
+      if (dist < wakeRadius && other.y <= ry + removedR * 0.65) {
+        // Gentle settle impulse so treats resting above immediately tumble into the vacuum
+        other.vy = Math.max(other.vy, 34);
+        other.vx += (dx === 0 ? (Math.random() - 0.5) : -Math.sign(dx)) * 18;
+        other.vr += (dx >= 0 ? -1 : 1) * 0.9;
+      }
+    }
+  }
+
+  function startCascadeWindow(originX, originY) {
+    const dur = 2.6 + getComboUpgradeBonus();
+    gameState.serveCascadeTimer = Math.max(gameState.serveCascadeTimer, dur);
+    gameState.serveCascadeMerges = 0;
+    gameState.serveCascadeOrigin = { x: originX, y: originY };
+  }
+
+  function serveEntityById(entityId) {
+    if (!gameState.running || gameState.over || gameState.paused) return false;
+    const ent = gameState.entities.find((e) => e.id === entityId && !e.merged);
+    if (!ent) return false;
+    const match = findServableMatch(ent);
+    if (!match) return false;
+
+    audio.ensureCtx();
+    audio.playServeBell();
+    platform.vibrateShort('medium');
+
+    // 1. Remove served dessert from jar & trigger vacuum collapse wake-up!
+    gameState.entities = gameState.entities.filter((e) => e.id !== ent.id);
+    wakeNeighborsAfterRemoval(ent.x, ent.y, ent.r);
+    startCascadeWindow(ent.x, ent.y);
+
+    // 2. Flying serve animation toward top order bar
+    const targetX = match.kind === 'vip' ? JAR.canvasW * 0.68 : match.kind === 'souffle' ? JAR.canvasW * 0.5 : JAR.canvasW * 0.3;
+    gameState.flyingServes.push({
+      tier: ent.tier,
+      isGolden: !!ent.isGolden,
+      x0: ent.x,
+      y0: ent.y,
+      cx: (ent.x + targetX) * 0.5 + (ent.x < JAR.canvasW * 0.5 ? -38 : 38),
+      cy: Math.min(ent.y, JAR.neckY) - 48,
+      x1: targetX,
+      y1: 12,
+      t: 0,
+      dur: 0.34
+    });
+
+    spawnSparkleBurst(ent.x, ent.y, '#ffe47a', 22);
+    spawnShockwave(ent.x, ent.y, ent.r * 2.1 + 36, '#ffe47a', 3.6);
+    gameState.jarFlash = Math.max(gameState.jarFlash, 0.38);
+
+    gameState.servesCompleted++;
+    saveData.lifetimeStats.servesTotal = (saveData.lifetimeStats.servesTotal || 0) + 1;
+    persistSaveData();
+
+    const feverMult = app.getFeverMultiplier();
+    const goldMult = ent.isGolden ? 1.8 : 1.0;
+
+    // Special Case: T9 Crown Cat Soufflé Grand Slam!
+    if (match.kind === 'souffle') {
+      const pts = Math.round(TIERS[8].servePoints * feverMult * goldMult);
+      addScore(pts);
+      const dust = addRunStardust(48);
+      addFeverEnergy(55);
+      addSkillEnergy(100, true);
+      audio.playSupernova();
+      platform.vibrateShort('heavy');
+
+      // Cleanse all T1~T2 treats in jar as celebration garnish!
+      let cleansed = 0;
+      gameState.entities = gameState.entities.filter((other) => {
+        if (!other.isWildcard && !other.isYarnBall && other.tier <= 2) {
+          cleansed++;
+          spawnSparkleBurst(other.x, other.y, '#ffe899', 10);
+          return false;
+        }
+        return true;
+      });
+      if (gameState.mode === 'rush') {
+        gameState.rushTimer += 6.0;
+      }
+      spawnPopup(ent.x, ent.y - 20, `👑 主菜献礼! +${pts}`, '#ffe570', 22);
+      showComboBanner('👑 星冠猫神主菜大满贯!', `+${pts}分 · +${dust}⭐ · 净化${cleansed}颗小糖`, '#ffe570');
+      app.showToast(`👑 献上星冠猫神舒芙蕾！+${pts}分 · 招牌技满能！`);
+      return true;
+    }
+
+    // Standard / VIP Table Serve
+    const ord = match.order;
+    const def = TIERS[ent.tier - 1];
+    const isFresh = ord.freshSteps > 0;
+    const freshMult = isFresh ? ord.freshMult : 1.0;
+    const auraMult = app.getSouffleAuraMult();
+    const mikanVipMult = saveData.selectedPatron === 'mikan' && ord.kind === 'vip' ? 1.25 : 1.0;
+
+    const servePts = Math.round(def.servePoints * feverMult * goldMult * freshMult * auraMult * mikanVipMult);
+    addScore(servePts);
+    addFeverEnergy(22);
+    addSkillEnergy(35);
+
+    if (gameState.mode === 'rush') {
+      gameState.rushTimer += 3.0;
+      spawnPopup(ent.x, ent.y - 44, '⏱️ 出餐续命 +3.0s!', '#9cf4ff', 15);
+    }
+
+    ord.slots[match.slotIdx].done = true;
+    const freshTag = isFresh ? '🔥热腾腾 ' : '';
+    spawnPopup(ent.x, ent.y - 16, `🔔 ${freshTag}上菜 +${servePts}`, '#ffe67e', 18);
+
+    // Check if the entire table order is complete
+    if (ord.slots.every((s) => s.done)) {
+      ord.completed = true;
+      gameState.ordersCompleted++;
+      const bonusPts = Math.round(ord.bonusScore * feverMult * freshMult * auraMult);
+      const dust = addRunStardust(Math.round(ord.rewardDust * freshMult));
+      addScore(bonusPts);
+      addFeverEnergy(ord.kind === 'vip' ? 24 : 14);
+      if (ord.kind === 'vip') addSkillEnergy(25);
+      audio.playOrderComplete();
+
+      const activePatron = app.activePatron;
+      setPatronSpeech(
+        activePatron,
+        ord.kind === 'vip' ? `${activePatron.thanks} VIP 大单完成！` : activePatron.thanks,
+        3.6
+      );
+
+      if (ord.kind === 'vip') {
+        if (isFresh) grantNextRainbow('VIP极速上菜');
+        queueBlessing(isFresh ? '👑 VIP 鲜度大单达成' : '🎉 VIP 心愿单达成');
+        showComboBanner('👑 VIP 套餐上齐!', `额外赏金 +${bonusPts} · +${dust}⭐`, '#ffe378');
+        app.showToast(`👑 VIP 订单完成！+${servePts + bonusPts}分 · +${dust}⭐ · 获得祝福!`);
+      } else {
+        if (gameState.ordersCompleted % 2 === 0) {
+          queueBlessing('🔔 连续出餐达标');
+          if (!gameState.activeEvent && gameState.mode === 'chef') {
+            setTimeout(() => {
+              if (gameState.running && !gameState.over && !gameState.activeEvent) {
+                triggerShopEvent();
+              }
+            }, 900);
+          }
+        }
+        app.showToast(`🔔 快餐出单！+${servePts + bonusPts}分 · +${dust}⭐（趁机触发抽底雪崩！）`);
+      }
+
+      const replaceKind = ord.kind;
+      const replaceUid = ord.uid;
+      setTimeout(() => {
+        if (!gameState.running || gameState.over || gameState.mode === 'zen') return;
+        const idx = gameState.orders.findIndex((o) => o && o.uid === replaceUid);
+        if (idx !== -1) {
+          gameState.orders[idx] = generateTableOrder(replaceKind, false);
+          gameState.order = gameState.orders[1] || gameState.orders[0] || null;
+        }
+      }, 520);
+    } else {
+      app.showToast(`🔔 已端上【${def.name}】+${servePts}分！还差 1 份即完成 VIP 套餐～`);
+    }
+
+    return true;
   }
 
   function notifyTreatSynthesized(tier, entity) {
-    if (!gameState.order || gameState.order.completed || gameState.mode !== 'chef') return;
-    const slot = gameState.order.slots.find((s) => !s.done && s.tier === tier);
-    if (slot) {
-      slot.done = true;
-      if (entity) entity.creditedToOrder = true;
+    if (!entity || gameState.mode === 'zen') return;
+    const match = findServableMatch(entity);
+    if (match && match.kind !== 'souffle') {
       audio.playOrderStamp();
-      spawnSparkleBurst(entity ? entity.x : JAR.canvasW / 2, entity ? entity.y : 250, '#ffd85d', 14);
-      checkOrderComplete();
-    }
-  }
-
-  function checkOrderComplete() {
-    if (!gameState.order || gameState.order.completed || gameState.mode !== 'chef') return;
-    if (gameState.order.slots.every((s) => s.done)) {
-      const ord = gameState.order;
-      ord.completed = true;
-      gameState.ordersCompleted++;
-
-      const isRush = ord.rushDropsLeft > 0;
-      const feverMult = app.getFeverMultiplier();
-      const rushMult = isRush ? 1.6 : 1;
-      const pts = Math.round(ord.rewardScore * feverMult * rushMult);
-      const dustBase = Math.round(ord.rewardDust * rushMult);
-      const dust = addRunStardust(dustBase);
-
-      addScore(pts);
-      addFeverEnergy(isRush ? 36 : 28);
-      audio.playOrderComplete();
-      platform.vibrateShort('medium');
-
-      let toolMsg = '';
-      if (gameState.ordersCompleted % 2 === 0) {
-        const pool = ['shake', 'fork', 'spoon'];
-        const gift = pool[Math.floor(Math.random() * pool.length)];
-        gameState.tools[gift]++;
-        const label = gift === 'shake' ? '摇一摇' : gift === 'fork' ? '泡泡叉' : '升阶勺';
-        toolMsg = ` · +1 ${label}`;
-        if (!gameState.activeEvent) {
-          setTimeout(() => {
-            if (gameState.running && !gameState.over && !gameState.activeEvent) {
-              triggerShopEvent();
-            }
-          }, 1150);
-        }
-      }
-
-      if (isRush) grantNextRainbow();
-      const activePatron = app.activePatron;
-      setPatronSpeech(activePatron, isRush ? `${activePatron.thanks} 极速附赠彩虹万能糖！` : activePatron.thanks, 3.8);
-      app.showToast(
-        isRush
-          ? `⚡ 极速订单达成！+${pts}分 · +${dust}⭐ · 送🌈${toolMsg}`
-          : `🎉 订单完成！+${pts}分 · +${dust}⭐${toolMsg}`
-      );
-      spawnPopup(JAR.canvasW / 2, 168, isRush ? `⚡ 极速订单! +${pts}` : `订单完成! +${pts}`, '#ffe57e', 20);
-      spawnSparkleBurst(JAR.canvasW / 2, 180, '#ffd45e', 28);
-      spawnShockwave(JAR.canvasW / 2, 190, 140, '#ffe378', 3.4);
-
-      queueBlessing(isRush ? '⚡ 极速订单达成' : '🎉 心愿订单达成');
-      setTimeout(() => {
-        if (gameState.running && !gameState.over && gameState.mode === 'chef') {
-          generateOrder();
-        }
-      }, 950);
+      spawnPopup(entity.x, entity.y - entity.r - 12, '🔔 可点击上菜!', '#fff099', 13);
     }
   }
 
   function skipOrderFn() {
-    if (gameState.skipCooldown > 0 || gameState.mode !== 'chef') return;
-    gameState.skipCooldown = 25;
-    app.showToast('📋 已为顾客更换新的星夜心愿单！');
-    generateOrder();
+    if (gameState.skipCooldown > 0 || gameState.mode === 'zen') return;
+    gameState.skipCooldown = 18;
+    const quick = generateTableOrder('quick', false);
+    const vip = generateTableOrder('vip', false);
+    gameState.orders = [quick, vip];
+    gameState.order = vip;
+    app.showToast('📋 已为双桌更换全新星夜点单！');
   }
 
   // Score, Fever, Shop Events, Rush Gust
@@ -1146,11 +1355,16 @@ function createApp() {
     app.showToast(`🌪️ 星风吹散！清除顶部 ${clearCount} 颗甜品并扣除 5.0 秒`);
   }
 
-  // Tool Actions
+  // Tool & Chef Signature Skill Actions
   function armOrUseToolFn(key) {
     if (!gameState.running || gameState.over) return;
     if (app.activeModal === 'blessing') app.closeModal();
     audio.ensureCtx();
+
+    if (gameState.activeSkillMode) {
+      gameState.activeSkillMode = null;
+      gameState.swapFirstEntityId = null;
+    }
 
     if (gameState.activeToolMode === key) {
       cancelToolMode();
@@ -1187,13 +1401,60 @@ function createApp() {
     gameState.activeToolMode = key;
   }
 
+  function activateChefSkillFn() {
+    if (!gameState.running || gameState.over) return;
+    if (app.activeModal === 'blessing') app.closeModal();
+    audio.ensureCtx();
+
+    if (gameState.activeSkillMode) {
+      cancelToolMode();
+      return;
+    }
+
+    const patron = app.activePatron;
+    const sk = patron.activeSkill;
+    if (gameState.skillEnergy < 100) {
+      app.showToast(`${sk.icon} 【${sk.name}】充能中 (${Math.floor(gameState.skillEnergy)}%)，点击金铃出餐可极速充能！`);
+      return;
+    }
+
+    gameState.activeToolMode = null;
+    if (sk.id === 'scoop') {
+      gameState.activeSkillMode = 'scoop';
+      app.showToast('🥄 点击罐内任意 1~5 阶甜品，捞回罐口并引发抽底雪崩！');
+    } else if (sk.id === 'swap') {
+      const swappable = gameState.entities.filter((e) => !e.merged && !e.isYarnBall);
+      if (swappable.length < 2) {
+        app.showToast('🌙 罐内至少需要 2 颗甜品才能发动【星月移形】哦～');
+        return;
+      }
+      gameState.activeSkillMode = 'swap_1';
+      gameState.swapFirstEntityId = null;
+      app.showToast('🌙 请依次点击罐内两颗甜品，瞬间互换它们的位置！');
+    } else if (sk.id === 'meteor_shot') {
+      if (gameState.nextShotMeteor) {
+        app.showToast('🔥 【元气重锤】已经装填完毕，发射即可撞击升阶！');
+        return;
+      }
+      gameState.skillEnergy = 0;
+      gameState.nextShotMeteor = true;
+      audio.playChefSkill('mugi');
+      platform.vibrateShort('medium');
+      spawnSparkleBurst(gameState.dropX, JAR.dropY + 12, '#ff8e52', 24);
+      showComboBanner('🔥 元气重锤装填!', '下次发射撞击首颗甜品直接升阶 + 爆破气浪', '#ff9e66');
+      app.showToast('🔥 元气重锤已就绪！拉弓发射撞向目标甜品吧！');
+    }
+  }
+
   function cancelToolMode() {
     gameState.activeToolMode = null;
+    gameState.activeSkillMode = null;
+    gameState.swapFirstEntityId = null;
     gameState.hoveredEntityId = null;
   }
 
   function swapHoldPocketFn() {
-    if (!gameState.running || gameState.over || gameState.activeToolMode) return;
+    if (!gameState.running || gameState.over || gameState.activeToolMode || gameState.activeSkillMode) return;
     if (app.activeModal === 'blessing') app.closeModal();
     if (!gameState.canHoldThisTurn) {
       app.showToast('放下一颗甜品后才能再次交换暂存哦～');
@@ -1236,7 +1497,7 @@ function createApp() {
     return gameState.curMeta && gameState.curMeta.wildcard ? getShapeDef(1) : getShapeDef(gameState.curTier);
   }
 
-  function clampDropX() {
+  function clampDropXVal(rawX) {
     const r = getCurrentDropRadius();
     const shapeDef = getCurrentDropShapeDef();
     let leftExt = r;
@@ -1248,11 +1509,15 @@ function createApp() {
     }
     const minX = JAR.left + leftExt + 4;
     const maxX = JAR.right - rightExt - 4;
-    gameState.dropX = Math.max(minX, Math.min(maxX, gameState.dropX));
+    return Math.max(minX, Math.min(maxX, rawX));
+  }
+
+  function clampDropX() {
+    gameState.dropX = clampDropXVal(gameState.dropX);
   }
 
   function adjustAimAngle(deltaRad) {
-    if (!gameState.running || gameState.over || gameState.activeToolMode) return;
+    if (!gameState.running || gameState.over || gameState.activeToolMode || gameState.activeSkillMode) return;
     const next = Math.max(-0.78, Math.min(0.78, gameState.aimAngle + deltaRad));
     if (Math.abs(next - gameState.aimAngle) > 1e-4) {
       gameState.aimAngle = next;
@@ -1264,8 +1529,7 @@ function createApp() {
 
   function updateDropPointerX(newX) {
     gameState.prevDropX = gameState.dropX;
-    gameState.dropX = newX;
-    clampDropX();
+    gameState.dropX = clampDropXVal(newX);
     const dx = gameState.dropX - gameState.prevDropX;
     if (Math.abs(dx) > 0.5) {
       gameState.dropSway = Math.max(-0.14, Math.min(0.14, gameState.dropSway - dx * 0.0045));
@@ -1278,16 +1542,22 @@ function createApp() {
     const def = TIERS[tier - 1];
     const eqR = isWildcard ? WILDCARD_RADIUS : def.radius;
     const shapeDef = isWildcard ? getShapeDef(1) : getShapeDef(tier);
-    const mat = isWildcard ? { friction: 0.14, restitution: 0.36 } : def.material;
+    const mat = isWildcard ? { friction: 0.14, restitution: 0.36, gravityScale: 1.0, massMult: 1.0 } : def.material;
 
     const entity = {
       id: gameState.nextEntityId++,
       tier,
       isWildcard,
       isGolden,
-      hasCollided: !!bornFromMerge,
+      isBankLaunched: !!meta.isBankLaunched,
+      isMeteorShot: !!meta.isMeteorShot,
+      wallBounces: 0,
+      resonanceTimer: 0,
+      spinBoostTimer: 0,
+      spinBoostDir: 1,
+      crushUsed: false,
+      hasCollided: !!(bornFromMerge || meta.preSettled),
       bornFromMerge: !!bornFromMerge,
-      inBakeZoneBonus: !!meta.inBakeZone,
       r: eqR,
       mass: eqR * eqR,
       x,
@@ -1299,7 +1569,7 @@ function createApp() {
       squishAmt: bornFromMerge ? 0.25 : 0,
       squishVel: 0,
       squishAngle: bornFromMerge ? Math.PI * 0.5 : 0,
-      age: 0,
+      age: meta.preSettled ? 1.0 : 0,
       dangerTime: 0,
       inContact: false,
       merged: false,
@@ -1310,7 +1580,7 @@ function createApp() {
       anim: null
     };
     Physics.configureBodyShape(entity, shapeDef, eqR, mat);
-    if (bornFromMerge) {
+    if (bornFromMerge || meta.preSettled) {
       Physics.clampBodyInsideJarPositional(entity, JAR);
     }
     gameState.entities.push(entity);
@@ -1318,67 +1588,56 @@ function createApp() {
     return entity;
   }
 
-  function dropCurrentTreat() {
-    if (!gameState.running || gameState.over || gameState.paused) return;
-    if (gameState.activeToolMode || gameState.dropCooldown > 0 || isWaitingForLanding()) {
-      gameState.waitingForLanding = isWaitingForLanding();
-      return;
+  function dropCurrentTreat(launchVx = 0, launchVy = 320, isBankLaunched = false) {
+    if (!gameState.running || gameState.over || gameState.paused) return false;
+    if (gameState.activeToolMode || gameState.activeSkillMode || gameState.dropCooldown > 0) return false;
+
+    const curR = getCurrentDropRadius();
+    if (!Physics.isSpawnClear(gameState.dropX, JAR.dropY, curR, gameState.entities)) {
+      return false;
     }
 
     audio.ensureCtx();
     clampDropX();
     const totalAngle = getAimTotalAngle();
     const curMeta = gameState.curMeta || { wildcard: false, golden: false };
+    const isMeteor = !!gameState.nextShotMeteor;
+    if (isMeteor) gameState.nextShotMeteor = false;
 
-    const isSameSpot = gameState.lastDropX !== null && Math.abs(gameState.dropX - gameState.lastDropX) <= 24;
-    gameState.sameSpotStreak = isSameSpot ? gameState.sameSpotStreak + 1 : 0;
-    gameState.lastDropX = gameState.dropX;
+    // Reset per-drop soft skill energy cap
+    gameState.stepSkillGain = 0;
 
-    let dropVx = 0;
-    let dropVr = 0;
-    if (gameState.sameSpotStreak === 3) {
-      app.showToast('⚠️ 一直点同一个地方很难连锁！试试左右换位或 ↺/↻ 倾角～');
-    } else if (gameState.sameSpotStreak >= 4) {
-      dropVx = (Math.random() < 0.5 ? -1 : 1) * (65 + Math.random() * 55);
-      dropVr = (Math.random() - 0.5) * 4.2;
-      spawnPopup(gameState.dropX, JAR.neckY + 14, '🔥 连点过热偏移!', '#ff9678', 13);
-    }
-
-    let inBakeZone = false;
-    const bz = gameState.bakeZone;
-    if (bz && gameState.sameSpotStreak < 4 && Math.abs(gameState.dropX - bz.x) <= bz.w * 0.5) {
-      inBakeZone = true;
-      const zoneDust = addRunStardust(2);
-      addScore(18 + gameState.curTier * 6);
-      addFeverEnergy(7);
-      spawnSparkleBurst(gameState.dropX, JAR.neckY + 28, '#ffe588', 12);
-      spawnPopup(gameState.dropX, JAR.neckY + 30, `🎯 星光位 +${zoneDust}⭐`, '#ffe98a', 14);
-      rotateBakeZone(bz.colIdx, gameState.dropX);
-    } else if (bz) {
-      bz.turnsLeft--;
-      if (bz.turnsLeft <= 0) {
-        rotateBakeZone(bz.colIdx, gameState.dropX);
-      }
+    let finalVx = launchVx;
+    let finalVy = launchVy;
+    if (isMeteor) {
+      const spd = Math.hypot(finalVx, finalVy) || 320;
+      const boost = Math.max(1.25, 760 / spd);
+      finalVx *= boost;
+      finalVy *= boost;
     }
 
     const dropped = createEntity(
       gameState.curTier,
       gameState.dropX,
-      JAR.dropY,
-      dropVx,
-      310,
+      JAR.dropY + (isBankLaunched ? 4 : 0),
+      finalVx,
+      finalVy,
       false,
       totalAngle,
-      dropVr,
-      { ...curMeta, inBakeZone }
+      isBankLaunched ? (finalVx >= 0 ? 3.5 : -3.5) : 0,
+      { ...curMeta, isBankLaunched: isBankLaunched || Math.abs(finalVx) > 85, isMeteorShot: isMeteor }
     );
     gameState.lastDroppedId = dropped.id;
-    gameState.waitingForLanding = true;
     gameState.dropsMadeThisRun++;
-    audio.playDrop(curMeta.wildcard, curMeta.golden);
+    audio.playDrop(curMeta.wildcard, curMeta.golden || isMeteor);
 
-    if (gameState.order && !gameState.order.completed && gameState.order.rushDropsLeft > 0) {
-      gameState.order.rushDropsLeft = Math.max(0, gameState.order.rushDropsLeft - 1);
+    // Decay freshSteps on active Dual-Table Orders
+    if (gameState.orders && gameState.orders.length > 0) {
+      for (const ord of gameState.orders) {
+        if (ord && !ord.completed && ord.freshSteps > 0) {
+          ord.freshSteps = Math.max(0, ord.freshSteps - 1);
+        }
+      }
     }
 
     const wasWild = !!curMeta.wildcard;
@@ -1417,13 +1676,14 @@ function createApp() {
     gameState.canHoldThisTurn = true;
     const isFever = gameState.feverTimer > 0;
     if (gameState.mode === 'rush') {
-      gameState.dropCooldown = isFever ? 0.14 : 0.18;
+      gameState.dropCooldown = isFever ? 0.08 : 0.12;
     } else {
-      gameState.dropCooldown = isFever ? 0.18 : 0.24;
+      gameState.dropCooldown = isFever ? 0.10 : 0.16;
     }
     gameState.heldActionAnim = null;
     gameState.heldActionCooldown = 1.5 + Math.random() * 1.5;
     clampDropX();
+    return true;
   }
 
   // Particles & FX
@@ -1519,6 +1779,122 @@ function createApp() {
     }
   }
 
+  function triggerMontBlancCrush(mb) {
+    if (!mb || mb.merged) return 0;
+    const victims = gameState.entities
+      .filter((other) => {
+        if (other.id === mb.id || other.merged || other.isWildcard || other.isYarnBall) return false;
+        if (other.tier > 2) return false;
+        const dy = other.y - mb.y;
+        const dist = Math.hypot(other.x - mb.x, dy);
+        return dy > -10 && dist <= mb.r + other.r + 22;
+      })
+      .slice(0, 2);
+    if (victims.length === 0) return 0;
+    const victimIds = new Set(victims.map((v) => v.id));
+    let pts = 0;
+    for (const v of victims) {
+      pts += Math.round(100 * app.getFeverMultiplier() * app.getSouffleAuraMult());
+      spawnSparkleBurst(v.x, v.y, '#d9a97c', 14);
+      spawnShockwave(v.x, v.y, 48, '#e3b27d', 2.8);
+    }
+    gameState.entities = gameState.entities.filter((e) => !victimIds.has(e.id));
+    addScore(pts);
+    addRunStardust(victims.length * 5);
+    addSkillEnergy(victims.length * 10);
+    audio.playTraitTrigger(8);
+    spawnPopup(mb.x, mb.y + mb.r * 0.4, `🌰 重锤压碎×${victims.length}! +${pts}`, '#ffd699', 16);
+    return victims.length;
+  }
+
+  function triggerDessertTrait(born, mx, my) {
+    if (!born || born.merged || born.isWildcard) return;
+    const tier = born.tier;
+
+    if (tier === 3) {
+      // T3 Matcha Kitty: 1.8s gentle same-tier resonance field
+      born.resonanceTimer = 1.8;
+      spawnShockwave(mx, my, 105, '#a8e67e', 2.4);
+      spawnPopup(mx, my - born.r - 12, '🍵 猫耳共鸣!', '#c9f598', 12.5);
+    } else if (tier === 4) {
+      // T4 Lemon Honey Tart: vaporize up to 2 nearby T1 Blueberries
+      const targets = gameState.entities
+        .filter((e) => e.id !== born.id && !e.merged && !e.isWildcard && !e.isYarnBall && e.tier === 1)
+        .map((e) => ({ e, d: Math.hypot(e.x - mx, e.y - my) }))
+        .filter((it) => it.d <= 105 + eRadiusSafe(it.e))
+        .sort((a, b) => a.d - b.d)
+        .slice(0, 2);
+      if (targets.length > 0) {
+        const rmIds = new Set(targets.map((it) => it.e.id));
+        let gainPts = 0;
+        for (const it of targets) {
+          gainPts += Math.round(55 * app.getFeverMultiplier() * app.getSouffleAuraMult());
+          spawnSparkleBurst(it.e.x, it.e.y, '#fff08a', 14);
+          spawnShockwave(it.e.x, it.e.y, 44, '#ffe86b', 2.6);
+        }
+        gameState.entities = gameState.entities.filter((e) => !rmIds.has(e.id));
+        addScore(gainPts);
+        addSkillEnergy(targets.length * 8);
+        audio.playTraitTrigger(4);
+        wakeNeighborsAfterRemoval(mx, my, born.r);
+        spawnPopup(mx, my - born.r - 16, `🍋 气泡清杂×${targets.length}! +${gainPts}`, '#fff08a', 15);
+      }
+    } else if (tier === 5) {
+      // T5 Strawberry Daifuku: soft inward mochi vortex pulls neighbors gently together
+      let pulled = 0;
+      for (const other of gameState.entities) {
+        if (other.id === born.id || other.merged) continue;
+        const dx = mx - other.x;
+        const dy = my - other.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 8 && dist <= 145) {
+          const factor = 1 - dist / 145;
+          const pull = 120 + factor * 140;
+          other.vx += (dx / dist) * pull;
+          other.vy += (dy / dist) * pull * 0.65 - 28;
+          pulled++;
+        }
+      }
+      if (pulled > 0) {
+        audio.playTraitTrigger(5);
+        spawnShockwave(mx, my, 135, '#ff9ec2', 3.0);
+        spawnPopup(mx, my - born.r - 16, '🍓 软糯聚拢!', '#ffb8d6', 14);
+      }
+    } else if (tier === 6) {
+      // T6 Caramel Star Donut: 1.4s spinning mixer loosens wedged clusters
+      born.spinBoostTimer = 1.4;
+      born.spinBoostDir = Math.random() < 0.5 ? 1 : -1;
+      for (const other of gameState.entities) {
+        if (other.id === born.id || other.merged) continue;
+        const dx = other.x - mx;
+        const dy = other.y - my;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 1 && dist <= born.r + other.r + 42) {
+          // Tangential swirl impulse
+          const tx = (-dy / dist) * born.spinBoostDir;
+          const ty = (dx / dist) * born.spinBoostDir;
+          other.vx += tx * 115;
+          other.vy += ty * 75 - 45;
+        }
+      }
+      audio.playTraitTrigger(6);
+      spawnShockwave(mx, my, born.r * 1.9, '#eab074', 3.2);
+      spawnPopup(mx, my - born.r - 16, '🍩 焦糖陀螺!', '#ffd499', 14.5);
+    } else if (tier === 7) {
+      // T7 Cosmic Macaron: low-gravity buoyant lift
+      born.vy = Math.min(born.vy, -125);
+      spawnSparkleBurst(mx, my, '#d8c2ff', 16);
+      spawnPopup(mx, my - born.r - 16, '☁️ 云端微浮!', '#e5d4ff', 14.5);
+    } else if (tier === 8) {
+      // T8 Royal Mont Blanc: heavy hammer crush
+      triggerMontBlancCrush(born);
+    }
+  }
+
+  function eRadiusSafe(e) {
+    return e && typeof e.r === 'number' ? e.r : 16;
+  }
+
   // Step Physics World
   function stepPhysics(dt) {
     const magnetLv = app.getEffectiveMagnetLevel();
@@ -1527,9 +1903,51 @@ function createApp() {
     const magnetForce = magnetLv > 0 || isFever ? 420 + magnetLv * 280 + (isFever ? 640 : 0) : 0;
 
     const result = Physics.stepWorld(gameState.entities, JAR, dt, 1880, { magnetRange, magnetForce });
-    const { mergePairs, impacts, debugContacts, magnetLinks } = result;
+    const { mergePairs, impacts, wallBounces, meteorHits, debugContacts, magnetLinks } = result;
     gameState.lastDebugContacts = debugContacts;
     gameState.magnetLinks = magnetLinks || [];
+
+    // Glass wall bank-shot bounce feedback
+    if (wallBounces && wallBounces.length > 0) {
+      for (const wb of wallBounces) {
+        audio.playBankBounce(wb.count);
+        spawnSparkleBurst(wb.x, wb.y, '#9cf4ff', 10);
+        spawnShockwave(wb.x, wb.y, 44, '#9cf4ff', 2.6);
+        if (wb.count === 1) {
+          spawnPopup(wb.x + wb.nx * 24, wb.y - 10, '🎱 弹壁!', '#b4f6ff', 13);
+        }
+      }
+    }
+
+    // Mugi's Meteor Shot impact upgrade & blast
+    if (meteorHits && meteorHits.length > 0) {
+      for (const mh of meteorHits) {
+        const tgt = mh.target;
+        if (!tgt || tgt.merged) continue;
+        audio.playCritJump();
+        platform.vibrateShort('medium');
+        spawnSparkleBurst(mh.x, mh.y, '#ff9852', 24);
+        spawnShockwave(mh.x, mh.y, 128, '#ff9852', 4.4);
+        damageNearbyYarnBalls(mh.x, mh.y, 125, false);
+        gameState.screenShake = Math.max(gameState.screenShake, 5.0);
+        if (tgt.tier < 9) {
+          const nextTier = tgt.tier + 1;
+          const def = TIERS[nextTier - 1];
+          tgt.tier = nextTier;
+          Physics.configureBodyShape(tgt, getShapeDef(nextTier), def.radius, def.material);
+          Physics.clampBodyInsideJarPositional(tgt, JAR);
+          tgt.squishAmt = 0.26;
+          tgt.squishVel = 0;
+          const pts = Math.round(def.points * 1.5 * app.getFeverMultiplier() * app.getSouffleAuraMult());
+          addScore(pts);
+          unlockTier(nextTier);
+          triggerDessertTrait(tgt, tgt.x, tgt.y);
+          notifyTreatSynthesized(nextTier, tgt);
+          spawnPopup(tgt.x, tgt.y - tgt.r * 0.6, `🔥 重锤升阶! +${pts}`, '#ffba78', 18);
+          showComboBanner('🔥 元气重锤命中!', `${def.name} 强行升阶 +${pts}`, '#ffaa66');
+        }
+      }
+    }
 
     if (impacts.length > 0) {
       let strongest = impacts[0];
@@ -1538,6 +1956,13 @@ function createApp() {
         if (imp.speed > strongest.speed) strongest = imp;
         applyDirectionalSquish(imp.bodyB, imp.nx, imp.ny, imp.speed);
         if (imp.bodyA) applyDirectionalSquish(imp.bodyA, -imp.nx, -imp.ny, imp.speed);
+
+        // T8 Mont Blanc heavy landing crush
+        if (imp.bodyB && imp.bodyB.tier === 8 && !imp.bodyB.crushUsed && imp.speed > 240) {
+          imp.bodyB.crushUsed = true;
+          triggerMontBlancCrush(imp.bodyB);
+        }
+
         if (imp.speed > 135) {
           const defB = imp.bodyB.isYarnBall ? null : TIERS[imp.bodyB.tier - 1];
           const intensity = Math.min(1, (imp.speed - 110) / 520);
@@ -1568,16 +1993,19 @@ function createApp() {
       const critLv = app.getPerkLevel('critJump');
       const goldenLv = app.getPerkLevel('golden');
       const rainbowLv = app.getPerkLevel('rainbow');
-      const upComboBonus = SHOP_UPGRADES.find((u) => u.id === 'up_combo').values[app.getUpgradeLevel('up_combo')] || 0;
+      const upComboBonus = getComboUpgradeBonus();
       const isChimeEvent = !!(gameState.activeEvent && gameState.activeEvent.kind === 'chime');
       const chimeScoreMult = isChimeEvent ? 1.45 : 1.0;
       const chimeComboBonus = isChimeEvent ? 0.5 : 0;
+      const souffleAuraMult = app.getSouffleAuraMult();
 
       gameState.entities = gameState.entities.filter((e) => !e.merged);
       for (const [a, b] of mergePairs) {
         const isTwinWild = !!(a.isWildcard && b.isWildcard);
         const isWildMerge = !isTwinWild && !!(a.isWildcard || b.isWildcard);
         const isGoldenMerge = !!(a.isGolden || b.isGolden);
+        const isBankShot = !!((a.wallBounces > 0 && a.age < 2.4) || (b.wallBounces > 0 && b.age < 2.4));
+        const isMeteorMerge = !!(a.isMeteorShot || b.isMeteorShot);
 
         const targetBody = isWildMerge ? (a.isWildcard ? b : a) : null;
         const mx = targetBody ? targetBody.x : (a.x + b.x) * 0.5;
@@ -1596,13 +2024,50 @@ function createApp() {
         gameState.comboTimer = 1.72 + comboLv * 0.6 + upComboBonus + chimeComboBonus;
         if (gameState.comboCount > gameState.maxCombo) gameState.maxCombo = gameState.comboCount;
 
+        // Base skill recharge from merging
+        addSkillEnergy(5);
+
+        // Serve Cascade Avalanche detection!
+        let cascadeMult = 1.0;
+        let cascadeHitNum = 0;
+        if (gameState.serveCascadeTimer > 0) {
+          gameState.serveCascadeMerges++;
+          cascadeHitNum = gameState.serveCascadeMerges;
+          gameState.serveCascadeTimer = Math.max(gameState.serveCascadeTimer, 1.85);
+          cascadeMult = CASCADE_MULTIPLIERS[Math.min(CASCADE_MULTIPLIERS.length - 1, cascadeHitNum)];
+          if (cascadeHitNum > gameState.maxAvalancheRun) gameState.maxAvalancheRun = cascadeHitNum;
+          if (cascadeHitNum > (saveData.lifetimeStats.maxAvalancheEver || 0)) {
+            saveData.lifetimeStats.maxAvalancheEver = cascadeHitNum;
+            persistSaveData();
+          }
+          audio.playCascadeHit(cascadeHitNum);
+          if (cascadeHitNum === 2) {
+            addSkillEnergy(20);
+            const avDust = addRunStardust(12);
+            spawnPopup(JAR.canvasW / 2, 148, `🏔️ 抽底雪崩连爆! +20%技 · +${avDust}⭐`, '#9cf4ff', 17);
+          }
+        }
+
+        // Bank-Shot multiplier (extra bonus for Mugi patron & T2 Peach Puff)
+        let bankMult = 1.0;
+        if (isBankShot) {
+          const isT2Bank = !isWildMerge && !isTwinWild && a.tier === 2;
+          bankMult = 1.5 + (saveData.selectedPatron === 'mugi' ? 0.4 : 0) + (isT2Bank ? 0.3 : 0);
+          gameState.bankShotsLanded++;
+          saveData.lifetimeStats.bankShotsTotal = (saveData.lifetimeStats.bankShotsTotal || 0) + 1;
+          persistSaveData();
+          addSkillEnergy(10);
+        }
+
+        // Mugi ≥3 combo skill energy burst
         if (saveData.selectedPatron === 'mugi' && gameState.comboCount >= 3) {
+          addSkillEnergy(20);
           if (gameState.mode === 'rush') {
-            addScore(60);
-            spawnPopup(mx + 26, my - 26, '🍯 +60分!', '#ffd27a', 13);
+            addScore(80);
+            spawnPopup(mx + 26, my - 26, '🍯 +80分 · +20%技!', '#ffd27a', 13);
           } else {
             const mugiDust = addRunStardust(4);
-            spawnPopup(mx + 26, my - 26, `🍯 +${mugiDust}⭐`, '#ffd27a', 13);
+            spawnPopup(mx + 26, my - 26, `🍯 +${mugiDust}⭐ · +20%技`, '#ffd27a', 13);
           }
         }
 
@@ -1625,12 +2090,11 @@ function createApp() {
           grantNextRainbow(`${gameState.comboCount}连合奖励`);
         }
 
-        damageNearbyYarnBalls(mx, my, 95, false);
+        damageNearbyYarnBalls(mx, my, isMeteorMerge ? 135 : 95, false);
 
         if (isTwinWild) {
           const born = createEntity(5, mx, my, mvx, mvy - 30, true, 0, 0, { golden: true });
-          const zoneMult = a.inBakeZoneBonus || b.inBakeZoneBonus ? 1.35 : 1.0;
-          const pts = Math.round(320 * feverMult * comboBonus * chimeScoreMult * zoneMult);
+          const pts = Math.round(480 * feverMult * comboBonus * chimeScoreMult * bankMult * cascadeMult * souffleAuraMult);
           addScore(pts);
           addRunStardust(24);
           addFeverEnergy(45);
@@ -1639,7 +2103,7 @@ function createApp() {
           spawnSparkleBurst(mx, my, '#ffe378', 22);
           spawnShockwave(mx, my, 130, '#ff99cc', 4.5);
           spawnShockwave(mx, my, 92, '#ffe378', 3.2);
-          applyMergeShockwaveImpulse(mx, my, born.r, 5, born.id);
+          triggerDessertTrait(born, mx, my);
           gameState.hitstopTimer = Math.max(gameState.hitstopTimer, 0.048);
           gameState.screenShake = Math.max(gameState.screenShake, 5.5);
           gameState.jarFlash = Math.max(gameState.jarFlash, 0.65);
@@ -1651,7 +2115,7 @@ function createApp() {
 
         const baseTier = targetBody ? targetBody.tier : a.tier;
         if (baseTier < 9) {
-          const critChance = critLv * 0.14;
+          const critChance = critLv * 0.14 + (isMeteorMerge ? 0.5 : 0);
           const isCrit = baseTier <= 7 && critChance > 0 && Math.random() < critChance;
           const nextTier = Math.min(9, baseTier + (isCrit ? 2 : 1));
           const def = TIERS[nextTier - 1];
@@ -1660,43 +2124,50 @@ function createApp() {
 
           const goldMult = isGoldenMerge ? 2.5 : 1;
           const critMult = isCrit ? 2.0 : 1;
-          const zoneMult = a.inBakeZoneBonus || b.inBakeZoneBonus ? 1.35 : 1.0;
-          const pts = Math.round(def.points * feverMult * comboBonus * goldMult * critMult * chimeScoreMult * zoneMult);
+          const pts = Math.round(
+            def.points * feverMult * comboBonus * goldMult * critMult * chimeScoreMult * bankMult * cascadeMult * souffleAuraMult
+          );
           addScore(pts);
 
           let dustBase = nextTier >= 4 ? Math.max(1, Math.floor(nextTier / 2)) : 0;
           if (isGoldenMerge) dustBase += 12 + goldenLv * 10;
           const dustGain = dustBase > 0 ? addRunStardust(dustBase) : 0;
-          addFeverEnergy(5.5 + nextTier * 2.3 + (isGoldenMerge ? 26 : 0) + (isWildMerge ? 14 : 0));
+          addFeverEnergy(5.5 + nextTier * 2.3 + (isGoldenMerge ? 26 : 0) + (isWildMerge ? 14 : 0) + (isBankShot ? 10 : 0));
 
           if (isCrit) audio.playCritJump();
           else if (isWildMerge) audio.playWildcard();
           else if (isGoldenMerge) audio.playGoldenMerge();
           else audio.playMerge(nextTier, gameState.comboCount, false);
 
-          if (gameState.comboCount >= 3 || nextTier >= 6 || isCrit) {
+          if (gameState.comboCount >= 3 || nextTier >= 6 || isCrit || cascadeHitNum >= 2) {
             platform.vibrateShort('light');
           }
 
           spawnSparkleBurst(mx, my, isGoldenMerge ? '#ffe066' : def.color, 14 + nextTier * 2);
-          if (isWildMerge || isCrit) spawnSparkleBurst(mx, my, '#ff99cc', 16);
+          if (isWildMerge || isCrit || isBankShot) spawnSparkleBurst(mx, my, isBankShot ? '#9cf4ff' : '#ff99cc', 16);
           spawnShockwave(
             mx,
             my,
             def.radius * 1.9 + 26 + app.getPerkLevel('shockwave') * 12,
-            isWildMerge ? '#ff99cc' : isGoldenMerge ? '#ffe169' : def.color,
-            isCrit || isGoldenMerge ? 4.4 : 3.2
+            isWildMerge ? '#ff99cc' : isGoldenMerge ? '#ffe169' : isBankShot ? '#9cf4ff' : def.color,
+            isCrit || isGoldenMerge || isBankShot ? 4.4 : 3.2
           );
-          if (nextTier >= 5 || gameState.comboCount >= 2 || isCrit || isGoldenMerge) {
+          if (nextTier >= 5 || gameState.comboCount >= 2 || isCrit || isGoldenMerge || cascadeHitNum >= 1) {
             spawnShockwave(mx, my, def.radius * 1.3 + 16, '#fff4bf', 2.2);
           }
-          applyMergeShockwaveImpulse(mx, my, def.radius, nextTier, born.id);
 
-          if (isCrit || nextTier >= 7 || gameState.comboCount >= 4) {
+          // T5 Strawberry Daifuku pulls neighbors inward instead of pushing them outward
+          if (nextTier !== 5) {
+            applyMergeShockwaveImpulse(mx, my, def.radius, nextTier, born.id);
+          }
+          // Fire per-tier signature physics/gameplay trait!
+          triggerDessertTrait(born, mx, my);
+
+          if (isCrit || nextTier >= 7 || gameState.comboCount >= 4 || cascadeHitNum >= 3) {
             gameState.hitstopTimer = Math.max(gameState.hitstopTimer, 0.045);
             gameState.screenShake = Math.max(gameState.screenShake, 5.2);
             gameState.jarFlash = Math.max(gameState.jarFlash, 0.45);
-          } else if (isWildMerge || isGoldenMerge || nextTier >= 5 || gameState.comboCount >= 2) {
+          } else if (isWildMerge || isGoldenMerge || isBankShot || nextTier >= 5 || gameState.comboCount >= 2 || cascadeHitNum >= 1) {
             gameState.hitstopTimer = Math.max(gameState.hitstopTimer, 0.025);
             gameState.screenShake = Math.max(gameState.screenShake, 3.0);
           } else {
@@ -1706,7 +2177,17 @@ function createApp() {
           let label = isChimeEvent ? `🔔 +${pts}` : `+${pts}`;
           let popColor = isChimeEvent ? '#ffe778' : '#ffffff';
           let popSize = 15;
-          if (isCrit) {
+          if (cascadeHitNum >= 1) {
+            label = `🏔️ 雪崩×${cascadeMult.toFixed(1)}! +${pts}`;
+            popColor = '#9cf4ff';
+            popSize = 18 + Math.min(4, cascadeHitNum);
+            showComboBanner(`🏔️ 抽底雪崩 ${cascadeHitNum} 连!!`, `雪崩倍率 ×${cascadeMult.toFixed(1)} · +${pts}分`, '#9cf4ff');
+          } else if (isBankShot) {
+            label = `🎱 弹壁神球 ×${bankMult.toFixed(1)}! +${pts}`;
+            popColor = '#9cf4ff';
+            popSize = 18;
+            showComboBanner(`🎱 弹壁神球!`, `${def.name} ×${bankMult.toFixed(1)} · +10% 厨艺能`, '#9cf4ff');
+          } else if (isCrit) {
             label = `⚡ 奇迹跳阶+2! +${pts}`;
             popColor = '#ffe46b';
             popSize = 19;
@@ -1738,16 +2219,17 @@ function createApp() {
             gameState.soufflesMadeThisRun++;
             saveData.lifetimeStats.soufflesMade = (saveData.lifetimeStats.soufflesMade || 0) + 1;
             persistSaveData();
-            app.showToast('👑 奇迹诞生！合成传说级【星冠猫神舒芙蕾】！');
-            setPatronSpeech(app.activePatron, '哇！！星冠猫神舒芙蕾诞生了！整座甜品屋都在发光！', 5.0);
-            showComboBanner('👑 星冠猫神诞生!', '传说级至高甜点!', '#ffe46b');
+            app.showToast('👑 传说诞生！留罐全场 ×2.0，点击它即可主菜献礼 +3200！');
+            setPatronSpeech(app.activePatron, '哇！！星冠猫神舒芙蕾诞生了！留着翻倍还是直接献礼？', 5.0);
+            showComboBanner('👑 星冠猫神诞生!', '留罐全局 ×2.0 · 点击随时献礼!', '#ffe46b');
           }
           notifyTreatSynthesized(nextTier, born);
         } else {
-          const pts = Math.round((isWildMerge ? 1200 : 1800) * feverMult * comboBonus * chimeScoreMult);
+          const pts = Math.round((isWildMerge ? 1800 : 2800) * feverMult * comboBonus * chimeScoreMult * souffleAuraMult);
           addScore(pts);
           addRunStardust(55);
           addFeverEnergy(65);
+          addSkillEnergy(100, true);
           audio.playSupernova();
           platform.vibrateShort('heavy');
           spawnSparkleBurst(mx, my, '#ffe378', 48);
@@ -1774,9 +2256,10 @@ function createApp() {
     for (const e of gameState.entities) {
       e.age += dt;
       if (e.yarnHitFlash > 0) e.yarnHitFlash = Math.max(0, e.yarnHitFlash - dt);
-      if (e.age < 0.45 && e.vy > 140) {
+      const speed = Math.hypot(e.vx, e.vy);
+      if ((e.age < 0.75 && speed > 180) || e.isMeteorShot) {
         e.trail.push({ x: e.x, y: e.y });
-        if (e.trail.length > 6) e.trail.shift();
+        if (e.trail.length > 7) e.trail.shift();
       } else if (e.trail.length > 0) {
         e.trail.shift();
       }
@@ -1809,7 +2292,6 @@ function createApp() {
         ? Math.min(1, 0.35 + ((15.0 - gameState.rushTimer) / 15.0) * 0.65)
         : 0;
     audio.setDangerLevel(Math.max(overflowDanger, rushDanger));
-    gameState.waitingForLanding = isWaitingForLanding();
   }
 
   function updateDessertAnimations(dt) {
@@ -1980,6 +2462,20 @@ function createApp() {
     app.openModal('gameover');
   }
 
+  function spawnStarterBoard(mode) {
+    if (mode === 'zen') return;
+    // Pre-populate 4 settled starter treats so Turn 1 immediately has merge/bank-shot/serve decisions!
+    const layout = [
+      { tier: 2, x: 112, y: 446 },
+      { tier: 1, x: 184, y: 468 },
+      { tier: 3, x: 254, y: 454 },
+      { tier: 2, x: 328, y: 446 }
+    ];
+    for (const item of layout) {
+      createEntity(item.tier, item.x, item.y, 0, 0, false, 0, 0, { preSettled: true });
+    }
+  }
+
   function startNewRunFn(mode = gameState.mode) {
     gameState.mode = mode;
     gameState.running = true;
@@ -1991,13 +2487,24 @@ function createApp() {
     gameState.dropsMadeThisRun = 0;
     gameState.soufflesMadeThisRun = 0;
     gameState.yarnBrokenThisRun = 0;
+    gameState.servesCompleted = 0;
+    gameState.bankShotsLanded = 0;
+    gameState.serveCascadeTimer = 0;
+    gameState.serveCascadeMerges = 0;
+    gameState.maxAvalancheRun = 0;
 
     const upFeverLv = app.getUpgradeLevel('up_fever');
-    const startFeverEnergy = SHOP_UPGRADES.find((u) => u.id === 'up_fever').values[upFeverLv] || 0;
-    gameState.feverEnergy = startFeverEnergy;
+    const startEnergy = SHOP_UPGRADES.find((u) => u.id === 'up_fever').values[upFeverLv] || 0;
+    gameState.feverEnergy = startEnergy;
     gameState.feverTimer = 0;
     gameState.feverMaxDuration = 10.0;
     gameState.feverBonusUsed = 0;
+
+    gameState.skillEnergy = startEnergy;
+    gameState.stepSkillGain = 0;
+    gameState.activeSkillMode = null;
+    gameState.swapFirstEntityId = null;
+    gameState.nextShotMeteor = false;
 
     gameState.comboCount = 0;
     gameState.comboTimer = 0;
@@ -2009,9 +2516,8 @@ function createApp() {
 
     const upToolsLv = app.getUpgradeLevel('up_tools');
     gameState.tools = {
-      shake: 2 + (upToolsLv >= 1 ? 1 : 0),
-      fork: 2 + (upToolsLv >= 2 ? 1 : 0) + (saveData.selectedPatron === 'mikan' ? 1 : 0),
-      spoon: 1 + (upToolsLv >= 3 ? 1 : 0)
+      shake: 2 + (upToolsLv >= 1 ? 1 : 0) + (upToolsLv >= 3 ? 1 : 0),
+      spoon: 1 + (upToolsLv >= 2 ? 1 : 0)
     };
 
     gameState.activeToolMode = null;
@@ -2019,6 +2525,20 @@ function createApp() {
     gameState.prevDropX = 220;
     gameState.aimAngle = 0;
     gameState.dropSway = 0;
+    gameState.aim = {
+      active: false,
+      mode: 'drop',
+      anchorX: 220,
+      anchorY: 160,
+      curX: 220,
+      curY: 160,
+      power: 0,
+      launchVx: 0,
+      launchVy: 320,
+      angle: 0,
+      cancelled: false,
+      stretchBand: 0
+    };
     gameState.lastDebugContacts = [];
     gameState.magnetLinks = [];
     gameState.perks = {};
@@ -2028,11 +2548,11 @@ function createApp() {
     gameState.blessingSubText = '';
     gameState.blessingLockUntil = 0;
 
-    gameState.zenNextMilestone = 500;
+    gameState.zenNextMilestone = 600;
     gameState.rushTimer = 90.0;
     gameState.rushFinished = false;
     gameState.rushGustCooldown = 0;
-    gameState.rushNextMilestone = 1800;
+    gameState.rushNextMilestone = 2000;
     gameState.rushLastTickSec = 6;
 
     gameState.activeEvent = null;
@@ -2041,6 +2561,7 @@ function createApp() {
     gameState.nextEventTimer = 18.0;
     gameState.meteorGoldenLeft = 0;
     gameState.shootingStars = [];
+    gameState.flyingServes = [];
 
     gameState.hitstopTimer = 0;
     gameState.screenShake = 0;
@@ -2049,7 +2570,7 @@ function createApp() {
     gameState.comboBanner = null;
     gameState.dropsUntilRainbow = getRainbowPityBase();
     const firstNext = pickDropBundle(false);
-    gameState.curTier = 1 + Math.floor(Math.random() * 2);
+    gameState.curTier = 2; // Starts with bouncy Peach Puff ready to merge or bank-shot!
     gameState.curMeta = { wildcard: false, golden: false };
     gameState.nextTier = firstNext.tier;
     gameState.nextMeta = firstNext.meta;
@@ -2058,10 +2579,6 @@ function createApp() {
     gameState.canHoldThisTurn = true;
     gameState.dropCooldown = 0;
     gameState.lastDroppedId = null;
-    gameState.waitingForLanding = false;
-    gameState.lastDropX = null;
-    gameState.sameSpotStreak = 0;
-    rotateBakeZone(-1);
     gameState.dangerDuration = 0;
     gameState.jarShakeAmp = 0;
     gameState.entities = [];
@@ -2077,25 +2594,115 @@ function createApp() {
     audio.setDangerLevel(0);
     audio.unlock();
 
+    spawnStarterBoard(mode);
+    initOrders();
+
     const activePatron = app.activePatron;
     if (mode === 'chef') {
-      generateOrder();
+      setPatronSpeech(activePatron, activePatron.greet, 5.0);
     } else if (mode === 'rush') {
-      gameState.order = null;
-      setPatronSpeech(activePatron, `⚡ 90秒狂欢开跑！${activePatron.shortName}助阵冲分，溢罐吹散不秒死！`, 5.0);
+      setPatronSpeech(activePatron, `⚡ 90秒弹射狂欢！点击金铃出餐直接 +3.0s 续命，下拉拉弓打弹壁！`, 5.0);
     } else {
-      gameState.order = null;
-      setPatronSpeech(activePatron, `悠闲经典开启！${activePatron.shortName}陪你慢慢叠搭拿三选一祝福～`, 5.0);
+      setPatronSpeech(activePatron, `🍵 悠闲经典开启！下拉拉弓可撞墙弹射，享受 9 阶甜品异能吧～`, 5.0);
     }
   }
 
-  // Tool Canvas Targeting Click
-  function findEntityAt(x, y) {
+  // Tool & Active Chef Skill Canvas Targeting Click
+  function findEntityAt(x, y, pad = 7) {
     for (let i = gameState.entities.length - 1; i >= 0; i--) {
       const e = gameState.entities[i];
-      if (Physics.pointInBody(e, x, y, 5)) return e;
+      if (e.merged) continue;
+      if (Physics.pointInBody(e, x, y, pad)) return e;
+      if (Math.hypot(e.x - x, e.y - y) <= e.r + pad * 0.7) return e;
     }
     return null;
+  }
+
+  function handleSkillCanvasClick(lx, ly) {
+    const target = findEntityAt(lx, ly, 10);
+    if (!target) {
+      app.showToast('请点击罐内的甜品目标哦～');
+      return;
+    }
+    if (target.isYarnBall) {
+      app.showToast('🧶 毛线球无法被厨艺技选中，请在附近合成 2 次或摇一摇震碎！');
+      return;
+    }
+
+    if (gameState.activeSkillMode === 'scoop') {
+      if (target.isWildcard || target.tier > 5) {
+        app.showToast('🥄 【金勺捞底】只能捞出 1~5 阶甜品哦！');
+        return;
+      }
+      gameState.skillEnergy = 0;
+      gameState.entities = gameState.entities.filter((e) => e.id !== target.id);
+      wakeNeighborsAfterRemoval(target.x, target.y, target.r);
+      startCascadeWindow(target.x, target.y);
+
+      // Preserve current held treat into HOLD if empty, then put scooped treat into hand
+      if (gameState.holdTier === null) {
+        gameState.holdTier = gameState.curTier;
+        gameState.holdMeta = { ...gameState.curMeta };
+      }
+      gameState.curTier = target.tier;
+      gameState.curMeta = { wildcard: false, golden: !!target.isGolden };
+      clampDropX();
+
+      audio.playChefSkill('mikan');
+      platform.vibrateShort('medium');
+      spawnSparkleBurst(target.x, target.y, '#ffe47a', 24);
+      spawnShockwave(target.x, target.y, target.r * 2.2 + 30, '#ffe47a', 3.6);
+      spawnPopup(target.x, target.y - 14, `🥄 金勺捞底!`, '#ffe680', 18);
+      showComboBanner('🥄 金勺捞底发动!', '原位触发抽底雪崩 · 甜品已捞回罐口', '#ffe47a');
+      cancelToolMode();
+      return;
+    }
+
+    if (gameState.activeSkillMode === 'swap_1') {
+      gameState.swapFirstEntityId = target.id;
+      gameState.activeSkillMode = 'swap_2';
+      audio.playTilt();
+      spawnShockwave(target.x, target.y, target.r + 20, '#d8b4ff', 2.8);
+      app.showToast(`🌙 已选中【${target.isWildcard ? '彩虹糖' : TIERS[target.tier - 1].name}】，请点击第 2 颗甜品互换位置！`);
+      return;
+    }
+
+    if (gameState.activeSkillMode === 'swap_2') {
+      const first = gameState.entities.find((e) => e.id === gameState.swapFirstEntityId && !e.merged);
+      if (!first) {
+        gameState.activeSkillMode = 'swap_1';
+        gameState.swapFirstEntityId = null;
+        return;
+      }
+      if (target.id === first.id) {
+        app.showToast('请选择另一颗不同的甜品进行位置互换哦～');
+        return;
+      }
+
+      gameState.skillEnergy = 0;
+      const fx = first.x;
+      const fy = first.y;
+      first.x = target.x;
+      first.y = target.y;
+      target.x = fx;
+      target.y = fy;
+      first.vx *= 0.2;
+      first.vy = -45;
+      target.vx *= 0.2;
+      target.vy = -45;
+      Physics.clampBodyInsideJarPositional(first, JAR);
+      Physics.clampBodyInsideJarPositional(target, JAR);
+
+      audio.playChefSkill('luna');
+      platform.vibrateShort('medium');
+      spawnSparkleBurst(first.x, first.y, '#d8b4ff', 20);
+      spawnSparkleBurst(target.x, target.y, '#ffe47a', 20);
+      spawnShockwave(first.x, first.y, first.r + 36, '#d8b4ff', 3.4);
+      spawnShockwave(target.x, target.y, target.r + 36, '#ffe47a', 3.4);
+      spawnPopup((first.x + target.x) * 0.5, Math.min(first.y, target.y) - 16, '🌙 星月移形互换!', '#e5caff', 18);
+      showComboBanner('🌙 星月移形!', '两颗甜品瞬间空间对调!', '#d8b4ff');
+      cancelToolMode();
+    }
   }
 
   function handleToolCanvasClick(lx, ly) {
@@ -2109,29 +2716,13 @@ function createApp() {
       return;
     }
 
-    if (gameState.activeToolMode === 'fork') {
-      if (target.isWildcard || target.tier > 4) {
-        app.showToast('🫧 泡泡叉只能消除 1~4 阶普通甜品哦！');
-        return;
-      }
-      if (gameState.tools.fork <= 0) return;
-      gameState.tools.fork--;
-      audio.playTool('fork');
-      spawnSparkleBurst(target.x, target.y, '#9be8ff', 18);
-      spawnShockwave(target.x, target.y, target.r * 1.9, '#9be8ff', 3);
-      spawnPopup(target.x, target.y, '🫧 消除!', '#b4f4ff', 15);
-      gameState.entities = gameState.entities.filter((e) => e.id !== target.id);
-      cancelToolMode();
-      return;
-    }
-
     if (gameState.activeToolMode === 'spoon') {
       if (target.isWildcard) {
         app.showToast('🌈 彩虹万能糖碰到任意甜品就会自动升阶，无需升阶勺！');
         return;
       }
       if (target.tier >= 9) {
-        app.showToast('👑 已经是最高阶星冠猫神舒芙蕾啦！');
+        app.showToast('👑 已经是最高阶星冠猫神舒芙蕾啦！点击它即可直接献礼！');
         return;
       }
       if (gameState.tools.spoon <= 0) return;
@@ -2146,7 +2737,7 @@ function createApp() {
       target.squishVel = 0;
       target.squishAngle = Math.PI * 0.5;
 
-      const pts = Math.round(def.points * app.getFeverMultiplier());
+      const pts = Math.round(def.points * app.getFeverMultiplier() * app.getSouffleAuraMult());
       addScore(pts);
       unlockTier(nextTier);
       if (nextTier === 9) {
@@ -2158,15 +2749,17 @@ function createApp() {
       spawnSparkleBurst(target.x, target.y, '#ffe16e', 22);
       spawnShockwave(target.x, target.y, target.r * 2.0, '#ffe16e', 3.4);
       spawnPopup(target.x, target.y - target.r * 0.5, `✨ 升阶! +${pts}`, '#ffe470', 17);
+      triggerDessertTrait(target, target.x, target.y);
       notifyTreatSynthesized(nextTier, target);
       cancelToolMode();
     }
   }
 
-  // Unified Pointer & Touch Event Handling
+  // Unified Pointer & Touch Event Handling (4.0 Dual-Mode Aim + Tap-to-Serve Arbitration)
   let pendingUiHit = null;
   let uiDragMoved = false;
   let dragStartPos = { x: 0, y: 0, lastY: 0, active: false };
+  let pendingServe = { entityId: null, downLx: 0, downLy: 0 };
   let aimingState = { active: false, pointerType: 'touch', lastStableX: 220 };
 
   function toJarLogical(x, y) {
@@ -2177,6 +2770,64 @@ function createApp() {
     };
   }
 
+  function updateAimVector(lx, ly, pointerType) {
+    const aim = gameState.aim;
+    aim.curX = lx;
+    aim.curY = ly;
+    const cancelled = pointerType === 'touch' && ly < JAR.neckY - 20;
+    aim.cancelled = cancelled;
+    gameState.touchAim.cancelled = cancelled;
+
+    const dragDy = ly - aim.anchorY;
+    if (dragDy >= 26 && !cancelled) {
+      // Pull-down Direct-Aim Slingshot / Bank-Shot Mode!
+      aim.mode = 'sling';
+      const originX = gameState.dropX;
+      const originY = JAR.dropY + 4;
+      const vxDir = lx - originX;
+      const vyDir = Math.max(24, ly - originY);
+      const rawAng = Math.atan2(vxDir, vyDir);
+      const clampedAng = Math.max(-1.08, Math.min(1.08, rawAng)); // ±62° cone downward
+      const pullDist = Math.hypot(lx - aim.anchorX, ly - aim.anchorY);
+      const power = Math.max(0.12, Math.min(1.0, (pullDist - 24) / 115));
+      const speed = 420 + 660 * power;
+      aim.angle = clampedAng;
+      aim.power = power;
+      aim.launchVx = Math.sin(clampedAng) * speed;
+      aim.launchVy = Math.cos(clampedAng) * speed;
+
+      const band = power >= 0.8 ? 3 : power >= 0.5 ? 2 : power >= 0.25 ? 1 : 0;
+      if (band !== aim.stretchBand && band > 0) {
+        aim.stretchBand = band;
+        audio.playSlingStretch(power);
+      }
+    } else {
+      // Quick Vertical Drop Mode (zero friction)
+      aim.mode = 'drop';
+      aim.power = 0;
+      aim.angle = 0;
+      aim.launchVx = 0;
+      aim.launchVy = 320;
+      aim.stretchBand = 0;
+      updateDropPointerX(lx);
+      aim.anchorX = gameState.dropX;
+      aimingState.lastStableX = gameState.dropX;
+      gameState.touchAim.lastStableX = gameState.dropX;
+    }
+  }
+
+  function resetAimingState() {
+    aimingState.active = false;
+    pendingServe.entityId = null;
+    gameState.aim.active = false;
+    gameState.aim.mode = 'drop';
+    gameState.aim.power = 0;
+    gameState.aim.cancelled = false;
+    gameState.aim.stretchBand = 0;
+    gameState.touchAim.active = false;
+    gameState.touchAim.cancelled = false;
+  }
+
   platform.bindPointerEvents(canvas, {
     onDown: ({ x, y, pointerType }) => {
       audio.unlock();
@@ -2184,27 +2835,45 @@ function createApp() {
       dragStartPos = { x, y, lastY: y, active: true };
       uiDragMoved = false;
       pendingUiHit = hit;
+      pendingServe.entityId = null;
 
-      if (app.activeModal) {
-        return;
-      }
-
-      if (hit) {
+      if (app.activeModal || hit) {
         return;
       }
 
       if (!app.isLobbyOpen && gameState.running && !gameState.over && !gameState.paused) {
         const { lx, ly } = toJarLogical(x, y);
+        if (gameState.activeSkillMode) {
+          handleSkillCanvasClick(lx, ly);
+          return;
+        }
         if (gameState.activeToolMode) {
           handleToolCanvasClick(lx, ly);
           return;
         }
         if (ly >= -30 && ly <= JAR.floorY + 24 && lx >= -30 && lx <= JAR.canvasW + 30) {
+          // Check Tap-to-Serve arbitration first!
+          const servable = findServableEntityAt(lx, ly, 12);
+          if (servable) {
+            pendingServe = { entityId: servable.id, downLx: lx, downLy: ly };
+            return;
+          }
           updateDropPointerX(lx);
           aimingState = { active: true, pointerType, lastStableX: gameState.dropX };
+          gameState.aim.active = true;
+          gameState.aim.mode = 'drop';
+          gameState.aim.anchorX = gameState.dropX;
+          gameState.aim.anchorY = ly;
+          gameState.aim.curX = lx;
+          gameState.aim.curY = ly;
+          gameState.aim.power = 0;
+          gameState.aim.launchVx = 0;
+          gameState.aim.launchVy = 320;
+          gameState.aim.stretchBand = 0;
+          gameState.aim.cancelled = pointerType === 'touch' && ly < JAR.neckY - 20;
           if (pointerType === 'touch') {
             gameState.touchAim.active = true;
-            gameState.touchAim.cancelled = ly < JAR.neckY - 22;
+            gameState.touchAim.cancelled = gameState.aim.cancelled;
             gameState.touchAim.lastStableX = gameState.dropX;
           }
         }
@@ -2228,18 +2897,31 @@ function createApp() {
 
       if (!app.isLobbyOpen && gameState.running && !gameState.over && !gameState.paused) {
         const { lx, ly } = toJarLogical(x, y);
-        if (gameState.activeToolMode) {
+        if (gameState.activeToolMode || gameState.activeSkillMode) {
           const hitEntity = findEntityAt(lx, ly);
           gameState.hoveredEntityId = hitEntity ? hitEntity.id : null;
           return;
         }
-        if (aimingState.active) {
-          if (pointerType === 'touch') {
-            gameState.touchAim.cancelled = ly < JAR.neckY - 22;
+        // If dragging >= 12px off a servable treat, seamlessly hand off to aiming!
+        if (pendingServe.entityId !== null) {
+          if (Math.hypot(lx - pendingServe.downLx, ly - pendingServe.downLy) >= 12) {
+            const startX = clampDropXVal(pendingServe.downLx);
+            const startY = pendingServe.downLy;
+            pendingServe.entityId = null;
+            updateDropPointerX(startX);
+            aimingState = { active: true, pointerType, lastStableX: gameState.dropX };
+            gameState.aim.active = true;
+            gameState.aim.mode = 'drop';
+            gameState.aim.anchorX = gameState.dropX;
+            gameState.aim.anchorY = startY;
+            gameState.aim.stretchBand = 0;
+            if (pointerType === 'touch') gameState.touchAim.active = true;
+            updateAimVector(lx, ly, pointerType);
           }
-          updateDropPointerX(lx);
-          aimingState.lastStableX = gameState.dropX;
-          gameState.touchAim.lastStableX = gameState.dropX;
+          return;
+        }
+        if (aimingState.active) {
+          updateAimVector(lx, ly, pointerType);
         } else if (pointerType === 'mouse' && lx >= 0 && lx <= JAR.canvasW && ly >= -30 && ly <= JAR.floorY + 20) {
           updateDropPointerX(lx);
         }
@@ -2265,32 +2947,40 @@ function createApp() {
           pendingUiHit.onClick();
         }
         pendingUiHit = null;
-        aimingState.active = false;
-        gameState.touchAim.active = false;
-        gameState.touchAim.cancelled = false;
+        resetAimingState();
+        return;
+      }
+
+      if (pendingServe.entityId !== null) {
+        const serveId = pendingServe.entityId;
+        pendingServe.entityId = null;
+        serveEntityById(serveId);
         return;
       }
 
       if (aimingState.active) {
         const { lx, ly } = toJarLogical(x, y);
-        const cancelled = pointerType === 'touch' && (gameState.touchAim.cancelled || ly < JAR.neckY - 22);
+        const isSling = gameState.aim.mode === 'sling';
+        const vx = isSling ? gameState.aim.launchVx : 0;
+        const vy = isSling ? gameState.aim.launchVy : 320;
+        const cancelled = pointerType === 'touch' && (gameState.aim.cancelled || ly < JAR.neckY - 20);
         const targetX =
-          pointerType === 'touch' && Math.abs(lx - aimingState.lastStableX) <= 10 ? aimingState.lastStableX : lx;
-        aimingState.active = false;
-        gameState.touchAim.active = false;
-        gameState.touchAim.cancelled = false;
+          !isSling && pointerType === 'touch' && Math.abs(lx - aimingState.lastStableX) <= 10
+            ? aimingState.lastStableX
+            : lx;
+        resetAimingState();
         if (cancelled) return;
-        updateDropPointerX(targetX);
-        dropCurrentTreat();
+        if (!isSling) {
+          updateDropPointerX(targetX);
+        }
+        dropCurrentTreat(vx, vy, isSling);
       }
     },
 
     onCancel: () => {
       dragStartPos.active = false;
       pendingUiHit = null;
-      aimingState.active = false;
-      gameState.touchAim.active = false;
-      gameState.touchAim.cancelled = false;
+      resetAimingState();
     },
 
     onWheel: (_x, _y, deltaY) => {
@@ -2298,7 +2988,7 @@ function createApp() {
         app.modalScrollY = Math.max(0, Math.min(app.modalMaxScroll, app.modalScrollY + deltaY * 0.6));
         return;
       }
-      if (!app.isLobbyOpen && gameState.running && !gameState.over && !gameState.paused && !gameState.activeToolMode) {
+      if (!app.isLobbyOpen && gameState.running && !gameState.over && !gameState.paused && !gameState.activeToolMode && !gameState.activeSkillMode) {
         adjustAimAngle(deltaY > 0 ? 0.14 : -0.14);
       }
     }
@@ -2351,14 +3041,20 @@ function createApp() {
       adjustAimAngle(0.14);
     } else if (key === ' ' || key === 'ArrowDown' || key === 'Enter') {
       if (ev && ev.preventDefault) ev.preventDefault();
-      dropCurrentTreat();
+      const ang = gameState.aimAngle;
+      if (Math.abs(ang) > 0.08) {
+        const spd = 760;
+        dropCurrentTreat(Math.sin(ang) * spd, Math.cos(ang) * spd, true);
+      } else {
+        dropCurrentTreat(0, 320, false);
+      }
     } else if (key === 'h' || key === 'H' || key === 'Shift') {
       if (ev && ev.preventDefault) ev.preventDefault();
       app.swapHoldPocket();
     } else if (key === 'b' || key === 'B') {
       if (gameState.pendingBlessings > 0) app.openBlessingModal();
     } else if (key === '1') app.armOrUseTool('shake');
-    else if (key === '2') app.armOrUseTool('fork');
+    else if (key === '2' || key === 'f' || key === 'F') app.activateChefSkill();
     else if (key === '3') app.armOrUseTool('spoon');
   });
 
@@ -2384,6 +3080,13 @@ function createApp() {
       if (gameState.rushGustCooldown > 0) gameState.rushGustCooldown = Math.max(0, gameState.rushGustCooldown - dt);
       gameState.dropSway *= Math.exp(-dt * 11);
       if (Math.abs(gameState.dropSway) < 0.001) gameState.dropSway = 0;
+
+      if (gameState.serveCascadeTimer > 0) {
+        gameState.serveCascadeTimer = Math.max(0, gameState.serveCascadeTimer - dt);
+        if (gameState.serveCascadeTimer === 0) {
+          gameState.serveCascadeMerges = 0;
+        }
+      }
 
       if (gameState.comboTimer > 0) {
         gameState.comboTimer = Math.max(0, gameState.comboTimer - dt);
@@ -2446,6 +3149,11 @@ function createApp() {
       }
     }
 
+    for (let i = gameState.flyingServes.length - 1; i >= 0; i--) {
+      const fs = gameState.flyingServes[i];
+      fs.t += dt;
+      if (fs.t >= fs.dur) gameState.flyingServes.splice(i, 1);
+    }
     for (let i = gameState.shootingStars.length - 1; i >= 0; i--) {
       const st = gameState.shootingStars[i];
       st.life -= dt;
@@ -2529,8 +3237,8 @@ function createApp() {
   );
   platform.setupShare(() => ({
     title: gameState.score > 0
-      ? `🌙 我在星夜吃茶拿下了 ${gameState.score} 分！来一起烤制星冠猫神舒芙蕾～`
-      : '🌙 星夜吃茶 · 喵呜甜品合合乐｜手绘治愈系物理合成小游戏'
+      ? `🌙 我在星夜吃茶拿下了 ${gameState.score} 分！来一起弹壁合成 + 抽底雪崩出餐吧～`
+      : '🌙 星夜吃茶 · 喵呜甜品合合乐｜手绘弹射物理合成小游戏'
   }));
 
   // Expose Debug Inspection Hooks for Automated E2E Testing
@@ -2550,6 +3258,15 @@ function createApp() {
       score: gameState.score,
       stardust: gameState.stardust,
       dropsMadeThisRun: gameState.dropsMadeThisRun,
+      servesCompleted: gameState.servesCompleted,
+      ordersCompleted: gameState.ordersCompleted,
+      bankShotsLanded: gameState.bankShotsLanded,
+      serveCascadeTimer: +gameState.serveCascadeTimer.toFixed(2),
+      serveCascadeMerges: gameState.serveCascadeMerges,
+      maxAvalancheRun: gameState.maxAvalancheRun,
+      skillEnergy: +gameState.skillEnergy.toFixed(1),
+      activeSkillMode: gameState.activeSkillMode,
+      nextShotMeteor: gameState.nextShotMeteor,
       feverEnergy: +gameState.feverEnergy.toFixed(1),
       feverTimer: +gameState.feverTimer.toFixed(2),
       rushTimer: +gameState.rushTimer.toFixed(2),
@@ -2563,17 +3280,21 @@ function createApp() {
       pendingBlessings: gameState.pendingBlessings,
       dropsUntilRainbow: gameState.dropsUntilRainbow,
       canHoldThisTurn: gameState.canHoldThisTurn,
+      aim: { ...gameState.aim },
       aimAngle: +gameState.aimAngle.toFixed(3),
-      lastDropX: gameState.lastDropX,
-      sameSpotStreak: gameState.sameSpotStreak,
-      bakeZone: gameState.bakeZone ? { ...gameState.bakeZone } : null,
-      waitingForLanding: isWaitingForLanding(),
       curTier: gameState.curTier,
       curMeta: { ...gameState.curMeta },
       nextTier: gameState.nextTier,
       nextMeta: { ...gameState.nextMeta },
       holdTier: gameState.holdTier,
       holdMeta: gameState.holdMeta ? { ...gameState.holdMeta } : null,
+      orders: (gameState.orders || []).map((o) => ({
+        uid: o.uid,
+        kind: o.kind,
+        freshSteps: o.freshSteps,
+        completed: o.completed,
+        slots: o.slots.map((s) => ({ tier: s.tier, done: s.done }))
+      })),
       debugPhysics: gameState.debugPhysics,
       jarBox: app.lastJarBox,
       assetsLoaded: sprites.loadedCount,
@@ -2591,6 +3312,9 @@ function createApp() {
         isWildcard: !!e.isWildcard,
         isGolden: !!e.isGolden,
         isYarnBall: !!e.isYarnBall,
+        isServable: !!findServableMatch(e),
+        wallBounces: e.wallBounces || 0,
+        gravityScale: e.gravityScale || 1,
         yarnHp: e.isYarnBall ? e.yarnHp : 0,
         x: +e.x.toFixed(2),
         y: +e.y.toFixed(2),
@@ -2606,6 +3330,20 @@ function createApp() {
     },
     addBankStardust: (amt) => {
       saveData.bankStardust = Math.max(0, (saveData.bankStardust || 0) + (Number(amt) || 0));
+      persistSaveData();
+    },
+    chargeSkill: () => addSkillEnergy(100, true),
+    spawnTestEntity: (tier, x, y, opts = {}) => {
+      const ent = createEntity(tier, x, y, opts.vx || 0, opts.vy || 0, false, 0, 0, {
+        preSettled: opts.preSettled !== false,
+        golden: !!opts.golden
+      });
+      return ent.id;
+    },
+    serveById: (id) => serveEntityById(id),
+    selectPatron: (id) => {
+      if (!saveData.unlockedPatrons.includes(id)) saveData.unlockedPatrons.push(id);
+      saveData.selectedPatron = id;
       persistSaveData();
     },
     triggerEvent: (kind) => triggerShopEvent(kind),

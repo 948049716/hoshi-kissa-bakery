@@ -398,35 +398,35 @@ function renderHelpModal(ctx, metrics, app, hits) {
 
   const cards = [
     {
-      title: '🧲 物理合成与操控',
+      title: '🎱 双模投料：快投 × 拉弓弹壁',
       lines: [
-        '• 拖动或点击玻璃罐区域瞄准，松手即可投放；按住上划出罐口可取消投放！',
-        '• 点击右上方「HOLD」随时与下一颗交换暂存，提前铺垫大连锁。',
-        '• 同阶甜品靠近触发「甜蜜星磁」与爆震气浪，锁定金圈即触即发！'
+        '• 轻点/横滑 = 快速垂投；按住下拉 ≥26px 切【拉弓弹壁斜抛】',
+        '• 碰壁反弹命中合成触发【弹壁神球 ×1.5】，上划罐口取消投放',
+        '• 点击右上方「HOLD」随时交换暂存，灵活编排连合节奏'
       ]
     },
     {
-      title: '🌈 特殊甜品 & 🎁 祝福连抽',
+      title: '🔔 真·点选出餐 & 🏔️ 抽底雪崩',
       lines: [
-        '• 彩虹万能糖：碰任意甜品立刻升阶 +1，双彩虹碰出黄金草莓大福奇迹！',
-        '• 黄金甜点：触发 2.5× 暴击积分、大量星尘与狂热充能。',
-        '• 堆叠祝福：获得祝福不打断操作，随时点罐底 🎁 按钮连续三选一。'
+        '• 符合双桌订单的甜品在罐内亮起【🔔上菜】，直接点击端走！',
+        '• 抽底后 2.6 秒内塌方合成享【雪崩 ×1.4~×3.2】，2 连再充技！',
+        '• 90 秒狂欢出餐直接 +3.0 秒续命；9 阶猫神留罐 ×2 或点它献礼'
       ]
     },
     {
-      title: '⚡ 三大模式 & 🌠 突发事件',
+      title: '✨ 9 阶甜品异能 & 🌟 招牌主动技',
       lines: [
-        '• 90秒狂欢：极速连投、1.85× 狂热充能；溢罐触发星风吹散减时不秒死。',
-        '• 流星许愿夜 / 黄金烘焙钟：连续镀金甜点或 14 秒全合成 +45% 得分暴击！',
-        '• 猫咪捣蛋时间：毛线球旁 95px 内合成 2 次或用【摇一摇】震碎爆星尘与高分！'
+        '• 蜜桃高弹、抹茶柔磁、柠檬清蓝莓、大福聚拢、甜甜圈旋搅、马卡龙微浮、蒙布朗压碎',
+        '• 出餐充满底部中央【招牌技】：蜜柑捞底、星兔互换、柴柴重锤',
+        '• 点击「📖 图鉴」可随时查阅每一阶甜品的物理特性与异能'
       ]
     },
     {
-      title: '🏪 永久星尘 & 吃茶小铺',
+      title: '🏪 永久星尘 & 突发店铺事件',
       lines: [
-        '• 每局打烊将积分与余尘折算为永久星尘存入银行（≥5步投放保底 15⭐）。',
-        '• 在小铺永久升级「厨房天赋」、解锁樱花/深海主题罐与眠眠星兔/蜂蜜柴柴！',
-        '• 下方 3 个魔法道具：1 摇一摇、2 泡泡叉（消1~4阶）、3 升阶勺（+1阶）。'
+        '• 打烊折算永久星尘存银行，在小铺升级天赋、解锁主题罐与搭档',
+        '• 流星许愿夜 / 黄金烘焙钟：镀金甜点雨或 14 秒全合成 +45%',
+        '• 猫咪捣蛋毛线球：附近合成 2 次或摇一摇震碎爆星尘与高分'
       ]
     }
   ];
@@ -439,7 +439,7 @@ function renderHelpModal(ctx, metrics, app, hits) {
   const isWide = f.iw >= 500;
   const cols = isWide ? 2 : 1;
   const cardW = (f.iw - 10 - (cols - 1) * 9) / cols;
-  const cardH = isWide ? 148 : 112;
+  const cardH = isWide ? 156 : 118;
   const rows = Math.ceil(cards.length / cols);
   const totalH = rows * cardH + (rows - 1) * 8;
   app.modalMaxScroll = Math.max(0, totalH - bodyH);
@@ -455,7 +455,7 @@ function renderHelpModal(ctx, metrics, app, hits) {
     UI.drawFitText(ctx, cards[i].title, cx + 10, cy + 16, cardW - 20, 12.5, 10, 900, '#4A2C2A');
     let ly = cy + 28;
     for (let j = 0; j < cards[i].lines.length; j++) {
-      ly += UI.drawWrappedText(ctx, cards[i].lines[j], cx + 10, ly, cardW - 20, 13.5, UI.fontStr(10.5, 600), '#724640') + 2;
+      ly += UI.drawWrappedText(ctx, cards[i].lines[j], cx + 10, ly, cardW - 20, 13.5, UI.fontStr(10.2, 600), '#724640') + 2;
     }
   }
   endModalScrollBody(ctx, clipRect.x, clipRect.y, clipRect.w, clipRect.h, app.modalScrollY, app.modalMaxScroll);
@@ -464,7 +464,7 @@ function renderHelpModal(ctx, metrics, app, hits) {
 function renderCompendiumModal(ctx, metrics, app, hits) {
   const f = renderModalBackdropAndFrame(ctx, metrics, app, 660, metrics.height * 0.84, hits);
   const { saveData, sprites } = app;
-  UI.drawFitText(ctx, `📖 星夜甜品图鉴 (已解锁 ${saveData.unlockedTiers.length}/9)`, f.ix, f.iy + 14, f.iw - 66, 15.5, 11.5, 900, '#4A2C2A');
+  UI.drawFitText(ctx, `📖 甜品异能图鉴 (已解锁 ${saveData.unlockedTiers.length}/9)`, f.ix, f.iy + 14, f.iw - 66, 15.5, 11.5, 900, '#4A2C2A');
   const closeW = 58;
   UI.drawPillButton(ctx, f.ix + f.iw - closeW, f.iy + 1, closeW, 28, { style: 'wood', text: '✕ 关闭', fontSize: 11.5 });
   hits.add('modal_close', f.ix + f.iw - closeW, f.iy + 1, closeW, 28, () => app.closeModal());
@@ -477,7 +477,7 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
   const cols = f.iw >= 500 ? 3 : 2;
   const gap = 8;
   const cardW = (f.iw - 8 - (cols - 1) * gap) / cols;
-  const cardH = 128;
+  const cardH = 136;
   const rows = Math.ceil(TIERS.length / cols);
   const totalH = rows * cardH + (rows - 1) * gap;
   app.modalMaxScroll = Math.max(0, totalH - bodyH);
@@ -505,22 +505,25 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
       unlocked ? '#c59c62' : '#b29770',
       1.8
     );
-    UI.drawFitText(ctx, `${t.tier} 阶 · ${t.points} 分`, cx + cardW * 0.5, cy + 14, cardW - 14, 10, 8.5, 800, '#8f4e1b', 'center');
+    UI.drawFitText(ctx, `${t.tier}阶 · 合+${t.points} · 出+${t.servePoints}`, cx + cardW * 0.5, cy + 13, cardW - 12, 9.5, 8, 800, '#8f4e1b', 'center');
     if (sprites.base[t.tier]) {
       ctx.save();
       if (!unlocked) ctx.globalAlpha = 0.25;
-      UI.drawContainImage(ctx, sprites.base[t.tier], cx + cardW * 0.5, cy + 44, 42, 42);
+      UI.drawContainImage(ctx, sprites.base[t.tier], cx + cardW * 0.5, cy + 42, 40, 40);
       ctx.restore();
     }
-    UI.drawFitText(ctx, unlocked ? t.name : '??? 未解锁', cx + cardW * 0.5, cy + 74, cardW - 12, 12, 9.5, 900, '#4A2C2A', 'center');
+    UI.drawFitText(ctx, unlocked ? `${t.name}` : '??? 未解锁', cx + cardW * 0.5, cy + 70, cardW - 12, 11.5, 9.5, 900, '#4A2C2A', 'center');
+    if (unlocked && t.traitName) {
+      UI.drawFitText(ctx, `✦ 异能：${t.traitName}`, cx + cardW * 0.5, cy + 84, cardW - 14, 9.5, 8, 800, '#b04914', 'center');
+    }
     UI.drawWrappedText(
       ctx,
-      unlocked ? t.lore : '继续向上合成即可解锁图鉴故事！',
+      unlocked ? (t.traitDesc || t.lore) : '继续向上合成即可解锁甜品异能！',
       cx + 8,
-      cy + 85,
+      cy + 94,
       cardW - 16,
       12,
-      UI.fontStr(9.5, 600),
+      UI.fontStr(9.3, 600),
       '#724640',
       'left',
       3

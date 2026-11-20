@@ -1556,6 +1556,68 @@ class StarlightAudio {
     }
   }
 
+  playSlingStretch(power = 0.5) {
+    const f = 340 + Math.max(0, Math.min(1, power)) * 320;
+    this._playTone(f, 'sine', 0.036, 0.048, 0.003, f * 1.12);
+  }
+
+  playBankBounce(count = 1) {
+    const base = count >= 2 ? 1318.51 : 1046.5;
+    this._playTone(base, 'sine', 0.095, 0.13, 0.003, base * 1.15);
+    this._playTone(base * 2.0, 'triangle', 0.04, 0.07, 0.002);
+  }
+
+  playServeBell() {
+    // Classic brass patisserie service bell + bright ascending confirmation
+    this._playTone(1567.98, 'sine', 0.13, 0.34, 0.003);
+    this._playTone(3135.96, 'sine', 0.045, 0.18, 0.002);
+    setTimeout(() => this._playTone(1318.51, 'triangle', 0.095, 0.22, 0.005), 55);
+    setTimeout(() => this._playTone(1975.53, 'sine', 0.095, 0.28, 0.005), 110);
+  }
+
+  playCascadeHit(step = 1) {
+    const scale = [659.25, 783.99, 987.77, 1174.66, 1318.51, 1567.98];
+    const f = scale[Math.min(scale.length - 1, Math.max(0, step - 1))];
+    this._playTone(f, 'triangle', 0.125, 0.24, 0.004, f * 1.04);
+    this._playTone(f * 1.5, 'sine', 0.08, 0.22, 0.006);
+  }
+
+  playTraitTrigger(tier = 4) {
+    if (tier === 4) {
+      // Lemon fizz vaporize pop
+      this._playTone(740, 'sine', 0.09, 0.11, 0.004, 1380);
+      setTimeout(() => this._playTone(1174.66, 'triangle', 0.075, 0.14, 0.004, 1760), 45);
+    } else if (tier === 5) {
+      // Daifuku soft inward pull whoosh
+      this._playTone(587.33, 'sine', 0.09, 0.22, 0.008, 392);
+      setTimeout(() => this._playTone(783.99, 'sine', 0.075, 0.18, 0.006), 60);
+    } else if (tier === 6) {
+      // Caramel donut spin whirr
+      this._playTone(440, 'triangle', 0.085, 0.18, 0.006, 880);
+      setTimeout(() => this._playTone(659.25, 'sine', 0.07, 0.18, 0.006, 987.77), 55);
+    } else if (tier === 8) {
+      // Mont Blanc heavy hammer crush thump
+      this._playTone(150, 'triangle', 0.16, 0.24, 0.004, 72);
+      this._playTone(320, 'sine', 0.09, 0.16, 0.004, 180);
+    } else {
+      this._playTone(880, 'sine', 0.08, 0.18, 0.005, 1174.66);
+    }
+  }
+
+  playChefSkill(patronId = 'mikan') {
+    const chord =
+      patronId === 'luna'
+        ? [587.33, 880.0, 1174.66, 1760.0]
+        : patronId === 'mugi'
+        ? [523.25, 659.25, 783.99, 1318.51]
+        : [659.25, 783.99, 1046.5, 1567.98];
+    chord.forEach((f, i) => {
+      setTimeout(() => {
+        this._playTone(f, i % 2 === 0 ? 'triangle' : 'sine', 0.105, 0.26, 0.005);
+      }, i * 44);
+    });
+  }
+
   getDebugState() {
     const info = this.getTrackInfo();
     return {

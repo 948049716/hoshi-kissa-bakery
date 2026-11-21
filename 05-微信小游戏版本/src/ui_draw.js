@@ -1,10 +1,26 @@
 /**
- * Canvas 2D Storybook UI Drawing Primitives, Safe Geometry Helpers,
- * CJK Text Wrapping, Procedural Special Candy Drawing & Hit/Scroll Registry.
+ * Canvas 2D Storybook UI Design System, Drawing Primitives, Safe Geometry Helpers,
+ * CJK Text Wrapping, Atlas Icon Renderer, Unified Cards/Banners & Hit Registry.
  */
 'use strict';
 
+const { UI_ATLAS_RECTS } = require('./constants');
+
 const FONT_FAMILY = 'PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif';
+
+// Unified Starlight Kissa Palette Tokens
+const KISSA_THEME = {
+  ink: '#4A2C2A',
+  inkSoft: '#6E463B',
+  inkMuted: '#8C6853',
+  creamLight: '#FFFDF7',
+  creamMid: '#F8ECD4',
+  creamDeep: '#EDD7B0',
+  borderWarm: '#C69F69',
+  brassLight: '#FFE799',
+  brassMid: '#E4A83C',
+  brassDark: '#9A5B17'
+};
 
 function fontStr(px, weight = 700) {
   return `${weight} ${Math.round(px)}px ${FONT_FAMILY}`;
@@ -100,15 +116,50 @@ function drawContainImage(ctx, img, cx, cy, maxW, maxH) {
   ctx.drawImage(img, cx - dw * 0.5, cy - dh * 0.5, dw, dh);
 }
 
-function drawWoodBoard(ctx, x, y, w, h, radius = 14, withRivets = true) {
+/**
+ * Draw a storybook illustrated icon from `sprites.uiAtlas` or standalone UI sprites.
+ */
+function drawUiIcon(ctx, sprites, iconKey, cx, cy, size, alpha = 1, rot = 0) {
+  if (!sprites || !iconKey || size <= 0) return false;
+
+  // Standalone decorative sprites check
+  let standalone = null;
+  if (iconKey === 'serve_bell') standalone = sprites.serveBell;
+  else if (iconKey === 'shop_sign') standalone = sprites.shopSign;
+  else if (iconKey === 'yarn_ball') standalone = sprites.yarnBall;
+
+  if (standalone && standalone.width > 0 && standalone.height > 0) {
+    ctx.save();
+    if (alpha < 1) ctx.globalAlpha *= alpha;
+    ctx.translate(cx, cy);
+    if (rot) ctx.rotate(rot);
+    drawContainImage(ctx, standalone, 0, 0, size, size);
+    ctx.restore();
+    return true;
+  }
+
+  const rect = UI_ATLAS_RECTS && UI_ATLAS_RECTS[iconKey];
+  const atlas = sprites.uiAtlas;
+  if (!rect || !atlas || !atlas.width || !atlas.height) return false;
+
   ctx.save();
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.42)';
+  if (alpha < 1) ctx.globalAlpha *= alpha;
+  ctx.translate(cx, cy);
+  if (rot) ctx.rotate(rot);
+  ctx.drawImage(atlas, rect.x, rect.y, rect.w, rect.h, -size * 0.5, -size * 0.5, size, size);
+  ctx.restore();
+  return true;
+}
+
+function drawWoodBoard(ctx, x, y, w, h, radius = 15, withRivets = true) {
+  ctx.save();
+  ctx.shadowColor = 'rgba(26, 12, 5, 0.38)';
   ctx.shadowBlur = 16;
   ctx.shadowOffsetY = 6;
   const g = ctx.createLinearGradient(x, y, x, y + h);
-  g.addColorStop(0, '#c0854b');
-  g.addColorStop(0.55, '#8c5529');
-  g.addColorStop(1, '#693b1a');
+  g.addColorStop(0, '#be844c');
+  g.addColorStop(0.52, '#8b5429');
+  g.addColorStop(1, '#683a19');
   ctx.fillStyle = g;
   roundRectPath(ctx, x, y, w, h, radius);
   ctx.fill();
@@ -116,38 +167,49 @@ function drawWoodBoard(ctx, x, y, w, h, radius = 14, withRivets = true) {
 
   ctx.save();
   roundRectPath(ctx, x, y, w, h, radius);
-  ctx.lineWidth = 2.5;
-  ctx.strokeStyle = '#4A2C2A';
+  ctx.lineWidth = 2.4;
+  ctx.strokeStyle = '#432418';
   ctx.stroke();
 
-  // Inner top sheen
-  ctx.strokeStyle = 'rgba(255, 224, 166, 0.36)';
-  ctx.lineWidth = 1.5;
-  roundRectPath(ctx, x + 2, y + 2, w - 4, h - 4, Math.max(4, radius - 2));
+  // Inner warm brass-wood bevel sheen
+  ctx.strokeStyle = 'rgba(255, 228, 174, 0.38)';
+  ctx.lineWidth = 1.4;
+  roundRectPath(ctx, x + 2.2, y + 2.2, w - 4.4, h - 4.4, Math.max(4, radius - 2));
   ctx.stroke();
 
-  if (withRivets && w > 60) {
-    const rivetR = w < 220 ? 3.5 : 4.5;
-    const rxOffsets = [x + 11, x + w - 11];
-    const ry = y + 8;
+  if (withRivets && w > 64) {
+    const rivetR = w < 220 ? 3.4 : 4.2;
+    const rxOffsets = [x + 12, x + w - 12];
+    const ry = y + 9;
     for (let i = 0; i < rxOffsets.length; i++) {
       const rx = rxOffsets[i];
       const rg = ctx.createRadialGradient(rx - 1, ry - 1, 0.5, rx, ry, rivetR);
-      rg.addColorStop(0, '#ffe69b');
+      rg.addColorStop(0, '#fff0b3');
       rg.addColorStop(1, '#a97023');
       ctx.fillStyle = rg;
       ctx.beginPath();
       ctx.arc(rx, ry, rivetR, 0, Math.PI * 2);
       ctx.fill();
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = '#4A2C2A';
+      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = '#432418';
       ctx.stroke();
     }
   }
   ctx.restore();
 }
 
-function drawParchmentSheet(ctx, x, y, w, h, radius = 10, topCol = '#fbf4df', botCol = '#f0dfba', borderCol = '#4A2C2A', lineWidth = 2) {
+function drawParchmentSheet(
+  ctx,
+  x,
+  y,
+  w,
+  h,
+  radius = 11,
+  topCol = '#fcf6e6',
+  botCol = '#f2e2c1',
+  borderCol = '#4A2C2A',
+  lineWidth = 2
+) {
   ctx.save();
   const g = ctx.createLinearGradient(x, y, x, y + h);
   g.addColorStop(0, topCol);
@@ -155,7 +217,17 @@ function drawParchmentSheet(ctx, x, y, w, h, radius = 10, topCol = '#fbf4df', bo
   ctx.fillStyle = g;
   roundRectPath(ctx, x, y, w, h, radius);
   ctx.fill();
+
+  // Subtle top inner parchment highlight for cohesive depth
+  if (h > 22 && w > 24) {
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+    ctx.lineWidth = 1.1;
+    roundRectPath(ctx, x + 1.5, y + 1.5, w - 3, h - 3, Math.max(3, radius - 1.5));
+    ctx.stroke();
+  }
+
   if (lineWidth > 0) {
+    roundRectPath(ctx, x, y, w, h, radius);
     ctx.lineWidth = lineWidth;
     ctx.strokeStyle = borderCol;
     ctx.stroke();
@@ -163,56 +235,251 @@ function drawParchmentSheet(ctx, x, y, w, h, radius = 10, topCol = '#fbf4df', bo
   ctx.restore();
 }
 
+/**
+ * Unified Storybook Card surface used across Lobby, Shop, Prep Shop, Guide & Modals.
+ */
+function drawKissaCard(ctx, x, y, w, h, opts = {}) {
+  const radius = opts.radius !== undefined ? opts.radius : 12;
+  const tone = opts.tone || 'cream'; // 'cream' | 'selected' | 'equipped' | 'amber' | 'soft'
+  let topCol = '#fffdf8';
+  let botCol = '#f7ead0';
+  let borderCol = opts.borderColor || '#c59e68';
+  let lipCol = 'rgba(138, 92, 42, 0.22)';
+  let borderW = opts.lineWidth || 1.8;
+
+  if (tone === 'selected') {
+    topCol = '#fff9e0';
+    botCol = '#ffe394';
+    borderCol = '#4A2C2A';
+    lipCol = '#965d1c';
+    borderW = 2.2;
+  } else if (tone === 'equipped') {
+    topCol = '#f2fbf0';
+    botCol = '#d8efd2';
+    borderCol = '#437a42';
+    lipCol = 'rgba(56, 108, 54, 0.35)';
+    borderW = 2.0;
+  } else if (tone === 'amber') {
+    topCol = '#fff8dc';
+    botCol = '#fbe4a4';
+    borderCol = '#c08424';
+    lipCol = 'rgba(154, 96, 22, 0.26)';
+  } else if (tone === 'soft') {
+    topCol = 'rgba(255, 250, 238, 0.72)';
+    botCol = 'rgba(244, 228, 198, 0.78)';
+    borderCol = '#cca874';
+    lipCol = null;
+    borderW = 1.4;
+  }
+
+  ctx.save();
+  if (lipCol) {
+    ctx.fillStyle = lipCol;
+    roundRectPath(ctx, x, y + 2, w, h, radius);
+    ctx.fill();
+  }
+
+  const g = ctx.createLinearGradient(x, y, x, y + h);
+  g.addColorStop(0, opts.topCol || topCol);
+  g.addColorStop(1, opts.botCol || botCol);
+  ctx.fillStyle = g;
+  roundRectPath(ctx, x, y, w, h, radius);
+  ctx.fill();
+
+  if (h >= 26) {
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
+    ctx.lineWidth = 1.1;
+    roundRectPath(ctx, x + 1.5, y + 1.5, w - 3, h - 3, Math.max(3, radius - 1.5));
+    ctx.stroke();
+  }
+
+  roundRectPath(ctx, x, y, w, h, radius);
+  ctx.lineWidth = borderW;
+  ctx.strokeStyle = borderCol;
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * Unified Micro-Badge / Tag Pill so all status & category chips look cohesive.
+ */
+function drawTagBadge(ctx, x, y, w, h, text, tone = 'amber', fontSize = 9.5) {
+  const palettes = {
+    amber: { top: '#ffebb0', bot: '#f5c762', border: '#a8681c', text: '#5e2e08' },
+    berry: { top: '#ff9685', bot: '#eb6b58', border: '#4A2C2A', text: '#fffdf8' },
+    sage: { top: '#e4f5de', bot: '#bfe0b5', border: '#3c703a', text: '#214d20' },
+    cocoa: { top: '#59331d', bot: '#3d2112', border: '#dfa855', text: '#ffefc8' },
+    soft: { top: '#f6e8cc', bot: '#ead4ad', border: '#b89058', text: '#694127' },
+    plum: { top: '#f8e6f0', bot: '#edd0e1', border: '#944a6d', text: '#632644' },
+    frost: { top: '#e6f6fc', bot: '#cbe8f6', border: '#3f7896', text: '#1d4c66' }
+  };
+  const pal = palettes[tone] || palettes.amber;
+  const r = Math.min(h * 0.5, 10);
+
+  ctx.save();
+  const g = ctx.createLinearGradient(x, y, x, y + h);
+  g.addColorStop(0, pal.top);
+  g.addColorStop(1, pal.bot);
+  ctx.fillStyle = g;
+  roundRectPath(ctx, x, y, w, h, r);
+  ctx.fill();
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = pal.border;
+  ctx.stroke();
+
+  drawFitText(ctx, text, x + w * 0.5, y + h * 0.5 + 0.4, w - 8, fontSize, 7.5, 800, pal.text, 'center', 'middle');
+  ctx.restore();
+}
+
+/**
+ * Unified Floating Notice / Toast / Skill Prompt Banner.
+ */
+function drawNoticeBanner(ctx, x, y, w, h, opts = {}) {
+  const r = opts.radius !== undefined ? opts.radius : Math.min(h * 0.5, 15);
+  const borderCol = opts.borderColor || '#e8b65c';
+  ctx.save();
+  ctx.shadowColor = 'rgba(18, 8, 3, 0.34)';
+  ctx.shadowBlur = 10;
+  ctx.shadowOffsetY = 3;
+  const g = ctx.createLinearGradient(x, y, x, y + h);
+  g.addColorStop(0, opts.topCol || 'rgba(62, 34, 19, 0.95)');
+  g.addColorStop(1, opts.botCol || 'rgba(40, 21, 11, 0.96)');
+  ctx.fillStyle = g;
+  roundRectPath(ctx, x, y, w, h, r);
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  roundRectPath(ctx, x, y, w, h, r);
+  ctx.lineWidth = 1.9;
+  ctx.strokeStyle = borderCol;
+  ctx.stroke();
+
+  let textLeft = x + 12;
+  if (opts.icon && opts.sprites) {
+    const icS = opts.iconSize || Math.min(20, h - 6);
+    if (drawUiIcon(ctx, opts.sprites, opts.icon, x + 10 + icS * 0.5, y + h * 0.5, icS)) {
+      textLeft = x + 14 + icS;
+    }
+  }
+  const rightPad = opts.rightReserve || 12;
+  if (opts.text) {
+    const availW = Math.max(24, x + w - rightPad - textLeft);
+    const align = opts.align || (opts.icon ? 'left' : 'center');
+    const tx = align === 'center' ? textLeft + availW * 0.5 : textLeft;
+    drawFitText(
+      ctx,
+      opts.text,
+      tx,
+      y + h * 0.5 + 0.5,
+      availW,
+      opts.fontSize || 11.5,
+      9,
+      800,
+      opts.textColor || '#fff3cf',
+      align,
+      'middle'
+    );
+  }
+  ctx.restore();
+}
+
+/**
+ * Unified Currency Capsule (Stardust `icon_stardust` or Recipe Coins `icon_coin`).
+ */
+function drawCurrencyChip(ctx, x, y, w, h, sprites, iconKey, valText, opts = {}) {
+  const isDark = opts.style === 'dark';
+  drawPillButton(ctx, x, y, w, h, {
+    style: isDark ? 'dark' : opts.style || 'wood',
+    radius: h * 0.5
+  });
+  const icS = Math.min(h - 4, 22);
+  const icCx = x + 6 + icS * 0.5;
+  const drew = drawUiIcon(ctx, sprites, iconKey, icCx, y + h * 0.5, icS);
+  const tx = drew ? icCx + icS * 0.5 + 3 : x + 8;
+  const tw = Math.max(16, x + w - tx - 7);
+  drawFitText(
+    ctx,
+    String(valText),
+    tx + tw * 0.5,
+    y + h * 0.5 + 0.5,
+    tw,
+    opts.fontSize || 12,
+    9,
+    900,
+    isDark ? '#fff2cf' : '#592e0d',
+    'center',
+    'middle'
+  );
+}
+
 function drawPillButton(ctx, x, y, w, h, opts = {}) {
   const style = opts.style || 'wood';
-  const radius = opts.radius !== undefined ? opts.radius : Math.min(h * 0.5, 18);
+  const radius = opts.radius !== undefined ? opts.radius : Math.min(h * 0.5, 16);
   const disabled = !!opts.disabled;
 
-  let topCol = '#f8e9c7';
-  let botCol = '#e7c98f';
+  let topCol = '#fdf2da';
+  let botCol = '#e9cd99';
   let borderCol = '#4A2C2A';
-  let lipCol = '#5b3317';
+  let lipCol = '#6e401d';
   let textCol = '#4A2C2A';
+  let sheenCol = 'rgba(255, 255, 255, 0.62)';
   let borderW = 2;
 
   if (style === 'cta') {
-    topCol = '#ffe484';
-    botCol = '#df8c22';
-    lipCol = '#8f4e11';
+    topCol = '#ffe994';
+    botCol = '#e39224';
+    lipCol = '#8a4a10';
     textCol = '#421e08';
-    borderW = 2.5;
+    sheenCol = 'rgba(255, 252, 224, 0.78)';
+    borderW = 2.4;
+  } else if (style === 'walnut') {
+    topCol = '#9e6435';
+    botCol = '#6d3e1c';
+    borderCol = '#3d2010';
+    lipCol = '#42210e';
+    textCol = '#fff4dc';
+    sheenCol = 'rgba(255, 226, 174, 0.34)';
+    borderW = 2.1;
   } else if (style === 'active') {
-    topCol = '#ffe395';
-    botCol = '#efb44c';
-    lipCol = '#7a4614';
+    topCol = '#ffea9f';
+    botCol = '#eeb44a';
+    lipCol = '#7e4814';
+    sheenCol = 'rgba(255, 252, 226, 0.72)';
   } else if (style === 'equipped') {
-    topCol = '#daf3e2';
-    botCol = '#b4e2c2';
-    borderCol = '#2f724c';
-    lipCol = '#2f724c';
-    textCol = '#1f5c3a';
+    topCol = '#e6f5df';
+    botCol = '#bfe0b4';
+    borderCol = '#386b35';
+    lipCol = '#386b35';
+    textCol = '#214d20';
+    sheenCol = 'rgba(255, 255, 255, 0.65)';
   } else if (style === 'card') {
-    topCol = '#fffcf3';
-    botCol = '#f7e9c7';
-    borderCol = '#bc9358';
-    lipCol = null;
+    topCol = '#fffdf8';
+    botCol = '#f7ebd2';
+    borderCol = '#c49d67';
+    lipCol = 'rgba(138, 92, 42, 0.22)';
+    borderW = 1.8;
   } else if (style === 'cardSelected') {
-    topCol = '#fff5cb';
-    botCol = '#ffd97c';
+    topCol = '#fff8dc';
+    botCol = '#ffdf88';
     borderCol = '#4A2C2A';
-    lipCol = '#8a5418';
+    lipCol = '#8d5518';
+    borderW = 2.2;
   } else if (style === 'dark') {
-    topCol = 'rgba(64, 36, 18, 0.92)';
-    botCol = 'rgba(42, 23, 12, 0.94)';
-    borderCol = '#c69148';
-    lipCol = null;
-    textCol = '#fce9c4';
+    topCol = 'rgba(68, 38, 20, 0.94)';
+    botCol = 'rgba(44, 24, 12, 0.96)';
+    borderCol = '#d59f50';
+    lipCol = 'rgba(22, 10, 4, 0.55)';
+    textCol = '#fcecc9';
+    sheenCol = 'rgba(255, 228, 172, 0.22)';
+    borderW = 1.8;
   } else if (style === 'danger') {
-    topCol = '#e94f43';
-    botCol = '#c53226';
+    topCol = '#e85b4d';
+    botCol = '#c2392c';
     borderCol = '#4A2C2A';
     lipCol = '#6b1812';
     textCol = '#ffffff';
+    sheenCol = 'rgba(255, 226, 220, 0.38)';
   }
 
   ctx.save();
@@ -221,7 +488,7 @@ function drawPillButton(ctx, x, y, w, h, opts = {}) {
   // 3D bevel bottom lip
   if (lipCol && !disabled) {
     ctx.fillStyle = lipCol;
-    roundRectPath(ctx, x, y + 2.5, w, h, radius);
+    roundRectPath(ctx, x, y + 2.3, w, h, radius);
     ctx.fill();
   }
 
@@ -232,23 +499,88 @@ function drawPillButton(ctx, x, y, w, h, opts = {}) {
   roundRectPath(ctx, x, y, w, h, radius);
   ctx.fill();
 
+  // Inner top highlight sheen
+  if (sheenCol && h >= 18 && w >= 18) {
+    ctx.strokeStyle = sheenCol;
+    ctx.lineWidth = 1.1;
+    roundRectPath(ctx, x + 1.5, y + 1.4, w - 3, h - 2.8, Math.max(2, radius - 1.4));
+    ctx.stroke();
+  }
+
+  roundRectPath(ctx, x, y, w, h, radius);
   ctx.lineWidth = borderW;
   ctx.strokeStyle = borderCol;
   ctx.stroke();
 
-  if (opts.text) {
+  const hasIcon = !!(opts.icon && opts.sprites);
+  const hasText = !!opts.text;
+
+  if (hasIcon && !hasText) {
+    const icS = opts.iconSize || Math.min(w, h) * 0.68;
+    const drew = drawUiIcon(ctx, opts.sprites, opts.icon, x + w * 0.5, y + h * 0.5, icS, opts.mutedSlash ? 0.65 : 1);
+    if (!drew && opts.fallbackText) {
+      ctx.font = fontStr(opts.fontSize || 13, 800);
+      ctx.fillStyle = opts.textColor || textCol;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(opts.fallbackText, x + w * 0.5, y + h * 0.5 + 0.5);
+    }
+    if (opts.mutedSlash) {
+      ctx.save();
+      ctx.strokeStyle = '#4A2C2A';
+      ctx.lineWidth = 3.2;
+      ctx.lineCap = 'round';
+      const sl = icS * 0.34;
+      ctx.beginPath();
+      ctx.moveTo(x + w * 0.5 - sl, y + h * 0.5 - sl);
+      ctx.lineTo(x + w * 0.5 + sl, y + h * 0.5 + sl);
+      ctx.stroke();
+      ctx.strokeStyle = '#ef6456';
+      ctx.lineWidth = 1.8;
+      ctx.stroke();
+      ctx.restore();
+    }
+  } else if (hasText) {
     const fs = opts.fontSize || Math.max(11, Math.min(15, h * 0.44));
     let curFs = fs;
-    ctx.font = fontStr(curFs, opts.fontWeight || 800);
-    const maxTw = w - 12;
-    while (curFs > 9 && ctx.measureText(opts.text).width > maxTw) {
+    const weight = opts.fontWeight || 800;
+    const icS = hasIcon ? (opts.iconSize || Math.min(h - 7, curFs * 1.42)) : 0;
+    const icGap = hasIcon ? 4.5 : 0;
+    const maxTw = Math.max(12, w - 12 - (hasIcon ? icS + icGap : 0));
+
+    ctx.font = fontStr(curFs, weight);
+    while (curFs > 8.5 && ctx.measureText(opts.text).width > maxTw) {
       curFs -= 0.5;
-      ctx.font = fontStr(curFs, opts.fontWeight || 800);
+      ctx.font = fontStr(curFs, weight);
     }
+    const tw = ctx.measureText(opts.text).width;
+    const totalW = (hasIcon ? icS + icGap : 0) + tw;
+    const startX = x + (w - totalW) * 0.5;
+
+    let drewIcon = false;
+    if (hasIcon) {
+      drewIcon = drawUiIcon(ctx, opts.sprites, opts.icon, startX + icS * 0.5, y + h * 0.5, icS);
+      if (drewIcon && opts.mutedSlash) {
+        const icx = startX + icS * 0.5;
+        const icy = y + h * 0.5;
+        const sl = icS * 0.34;
+        ctx.save();
+        ctx.strokeStyle = '#ef6456';
+        ctx.lineWidth = 2.0;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(icx - sl, icy - sl);
+        ctx.lineTo(icx + sl, icy + sl);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
     ctx.fillStyle = opts.textColor || textCol;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(opts.text, x + w * 0.5, y + h * 0.5 + 0.5);
+    const textCx = drewIcon ? startX + icS + icGap + tw * 0.5 : x + w * 0.5;
+    ctx.fillText(opts.text, textCx, y + h * 0.5 + 0.5);
   }
 
   ctx.restore();
@@ -539,6 +871,7 @@ class HitRegistry {
 
 module.exports = {
   FONT_FAMILY,
+  KISSA_THEME,
   fontStr,
   hslToRgbColor,
   roundRectPath,
@@ -548,8 +881,13 @@ module.exports = {
   drawHeartIcon,
   drawCoverImage,
   drawContainImage,
+  drawUiIcon,
   drawWoodBoard,
   drawParchmentSheet,
+  drawKissaCard,
+  drawTagBadge,
+  drawNoticeBanner,
+  drawCurrencyChip,
   drawPillButton,
   wrapText,
   drawWrappedText,

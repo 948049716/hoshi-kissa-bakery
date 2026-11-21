@@ -11,6 +11,7 @@ const {
   WILDCARD_RADIUS,
   YARN_BALL_RADIUS,
   ASSET_PATHS,
+  MODE_GUIDES,
   BLESSINGS,
   PATRONS,
   CASCADE_MULTIPLIERS,
@@ -33,6 +34,9 @@ const StarlightAudio = require('./audio');
 const UI = require('./ui_draw');
 const ScreensUI = require('./screens_ui');
 const ModalsUI = require('./modals_ui');
+
+const LAUNCH_X = JAR.canvasW * 0.5;
+const LAUNCH_Y = JAR.dropY + 4;
 
 function getShapeDef(tier) {
   return PHYSICS_SHAPES[`tier_${tier}`];
@@ -67,6 +71,8 @@ function createApp() {
       equippedTheme: 'amber',
       unlockedThemes: ['amber'],
       shopUpgrades: { up_tools: 0, up_fever: 0, up_combo: 0, up_dust: 0 },
+      seenModeGuides: { chef: false, rush: false, zen: false },
+      seenTips: { prep_shop: false, glaze_ring: false, frozen: false },
       lifetimeStats: {
         runsPlayed: 0,
         ordersCompleted: 0,
@@ -98,6 +104,8 @@ function createApp() {
     const upRaw = parsed.shopUpgrades && typeof parsed.shopUpgrades === 'object' ? parsed.shopUpgrades : {};
     const clampLv = (v) => Math.max(0, Math.min(3, Math.floor(Number(v) || 0)));
     const stRaw = parsed.lifetimeStats && typeof parsed.lifetimeStats === 'object' ? parsed.lifetimeStats : {};
+    const sgRaw = parsed.seenModeGuides && typeof parsed.seenModeGuides === 'object' ? parsed.seenModeGuides : {};
+    const tpRaw = parsed.seenTips && typeof parsed.seenTips === 'object' ? parsed.seenTips : {};
 
     let bankStardust;
     if (typeof parsed.bankStardust === 'number' && Number.isFinite(parsed.bankStardust)) {
@@ -129,6 +137,16 @@ function createApp() {
         up_combo: clampLv(upRaw.up_combo),
         up_dust: clampLv(upRaw.up_dust)
       },
+      seenModeGuides: {
+        chef: !!sgRaw.chef,
+        rush: !!sgRaw.rush,
+        zen: !!sgRaw.zen
+      },
+      seenTips: {
+        prep_shop: !!tpRaw.prep_shop,
+        glaze_ring: !!tpRaw.glaze_ring,
+        frozen: !!tpRaw.frozen
+      },
       lifetimeStats: {
         runsPlayed: Math.max(0, Math.floor(Number(stRaw.runsPlayed) || 0)),
         ordersCompleted: Math.max(0, Math.floor(Number(stRaw.ordersCompleted) || 0)),
@@ -159,6 +177,10 @@ function createApp() {
     hero: null,
     shopSign: null,
     yarnBall: null,
+    uiAtlas: null,
+    titlePlaque: null,
+    patronStage: null,
+    serveBell: null,
     tools: { shake: null, fork: null, spoon: null },
     patrons: {},
     base: {},
@@ -183,6 +205,10 @@ function createApp() {
     track(platform.loadImage(ASSET_PATHS.hero).then((img) => (sprites.hero = img)));
     track(platform.loadImage(ASSET_PATHS.shopSign).then((img) => (sprites.shopSign = img)));
     track(platform.loadImage(ASSET_PATHS.yarnBall).then((img) => (sprites.yarnBall = img)));
+    track(platform.loadImage(ASSET_PATHS.uiAtlas).then((img) => (sprites.uiAtlas = img)));
+    track(platform.loadImage(ASSET_PATHS.titlePlaque).then((img) => (sprites.titlePlaque = img)));
+    track(platform.loadImage(ASSET_PATHS.patronStage).then((img) => (sprites.patronStage = img)));
+    track(platform.loadImage(ASSET_PATHS.serveBell).then((img) => (sprites.serveBell = img)));
     track(platform.loadImage(ASSET_PATHS.tools.shake).then((img) => (sprites.tools.shake = img)));
     track(platform.loadImage(ASSET_PATHS.tools.fork).then((img) => (sprites.tools.fork = img)));
     track(platform.loadImage(ASSET_PATHS.tools.spoon).then((img) => (sprites.tools.spoon = img)));
@@ -363,8 +389,10 @@ function createApp() {
     saveData,
     gameState,
     isLobbyOpen: true,
-    activeModal: null, // 'shop' | 'career' | 'help' | 'compendium' | 'blessing' | 'gameover' | null
+    activeModal: null, // 'shop' | 'career' | 'help' | 'mode_guide' | 'compendium' | 'blessing' | 'gameover' | null
     activeShopTab: 'upgrades',
+    guideMode: 'chef',
+    guideStep: 0,
     lobbySpeechIndex: 0,
     lobbyBounceT: 0,
     modalScrollY: 0,
@@ -493,6 +521,55 @@ function createApp() {
       if (this.activeModal === 'gameover' || this.activeModal === 'prep_shop' || this.activeModal === 'shift_victory') {
         return;
       }
+      if (this.activeModal === 'mode_guide') {
+        this.finishModeGuide();
+        return;
+      }
+      this.activeModal = null;
+      this.modalScrollY = 0;
+      this.modalMaxScroll = 0;
+      if (!this.isLobbyOpen && gameState.running && !gameState.over) {
+        gameState.paused = false;
+      }
+      this.syncAudioMood();
+    },
+
+    openModeGuide(mode = gameState.mode, startStep = 0) {
+      const targetMode = MODE_GUIDES[mode] ? mode : 'chef';
+      audio.ensureCtx();
+      audio.playTilt();
+      if (!this.isLobbyOpen && gameState.running && !gameState.over) {
+        gameState.paused = true;
+      }
+      this.guideMode = targetMode;
+      this.guideStep = Math.max(0, startStep);
+      this.openModal('mode_guide');
+    },
+
+    nextModeGuideStep() {
+      audio.ensureCtx();
+      const def = MODE_GUIDES[this.guideMode] || MODE_GUIDES.chef;
+      if (this.guideStep + 1 < def.steps.length) {
+        audio.playTilt();
+        this.guideStep++;
+      } else {
+        audio.playPatronSelect();
+        this.finishModeGuide();
+      }
+    },
+
+    prevModeGuideStep() {
+      if (this.guideStep > 0) {
+        audio.ensureCtx();
+        audio.playTilt();
+        this.guideStep--;
+      }
+    },
+
+    finishModeGuide() {
+      if (!saveData.seenModeGuides) saveData.seenModeGuides = {};
+      saveData.seenModeGuides[this.guideMode] = true;
+      persistSaveData();
       this.activeModal = null;
       this.modalScrollY = 0;
       this.modalMaxScroll = 0;
@@ -597,15 +674,19 @@ function createApp() {
       this.showToast('🏠 已回到星夜吃茶大厅');
     },
 
-    startNewRun(mode = gameState.mode) {
+    startNewRun(mode = gameState.mode, opts = {}) {
       startNewRunFn(mode);
       audio.playStartCafe();
+      const skipGuide = !!(opts && opts.skipGuide);
+      if (!skipGuide && (!saveData.seenModeGuides || !saveData.seenModeGuides[mode])) {
+        this.openModeGuide(mode, 0);
+      }
     },
 
     restartRun() {
       startNewRunFn(gameState.mode);
       audio.playStartCafe();
-      this.showToast('🔄 已重新开启新一轮营业！');
+      this.showToast('已重新开启新一轮营业！');
     },
 
     shareResult() {
@@ -1537,13 +1618,20 @@ function createApp() {
     const { relicOffers, modOffers } = rollPrepShopOffers();
     const nextShiftNum = gameState.shift + 1;
     const nextHazards = pickHazardsForShift(nextShiftNum);
+    const isFirstPrep = !saveData.seenTips || !saveData.seenTips.prep_shop;
+    if (isFirstPrep) {
+      if (!saveData.seenTips) saveData.seenTips = {};
+      saveData.seenTips.prep_shop = true;
+      persistSaveData();
+    }
     gameState.prepShop = {
       shiftSummary,
       relicOffers,
       modOffers,
       rerollCost: 10,
       nextShiftNum,
-      nextHazards
+      nextHazards,
+      showBeginnerTip: isFirstPrep
     };
     gameState.paused = true;
     app.openModal('prep_shop');
@@ -2274,55 +2362,60 @@ function createApp() {
     clampDropX();
   }
 
+  function computeTurretShotFromAngle(rawAngle, powerHint = 0.72) {
+    const ang = Math.max(-1.14, Math.min(1.14, Number(rawAngle) || 0));
+    const p = Math.max(0.25, Math.min(1.0, Math.max(powerHint, Math.abs(ang) * 0.82)));
+    const bouncyBoost = app.hasRelic('rel_bouncy') ? 1.25 : 1.0;
+    const speed = (520 + 560 * p) * bouncyBoost;
+    return {
+      angle: ang,
+      power: p,
+      launchVx: Math.sin(ang) * speed,
+      launchVy: Math.cos(ang) * speed,
+      isAngled: Math.abs(ang) > 0.035
+    };
+  }
+
   function getAimTotalAngle() {
-    return Math.max(-0.78, Math.min(0.78, gameState.aimAngle));
+    return Math.max(-1.14, Math.min(1.14, gameState.aimAngle));
   }
 
   function getCurrentDropRadius() {
     return gameState.curMeta && gameState.curMeta.wildcard ? WILDCARD_RADIUS : TIERS[gameState.curTier - 1].radius;
   }
 
-  function getCurrentDropShapeDef() {
-    return gameState.curMeta && gameState.curMeta.wildcard ? getShapeDef(1) : getShapeDef(gameState.curTier);
-  }
-
-  function clampDropXVal(rawX) {
-    const r = getCurrentDropRadius();
-    const shapeDef = getCurrentDropShapeDef();
-    let leftExt = r;
-    let rightExt = r;
-    if (shapeDef && Physics) {
-      const ex = Physics.getRotatedHalfExtentsX(shapeDef, r, getAimTotalAngle());
-      leftExt = ex.leftExtent;
-      rightExt = ex.rightExtent;
-    }
-    const minX = JAR.left + leftExt + 4;
-    const maxX = JAR.right - rightExt - 4;
-    return Math.max(minX, Math.min(maxX, rawX));
+  function clampDropXVal() {
+    return LAUNCH_X;
   }
 
   function clampDropX() {
-    gameState.dropX = clampDropXVal(gameState.dropX);
+    gameState.dropX = LAUNCH_X;
+    gameState.prevDropX = LAUNCH_X;
+  }
+
+  function syncIdleAimFromAngle(ang, powerHint = 0.72) {
+    const shot = computeTurretShotFromAngle(ang, powerHint);
+    gameState.aimAngle = shot.angle;
+    gameState.aim.angle = shot.angle;
+    gameState.aim.power = shot.power;
+    gameState.aim.launchVx = shot.launchVx;
+    gameState.aim.launchVy = shot.launchVy;
+    return shot;
   }
 
   function adjustAimAngle(deltaRad) {
     if (!gameState.running || gameState.over || gameState.activeToolMode || gameState.activeSkillMode) return;
-    const next = Math.max(-0.78, Math.min(0.78, gameState.aimAngle + deltaRad));
+    const next = Math.max(-1.14, Math.min(1.14, gameState.aimAngle + deltaRad));
     if (Math.abs(next - gameState.aimAngle) > 1e-4) {
-      gameState.aimAngle = next;
       clampDropX();
+      syncIdleAimFromAngle(next, 0.76);
       audio.ensureCtx();
       audio.playTilt();
     }
   }
 
-  function updateDropPointerX(newX) {
-    gameState.prevDropX = gameState.dropX;
-    gameState.dropX = clampDropXVal(newX);
-    const dx = gameState.dropX - gameState.prevDropX;
-    if (Math.abs(dx) > 0.5) {
-      gameState.dropSway = Math.max(-0.14, Math.min(0.14, gameState.dropSway - dx * 0.0045));
-    }
+  function updateDropPointerX() {
+    clampDropX();
   }
 
   function createEntity(tier, x, y, vx = 0, vy = 0, bornFromMerge = false, initialAngle = 0, initialVr = 0, meta = {}) {
@@ -2382,19 +2475,19 @@ function createApp() {
     return entity;
   }
 
-  function dropCurrentTreat(launchVx = 0, launchVy = 320, isBankLaunched = false) {
+  function dropCurrentTreat(launchVx = 0, launchVy = 640, isBankLaunched = false) {
     if (!gameState.running || gameState.over || gameState.paused) return false;
     if (gameState.activeToolMode || gameState.activeSkillMode || gameState.dropCooldown > 0) return false;
     if (gameState.mode === 'chef' && gameState.stepsLeft <= 0) return false;
 
+    clampDropX();
     const curR = getCurrentDropRadius();
-    if (!Physics.isSpawnClear(gameState.dropX, JAR.dropY, curR, gameState.entities)) {
+    if (!Physics.isSpawnClear(LAUNCH_X, LAUNCH_Y, curR, gameState.entities)) {
       return false;
     }
 
     audio.ensureCtx();
-    clampDropX();
-    const totalAngle = getAimTotalAngle();
+    const launchAngle = getAimTotalAngle();
     const curMeta = gameState.curMeta || { wildcard: false, golden: false };
     const isMeteor = !!gameState.nextShotMeteor;
     if (isMeteor) gameState.nextShotMeteor = false;
@@ -2405,22 +2498,23 @@ function createApp() {
     let finalVx = launchVx;
     let finalVy = launchVy;
     if (isMeteor) {
-      const spd = Math.hypot(finalVx, finalVy) || 320;
-      const boost = Math.max(1.25, 760 / spd);
+      const spd = Math.hypot(finalVx, finalVy) || 640;
+      const boost = Math.max(1.2, 820 / spd);
       finalVx *= boost;
       finalVy *= boost;
     }
 
+    const angledShot = isBankLaunched || Math.abs(finalVx) > 55;
     const dropped = createEntity(
       gameState.curTier,
-      gameState.dropX,
-      JAR.dropY + (isBankLaunched ? 4 : 0),
+      LAUNCH_X,
+      LAUNCH_Y,
       finalVx,
       finalVy,
       false,
-      totalAngle,
-      isBankLaunched ? (finalVx >= 0 ? 3.5 : -3.5) : 0,
-      { ...curMeta, isBankLaunched: isBankLaunched || Math.abs(finalVx) > 85, isMeteorShot: isMeteor }
+      -launchAngle * 0.35,
+      angledShot ? (finalVx >= 0 ? 3.2 : -3.2) : 0,
+      { ...curMeta, isBankLaunched: angledShot, isMeteorShot: isMeteor }
     );
     gameState.lastDroppedId = dropped.id;
     gameState.dropsMadeThisRun++;
@@ -2517,7 +2611,7 @@ function createApp() {
       }
     }
 
-    gameState.aimAngle = 0;
+    syncIdleAimFromAngle(0, 0.55);
     gameState.dropSway = 0;
     gameState.canHoldThisTurn = true;
     const isFever = gameState.feverTimer > 0;
@@ -3598,20 +3692,20 @@ function createApp() {
     };
 
     gameState.activeToolMode = null;
-    gameState.dropX = 220;
-    gameState.prevDropX = 220;
+    gameState.dropX = LAUNCH_X;
+    gameState.prevDropX = LAUNCH_X;
     gameState.aimAngle = 0;
     gameState.dropSway = 0;
     gameState.aim = {
       active: false,
-      mode: 'drop',
-      anchorX: 220,
-      anchorY: 160,
-      curX: 220,
-      curY: 160,
-      power: 0,
+      mode: 'sling',
+      anchorX: LAUNCH_X,
+      anchorY: LAUNCH_Y,
+      curX: LAUNCH_X,
+      curY: 180,
+      power: 0.45,
       launchVx: 0,
-      launchVy: 320,
+      launchVy: 680,
       angle: 0,
       cancelled: false,
       stretchBand: 0,
@@ -3689,15 +3783,31 @@ function createApp() {
     }
   }
 
-  // Tool & Active Chef Skill Canvas Targeting Click
+  // Tool & Active Chef Skill Canvas Targeting Click (prefers exact hit & closest center in crowded jars)
   function findEntityAt(x, y, pad = 7) {
+    let bestStrict = null;
+    let bestStrictDist = Infinity;
+    let bestPadded = null;
+    let bestPaddedDist = Infinity;
     for (let i = gameState.entities.length - 1; i >= 0; i--) {
       const e = gameState.entities[i];
       if (e.merged) continue;
-      if (Physics.pointInBody(e, x, y, pad)) return e;
-      if (Math.hypot(e.x - x, e.y - y) <= e.r + pad * 0.7) return e;
+      const d = Math.hypot(e.x - x, e.y - y);
+      if (d <= e.r || Physics.pointInBody(e, x, y, 0)) {
+        if (d < bestStrictDist) {
+          bestStrictDist = d;
+          bestStrict = e;
+        }
+        continue;
+      }
+      if (pad > 0 && (d <= e.r + pad * 0.7 || Physics.pointInBody(e, x, y, pad))) {
+        if (d < bestPaddedDist) {
+          bestPaddedDist = d;
+          bestPadded = e;
+        }
+      }
     }
-    return null;
+    return bestStrict || bestPadded;
   }
 
   function handleSkillCanvasClick(lx, ly) {
@@ -3862,60 +3972,29 @@ function createApp() {
 
   function updateAimVector(lx, ly, pointerType) {
     const aim = gameState.aim;
+    clampDropX();
+    aim.anchorX = LAUNCH_X;
+    aim.anchorY = LAUNCH_Y;
     aim.curX = lx;
     aim.curY = ly;
     const cancelled = pointerType === 'touch' && ly < JAR.neckY - 20;
     aim.cancelled = cancelled;
     gameState.touchAim.cancelled = cancelled;
 
-    const dragDx = lx - aim.anchorX;
-    const dragDy = ly - aim.anchorY;
-    const pullDist = Math.hypot(dragDx, dragDy);
-    // Sling latch: once the player has pulled down into slingshot mode, stay in sling for the
-    // rest of this hold (sideways swings naturally lift the finger and used to drop dy < 26,
-    // which flipped back to quick-drop and slid the top drop point instead of forming an angle).
-    // Only returning to (almost) the anchor point un-commits the sling.
-    if (aim.slingLocked && pullDist < 12) {
-      aim.slingLocked = false;
-    }
-    if (!aim.slingLocked && !cancelled && (dragDy >= 26 || (dragDy >= 10 && pullDist >= 34))) {
-      aim.slingLocked = true;
-      // Lock the launch origin at the anchor column for the whole pull.
-      gameState.dropX = clampDropXVal(aim.anchorX);
-    }
-    if (aim.slingLocked) {
-      // Pull-down Direct-Aim Slingshot / Bank-Shot Mode!
-      aim.mode = 'sling';
-      // Aim follows the drag vector from the anchor (not from the jar top), so a modest sideways
-      // swing already yields a wide bank-shot angle; clamp to ±62° downward cone.
-      const vyDir = Math.max(14, dragDy);
-      const rawAng = Math.atan2(dragDx, vyDir);
-      const clampedAng = Math.max(-1.08, Math.min(1.08, rawAng)); // ±62° cone downward
-      const power = Math.max(0.12, Math.min(1.0, (pullDist - 24) / 115));
-      const bouncyBoost = app.hasRelic('rel_bouncy') ? 1.25 : 1.0;
-      const speed = (420 + 660 * power) * bouncyBoost;
-      aim.angle = clampedAng;
-      aim.power = power;
-      aim.launchVx = Math.sin(clampedAng) * speed;
-      aim.launchVy = Math.cos(clampedAng) * speed;
+    const dx = lx - LAUNCH_X;
+    const dy = Math.max(16, ly - LAUNCH_Y);
+    const rawAng = Math.abs(dx) < 5 ? 0 : Math.atan2(dx, dy);
+    const dist = Math.hypot(dx, Math.max(0, ly - LAUNCH_Y));
+    const powerHint = Math.max(0.28, Math.min(1.0, (dist - 20) / 185));
+    const shot = syncIdleAimFromAngle(rawAng, powerHint);
 
-      const band = power >= 0.8 ? 3 : power >= 0.5 ? 2 : power >= 0.25 ? 1 : 0;
-      if (band !== aim.stretchBand && band > 0) {
-        aim.stretchBand = band;
-        audio.playSlingStretch(power);
-      }
-    } else {
-      // Quick Vertical Drop Mode (zero friction)
-      aim.mode = 'drop';
-      aim.power = 0;
-      aim.angle = 0;
-      aim.launchVx = 0;
-      aim.launchVy = 320;
-      aim.stretchBand = 0;
-      updateDropPointerX(lx);
-      aim.anchorX = gameState.dropX;
-      aimingState.lastStableX = gameState.dropX;
-      gameState.touchAim.lastStableX = gameState.dropX;
+    aim.mode = 'sling';
+    aim.slingLocked = true;
+
+    const band = shot.power >= 0.8 ? 3 : shot.power >= 0.5 ? 2 : shot.power >= 0.28 ? 1 : 0;
+    if (band !== aim.stretchBand && band > 0 && aimingState.active) {
+      aim.stretchBand = band;
+      audio.playSlingStretch(shot.power);
     }
   }
 
@@ -3923,8 +4002,6 @@ function createApp() {
     aimingState.active = false;
     pendingServe.entityId = null;
     gameState.aim.active = false;
-    gameState.aim.mode = 'drop';
-    gameState.aim.power = 0;
     gameState.aim.cancelled = false;
     gameState.aim.stretchBand = 0;
     gameState.aim.slingLocked = false;
@@ -3962,25 +4039,15 @@ function createApp() {
             pendingServe = { entityId: servable.id, downLx: lx, downLy: ly };
             return;
           }
-          updateDropPointerX(lx);
-          aimingState = { active: true, pointerType, lastStableX: gameState.dropX };
+          clampDropX();
+          aimingState = { active: true, pointerType, lastStableX: LAUNCH_X };
           gameState.aim.active = true;
-          gameState.aim.mode = 'drop';
-          gameState.aim.anchorX = gameState.dropX;
-          gameState.aim.anchorY = ly;
-          gameState.aim.curX = lx;
-          gameState.aim.curY = ly;
-          gameState.aim.power = 0;
-          gameState.aim.launchVx = 0;
-          gameState.aim.launchVy = 320;
           gameState.aim.stretchBand = 0;
-          gameState.aim.slingLocked = false;
-          gameState.aim.cancelled = pointerType === 'touch' && ly < JAR.neckY - 20;
           if (pointerType === 'touch') {
             gameState.touchAim.active = true;
-            gameState.touchAim.cancelled = gameState.aim.cancelled;
-            gameState.touchAim.lastStableX = gameState.dropX;
+            gameState.touchAim.lastStableX = LAUNCH_X;
           }
+          updateAimVector(lx, ly, pointerType);
         }
       }
     },
@@ -4007,20 +4074,14 @@ function createApp() {
           gameState.hoveredEntityId = hitEntity ? hitEntity.id : null;
           return;
         }
-        // If dragging >= 12px off a servable treat, seamlessly hand off to aiming!
+        // If dragging >= 12px off a servable treat, seamlessly hand off to angle aiming!
         if (pendingServe.entityId !== null) {
           if (Math.hypot(lx - pendingServe.downLx, ly - pendingServe.downLy) >= 12) {
-            const startX = clampDropXVal(pendingServe.downLx);
-            const startY = pendingServe.downLy;
             pendingServe.entityId = null;
-            updateDropPointerX(startX);
-            aimingState = { active: true, pointerType, lastStableX: gameState.dropX };
+            clampDropX();
+            aimingState = { active: true, pointerType, lastStableX: LAUNCH_X };
             gameState.aim.active = true;
-            gameState.aim.mode = 'drop';
-            gameState.aim.anchorX = gameState.dropX;
-            gameState.aim.anchorY = startY;
             gameState.aim.stretchBand = 0;
-            gameState.aim.slingLocked = false;
             if (pointerType === 'touch') gameState.touchAim.active = true;
             updateAimVector(lx, ly, pointerType);
           }
@@ -4028,8 +4089,13 @@ function createApp() {
         }
         if (aimingState.active) {
           updateAimVector(lx, ly, pointerType);
-        } else if (pointerType === 'mouse' && lx >= 0 && lx <= JAR.canvasW && ly >= -30 && ly <= JAR.floorY + 20) {
-          updateDropPointerX(lx);
+        } else if (pointerType === 'mouse' && lx >= 0 && lx <= JAR.canvasW && ly >= JAR.neckY && ly <= JAR.floorY + 12) {
+          // Smooth turret preview when hovering inside the jar on desktop
+          const dx = lx - LAUNCH_X;
+          const dy = Math.max(18, ly - LAUNCH_Y);
+          const rawAng = Math.abs(dx) < 5 ? 0 : Math.atan2(dx, dy);
+          const dist = Math.hypot(dx, Math.max(0, ly - LAUNCH_Y));
+          syncIdleAimFromAngle(rawAng, Math.max(0.32, Math.min(1.0, (dist - 20) / 185)));
         }
       }
     },
@@ -4039,7 +4105,8 @@ function createApp() {
       if (app.activeModal) {
         if (!uiDragMoved && pendingUiHit) {
           if (pendingUiHit.id === 'modal_backdrop') {
-            if (app.activeModal !== 'gameover') app.closeModal();
+            if (app.activeModal === 'mode_guide') app.nextModeGuideStep();
+            else if (app.activeModal !== 'gameover') app.closeModal();
           } else if (pendingUiHit.onClick) {
             pendingUiHit.onClick();
           }
@@ -4066,20 +4133,16 @@ function createApp() {
 
       if (aimingState.active) {
         const { lx, ly } = toJarLogical(x, y);
-        const isSling = gameState.aim.mode === 'sling';
-        const vx = isSling ? gameState.aim.launchVx : 0;
-        const vy = isSling ? gameState.aim.launchVy : 320;
         const cancelled = pointerType === 'touch' && (gameState.aim.cancelled || ly < JAR.neckY - 20);
-        const targetX =
-          !isSling && pointerType === 'touch' && Math.abs(lx - aimingState.lastStableX) <= 10
-            ? aimingState.lastStableX
-            : lx;
+        if (!cancelled) {
+          updateAimVector(lx, ly, pointerType);
+        }
+        const vx = gameState.aim.launchVx;
+        const vy = gameState.aim.launchVy;
+        const isAngled = Math.abs(gameState.aim.angle) > 0.035;
         resetAimingState();
         if (cancelled) return;
-        if (!isSling) {
-          updateDropPointerX(targetX);
-        }
-        dropCurrentTreat(vx, vy, isSling);
+        dropCurrentTreat(vx, vy, isAngled);
       }
     },
 
@@ -4095,12 +4158,12 @@ function createApp() {
         return;
       }
       if (!app.isLobbyOpen && gameState.running && !gameState.over && !gameState.paused && !gameState.activeToolMode && !gameState.activeSkillMode) {
-        adjustAimAngle(deltaY > 0 ? 0.14 : -0.14);
+        adjustAimAngle(deltaY > 0 ? 0.09 : -0.09);
       }
     }
   });
 
-  // Keyboard support for DevTools / PC Mini Game
+  // Keyboard support for DevTools / PC Mini Game (Left/Right/A/D/Q/E all adjust center launch angle!)
   platform.bindKeyboard((key, ev) => {
     audio.unlock();
     if (key === 'm' || key === 'M') {
@@ -4124,6 +4187,13 @@ function createApp() {
       return;
     }
     if (!gameState.running || gameState.over || app.isLobbyOpen) return;
+    if (app.activeModal === 'mode_guide') {
+      if (key === ' ' || key === 'Enter' || key === 'ArrowRight') {
+        if (ev && ev.preventDefault) ev.preventDefault();
+        app.nextModeGuideStep();
+      }
+      return;
+    }
     if (app.activeModal === 'blessing') {
       if (key === '1' || key === '2' || key === '3') {
         const ch = gameState.blessingChoices[Number(key) - 1];
@@ -4133,28 +4203,22 @@ function createApp() {
     }
     if (app.activeModal) return;
 
-    if (key === 'ArrowLeft' || key === 'a' || key === 'A') {
+    if (key === 'ArrowLeft' || key === 'a' || key === 'A' || key === 'q' || key === 'Q') {
       if (ev && ev.preventDefault) ev.preventDefault();
-      updateDropPointerX(gameState.dropX - 22);
-    } else if (key === 'ArrowRight' || key === 'd' || key === 'D') {
+      adjustAimAngle(-0.1);
+    } else if (key === 'ArrowRight' || key === 'd' || key === 'D' || key === 'e' || key === 'E') {
       if (ev && ev.preventDefault) ev.preventDefault();
-      updateDropPointerX(gameState.dropX + 22);
-    } else if (key === 'q' || key === 'Q') {
+      adjustAimAngle(0.1);
+    } else if (key === 'r' || key === 'R') {
       if (ev && ev.preventDefault) ev.preventDefault();
-      adjustAimAngle(-0.14);
-    } else if (key === 'e' || key === 'E') {
-      if (ev && ev.preventDefault) ev.preventDefault();
-      adjustAimAngle(0.14);
+      clampDropX();
+      syncIdleAimFromAngle(0, 0.55);
+      audio.playTilt();
     } else if (key === ' ' || key === 'ArrowDown' || key === 'Enter') {
       if (ev && ev.preventDefault) ev.preventDefault();
-      const ang = gameState.aimAngle;
-      if (Math.abs(ang) > 0.08) {
-        const spd = 760;
-        dropCurrentTreat(Math.sin(ang) * spd, Math.cos(ang) * spd, true);
-      } else {
-        dropCurrentTreat(0, 320, false);
-      }
-    } else if (key === 'h' || key === 'H' || key === 'Shift') {
+      const shot = computeTurretShotFromAngle(gameState.aimAngle, 0.78);
+      dropCurrentTreat(shot.launchVx, shot.launchVy, shot.isAngled);
+    } else if (key === 'h' || key === 'H' || key === 'c' || key === 'C' || key === 'Shift') {
       if (ev && ev.preventDefault) ev.preventDefault();
       app.swapHoldPocket();
     } else if (key === 'b' || key === 'B') {
@@ -4358,7 +4422,7 @@ function createApp() {
       ScreensUI.renderPlayScreen(ctx, metrics, app, hits, nowSec);
     }
 
-    ModalsUI.renderActiveModal(ctx, metrics, app, hits);
+    ModalsUI.renderActiveModal(ctx, metrics, app, hits, nowSec);
 
     const { topY, headerH } = ScreensUI.computeTopHeaderGeometry(metrics);
     ScreensUI.renderToast(ctx, metrics.width, topY + headerH, app);
@@ -4398,6 +4462,8 @@ function createApp() {
       lobbyOpen: app.isLobbyOpen,
       activeModal: app.activeModal,
       activeShopTab: app.activeShopTab,
+      guideMode: app.guideMode,
+      guideStep: app.guideStep,
       mode: gameState.mode,
       running: gameState.running,
       paused: gameState.paused,
@@ -4609,8 +4675,9 @@ function createApp() {
     grantRainbow: () => grantNextRainbow('测试彩虹糖'),
     queueBlessing: (r = '测试祝福') => queueBlessing(r),
     openBlessing: () => app.openBlessingModal(),
+    openModeGuide: (m, step = 0) => app.openModeGuide(m, step),
     togglePhysicsDebug: (val) => app.toggleDebugPhysics(val),
-    startMode: (mode) => app.startNewRun(mode),
+    startMode: (mode, opts = {}) => app.startNewRun(mode, { skipGuide: true, ...opts }),
     returnToLobby: () => app.returnToLobby(),
     refreshMetrics: () => {
       metrics = platform.getSystemMetrics();

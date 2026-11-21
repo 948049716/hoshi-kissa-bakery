@@ -1204,27 +1204,22 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
     ctx.restore();
   }
 
-  // Active Serve Cascade Avalanche Timer Pill (inside top glass)
+  // Active Serve Cascade Avalanche Timer Pill (unified Starlight Kissa banner)
   if (gameState.running && !gameState.over && gameState.serveCascadeTimer > 0) {
-    const pulse = 0.72 + 0.28 * Math.sin(nowSec * 12);
     const pillY = JAR.neckY + 18;
     const cascadeTxt =
       gameState.serveCascadeMerges > 0
-        ? `🏔️ 抽底雪崩 ×${gameState.serveCascadeMerges} (${gameState.serveCascadeTimer.toFixed(1)}s)`
-        : `🏔️ 抽底雪崩窗 ${gameState.serveCascadeTimer.toFixed(1)}s`;
-    ctx.save();
-    UI.roundRectPath(ctx, JAR.canvasW * 0.5 - 78, pillY - 10, 156, 20, 10);
-    ctx.fillStyle = `rgba(18, 62, 86, ${0.84 + 0.1 * pulse})`;
-    ctx.fill();
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = `rgba(156, 244, 255, ${0.72 + 0.28 * pulse})`;
-    ctx.stroke();
-    ctx.fillStyle = '#dcfbff';
-    ctx.font = UI.fontStr(10.5, 900);
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(cascadeTxt, JAR.canvasW * 0.5, pillY + 0.5);
-    ctx.restore();
+        ? `抽底雪崩 ×${gameState.serveCascadeMerges} (${gameState.serveCascadeTimer.toFixed(1)}s)`
+        : `抽底雪崩窗 ${gameState.serveCascadeTimer.toFixed(1)}s`;
+    UI.drawNoticeBanner(ctx, JAR.canvasW * 0.5 - 82, pillY - 10, 164, 21, {
+      icon: 'serve_bell',
+      sprites,
+      iconSize: 15,
+      text: cascadeTxt,
+      fontSize: 10,
+      borderColor: '#ffd872',
+      rightReserve: 10
+    });
   }
   ctx.restore();
 
@@ -1271,6 +1266,9 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
   let aimCtxData = null;
   let aimGlazeInfo = null;
 
+  const launchX = JAR.canvasW * 0.5;
+  const launchY = JAR.dropY + 4;
+
   if (canAim) {
     const curMeta = gameState.curMeta || { wildcard: false, golden: false };
     const curIsWild = !!curMeta.wildcard;
@@ -1278,56 +1276,52 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
     const curTierDef = TIERS[gameState.curTier - 1];
     const curR = curIsWild ? WILDCARD_RADIUS : curTierDef.radius;
     const curShape = curIsWild ? getShapeDef(1) : getShapeDef(gameState.curTier);
-    const aimAngle = Math.max(-0.78, Math.min(0.78, gameState.aimAngle));
-    const aim = gameState.aim || { active: false, mode: 'drop', cancelled: false, power: 0, launchVx: 0, launchVy: 320 };
-    const isSling = !!(aim.active && aim.mode === 'sling' && !aim.cancelled);
+    const aimAngle = Math.max(-1.14, Math.min(1.14, gameState.aimAngle || 0));
+    const aim = gameState.aim || {
+      active: false,
+      mode: 'sling',
+      cancelled: false,
+      power: 0.45,
+      launchVx: Math.sin(aimAngle) * 680,
+      launchVy: Math.cos(aimAngle) * 680
+    };
     const isAimCancelled = !!(aim.cancelled || (gameState.touchAim.active && gameState.touchAim.cancelled));
     const isTouchAiming = !!((aim.active || gameState.touchAim.active) && !isAimCancelled);
     const hasBouncy = Array.isArray(gameState.relics) && gameState.relics.includes('rel_bouncy');
     const hasPrism = Array.isArray(gameState.relics) && gameState.relics.includes('rel_prism');
 
-    let traj = null;
-    let landY = JAR.floorY - curR;
-    if (isSling) {
-      const gScale = curIsWild ? 1.0 : (curTierDef.material && curTierDef.material.gravityScale) || 1.0;
-      traj = Physics.predictBankShotTrajectory(
-        curR,
-        gameState.dropX,
-        JAR.dropY + 4,
-        aim.launchVx,
-        aim.launchVy,
-        JAR,
-        gameState.entities,
-        1880,
-        gScale,
-        gameState.curTier,
-        {
-          wallRestBonus: hasBouncy ? 0.25 : 0,
-          maxBounces: hasBouncy ? 2 : 1,
-          obstacles: gameState.obstacles
-        }
-      );
-      if (!curIsWild && !curIsGold && traj.glazeHit && traj.glazeHit.ring) {
-        aimGlazeInfo = {
-          hit: true,
-          x: traj.glazeHit.x,
-          y: traj.glazeHit.y,
-          ringId: traj.glazeHit.ring.id
-        };
+    const vx0 = typeof aim.launchVx === 'number' && (aim.launchVx !== 0 || aim.launchVy !== 0)
+      ? aim.launchVx
+      : Math.sin(aimAngle) * 680;
+    const vy0 = typeof aim.launchVy === 'number' && (aim.launchVx !== 0 || aim.launchVy !== 0)
+      ? aim.launchVy
+      : Math.cos(aimAngle) * 680;
+
+    const gScale = curIsWild ? 1.0 : (curTierDef.material && curTierDef.material.gravityScale) || 1.0;
+    const traj = Physics.predictBankShotTrajectory(
+      curR,
+      launchX,
+      launchY,
+      vx0,
+      vy0,
+      JAR,
+      gameState.entities,
+      1880,
+      gScale,
+      gameState.curTier,
+      {
+        wallRestBonus: hasBouncy ? 0.25 : 0,
+        maxBounces: hasBouncy ? 2 : 1,
+        obstacles: gameState.obstacles
       }
-    } else {
-      landY = predictLandingY(gameState.curTier, gameState.dropX, aimAngle, gameState.entities, curIsWild, gameState.obstacles);
-      if (!curIsWild && !curIsGold && !isAimCancelled && gameState.obstacles && gameState.obstacles.length > 0) {
-        for (let oi = 0; oi < gameState.obstacles.length; oi++) {
-          const ob = gameState.obstacles[oi];
-          if (ob && ob.type === 'glaze_ring') {
-            if (Math.abs(gameState.dropX - ob.x) <= (ob.rx || 38) - 1 && landY > ob.y) {
-              aimGlazeInfo = { hit: true, x: gameState.dropX, y: ob.y, ringId: ob.id };
-              break;
-            }
-          }
-        }
-      }
+    );
+    if (!curIsWild && !curIsGold && !isAimCancelled && traj.glazeHit && traj.glazeHit.ring) {
+      aimGlazeInfo = {
+        hit: true,
+        x: traj.glazeHit.x,
+        y: traj.glazeHit.y,
+        ringId: traj.glazeHit.ring.id
+      };
     }
 
     aimCtxData = {
@@ -1339,13 +1333,11 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
       curShape,
       aimAngle,
       aim,
-      isSling,
       isAimCancelled,
       isTouchAiming,
       hasBouncy,
       hasPrism,
-      traj,
-      landY
+      traj
     };
   }
 
@@ -1364,7 +1356,7 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
     }
   }
 
-  // 4. Dual-Mode Aim Trajectory (Quick Vertical Drop + Pull-Down Slingshot Bank-Shot)
+  // 4. Fixed-Center Angle Turret & Trajectory Guide
   if (aimCtxData) {
     const {
       curIsWild,
@@ -1372,19 +1364,16 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
       curR,
       curShape,
       aimAngle,
-      aim,
-      isSling,
       isAimCancelled,
       isTouchAiming,
       hasBouncy,
       hasPrism,
-      traj,
-      landY
+      traj
     } = aimCtxData;
     const [lr, lg, lb] = theme.lockColor;
     const willGlaze = !!(aimGlazeInfo && aimGlazeInfo.hit);
 
-    if (isSling && traj) {
+    if (traj && !isAimCancelled) {
       if (traj.hitBody && !traj.hitBody.isYarnBall && !(traj.hitBody.frozenHp > 0)) {
         if (curIsWild || traj.hitBody.isWildcard || traj.hitBody.tier === gameState.curTier) {
           lockedTarget = traj.hitBody;
@@ -1396,225 +1385,147 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
 
       const bPoints = traj.bouncePoints || (traj.bouncePoint ? [traj.bouncePoint] : []);
       const hasBounce = bPoints.length > 0;
+
       ctx.save();
-      // Power gauge arc underneath launch point
-      const arcR = curR + 11;
-      ctx.strokeStyle = 'rgba(255, 240, 200, 0.28)';
-      ctx.lineWidth = 4;
+      // Subtle starry brass protractor dial arc around fixed center launcher
+      const dialR = Math.max(36, curR + 14);
+      ctx.strokeStyle = isTouchAiming ? 'rgba(255, 236, 178, 0.48)' : 'rgba(255, 236, 178, 0.24)';
+      ctx.lineWidth = 2.0;
+      ctx.setLineDash([3, 4]);
       ctx.beginPath();
-      ctx.arc(gameState.dropX, JAR.dropY + 4, arcR, Math.PI * 0.16, Math.PI * 0.84);
+      ctx.arc(launchX, launchY, dialR, Math.PI * 0.5 - 1.14, Math.PI * 0.5 + 1.14);
       ctx.stroke();
+      ctx.setLineDash([]);
 
-      ctx.strokeStyle = hasBounce ? '#8ef5ff' : willGlaze ? '#ffe46b' : '#ffd86b';
-      ctx.lineWidth = 4.5;
-      ctx.lineCap = 'round';
-      const powerSpan = Math.PI * 0.68 * Math.max(0.1, aim.power);
+      // Active angle indicator tick on dial arc
+      const pointerDir = Math.PI * 0.5 - aimAngle;
+      ctx.fillStyle = hasBounce ? '#9cf4ff' : '#ffe382';
       ctx.beginPath();
-      ctx.arc(gameState.dropX, JAR.dropY + 4, arcR, Math.PI * 0.5 - powerSpan * 0.5, Math.PI * 0.5 + powerSpan * 0.5);
-      ctx.stroke();
+      ctx.arc(launchX + Math.cos(pointerDir) * dialR, launchY + Math.sin(pointerDir) * dialR, isTouchAiming ? 3.8 : 2.8, 0, Math.PI * 2);
+      ctx.fill();
 
-      // Dotted ballistic trajectory path
+      // Dotted ballistic trajectory path from fixed center turret
       if (traj.points.length >= 2) {
         ctx.beginPath();
-        ctx.setLineDash([7, 5]);
+        ctx.setLineDash(lockedTarget || hasBounce || willGlaze ? [7, 4] : [6, 6]);
         ctx.moveTo(traj.points[0].x, traj.points[0].y);
         for (let pi = 1; pi < traj.points.length; pi++) {
           ctx.lineTo(traj.points[pi].x, traj.points[pi].y);
         }
         ctx.strokeStyle = lockedTarget
           ? hasBounce
-            ? 'rgba(130, 246, 255, 0.96)'
+            ? 'rgba(148, 244, 255, 0.96)'
             : willGlaze
-            ? 'rgba(255, 224, 88, 0.96)'
-            : `rgba(${lr}, ${lg}, ${lb}, 0.95)`
+            ? 'rgba(255, 226, 96, 0.96)'
+            : `rgba(${lr}, ${lg}, ${lb}, 0.94)`
           : hasBounce
-          ? 'rgba(136, 238, 255, 0.85)'
+          ? 'rgba(148, 238, 255, 0.86)'
           : willGlaze
-          ? 'rgba(255, 224, 88, 0.92)'
-          : 'rgba(255, 224, 128, 0.85)';
-        ctx.lineWidth = hasBounce || willGlaze ? 3.2 : 2.8;
+          ? 'rgba(255, 226, 96, 0.90)'
+          : isTouchAiming
+          ? theme.guideTouch
+          : theme.guideLine;
+        ctx.lineWidth = isTouchAiming || hasBounce || willGlaze ? 3.0 : 2.1;
         ctx.stroke();
         ctx.setLineDash([]);
       }
 
-      // Glaze ring crossing sparkle marker on slingshot path
       if (willGlaze) {
         ctx.fillStyle = '#fff5b8';
-        UI.drawStar(ctx, aimGlazeInfo.x, aimGlazeInfo.y, 7.5 + Math.sin(nowSec * 12) * 1.4, nowSec * 5);
+        UI.drawStar(ctx, aimGlazeInfo.x, aimGlazeInfo.y, 7.4 + Math.sin(nowSec * 12) * 1.4, nowSec * 5);
       }
 
-      // Highlight reflection stars at all glass side-wall bounce points
+      // Highlight reflection stars at glass side-wall bounce points
       for (let bi = 0; bi < bPoints.length; bi++) {
         const bp = bPoints[bi];
         ctx.fillStyle = bi >= 1 ? '#ffe47a' : '#9cf4ff';
-        UI.drawStar(ctx, bp.x, bp.y, 7.5 + Math.sin(nowSec * 12 + bi) * 1.5, nowSec * 4);
-        ctx.strokeStyle = bi >= 1 ? 'rgba(255, 228, 122, 0.8)' : 'rgba(156, 244, 255, 0.72)';
-        ctx.lineWidth = 1.8;
+        UI.drawStar(ctx, bp.x, bp.y, 7.2 + Math.sin(nowSec * 12 + bi) * 1.4, nowSec * 4);
+        ctx.strokeStyle = bi >= 1 ? 'rgba(255, 228, 122, 0.78)' : 'rgba(156, 244, 255, 0.72)';
+        ctx.lineWidth = 1.7;
         ctx.beginPath();
-        ctx.arc(bp.x, bp.y, 12, 0, Math.PI * 2);
+        ctx.arc(bp.x, bp.y, 11.5, 0, Math.PI * 2);
         ctx.stroke();
       }
       ctx.restore();
 
       // Landing ghost contour at trajectory end
-      if (curIsWild) {
-        UI.drawRainbowWildcard(ctx, traj.endX, traj.endY, curR, aimAngle, nowSec, 0.36);
-      } else {
-        drawTierSprite(ctx, sprites, gameState.curTier, traj.endX, traj.endY, curR, aimAngle, 0, 0, 0.34);
-      }
-      drawShapePolygons(
-        ctx,
-        curShape,
-        traj.endX,
-        traj.endY,
-        curR,
-        aimAngle,
-        hasBounce ? 'rgba(136, 244, 255, 0.95)' : willGlaze ? 'rgba(255, 224, 88, 0.95)' : `rgba(${lr}, ${lg}, ${lb}, 0.9)`,
-        lockedTarget || willGlaze ? 2.4 : 1.7,
-        hasBounce ? 'rgba(136, 244, 255, 0.14)' : willGlaze ? 'rgba(255, 224, 88, 0.16)' : `rgba(${lr}, ${lg}, ${lb}, 0.12)`,
-        [4, 4]
-      );
-
-      // Callout badge for Bank-Shot, Glaze Ring Crossing, or Lock-on
-      if (lockedTarget || hasBounce || willGlaze) {
-        const multLabel = bPoints.length >= 2 && hasBouncy ? '×2.8' : hasPrism ? '×2.0' : '×1.5';
-        let tagText;
-        if (lockedTarget) {
-          if (hasBounce && willGlaze) tagText = '✨ 穿环弹壁合成!';
-          else if (hasBounce) tagText = `🎱 ${bPoints.length >= 2 ? '二段弹壁' : '弹壁可合成'} ${multLabel}!`;
-          else if (willGlaze) tagText = '✨ 穿环镀金合成!';
-          else if (curIsWild) tagText = '🌈 升阶+1!';
-          else tagText = '✦ 可合成!';
-        } else if (hasBounce && willGlaze) {
-          tagText = '🎱✨ 弹壁+镀金!';
-        } else if (willGlaze) {
-          tagText = '✨ 穿环镀金!';
-        } else {
-          tagText = bPoints.length >= 2 ? '🎱 二段折射' : '🎱 弹壁折射';
-        }
-        const tagW = Math.max(78, tagText.length * 8.2 + 18);
-        const tagY = Math.max(JAR.neckY + 20, traj.endY - curR - 14);
-        const tagX = Math.max(JAR.left + tagW * 0.5 + 4, Math.min(JAR.right - tagW * 0.5 - 4, traj.endX));
-        ctx.save();
-        ctx.fillStyle = hasBounce ? 'rgba(16, 62, 88, 0.92)' : willGlaze ? 'rgba(110, 58, 10, 0.92)' : 'rgba(66, 36, 12, 0.9)';
-        ctx.strokeStyle = hasBounce ? '#9cf4ff' : willGlaze ? '#ffe26a' : `rgb(${lr}, ${lg}, ${lb})`;
-        ctx.lineWidth = 1.5;
-        UI.roundRectPath(ctx, tagX - tagW * 0.5, tagY - 10, tagW, 20, 10);
-        ctx.fill();
-        ctx.stroke();
-        UI.drawFitText(ctx, tagText, tagX, tagY, tagW - 10, 10.5, 8.5, 800, hasBounce ? '#dcfbff' : '#fff5be', 'center');
-        ctx.restore();
-      }
-    } else {
-      // Standard Quick Vertical Drop Preview
-      lockedTarget = findAimMergeTarget(gameState, gameState.curTier, gameState.dropX, landY, curIsWild, effectiveMagnetLv);
-
-      ctx.save();
-      if (isAimCancelled) ctx.globalAlpha = 0.25;
-      ctx.beginPath();
-      ctx.setLineDash(lockedTarget || willGlaze ? [7, 4] : [6, 6]);
-      ctx.moveTo(gameState.dropX, JAR.dropY + curR * 0.9 + 2);
-      ctx.lineTo(gameState.dropX, Math.max(JAR.dropY + curR, landY - curR * 0.65));
-      if (lockedTarget) {
-        const pulse = 0.72 + 0.28 * Math.sin(nowSec * 10);
-        ctx.strokeStyle = curIsWild
-          ? `rgba(255, 168, 224, ${pulse})`
-          : willGlaze
-          ? `rgba(255, 224, 88, ${pulse})`
-          : `rgba(${lr}, ${lg}, ${lb}, ${pulse})`;
-        ctx.lineWidth = isTouchAiming ? 3.2 : 2.8;
-      } else if (willGlaze) {
-        ctx.strokeStyle = 'rgba(255, 224, 88, 0.92)';
-        ctx.lineWidth = isTouchAiming ? 3.0 : 2.5;
-      } else {
-        ctx.strokeStyle = curIsWild
-          ? 'rgba(255, 186, 232, 0.72)'
-          : curIsGold
-          ? 'rgba(255, 224, 102, 0.76)'
-          : isTouchAiming
-          ? theme.guideTouch
-          : theme.guideLine;
-        ctx.lineWidth = isTouchAiming ? 2.4 : 1.8;
-      }
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      if (willGlaze && !isAimCancelled) {
-        ctx.fillStyle = '#fff5b8';
-        UI.drawStar(ctx, aimGlazeInfo.x, aimGlazeInfo.y, 7.2 + Math.sin(nowSec * 12) * 1.4, nowSec * 5);
-      }
-      ctx.restore();
-
-      if (landY > JAR.dropY + 26 && !isAimCancelled) {
+      const ghostAngle = -aimAngle * 0.35;
+      if (traj.endY > launchY + 24) {
         if (curIsWild) {
-          UI.drawRainbowWildcard(ctx, gameState.dropX, landY, curR, aimAngle, nowSec, 0.34);
+          UI.drawRainbowWildcard(ctx, traj.endX, traj.endY, curR, ghostAngle, nowSec, isTouchAiming ? 0.38 : 0.28);
         } else {
-          drawTierSprite(ctx, sprites, gameState.curTier, gameState.dropX, landY, curR, aimAngle, 0, 0, isTouchAiming ? 0.34 : 0.25);
+          drawTierSprite(ctx, sprites, gameState.curTier, traj.endX, traj.endY, curR, ghostAngle, 0, 0, isTouchAiming ? 0.36 : 0.25);
         }
         drawShapePolygons(
           ctx,
           curShape,
-          gameState.dropX,
-          landY,
+          traj.endX,
+          traj.endY,
           curR,
-          aimAngle,
-          lockedTarget
-            ? `rgba(${lr}, ${lg}, ${lb}, 0.95)`
+          ghostAngle,
+          hasBounce
+            ? 'rgba(148, 244, 255, 0.94)'
             : willGlaze
-            ? 'rgba(255, 224, 88, 0.95)'
+            ? 'rgba(255, 224, 88, 0.94)'
+            : lockedTarget
+            ? `rgba(${lr}, ${lg}, ${lb}, 0.94)`
             : isTouchAiming
             ? theme.guideTouch
             : theme.guideLine,
-          lockedTarget || willGlaze ? 2.2 : 1.5,
-          lockedTarget ? `rgba(${lr}, ${lg}, ${lb}, 0.16)` : willGlaze ? 'rgba(255, 224, 88, 0.16)' : `rgba(${lr}, ${lg}, ${lb}, 0.06)`,
+          lockedTarget || hasBounce || willGlaze ? 2.2 : 1.5,
+          hasBounce
+            ? 'rgba(148, 244, 255, 0.14)'
+            : willGlaze
+            ? 'rgba(255, 224, 88, 0.15)'
+            : `rgba(${lr}, ${lg}, ${lb}, ${lockedTarget ? 0.15 : 0.06})`,
           [4, 4]
         );
+      }
 
+      // Unified Storybook Callout Badge for Bank-Shot, Glaze Ring, or Lock-on
+      if (lockedTarget || hasBounce || willGlaze) {
+        const multLabel = bPoints.length >= 2 && hasBouncy ? '×2.8' : hasPrism ? '×2.0' : '×1.5';
+        let tagText;
         if (lockedTarget) {
-          const tagText = curIsWild
-            ? '🌈 升阶+1!'
-            : willGlaze
-            ? '✨ 穿环镀金合成!'
-            : curIsGold || lockedTarget.isGolden
-            ? '✨ 黄金暴击!'
-            : '✦ 可合成!';
-          const tagW = willGlaze ? 104 : 78;
-          const tagY = Math.max(JAR.neckY + 20, landY - curR - 14);
-          const tagX = Math.max(JAR.left + tagW * 0.5 + 4, Math.min(JAR.right - tagW * 0.5 - 4, gameState.dropX));
-          ctx.save();
-          ctx.fillStyle = curIsWild ? 'rgba(130, 32, 92, 0.9)' : willGlaze ? 'rgba(110, 58, 10, 0.92)' : 'rgba(66, 36, 12, 0.9)';
-          ctx.strokeStyle = curIsWild ? '#ffb8e6' : willGlaze ? '#ffe26a' : `rgb(${lr}, ${lg}, ${lb})`;
-          ctx.lineWidth = 1.5;
-          UI.roundRectPath(ctx, tagX - tagW * 0.5, tagY - 10, tagW, 20, 10);
-          ctx.fill();
-          ctx.stroke();
-          UI.drawFitText(ctx, tagText, tagX, tagY, tagW - 8, 10.8, 8.8, 800, '#fff5be', 'center');
-          ctx.restore();
+          if (hasBounce && willGlaze) tagText = '穿环弹壁合成!';
+          else if (hasBounce) tagText = `${bPoints.length >= 2 ? '二段弹壁' : '弹壁合成'} ${multLabel}!`;
+          else if (willGlaze) tagText = '穿环镀金合成!';
+          else if (curIsWild) tagText = '彩虹升阶+1!';
+          else if (curIsGold || lockedTarget.isGolden) tagText = '黄金暴击!';
+          else tagText = '可合成!';
+        } else if (hasBounce && willGlaze) {
+          tagText = '弹壁 + 镀金!';
         } else if (willGlaze) {
-          const tagW = 82;
-          const tagY = Math.max(JAR.dangerY + 26, aimGlazeInfo.y - 24);
-          const tagX = Math.max(JAR.left + tagW * 0.5 + 4, Math.min(JAR.right - tagW * 0.5 - 4, gameState.dropX));
-          ctx.save();
-          ctx.fillStyle = 'rgba(110, 58, 10, 0.92)';
-          ctx.strokeStyle = '#ffe26a';
-          ctx.lineWidth = 1.5;
-          UI.roundRectPath(ctx, tagX - tagW * 0.5, tagY - 9.5, tagW, 19, 9.5);
-          ctx.fill();
-          ctx.stroke();
-          UI.drawFitText(ctx, '✨ 穿环镀金!', tagX, tagY, tagW - 8, 10.5, 8.5, 800, '#fff6c4', 'center');
-          ctx.restore();
+          tagText = '穿环镀金!';
+        } else {
+          tagText = bPoints.length >= 2 ? '二段折射' : '弹壁折射';
         }
+        const tagW = Math.max(76, tagText.length * 8.6 + 20);
+        const anchorY = lockedTarget || hasBounce ? traj.endY - curR - 14 : Math.max(JAR.dangerY + 24, aimGlazeInfo.y - 22);
+        const tagY = Math.max(JAR.neckY + 20, anchorY);
+        const tagX = Math.max(JAR.left + tagW * 0.5 + 4, Math.min(JAR.right - tagW * 0.5 - 4, lockedTarget || hasBounce ? traj.endX : aimGlazeInfo.x));
+        UI.drawNoticeBanner(ctx, tagX - tagW * 0.5, tagY - 10, tagW, 20, {
+          text: tagText,
+          fontSize: 10.2,
+          borderColor: hasBounce ? '#9cf4ff' : '#ffd872',
+          textColor: hasBounce ? '#e4fcff' : '#fff5cf',
+          rightReserve: 8
+        });
       }
     }
 
-    // Current hovering treat
+    // Fixed Center Turret Mount (`icon_launcher`) + Held Dessert at (220, launchY)
     const coolingDrop = gameState.dropCooldown > 0.04;
     if (gameState.curTier) {
-      const visualAngle = isSling ? -aim.angle * 0.35 : aimAngle + gameState.dropSway * 0.45;
-      const hoverY = JAR.dropY + (isSling ? 4 : 0);
+      const visualAngle = -aimAngle * 0.35;
+      const turretSize = Math.max(56, Math.min(76, curR * 2.35));
+
       ctx.save();
-      if (isAimCancelled) ctx.globalAlpha = 0.35;
-      else if (coolingDrop) ctx.globalAlpha = 0.55;
+      if (isAimCancelled) ctx.globalAlpha = 0.38;
+      else if (coolingDrop) ctx.globalAlpha = 0.62;
+
+      // Rotating wooden-and-brass pastry launcher ring (star nozzle points along launch angle!)
+      UI.drawUiIcon(ctx, sprites, 'icon_launcher', launchX, launchY, turretSize, 0.96, -aimAngle);
 
       // Mugi Meteor Shot blazing halo on held treat!
       if (gameState.nextShotMeteor) {
@@ -1623,36 +1534,27 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
         ctx.strokeStyle = `rgba(255, 138, 64, ${mp})`;
         ctx.lineWidth = 3.5;
         ctx.beginPath();
-        ctx.arc(gameState.dropX, hoverY, curR + 6 + mp * 2.5, 0, Math.PI * 2);
+        ctx.arc(launchX, launchY, curR + 6 + mp * 2.5, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
       }
 
       if (curIsWild) {
-        UI.drawRainbowWildcard(ctx, gameState.dropX, hoverY, curR, visualAngle, nowSec, coolingDrop ? 0.65 : 1);
+        UI.drawRainbowWildcard(ctx, launchX, launchY, curR, visualAngle, nowSec, coolingDrop ? 0.65 : 1);
       } else {
-        if (curIsGold) UI.drawGoldenAura(ctx, gameState.dropX, hoverY, curR, nowSec, coolingDrop ? 0.6 : 1);
-        drawTierSprite(ctx, sprites, gameState.curTier, gameState.dropX, hoverY, curR, visualAngle, 0, 0, 1, gameState.heldActionAnim);
+        if (curIsGold) UI.drawGoldenAura(ctx, launchX, launchY, curR, nowSec, coolingDrop ? 0.6 : 1);
+        drawTierSprite(ctx, sprites, gameState.curTier, launchX, launchY, curR, visualAngle, 0, 0, 1, gameState.heldActionAnim);
         if (gameState.heldActionAnim && !coolingDrop) {
-          drawDessertActionFX(ctx, gameState.dropX, hoverY, curR, gameState.curTier, gameState.heldActionAnim);
+          drawDessertActionFX(ctx, launchX, launchY, curR, gameState.curTier, gameState.heldActionAnim);
         }
       }
       ctx.restore();
 
       if (isAimCancelled) {
-        ctx.save();
-        ctx.fillStyle = 'rgba(42, 22, 12, 0.88)';
-        ctx.strokeStyle = 'rgba(255, 210, 140, 0.8)';
-        ctx.lineWidth = 1.4;
-        UI.roundRectPath(ctx, JAR.canvasW / 2 - 58, JAR.neckY + 12, 116, 22, 11);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = '#ffe8bc';
-        ctx.font = UI.fontStr(11, 700);
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('↑ 松手取消投放', JAR.canvasW / 2, JAR.neckY + 23);
-        ctx.restore();
+        UI.drawNoticeBanner(ctx, launchX - 62, JAR.neckY + 12, 124, 22, {
+          text: '↑ 松手取消发射',
+          fontSize: 10.5
+        });
       }
     }
   }
@@ -1831,7 +1733,7 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
       }
     }
 
-    // Servable Gold Bell Ring + Bouncing Tap-to-Serve Pill (with Aged Caramel Ledger bonus!)
+    // Servable Gold Bell Ring + Bouncing Tap-to-Serve Pill (with storybook serve_bell icon!)
     if (isServable && !isTargetingMode) {
       const sp = 0.65 + 0.35 * Math.sin(nowSec * 7 + e.id);
       ctx.save();
@@ -1840,8 +1742,8 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
       ctx.strokeStyle = isSouffle
         ? `rgba(255, 224, 96, ${0.75 + 0.25 * sp})`
         : isVipServable
-        ? `rgba(255, 168, 214, ${0.72 + 0.28 * sp})`
-        : `rgba(255, 224, 108, ${0.7 + 0.3 * sp})`;
+        ? `rgba(255, 196, 128, ${0.75 + 0.25 * sp})`
+        : `rgba(255, 226, 112, ${0.72 + 0.28 * sp})`;
       ctx.lineWidth = 2.6;
       ctx.setLineDash([7, 4]);
       ctx.beginPath();
@@ -1854,31 +1756,29 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
       const pillY = Math.max(JAR.neckY + 12, e.y - e.r - 10 + bob);
       const hasAged = !isSouffle && e.agedStacks > 0 && Array.isArray(gameState.relics) && gameState.relics.includes('rel_aged');
       const pillTxt = isSouffle
-        ? '👑献礼·×2'
+        ? '献礼·×2'
         : hasAged
-        ? `🔥+${e.agedStacks * 30}%`
+        ? `+${e.agedStacks * 30}%`
         : isVipServable
-        ? '👑VIP上菜'
-        : '🔔上菜';
-      const pillW = isSouffle || isVipServable || hasAged ? 58 : 44;
+        ? 'VIP上菜'
+        : '上菜';
+      const pillW = isSouffle || isVipServable || hasAged ? 66 : 50;
+      const px0 = e.x - pillW * 0.5;
+      const py0 = pillY - 9.5;
       ctx.save();
-      UI.roundRectPath(ctx, e.x - pillW * 0.5, pillY - 9, pillW, 18, 9);
+      UI.roundRectPath(ctx, px0, py0, pillW, 19, 9.5);
       ctx.fillStyle = hasAged
-        ? 'rgba(156, 56, 14, 0.94)'
-        : isSouffle
-        ? 'rgba(136, 72, 12, 0.94)'
+        ? 'rgba(138, 56, 18, 0.95)'
         : isVipServable
-        ? 'rgba(134, 34, 88, 0.92)'
-        : 'rgba(72, 42, 14, 0.92)';
+        ? 'rgba(98, 42, 24, 0.95)'
+        : 'rgba(64, 35, 16, 0.94)';
       ctx.fill();
-      ctx.lineWidth = 1.4;
-      ctx.strokeStyle = isVipServable ? '#ffb8e0' : '#ffe27a';
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = isVipServable ? '#ffd584' : '#ffe27a';
       ctx.stroke();
-      ctx.fillStyle = '#fff8dc';
-      ctx.font = UI.fontStr(9.5, 900);
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(pillTxt, e.x, pillY + 0.5);
+      const drewBell = UI.drawUiIcon(ctx, sprites, 'serve_bell', px0 + 10.5, pillY, 13.5);
+      const tx = drewBell ? px0 + 18 + (pillW - 22) * 0.5 : e.x;
+      UI.drawFitText(ctx, pillTxt, tx, pillY + 0.5, pillW - (drewBell ? 22 : 8), 9.5, 8, 900, '#fff6db', 'center');
       ctx.restore();
     }
 

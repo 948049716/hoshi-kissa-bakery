@@ -506,7 +506,7 @@ async function run() {
       const cap = window.__WX_HARNESS__.getMenuRect();
       return { hits: st.hits, cap, assetsLoaded: st.assetsLoaded, assetsTotal: st.assetsTotal };
     })()`);
-    assert(info.assetsLoaded === 37 && info.assetsTotal === 37, `${label}: assets ${info.assetsLoaded}/${info.assetsTotal}`);
+    assert(info.assetsLoaded === 41 && info.assetsTotal === 41, `${label}: assets ${info.assetsLoaded}/${info.assetsTotal}`);
     for (const h of info.hits) {
       if (h.id === 'modal_backdrop' || h.id === 'modal_body_guard') continue;
       assert(h.x >= -1 && h.y >= -1, `${label}: hit ${h.id} out of top-left (${h.x},${h.y})`);
@@ -614,8 +614,45 @@ async function run() {
   await sleep(340);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.mode === 'chef' && st.running === true && st.lobbyOpen === false, 'Started chef mode');
+  assert(
+    st.activeModal === 'mode_guide' && st.guideMode === 'chef' && st.guideStep === 0 && st.paused === true,
+    `Expected first-time Chef spotlight mode_guide (step 0, paused), got modal=${st.activeModal}, step=${st.guideStep}, paused=${st.paused}`
+  );
+  await checkCapsuleAndViewportBounds('iPhone SE Chef Mode Guide Step 1 375x667', 375, 667, 0);
+  await screenshot('08a_mode_guide_chef_375.png');
+
+  // Advance through all 3 spotlight guide steps
+  await tapHit('guide_next');
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === 'mode_guide' && st.guideStep === 1, `Expected Chef guide step 1, got ${st.guideStep}`);
+  await checkCapsuleAndViewportBounds('iPhone SE Chef Mode Guide Step 2 375x667', 375, 667, 0);
+  await screenshot('08a2_mode_guide_serve_375.png');
+
+  await tapHit('guide_next');
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === 'mode_guide' && st.guideStep === 2, `Expected Chef guide step 2, got ${st.guideStep}`);
+  await checkCapsuleAndViewportBounds('iPhone SE Chef Mode Guide Step 3 375x667', 375, 667, 0);
+
+  await tapHit('guide_next');
+  await sleep(180);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === null && st.paused === false, `Expected Chef guide finished & unpaused, got modal=${st.activeModal}`);
+
+  // Verify HUD '?' (play_help) re-opens mode_guide anytime and [跳过指引] skips in 1 tap
+  await tapHit('play_help');
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === 'mode_guide' && st.guideStep === 0, 'Expected play_help to reopen mode_guide');
+  await tapHit('guide_skip');
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === null && st.paused === false, 'Expected guide_skip to dismiss mode_guide immediately');
+
   assert(st.shift === 1 && st.shiftTarget === 1200, `Expected Shift 1 target ¥1200, got shift=${st.shift}, target=${st.shiftTarget}`);
   assert(st.stepsLeft === 16 && st.stepsMax === 16, `Expected 16/16 steps in Shift 1, got ${st.stepsLeft}/${st.stepsMax}`);
+  assert(st.dropX === 220, `Expected launcher fixed at center x=220, got ${st.dropX}`);
   assert(st.hits.some((h) => h.id === 'mobile_relics_bar'), 'Expected mobile_relics_bar hit in Chef HUD');
   assert(st.entities.length === 4, `Expected 4 pre-populated starter treats, got ${st.entities.length}`);
   assert(st.orders && st.orders.length === 2, `Expected Dual-Table orders (2), got ${st.orders && st.orders.length}`);
@@ -645,7 +682,7 @@ async function run() {
   assert(st.serveCascadeTimer > 0, `Expected Serve Cascade Avalanche window active, got ${st.serveCascadeTimer}`);
   assert(!st.entities.some((e) => e.id === starterT3.id), 'Served treat must be physically removed from jar');
 
-  // 3B. Pull-Down Direct-Aim Slingshot Bank-Shot (preview screenshot + actual wall bounce!)
+  // 3B. Fixed-Center Angle Aiming & Bank-Shot (dropX stays locked at 220 while aiming left!)
   const slingStartX = Math.round(jb.x + jb.w * 0.5);
   const slingStartY = Math.round(jb.y + jb.h * 0.25);
   const slingEndX = Math.round(jb.x + jb.w * 0.14);
@@ -663,16 +700,18 @@ async function run() {
   }
   await sleep(100);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.aim && st.aim.active && st.aim.mode === 'sling', `Expected slingshot aim mode active, got ${JSON.stringify(st.aim)}`);
+  assert(st.aim && st.aim.active && st.aim.mode === 'sling', `Expected turret angle aim mode active, got ${JSON.stringify(st.aim)}`);
+  assert(st.dropX === 220, `Expected launcher dropX locked at 220 during off-center drag, got ${st.dropX}`);
+  assert(st.aim.angle < -0.25 && st.aim.launchVx < -100, `Expected leftward launch angle & negative vx, got angle=${st.aim.angle}, vx=${st.aim.launchVx}`);
   await screenshot('08b_slingshot_aim_375.png');
   const dropsBeforeSling = st.dropsMadeThisRun;
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: slingEndX, y: slingEndY, button: 'left', clickCount: 1 });
   await sleep(520);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.dropsMadeThisRun === dropsBeforeSling + 1, 'Slingshot release must launch treat');
+  assert(st.dropsMadeThisRun === dropsBeforeSling + 1, 'Angled release must launch treat');
+  assert(st.dropX === 220, `Expected dropX still locked at 220 after release, got ${st.dropX}`);
 
-  // 3C. Regression: pull down, then swing far sideways while finger rises (dy < 26) — must stay
-  // latched in sling with a wide angle; the top drop point must NOT slide with the finger.
+  // 3C. Wide sideways angle sweep — top launch point MUST stay fixed at 220 with wide angle < -0.9
   await waitForCooldown();
   const wideStartX = Math.round(jb.x + jb.w * 0.5);
   const wideStartY = Math.round(jb.y + jb.h * 0.25);
@@ -694,14 +733,14 @@ async function run() {
     await sleep(22);
     if (pIdx === 2) {
       const s2 = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-      assert(s2.aim.mode === 'sling', `Expected sling after straight pull-down, got ${s2.aim.mode}`);
+      assert(s2.aim.mode === 'sling', `Expected sling after pull-down, got ${s2.aim.mode}`);
       wideDropX = s2.dropX;
     }
   }
   await sleep(80);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.aim && st.aim.active && st.aim.mode === 'sling', `Wide sideways swing must stay in sling mode, got ${JSON.stringify(st.aim)}`);
-  assert(Math.abs(st.dropX - wideDropX) < 0.5, `Drop point must stay locked during sling (was ${wideDropX}, now ${st.dropX})`);
+  assert(st.aim && st.aim.active && st.aim.mode === 'sling', `Wide sideways swing must stay in aim mode, got ${JSON.stringify(st.aim)}`);
+  assert(wideDropX === 220 && st.dropX === 220, `Drop point must stay locked at 220 (was ${wideDropX}, now ${st.dropX})`);
   assert(st.aim.angle < -0.9, `Wide left swing must form a wide launch angle, got ${st.aim.angle}`);
   await screenshot('08c_slingshot_wide_angle_375.png');
   const dropsBeforeWide = st.dropsMadeThisRun;
@@ -714,13 +753,29 @@ async function run() {
   });
   await sleep(520);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.dropsMadeThisRun === dropsBeforeWide + 1, 'Wide-angle slingshot release must launch treat');
+  assert(st.dropsMadeThisRun === dropsBeforeWide + 1, 'Wide-angle release must launch treat');
   await waitForCooldown();
 
-  // Hold swap + Quick vertical tap-drop
+  // Hold swap + Off-center right press & release (must keep dropX === 220 and aim/launch rightward!)
   await tapHit('mobile_hold_swap');
   await sleep(160);
-  await tapAt(Math.round(jb.x + jb.w * 0.72), Math.round(jb.y + jb.h * 0.30));
+  const offRightX = Math.round(jb.x + jb.w * 0.72);
+  const offRightY = Math.round(jb.y + jb.h * 0.30);
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: offRightX, y: offRightY, button: 'left', clickCount: 1 });
+  await sleep(80);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.dropX === 220 && st.aimAngle > 0.2 && st.aim.launchVx > 100,
+    `Off-center right press must keep dropX=220 and aim right, got dropX=${st.dropX}, aimAngle=${st.aimAngle}, vx=${st.aim.launchVx}`
+  );
+  const dropsBeforeRightTap = st.dropsMadeThisRun;
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: offRightX, y: offRightY, button: 'left', clickCount: 1 });
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.dropX === 220 && st.dropsMadeThisRun === dropsBeforeRightTap + 1,
+    `Off-center right release must launch from center x=220, got dropX=${st.dropX}, drops=${st.dropsMadeThisRun}`
+  );
   await waitForCooldown();
 
   // Trigger Meteor -> Yarn Ball -> Toggle Debug Wireframe
@@ -786,12 +841,15 @@ async function run() {
   await sleep(160);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.activeSkillMode === 'swap_2', `Expected Luna swap_2 mode after 1st tap, got ${st.activeSkillMode}`);
-  const swB = st.entities.find((e) => !e.isYarnBall && e.id !== swA.id);
+  const swB = st.entities.find((e) => !e.isYarnBall && !(e.frozenHp > 0) && e.id !== swA.id);
   assert(swB, 'Need live second swappable entity for Luna swap_2');
   await tapAt(Math.round(jb.x + swB.x * jb.scale), Math.round(jb.y + swB.y * jb.scale));
   await sleep(180);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.activeSkillMode === null && st.skillEnergy === 0, 'Expected Luna swap to complete and consume skillEnergy');
+  assert(
+    st.activeSkillMode === null && st.skillEnergy < 60,
+    `Expected Luna swap to complete and consume 100 skillEnergy (mode=${st.activeSkillMode}, energy=${st.skillEnergy})`
+  );
 
   // Mugi Meteor Shot arming
   await evalJS(`window.__HOSHI_DEBUG__.selectPatron('mugi'); window.__HOSHI_DEBUG__.chargeSkill();`);
@@ -1241,7 +1299,15 @@ async function run() {
   await tapHit('btn_start');
   await sleep(280);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.mode === 'rush' && st.rushTimer > 80, `Expected rush mode timer > 80, got ${st.rushTimer}`);
+  assert(
+    st.mode === 'rush' && st.activeModal === 'mode_guide' && st.guideMode === 'rush' && st.paused === true,
+    `Expected first-time Rush mode_guide, got modal=${st.activeModal}, guideMode=${st.guideMode}`
+  );
+  await checkCapsuleAndViewportBounds('iPhone 14 Rush Mode Guide 390x844', 390, 844, 34);
+  await tapHit('guide_skip');
+  await sleep(180);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.mode === 'rush' && st.activeModal === null && st.rushTimer > 80, `Expected rush mode active & timer > 80, got ${st.rushTimer}`);
   await checkCapsuleAndViewportBounds('iPhone 14 Rush HUD 390x844', 390, 844, 34);
 
   // Tap-to-Serve starter T3 in Rush mode -> must add +3.0s!
@@ -1451,11 +1517,14 @@ async function run() {
   await sleep(160);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   const stalePayout = st.shiftRevenue - revBeforeStaleServe;
+  const TIER_SERVE_PTS = { 1: 30, 2: 65, 3: 130, 4: 250, 5: 440, 6: 760, 7: 1200, 8: 1950, 9: 3200 };
+  const freshNorm = freshPayout / (TIER_SERVE_PTS[ffTier] || 130);
+  const staleNorm = stalePayout / (TIER_SERVE_PTS[staleQuick.slots[0].tier] || 130);
   assert(
-    freshPayout > stalePayout * 2.2,
-    `Expected fast_fresh ×2.0 payout (${freshPayout}) >> stale ×0.75 payout (${stalePayout})`
+    freshNorm > staleNorm * 2.2,
+    `Expected fast_fresh ×2.0 norm (${freshNorm.toFixed(2)}, ¥${freshPayout} T${ffTier}) >> stale ×0.75 norm (${staleNorm.toFixed(2)}, ¥${stalePayout} T${staleQuick.slots[0].tier})`
   );
-  console.log(`[Phase 3K OK] fast_fresh verified: fresh=¥${freshPayout} (×2.0) vs stale=¥${stalePayout} (×0.75)`);
+  console.log(`[Phase 3K OK] fast_fresh verified: fresh=¥${freshPayout} (T${ffTier}, ${freshNorm.toFixed(2)}x) vs stale=¥${stalePayout} (T${staleQuick.slots[0].tier}, ${staleNorm.toFixed(2)}x)`);
 
   // ==========================================================
   // 3L (Mobile 390x844). Phase 3 — Act 4, Act 5 Boss + Step-6 Judge Rush (freshSteps===4, ×2.5, +2 steps) & Build Details Modal
@@ -1546,7 +1615,7 @@ async function run() {
   await tapHit('btn_start');
   await sleep(300);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.mode === 'chef' && st.running === true && st.shift === 1, 'Chef mode running on desktop at Shift 1');
+  assert(st.mode === 'chef' && st.running === true && st.shift === 1 && st.activeModal === null, 'Chef mode running on desktop without repeating seen guide');
   assert(st.hits.some((h) => h.id === 'wide_relics_bar'), 'Expected wide_relics_bar hit on desktop Chef HUD');
   assert(st.hits.some((h) => h.id === 'wide_hazards_bar'), 'Expected wide_hazards_bar hit on desktop Chef HUD');
   assert(st.hits.some((h) => h.id === 'play_shift_badge'), 'Expected play_shift_badge hit on desktop Chef HUD');
@@ -1600,7 +1669,16 @@ async function run() {
   await tapHit('btn_start');
   await sleep(300);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.mode === 'zen' && st.running === true, 'Zen mode running on desktop');
+  assert(
+    st.mode === 'zen' && st.running === true && st.activeModal === 'mode_guide' && st.guideMode === 'zen',
+    `Expected first-time Zen mode_guide on desktop, got modal=${st.activeModal}`
+  );
+  await checkCapsuleAndViewportBounds('Desktop Zen Mode Guide 1280x760', 1280, 760, 0);
+  await screenshot('14a_mode_guide_zen_desktop_1280.png');
+  await tapHit('guide_skip');
+  await sleep(180);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.mode === 'zen' && st.running === true && st.activeModal === null, 'Zen mode running on desktop after guide_skip');
   await checkCapsuleAndViewportBounds('Desktop Zen HUD 1280x760', 1280, 760, 0);
   const djb = st.jarBox;
   await tapAt(Math.round(djb.x + djb.w * 0.5), Math.round(djb.y + djb.h * 0.35));

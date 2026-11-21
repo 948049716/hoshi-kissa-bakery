@@ -177,11 +177,34 @@ const ASSET_PATHS = {
   hero: 'assets/title_hero.jpg',
   shopSign: 'assets/icon_shop_sign.png',
   yarnBall: 'assets/event_yarn_ball.png',
+  uiAtlas: 'assets/ui_atlas.png',
+  titlePlaque: 'assets/ui_title_plaque.png',
+  patronStage: 'assets/ui_patron_stage.png',
+  serveBell: 'assets/ui_serve_bell.png',
   tools: {
     shake: 'assets/tool_shake.png',
     fork: 'assets/tool_fork.png',
     spoon: 'assets/tool_spoon.png'
   }
+};
+
+const UI_ATLAS_RECTS = {
+  mode_chef: { x: 0, y: 0, w: 128, h: 128 },
+  mode_rush: { x: 128, y: 0, w: 128, h: 128 },
+  mode_zen: { x: 256, y: 0, w: 128, h: 128 },
+  icon_shop: { x: 384, y: 0, w: 128, h: 128 },
+  icon_book: { x: 0, y: 128, w: 128, h: 128 },
+  icon_trophy: { x: 128, y: 128, w: 128, h: 128 },
+  icon_stardust: { x: 256, y: 128, w: 128, h: 128 },
+  icon_coin: { x: 384, y: 128, w: 128, h: 128 },
+  icon_bgm: { x: 0, y: 256, w: 128, h: 128 },
+  icon_sfx: { x: 128, y: 256, w: 128, h: 128 },
+  icon_help: { x: 256, y: 256, w: 128, h: 128 },
+  icon_home: { x: 384, y: 256, w: 128, h: 128 },
+  icon_restart: { x: 0, y: 384, w: 128, h: 128 },
+  icon_gift: { x: 128, y: 384, w: 128, h: 128 },
+  icon_launcher: { x: 256, y: 384, w: 128, h: 128 },
+  icon_paw_guide: { x: 384, y: 384, w: 128, h: 128 }
 };
 
 const BLESSINGS = [
@@ -286,12 +309,12 @@ const PATRONS = [
     },
     passiveDesc: '主动技【金勺捞底】捞出底层甜品；VIP赏金+25% + 开局+10🪙',
     shortPassive: '捞底·+10🪙',
-    greet: '刚出炉的星光面糊好香呀～亮金铃的甜品直接点它就能上菜哦！',
+    greet: '刚出炉的星光面糊好香呀～亮餐铃的甜品直接点它就能上菜哦！',
     thanks: '太棒啦！抽底上菜一气呵成，香气飘满月光街道啦～',
     idleLines: [
-      '欢迎回到星夜吃茶！下拉拉弓还能把甜品撞墙弹进深处缝隙哦～',
-      '看到罐里亮起 🔔 金铃的甜品了吗？点击它上菜，还能引发抽底雪崩！',
-      '我的招牌技【金勺捞底】能把压在底下的甜品捞回来重扔哦～',
+      '欢迎回到星夜吃茶！在罐内左右拖动调角，就能把甜品撞墙弹进深处哦～',
+      '看到罐里亮起餐铃的甜品了吗？点击它上菜，还能引发抽底雪崩！',
+      '我的招牌技【金勺捞底】能把压在底下的甜品捞回来重发哦～',
       '4 阶柠檬塔合出时会用气泡蒸发周围蓝莓，超适合清理罐底！'
     ]
   },
@@ -338,10 +361,10 @@ const PATRONS = [
     },
     passiveDesc: '主动技【元气重锤】穿甲升阶；弹壁+40%分，3连回+20%技',
     shortPassive: '重锤·弹壁+40%',
-    greet: '汪呜！下拉拉弓撞墙弹射打台球，再来一发元气重锤吧！',
+    greet: '汪呜！瞄准角度撞墙弹射打台球，再来一发元气重锤吧！',
     thanks: '太满足啦！下次我还要带朋友们一起来！',
     idleLines: [
-      '汪呜！！把蜜桃泡芙球拉弓往玻璃壁上弹，一杆钻进缝隙连合超爽！',
+      '汪呜！！把蜜桃泡芙球瞄准玻璃壁弹射，一杆钻进缝隙连合超爽！',
       '激活我的【元气重锤】，下一次发射撞到谁就帮谁强行升阶！',
       '3 连击以上能狂回厨艺能，源源不断放技能轰炸全场！',
       '8 阶栗子蒙布朗超重，砸下来能把底下的小蓝莓直接压碎变分！'
@@ -427,7 +450,7 @@ const SHIFTS = [
     baseCoins: 35,
     badge: '第1幕·试营',
     modifier: null,
-    desc: '纯净开场幕：底部预置 4 颗甜品，点击金铃出餐体验抽底雪崩！'
+    desc: '纯净开场幕：底部预置 4 颗甜品，点击餐铃出餐体验抽底雪崩！'
   },
   {
     shift: 2,
@@ -479,8 +502,8 @@ const SHIFT_HAZARDS = {
     icon: '✨',
     name: '焦糖星环',
     badge: '✨焦糖环',
-    color: '#c47e12',
-    bg: '#fff4d4',
+    color: '#b87618',
+    bg: '#fff5d9',
     desc: '罐中上部巡游的星光圆环，甜品穿过环心即刻镀金（合成 ×2.5 / 出餐 ×1.8）！'
   },
   divider: {
@@ -489,8 +512,8 @@ const SHIFT_HAZARDS = {
     name: '木质分槽隔板',
     badge: '🪵木隔板',
     color: '#8f4f22',
-    bg: '#f8e6d0',
-    desc: '罐底中央立起半高木隔板分为左右双烘焙槽，拉弓弹壁跨越最爽！'
+    bg: '#f9e9d6',
+    desc: '罐底中央立起半高木隔板分为左右双烘焙槽，瞄准侧壁反弹跨越最爽！'
   },
   bumpers: {
     id: 'bumpers',
@@ -498,7 +521,7 @@ const SHIFT_HAZARDS = {
     name: '双重黄油弹柱',
     badge: '🧈黄油弹柱',
     color: '#b56e10',
-    bg: '#fff1cc',
+    bg: '#fff3d4',
     desc: '罐壁左右中段安装 2 枚高弹星柱，甜品撞柱高回弹并爆出 +¥40 弹射小费！'
   },
   fast_fresh: {
@@ -506,8 +529,8 @@ const SHIFT_HAZARDS = {
     icon: '⏱️',
     name: '极速冷盘',
     badge: '⏱️极速冷盘',
-    color: '#b83c24',
-    bg: '#ffe5de',
+    color: '#b5452e',
+    bg: '#ffece4',
     desc: '订单鲜度窗缩至 5 步，鲜度内出餐暴涨 ×2.0 赏金，超时则降至 ×0.75！'
   }
 };
@@ -533,10 +556,10 @@ function getShiftConfig(shiftNum) {
 const MAX_RELIC_SLOTS = 4;
 
 const RELIC_ARCHETYPES = {
-  cascade: { id: 'cascade', icon: '🏔️', name: '抽底雪崩流', color: '#1b6d8a', bg: '#e2f7ff' },
-  bank: { id: 'bank', icon: '🎱', name: '弹壁台球流', color: '#2b5ca8', bg: '#e6f0ff' },
-  trait: { id: 'trait', icon: '🧪', name: '异能催化流', color: '#7a3494', bg: '#f5e8ff' },
-  greed: { id: 'greed', icon: '👑', name: '贪婪豪赌流', color: '#a35610', bg: '#fff1d1' }
+  cascade: { id: 'cascade', icon: '🏔️', name: '抽底雪崩流', color: '#467a63', bg: '#ebf6ee' },
+  bank: { id: 'bank', icon: '🎱', name: '弹壁台球流', color: '#8a5d2b', bg: '#f9eedb' },
+  trait: { id: 'trait', icon: '🧪', name: '异能催化流', color: '#8c4966', bg: '#fbeef4' },
+  greed: { id: 'greed', icon: '👑', name: '贪婪豪赌流', color: '#a85c14', bg: '#fff3d6' }
 };
 
 const RELICS = [
@@ -896,12 +919,122 @@ const STORAGE_KEY = 'hoshi_kissa_bakery_save_v1';
 
 const SOLO_EMOTES = ['✦', '♪', '喵~', '✨', '♡', '★', '!', '♛', '👑'];
 
+const MODE_GUIDES = {
+  chef: {
+    mode: 'chef',
+    icon: 'mode_chef',
+    title: '星夜主厨 · 新手三步指引',
+    subtitle: '5 幕闯关 × 订单上菜 × 秘方流派构筑',
+    steps: [
+      {
+        focus: 'launcher',
+        icon: 'icon_launcher',
+        tag: '第 1 / 3 步 · 定角发射',
+        title: '固定中央发射 · 拖动调角弹壁',
+        lines: [
+          '发射器固定在罐口正中，不可左右平移，专注瞄准发射角度！',
+          '在罐内拖动即可旋转角度并预览轨迹，撞玻璃壁反弹合成享 ×1.5 加成！',
+          '上滑移出罐口外松手即可取消本次发射。'
+        ]
+      },
+      {
+        focus: 'serve',
+        icon: 'serve_bell',
+        tag: '第 2 / 3 步 · 点击上菜',
+        title: '亮铃甜品直接点选上菜 · 抽底雪崩',
+        lines: [
+          '上方展示顾客点单；罐内符合订单的甜品会自动亮起「上菜」提示！',
+          '直接点击罐内亮铃甜品即可端走赚取营业额，无需等它消掉。',
+          '抽走瞬间上方甜品塌落相撞会触发【抽底雪崩】高倍连合与步数返还！'
+        ]
+      },
+      {
+        focus: 'hud_skill',
+        icon: 'icon_coin',
+        tag: '第 3 / 3 步 · 过关与构筑',
+        title: '限定步数达标 · 整备间买秘方',
+        lines: [
+          '在左上角步数耗尽前达成营业额即过关（提前达标可点「立即打烊」赚利息币）！',
+          '每幕过关进入【后厨整备间】，用秘方币自由搭配最多 4 张流派秘方。',
+          '上菜蓄满底部中央头像，即可释放搭档专属招牌主动技！'
+        ]
+      }
+    ]
+  },
+  rush: {
+    mode: 'rush',
+    icon: 'mode_rush',
+    title: '90秒狂欢 · 极速续命指引',
+    subtitle: '无步数限制 × 上菜加时 × 溢罐不秒死',
+    steps: [
+      {
+        focus: 'launcher',
+        icon: 'icon_launcher',
+        tag: '第 1 / 3 步 · 极速连发',
+        title: '中央定角连发 · 冲刺星光狂热',
+        lines: [
+          '本模式无步数限制！发射口固定在正中央，拖动瞄准角度松手即射。',
+          '连续合成积攒星光槽，进入狂热状态享受最高 5× 积分爆发！'
+        ]
+      },
+      {
+        focus: 'serve',
+        icon: 'mode_rush',
+        tag: '第 2 / 3 步 · 上菜续命',
+        title: '点击罐内亮铃甜品直接 +3.0 秒',
+        lines: [
+          '留意上方「出餐+3s」所需甜点，合出后直接点击罐内甜品端走！',
+          '每次成功上菜立刻延长 +3.0 秒倒计时，越上菜越持久！'
+        ]
+      },
+      {
+        focus: 'danger_dock',
+        icon: 'icon_gift',
+        tag: '第 3 / 3 步 · 星风救急',
+        title: '溢罐自动吹散不秒死 · 善用技能',
+        lines: [
+          '甜品堆过顶部警戒线不会直接判负，星风会自动吹散顶部甜品救急（仅扣 5 秒）！',
+          '下方摇一摇、招牌技与升阶勺可随时解围冲分！'
+        ]
+      }
+    ]
+  },
+  zen: {
+    mode: 'zen',
+    icon: 'mode_zen',
+    title: '悠闲经典 · 惬意烘焙指引',
+    subtitle: '零时间与步数压力 × 探索 9 阶传说甜点',
+    steps: [
+      {
+        focus: 'launcher',
+        icon: 'icon_launcher',
+        tag: '第 1 / 2 步 · 随心弹射',
+        title: '无压定角发射 · 体验甜品物理异能',
+        lines: [
+          '没有步数、倒计时与订单催促！在罐口中央自由调整角度发射。',
+          '从高弹泡芙、清杂柠檬塔到微浮马卡龙，每阶甜品都有独特物理异能！'
+        ]
+      },
+      {
+        focus: 'hold_milestone',
+        icon: 'icon_gift',
+        tag: '第 2 / 2 步 · 暂存与祝福',
+        title: '右上角暂存换牌 · 积分领祝福',
+        lines: [
+          '点击右上角「暂存」可随时调换手牌；每达积分里程碑可三选一星夜祝福！',
+          '向最高 9 阶传说甜点【星冠猫神舒芙蕾】发起挑战吧～'
+        ]
+      }
+    ]
+  }
+};
+
 function getChefRank(score) {
-  if (score >= 25000) return '👑 传奇猫神糕点宗师';
-  if (score >= 12000) return '🌙 星夜首席主厨';
-  if (score >= 5500) return '⭐ 银星甜点师';
-  if (score >= 2000) return '🧁 温柔烘焙师';
-  return '🐾 见习甜点师';
+  if (score >= 25000) return '传奇猫神宗师';
+  if (score >= 12000) return '星夜首席主厨';
+  if (score >= 5500) return '银星甜点师';
+  if (score >= 2000) return '温柔烘焙师';
+  return '见习甜点师';
 }
 
 module.exports = {
@@ -909,6 +1042,8 @@ module.exports = {
   WILDCARD_RADIUS,
   YARN_BALL_RADIUS,
   ASSET_PATHS,
+  UI_ATLAS_RECTS,
+  MODE_GUIDES,
   BLESSINGS,
   PATRONS,
   CASCADE_MULTIPLIERS,

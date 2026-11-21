@@ -980,11 +980,24 @@ async function run() {
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.prepShop.modOffers.some((m) => m.bought), 'Expected Deck Mod offer marked bought');
 
-  // Launch Shift 2 & verify Hot-Oven Carry-Over + Glaze Ring hazard
+  // Launch Shift 2 & verify First-Time Glaze Ring Spotlight Tip + Hot-Oven Carry-Over + Glaze Ring hazard
   await tapHit('prep_next_shift');
   await sleep(340);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.activeModal === null, 'Prep Shop closed on Shift 2 start');
+  assert(
+    st.activeModal === 'mode_guide' && st.guideMode === 'tip_glaze_ring',
+    `Expected first-time tip_glaze_ring spotlight guide on Shift 2 start, got modal=${st.activeModal}, guideMode=${st.guideMode}`
+  );
+  await checkCapsuleAndViewportBounds('iPhone SE Glaze Ring Tip 375x667', 375, 667, 0);
+  await screenshot('10f_tip_glaze_ring_375.png');
+  await tapHit('guide_next');
+  await sleep(220);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const saveAfterGlazeTip = await evalJS(`window.__HOSHI_DEBUG__.getSaveData()`);
+  assert(
+    st.activeModal === null && saveAfterGlazeTip.seenTips && saveAfterGlazeTip.seenTips.glaze_ring === true,
+    `Expected tip_glaze_ring dismissed & persisted, got modal=${st.activeModal}, seenTips=${JSON.stringify(saveAfterGlazeTip.seenTips)}`
+  );
   assert(st.shift === 2 && st.shiftTarget === 2600, `Expected Shift 2 target ¥2600, got shift=${st.shift}, target=${st.shiftTarget}`);
   assert(st.stepsLeft >= 16, `Expected >= 16 steps in Shift 2, got ${st.stepsLeft}`);
   assert(st.entities.length >= 2, `Expected Hot-Oven Carry-Over treats in Shift 2 jar, got ${st.entities.length}`);
@@ -1339,11 +1352,35 @@ async function run() {
   assert(st.over === true && st.rushFinished === true && st.activeModal === 'gameover', 'Rush timer expiration opens settlement');
   await screenshot('12_rush_gameover_390.png');
 
-  // 4B. Phase 2 — Mikan +10🪙 Starting Coins, Shift 5 Grand Prix Victory & Endless Overtime (Shift 6)
+  // 4B. Phase 2 — Mikan +8🪙 Starting Coins, Organic Shift 3 Ice-Only + Frozen Spotlight Tip, Shift 5 Victory & Endless Overtime
   await evalJS(`window.__HOSHI_DEBUG__.selectPatron('mikan'); window.__HOSHI_DEBUG__.startMode('chef');`);
   await sleep(300);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.mode === 'chef' && st.coins >= 10, `Expected Mikan starting coins >= 10, got ${st.coins}`);
+  assert(st.mode === 'chef' && st.coins >= 8, `Expected Mikan starting coins >= 8, got ${st.coins}`);
+
+  // Verify Item 8 & Item 1: Organic Shift 3 is pure ice-thawing (0 stage hazards, target ¥4400) + triggers first-time tip_frozen spotlight!
+  await evalJS(`window.__HOSHI_DEBUG__.setShift(3, null, { allowTips: true })`);
+  await sleep(260);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.shift === 3 &&
+      st.shiftTarget === 4400 &&
+      st.shiftHazards.length === 0 &&
+      st.entities.filter((e) => e.frozenHp > 0).length === 2 &&
+      st.activeModal === 'mode_guide' &&
+      st.guideMode === 'tip_frozen',
+    `Expected organic Shift 3 target=4400, 0 stage hazards, 2 frozen & tip_frozen modal, got shift=${st.shift}, target=${st.shiftTarget}, hazards=${JSON.stringify(st.shiftHazards)}, modal=${st.activeModal}/${st.guideMode}`
+  );
+  await checkCapsuleAndViewportBounds('iPhone 14 Frozen Tip 390x844', 390, 844, 34);
+  await screenshot('23_tip_frozen_390.png');
+  await tapHit('guide_next');
+  await sleep(200);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const saveAfterFrozenTip = await evalJS(`window.__HOSHI_DEBUG__.getSaveData()`);
+  assert(
+    st.activeModal === null && saveAfterFrozenTip.seenTips && saveAfterFrozenTip.seenTips.frozen === true,
+    `Expected tip_frozen dismissed & persisted, got modal=${st.activeModal}, seenTips=${JSON.stringify(saveAfterFrozenTip.seenTips)}`
+  );
 
   await evalJS(`
     window.__HOSHI_DEBUG__.setShift(5);
@@ -1356,7 +1393,7 @@ async function run() {
   await checkCapsuleAndViewportBounds('iPhone 14 Shift 5 Victory 390x844', 390, 844, 34);
   await screenshot('12b_shift_victory_390.png');
 
-  // Enter Endless Overtime -> Prep Shop for Shift 6 -> Launch Shift 6
+  // Enter Endless Overtime -> Prep Shop for Shift 6 -> Launch Shift 6 (must NOT re-trigger tip_frozen!)
   await tapHit('victory_endless');
   await sleep(240);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
@@ -1527,17 +1564,18 @@ async function run() {
   console.log(`[Phase 3K OK] fast_fresh verified: fresh=¥${freshPayout} (T${ffTier}, ${freshNorm.toFixed(2)}x) vs stale=¥${stalePayout} (T${staleQuick.slots[0].tier}, ${staleNorm.toFixed(2)}x)`);
 
   // ==========================================================
-  // 3L (Mobile 390x844). Phase 3 — Act 4, Act 5 Boss + Step-6 Judge Rush (freshSteps===4, ×2.5, +2 steps) & Build Details Modal
+  // 3L (Mobile 390x844). Phase 3 — Act 4 (8200 + Stage Obstacles), Act 5 Boss + Step-6 Judge Rush & Build Details Modal
   // ==========================================================
   await evalJS(`window.__HOSHI_DEBUG__.setShift(4)`);
   await sleep(220);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(
     st.shift === 4 &&
+      st.shiftTarget === 8200 &&
       st.entities.some((e) => e.isYarnBall) &&
       st.shiftHazards.length === 1 &&
-      (st.shiftHazards[0] === 'glaze_ring' || st.shiftHazards[0] === 'bumpers'),
-    `Expected Act 4 Yarn Ball + glaze_ring/bumpers, got hazards=${JSON.stringify(st.shiftHazards)}`
+      ['divider', 'bumpers', 'fast_fresh'].includes(st.shiftHazards[0]),
+    `Expected Act 4 target=8200 + Yarn Ball + divider/bumpers/fast_fresh, got target=${st.shiftTarget}, hazards=${JSON.stringify(st.shiftHazards)}`
   );
 
   // Act 5 Boss: 2 frozen high-tier + divider + organic step-6 Judge Rush (must start with FULL 4 steps!)
@@ -1684,6 +1722,249 @@ async function run() {
   await tapAt(Math.round(djb.x + djb.w * 0.5), Math.round(djb.y + djb.h * 0.35));
   await waitForCooldown();
   await screenshot('14_zen_desktop_1280.png');
+
+  // ==========================================================
+  // 6. Comprehensive Verification of 9 Optimization Items (Desktop 1280x760 & Mobile 390x844)
+  // ==========================================================
+  // 6A. Item 3 (Constant Turret Launch Speed) + Item 4 (Single-Table Reroll & 差1合) + Item 5 (Trait & Shatter Preview)
+  await evalJS(`
+    window.__HOSHI_DEBUG__.selectPatron('luna');
+    window.__HOSHI_DEBUG__.startMode('chef');
+  `);
+  await sleep(220);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const shotCheck = await evalJS(`({
+    s0: window.__HOSHI_DEBUG__.computeTurretShot(0),
+    sAng: window.__HOSHI_DEBUG__.computeTurretShot(0.52)
+  })`);
+  const spd0 = Math.hypot(shotCheck.s0.launchVx, shotCheck.s0.launchVy);
+  const spdAng = Math.hypot(shotCheck.sAng.launchVx, shotCheck.sAng.launchVy);
+  assert(
+    shotCheck.s0.power === 0.72 && Math.abs(spd0 - 920) < 0.5 && Math.abs(spdAng - 920) < 0.5,
+    `Expected constant turret speed 920 across angles, got spd0=${spd0}, spdAng=${spdAng}`
+  );
+
+  // Drag near vs drag far along same angle -> launch speed must stay strictly constant (920)!
+  const jb6 = st.jarBox;
+  const turretScreenX = Math.round(jb6.x + 220 * jb6.scale);
+  const turretScreenY = Math.round(jb6.y + 44 * jb6.scale);
+  await send('Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    x: turretScreenX + 24,
+    y: turretScreenY + 48,
+    button: 'left',
+    clickCount: 1
+  });
+  await sleep(80);
+  const nearAim = await evalJS(`window.__HOSHI_DEBUG__.getState().aim`);
+  await send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
+    x: turretScreenX + 96,
+    y: turretScreenY + 192,
+    button: 'left'
+  });
+  await sleep(80);
+  const farAim = await evalJS(`window.__HOSHI_DEBUG__.getState().aim`);
+  // Cancel shot by sliding above rim
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: turretScreenX, y: Math.max(4, jb6.y - 12), button: 'left' });
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: turretScreenX, y: Math.max(4, jb6.y - 12), button: 'left', clickCount: 1 });
+  await sleep(120);
+  const nearSpd = Math.hypot(nearAim.launchVx, nearAim.launchVy);
+  const farSpd = Math.hypot(farAim.launchVx, farAim.launchVy);
+  assert(
+    Math.abs(nearSpd - 920) < 1 && Math.abs(farSpd - 920) < 1,
+    `Expected near drag (${nearSpd}) and far drag (${farSpd}) to have identical constant speed 920`
+  );
+
+  // Single-Table Reroll: 1st free (preserves Table 1), 2nd costs 3🪙 (preserves Table 1)
+  await evalJS(`window.__HOSHI_DEBUG__.addCoins(10)`);
+  await sleep(80);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.freeSkipsLeft === 1, `Expected 1 free skip per shift, got ${st.freeSkipsLeft}`);
+  const uid0Before = st.orders[0].uid;
+  const uid1Before = st.orders[1].uid;
+  const coinsBeforeSkip1 = st.coins;
+  await tapHit('wide_skip_table_0');
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.orders[0].uid !== uid0Before &&
+      st.orders[1].uid === uid1Before &&
+      st.freeSkipsLeft === 0 &&
+      st.coins === coinsBeforeSkip1,
+    `Expected 1st single-table reroll to be free & only replace Table 0: before=[${uid0Before},${uid1Before}], after=[${st.orders[0].uid},${st.orders[1].uid}], coins=${st.coins}/${coinsBeforeSkip1}`
+  );
+
+  // Near-Order 1-Merge-Away (`差1合`) + Trait Radius & Frozen Shatter Visual Preview Screenshot
+  const targetOrdTier = st.orders[0].slots[0].tier;
+  const subTier = Math.max(1, targetOrdTier - 1);
+  // Advance next-piece Rainbow Wildcard onto active turret (`curMeta.wildcard === true`)
+  await evalJS(`window.__HOSHI_DEBUG__.grantRainbow()`);
+  await sleep(60);
+  await tapAt(turretScreenX, Math.round(jb6.y + 180 * jb6.scale));
+  await waitForCooldown();
+  await evalJS(`
+    window.__HOSHI_DEBUG__.clearEntities();
+    window.__HOSHI_DEBUG__.spawnTestEntity(${subTier}, 136, 452);
+    window.__HOSHI_DEBUG__.spawnTestEntity(${subTier}, 304, 452);
+    window.__HOSHI_DEBUG__.spawnTestEntity(3, 220, 420);
+    window.__HOSHI_DEBUG__.spawnTestEntity(1, 182, 455);
+    window.__HOSHI_DEBUG__.spawnTestEntity(4, 274, 428, { frozenHp: 1 });
+  `);
+  await sleep(420);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.curMeta.wildcard === true && st.nearOrderSubTiers.includes(subTier),
+    `Expected wildcard on turret & nearOrderSubTiers to include ${subTier}, got curMeta=${JSON.stringify(st.curMeta)}, near=${JSON.stringify(st.nearOrderSubTiers)}`
+  );
+  // Hold aim straight down at T3 (220, 420) -> previews T4 Lemon 105px circle + T1 target ring + 110px cyan frozen shatter!
+  await send('Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    x: turretScreenX,
+    y: Math.round(jb6.y + 260 * jb6.scale),
+    button: 'left',
+    clickCount: 1
+  });
+  await sleep(140);
+  await screenshot('25_near_order_and_trait_preview_1280.png');
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: turretScreenX, y: Math.max(4, jb6.y - 12), button: 'left' });
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: turretScreenX, y: Math.max(4, jb6.y - 12), button: 'left', clickCount: 1 });
+  await sleep(120);
+
+  // 6B. Item 6 (2/3-Piece Archetype Synergies) & Item 9 (Luna Free 1st Prep Reroll + Swap Resonance)
+  await evalJS(`
+    window.__HOSHI_DEBUG__.equipRelic('rel_bouncy');
+    window.__HOSHI_DEBUG__.equipRelic('rel_bumpers');
+    window.__HOSHI_DEBUG__.equipRelic('rel_lemonade');
+  `);
+  await sleep(140);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.activeSynergies.includes('bank:2') && st.archetypeCounts.bank === 2 && st.archetypeCounts.trait === 1,
+    `Expected bank:2 synergy active, got synergies=${JSON.stringify(st.activeSynergies)}, counts=${JSON.stringify(st.archetypeCounts)}`
+  );
+  // Open Relics Modal to visually verify Active Set Synergies card (`已激活流派套装共鸣`)
+  await tapHit('wide_relics_bar');
+  await sleep(180);
+  await checkCapsuleAndViewportBounds('Desktop Relics Active Synergy Modal 1280x760', 1280, 760, 0);
+  await screenshot('26b_relics_synergy_active_1280.png');
+  await tapHit('modal_close');
+  await sleep(140);
+  // Verify Luna's active skill swap triggers 2.0s globalResonanceTimer
+  await evalJS(`window.__HOSHI_DEBUG__.chargeSkill()`);
+  await sleep(100);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const swapTargets = st.entities.filter((e) => !e.frozenHp && !e.isYarnBall);
+  await tapHit('chef_skill_btn');
+  await sleep(120);
+  await tapAt(Math.round(jb6.x + swapTargets[0].x * jb6.scale), Math.round(jb6.y + swapTargets[0].y * jb6.scale));
+  await sleep(120);
+  await tapAt(Math.round(jb6.x + swapTargets[1].x * jb6.scale), Math.round(jb6.y + swapTargets[1].y * jb6.scale));
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.globalResonanceTimer > 1.2, `Expected Luna swap to trigger 2.0s globalResonanceTimer, got ${st.globalResonanceTimer}`);
+
+  // Clear Shift 1 as Luna -> verify Prep Shop 1st reroll is FREE (rerollCost === 0) & synergy badges render cleanly!
+  await evalJS(`
+    window.__HOSHI_DEBUG__.addShiftRevenue(1500);
+    window.__HOSHI_DEBUG__.triggerShiftClear();
+  `);
+  await sleep(240);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.activeModal === 'prep_shop' && st.prepShop && st.prepShop.rerollCost === 0,
+    `Expected Luna 1st Prep Shop reroll to be free (0), got ${JSON.stringify(st.prepShop)}`
+  );
+  await checkCapsuleAndViewportBounds('Desktop Luna Prep Shop Synergy 1280x760', 1280, 760, 0);
+  await screenshot('26_prep_synergy_luna_free_reroll_1280.png');
+  const coinsBeforeLunaReroll = st.coins;
+  await tapHit('prep_reroll');
+  await sleep(180);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.coins === coinsBeforeLunaReroll && st.prepShop.rerollCost === 5,
+    `Expected Luna free reroll to deduct 0 coins and advance rerollCost to 5, got coins=${st.coins}/${coinsBeforeLunaReroll}, nextCost=${st.prepShop.rerollCost}`
+  );
+  await tapHit('prep_next_shift');
+  await sleep(220);
+
+  // Equip 3rd #弹壁 relic -> verify bank:3 synergy!
+  await evalJS(`window.__HOSHI_DEBUG__.equipRelic('rel_prism')`);
+  await sleep(140);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeSynergies.includes('bank:3'), `Expected bank:3 3-piece synergy, got ${JSON.stringify(st.activeSynergies)}`);
+
+  // 6C. Mobile 390x844: Item 9 (Mugi Shake+1 & Bank-Shot +3🪙) + Item 2 (Two-Tier Non-Occluding Toast Queue) + Item 7 (Rush Serve Streak)
+  await setViewport(390, 844, true, 2);
+  await navigate('?safeTop=47&safeBottom=34&capsule=1');
+  await evalJS(`
+    window.__HOSHI_DEBUG__.selectPatron('mugi');
+    window.__HOSHI_DEBUG__.startMode('chef');
+  `);
+  await sleep(240);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.tools.shake >= 3, `Expected Mugi to start with +1 extra shake (>=3), got ${JSON.stringify(st.tools)}`);
+
+  // Trigger Mugi bank-shot merge (bounce off left glass wall JAR.left=30 into stationary T2) -> must award +3🪙!
+  const mugiCoins0 = st.coins;
+  await evalJS(`
+    window.__HOSHI_DEBUG__.clearEntities();
+    window.__HOSHI_DEBUG__.spawnTestEntity(2, 92, 445);
+    window.__HOSHI_DEBUG__.spawnTestEntity(2, 66, 365, { vx: -460, vy: 260, preSettled: false, isBankLaunched: true });
+  `);
+  await sleep(420);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.mugiBankCoinHits >= 1 && st.coins >= mugiCoins0 + 3,
+    `Expected Mugi bank-shot merge to grant +3 coins, got mugiBankCoinHits=${st.mugiBankCoinHits}, coins=${st.coins}/${mugiCoins0}`
+  );
+
+  // Item 2: Simultaneous Major Queue + Non-Competing Minor Pill (anchored near bottom, never occluding Top HUD!)
+  await evalJS(`
+    window.__HOSHI_DEBUG__.showToast('🎉 本幕目标已达标！可立即打烊赚利息', { level: 'major' });
+    window.__HOSHI_DEBUG__.showToast('🌟 第二条重要事件自动排队不顶替', { level: 'major' });
+    window.__HOSHI_DEBUG__.showToast('🔔 快餐小提示独立显示不抢占主横幅', { level: 'minor' });
+  `);
+  await sleep(120);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.toastCurrent &&
+      st.toastCurrent.level === 'major' &&
+      st.toastQueueLen === 1 &&
+      st.minorToast &&
+      st.minorToast.level === 'minor',
+    `Expected major toast + 1 queued major + concurrent minorToast, got cur=${JSON.stringify(st.toastCurrent)}, q=${st.toastQueueLen}, minor=${JSON.stringify(st.minorToast)}`
+  );
+  await checkCapsuleAndViewportBounds('iPhone 14 Two-Tier Non-Occluding Toast 390x844', 390, 844, 34);
+  await screenshot('24_two_tier_toast_390.png');
+
+  // Item 7: 90s Rush Starter Blitz Order + Consecutive Serve Streak Multiplier & Time Bonus
+  await evalJS(`window.__HOSHI_DEBUG__.startMode('rush')`);
+  await sleep(240);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.mode === 'rush' && st.orders[0] && st.orders[0].isStarterBlitz === true && st.orders[0].slots[0].tier === 3,
+    `Expected Rush opening Starter Blitz T3 order, got ${JSON.stringify(st.orders[0])}`
+  );
+  const rushT0 = st.orders[0].slots[0].tier;
+  const rushT1 = st.orders[1].slots[0].tier;
+  const timerBeforeStreak = st.rushTimer;
+  await evalJS(`(() => {
+    window.__HOSHI_DEBUG__.clearEntities();
+    const idA = window.__HOSHI_DEBUG__.spawnTestEntity(${rushT0}, 160, 440);
+    const idB = window.__HOSHI_DEBUG__.spawnTestEntity(${rushT1}, 270, 440);
+    window.__HOSHI_DEBUG__.serveById(idA);
+    window.__HOSHI_DEBUG__.serveById(idB);
+  })()`);
+  await sleep(180);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.rushServeStreak >= 2 && st.rushStreakTimer > 8 && st.rushTimer > timerBeforeStreak + 6.0,
+    `Expected Rush Serve Streak >= 2 with boosted time extension (> +6.0s for 2 serves), got streak=${st.rushServeStreak}, timerBefore=${timerBeforeStreak}, timerNow=${st.rushTimer}`
+  );
+  await checkCapsuleAndViewportBounds('iPhone 14 Rush Serve Streak 390x844', 390, 844, 34);
+  await screenshot('27_rush_serve_streak_390.png');
+  console.log('[Section 6 OK] All 9 gameplay & UX optimization items verified end-to-end!');
 
   assert(errors.length === 0, `Runtime/Console errors detected: ${errors.join(' | ')}`);
   console.log('\n✅ ALL WECHAT MINI GAME E2E CHECKS PASSED WITH ZERO ERRORS!');

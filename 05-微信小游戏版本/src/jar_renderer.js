@@ -1186,10 +1186,16 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
     }
   }
 
-  // Active Anti-Gravity Pill
+  const isActivelyAiming = !!(
+    (gameState.aim && gameState.aim.active && !gameState.aim.cancelled) ||
+    (gameState.touchAim && gameState.touchAim.active && !gameState.touchAim.cancelled)
+  );
+
+  // Active Anti-Gravity Pill (fades while aiming)
   if (gameState.running && !gameState.over && isAntiGrav) {
     const pillY = JAR.neckY + (gameState.serveCascadeTimer > 0 ? 40 : 18);
     ctx.save();
+    if (isActivelyAiming) ctx.globalAlpha = 0.34;
     UI.roundRectPath(ctx, JAR.canvasW * 0.5 - 86, pillY - 10, 172, 20, 10);
     ctx.fillStyle = 'rgba(62, 26, 108, 0.9)';
     ctx.fill();
@@ -1204,13 +1210,15 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
     ctx.restore();
   }
 
-  // Active Serve Cascade Avalanche Timer Pill (unified Starlight Kissa banner)
+  // Active Serve Cascade Avalanche Timer Pill (auto-fades while aiming so protractor stays clear)
   if (gameState.running && !gameState.over && gameState.serveCascadeTimer > 0) {
     const pillY = JAR.neckY + 18;
     const cascadeTxt =
       gameState.serveCascadeMerges > 0
         ? `抽底雪崩 ×${gameState.serveCascadeMerges} (${gameState.serveCascadeTimer.toFixed(1)}s)`
         : `抽底雪崩窗 ${gameState.serveCascadeTimer.toFixed(1)}s`;
+    ctx.save();
+    if (isActivelyAiming) ctx.globalAlpha = 0.34;
     UI.drawNoticeBanner(ctx, JAR.canvasW * 0.5 - 82, pillY - 10, 164, 21, {
       icon: 'serve_bell',
       sprites,
@@ -1220,6 +1228,7 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
       borderColor: '#ffd872',
       rightReserve: 10
     });
+    ctx.restore();
   }
   ctx.restore();
 
@@ -1277,25 +1286,26 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
     const curR = curIsWild ? WILDCARD_RADIUS : curTierDef.radius;
     const curShape = curIsWild ? getShapeDef(1) : getShapeDef(gameState.curTier);
     const aimAngle = Math.max(-1.14, Math.min(1.14, gameState.aimAngle || 0));
+    const hasBouncy = Array.isArray(gameState.relics) && gameState.relics.includes('rel_bouncy');
+    const hasPrism = Array.isArray(gameState.relics) && gameState.relics.includes('rel_prism');
+    const constSpeed = 920 * (hasBouncy ? 1.25 : 1.0);
     const aim = gameState.aim || {
       active: false,
       mode: 'sling',
       cancelled: false,
-      power: 0.45,
-      launchVx: Math.sin(aimAngle) * 680,
-      launchVy: Math.cos(aimAngle) * 680
+      power: 0.72,
+      launchVx: Math.sin(aimAngle) * constSpeed,
+      launchVy: Math.cos(aimAngle) * constSpeed
     };
     const isAimCancelled = !!(aim.cancelled || (gameState.touchAim.active && gameState.touchAim.cancelled));
     const isTouchAiming = !!((aim.active || gameState.touchAim.active) && !isAimCancelled);
-    const hasBouncy = Array.isArray(gameState.relics) && gameState.relics.includes('rel_bouncy');
-    const hasPrism = Array.isArray(gameState.relics) && gameState.relics.includes('rel_prism');
 
     const vx0 = typeof aim.launchVx === 'number' && (aim.launchVx !== 0 || aim.launchVy !== 0)
       ? aim.launchVx
-      : Math.sin(aimAngle) * 680;
+      : Math.sin(aimAngle) * constSpeed;
     const vy0 = typeof aim.launchVy === 'number' && (aim.launchVx !== 0 || aim.launchVy !== 0)
       ? aim.launchVy
-      : Math.cos(aimAngle) * 680;
+      : Math.cos(aimAngle) * constSpeed;
 
     const gScale = curIsWild ? 1.0 : (curTierDef.material && curTierDef.material.gravityScale) || 1.0;
     const traj = Physics.predictBankShotTrajectory(
@@ -1387,9 +1397,9 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
       const hasBounce = bPoints.length > 0;
 
       ctx.save();
-      // Subtle starry brass protractor dial arc around fixed center launcher
+      // Starry brass protractor dial arc + crisp constant-speed degree ticks around fixed center launcher
       const dialR = Math.max(36, curR + 14);
-      ctx.strokeStyle = isTouchAiming ? 'rgba(255, 236, 178, 0.48)' : 'rgba(255, 236, 178, 0.24)';
+      ctx.strokeStyle = isTouchAiming ? 'rgba(255, 236, 178, 0.56)' : 'rgba(255, 236, 178, 0.25)';
       ctx.lineWidth = 2.0;
       ctx.setLineDash([3, 4]);
       ctx.beginPath();
@@ -1397,12 +1407,43 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Active angle indicator tick on dial arc
+      const tickSteps = [-4, -3, -2, -1, 0, 1, 2, 3, 4]; // every ~14.3° (0.25 rad)
+      for (let ti = 0; ti < tickSteps.length; ti++) {
+        const aVal = tickSteps[ti] * 0.25;
+        const dir = Math.PI * 0.5 - aVal;
+        const isMajorTick = tickSteps[ti] % 2 === 0;
+        const rIn = dialR - (isMajorTick ? 4.5 : 2.5);
+        const rOut = dialR + (isMajorTick ? 3.5 : 1.8);
+        ctx.strokeStyle = isTouchAiming
+          ? isMajorTick
+            ? 'rgba(255, 240, 172, 0.82)'
+            : 'rgba(255, 236, 178, 0.45)'
+          : 'rgba(255, 236, 178, 0.28)';
+        ctx.lineWidth = isMajorTick ? 1.7 : 1.1;
+        ctx.beginPath();
+        ctx.moveTo(launchX + Math.cos(dir) * rIn, launchY + Math.sin(dir) * rIn);
+        ctx.lineTo(launchX + Math.cos(dir) * rOut, launchY + Math.sin(dir) * rOut);
+        ctx.stroke();
+      }
+
+      // Active angle indicator tick + live degree readout when aiming
       const pointerDir = Math.PI * 0.5 - aimAngle;
       ctx.fillStyle = hasBounce ? '#9cf4ff' : '#ffe382';
       ctx.beginPath();
-      ctx.arc(launchX + Math.cos(pointerDir) * dialR, launchY + Math.sin(pointerDir) * dialR, isTouchAiming ? 3.8 : 2.8, 0, Math.PI * 2);
+      ctx.arc(launchX + Math.cos(pointerDir) * dialR, launchY + Math.sin(pointerDir) * dialR, isTouchAiming ? 4.0 : 2.8, 0, Math.PI * 2);
       ctx.fill();
+      if (isTouchAiming) {
+        const degVal = Math.round((aimAngle * 180) / Math.PI);
+        const degStr = `${degVal > 0 ? '+' : ''}${degVal}°`;
+        ctx.font = UI.fontStr(9.5, 900);
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = 'rgba(42, 22, 12, 0.85)';
+        UI.roundRectPath(ctx, launchX + (aimAngle >= 0 ? -54 : 20), launchY - 8, 34, 16, 8);
+        ctx.fill();
+        ctx.fillStyle = hasBounce ? '#b8f7ff' : '#ffe89c';
+        ctx.fillText(degStr, launchX + (aimAngle >= 0 ? -37 : 37), launchY);
+      }
 
       // Dotted ballistic trajectory path from fixed center turret
       if (traj.points.length >= 2) {
@@ -1482,17 +1523,183 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
         );
       }
 
+      // Item 5: Visual Trait & Ice-Shatter / Meteor Blast Preview
+      if (gameState.nextShotMeteor && traj.endY > launchY + 20) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 134, 62, 0.78)';
+        ctx.fillStyle = 'rgba(255, 128, 52, 0.11)';
+        ctx.lineWidth = 2.0;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.arc(traj.endX, traj.endY, 120, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.setLineDash([]);
+        for (let ei = 0; ei < gameState.entities.length; ei++) {
+          const me = gameState.entities[ei];
+          if (!me || me.merged) continue;
+          if ((me.frozenHp > 0 || me.isYarnBall || me.tier <= 2) && Math.hypot(me.x - traj.endX, me.y - traj.endY) <= 120 + me.r * 0.4) {
+            ctx.strokeStyle = 'rgba(255, 178, 92, 0.9)';
+            ctx.lineWidth = 2.2;
+            ctx.beginPath();
+            ctx.arc(me.x, me.y, me.r + 5, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
+      }
+
+      if (lockedTarget) {
+        const mx = lockedTarget.x;
+        const my = lockedTarget.y;
+        const rMult = gameState.traitRadiusMult || 1.0;
+        const baseMergeTier = curIsWild
+          ? lockedTarget.isWildcard
+            ? 2
+            : lockedTarget.tier
+          : lockedTarget.isWildcard
+          ? gameState.curTier
+          : gameState.curTier;
+        const bornTier = Math.min(9, baseMergeTier + 1);
+
+        ctx.save();
+        // Nearby 110px Frozen Shatter Preview
+        for (let fi = 0; fi < gameState.entities.length; fi++) {
+          const fe = gameState.entities[fi];
+          if (!fe || fe.merged || !(fe.frozenHp > 0)) continue;
+          if (Math.hypot(fe.x - mx, fe.y - my) <= 110 + fe.r * 0.5) {
+            ctx.strokeStyle = 'rgba(154, 242, 255, 0.92)';
+            ctx.lineWidth = 2.4;
+            ctx.setLineDash([5, 3]);
+            ctx.beginPath();
+            ctx.moveTo(mx, my);
+            ctx.lineTo(fe.x, fe.y);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(fe.x, fe.y, fe.r + 6, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+        }
+
+        // Born Tier Special Ability Radius & Target Preview
+        if (bornTier === 3) {
+          const rad = 105 * rMult;
+          ctx.strokeStyle = 'rgba(154, 232, 114, 0.72)';
+          ctx.fillStyle = 'rgba(154, 232, 114, 0.09)';
+          ctx.lineWidth = 1.8;
+          ctx.setLineDash([6, 4]);
+          ctx.beginPath();
+          ctx.arc(mx, my, rad, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          ctx.setLineDash([]);
+        } else if (bornTier === 4) {
+          const hasLem = Array.isArray(gameState.relics) && gameState.relics.includes('rel_lemonade');
+          const rad = (hasLem ? 165 : 105) * rMult;
+          const cap = hasLem ? 4 : 2;
+          ctx.strokeStyle = 'rgba(255, 232, 92, 0.82)';
+          ctx.fillStyle = 'rgba(255, 236, 112, 0.10)';
+          ctx.lineWidth = 2.0;
+          ctx.setLineDash([6, 4]);
+          ctx.beginPath();
+          ctx.arc(mx, my, rad, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          const cands = gameState.entities
+            .filter((ce) => ce && !ce.merged && ce.id !== lockedTarget.id && !ce.isWildcard && !ce.isYarnBall && !(ce.frozenHp > 0) && ce.tier <= 2 && Math.hypot(ce.x - mx, ce.y - my) <= rad)
+            .sort((a, b) => Math.hypot(a.x - mx, a.y - my) - Math.hypot(b.x - mx, b.y - my))
+            .slice(0, cap);
+          for (let ci = 0; ci < cands.length; ci++) {
+            const ce = cands[ci];
+            ctx.strokeStyle = '#fff078';
+            ctx.lineWidth = 2.4;
+            ctx.beginPath();
+            ctx.arc(ce.x, ce.y, ce.r + 5, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+        } else if (bornTier === 5) {
+          const rad = 145 * rMult;
+          ctx.strokeStyle = 'rgba(255, 156, 202, 0.78)';
+          ctx.fillStyle = 'rgba(255, 162, 208, 0.09)';
+          ctx.lineWidth = 1.9;
+          ctx.setLineDash([6, 4]);
+          ctx.beginPath();
+          ctx.arc(mx, my, rad, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          ctx.setLineDash([]);
+          const pullR = rad * (0.72 - ((nowSec * 0.8) % 0.35));
+          ctx.strokeStyle = 'rgba(255, 198, 226, 0.68)';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(mx, my, pullR, 0, Math.PI * 2);
+          ctx.stroke();
+        } else if (bornTier === 6) {
+          const rad = (TIERS[5].radius + 48) * rMult;
+          ctx.strokeStyle = 'rgba(255, 204, 116, 0.82)';
+          ctx.lineWidth = 2.2;
+          for (let k = 0; k < 3; k++) {
+            const sa = nowSec * 4 + (k * Math.PI * 2) / 3;
+            ctx.beginPath();
+            ctx.arc(mx, my, rad, sa, sa + 0.85);
+            ctx.stroke();
+          }
+        } else if (bornTier === 8) {
+          const halfSpan = 95 * rMult;
+          const leftX = Math.max(JAR.left + 8, mx - halfSpan);
+          const rightX = Math.min(JAR.right - 8, mx + halfSpan);
+          ctx.fillStyle = 'rgba(232, 176, 98, 0.12)';
+          ctx.strokeStyle = 'rgba(255, 208, 122, 0.78)';
+          ctx.lineWidth = 1.8;
+          ctx.setLineDash([5, 4]);
+          UI.roundRectPath(ctx, leftX, my, rightX - leftX, Math.max(24, JAR.floorY - my - 4), 10);
+          ctx.fill();
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          const crushTargets = gameState.entities
+            .filter((ce) => ce && !ce.merged && ce.id !== lockedTarget.id && !ce.isWildcard && !ce.isYarnBall && !(ce.frozenHp > 0) && ce.tier <= 2 && ce.y > my - 10 && Math.abs(ce.x - mx) < halfSpan)
+            .slice(0, 2);
+          for (let ci = 0; ci < crushTargets.length; ci++) {
+            const ce = crushTargets[ci];
+            ctx.strokeStyle = '#ffd278';
+            ctx.lineWidth = 2.4;
+            ctx.beginPath();
+            ctx.arc(ce.x, ce.y, ce.r + 5, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
+      }
+
       // Unified Storybook Callout Badge for Bank-Shot, Glaze Ring, or Lock-on
       if (lockedTarget || hasBounce || willGlaze) {
         const multLabel = bPoints.length >= 2 && hasBouncy ? '×2.8' : hasPrism ? '×2.0' : '×1.5';
         let tagText;
         if (lockedTarget) {
+          const baseT = curIsWild ? (lockedTarget.isWildcard ? 2 : lockedTarget.tier) : gameState.curTier;
+          const bornT = Math.min(9, baseT + 1);
+          const traitShort =
+            bornT === 4
+              ? '·消小果'
+              : bornT === 5
+              ? '·引力聚拢'
+              : bornT === 6
+              ? '·旋风搅罐'
+              : bornT === 8
+              ? '·重锤压碎'
+              : bornT === 9
+              ? '·猫神×2'
+              : '';
           if (hasBounce && willGlaze) tagText = '穿环弹壁合成!';
           else if (hasBounce) tagText = `${bPoints.length >= 2 ? '二段弹壁' : '弹壁合成'} ${multLabel}!`;
           else if (willGlaze) tagText = '穿环镀金合成!';
           else if (curIsWild) tagText = '彩虹升阶+1!';
           else if (curIsGold || lockedTarget.isGolden) tagText = '黄金暴击!';
-          else tagText = '可合成!';
+          else tagText = `合T${bornT}${traitShort}!`;
         } else if (hasBounce && willGlaze) {
           tagText = '弹壁 + 镀金!';
         } else if (willGlaze) {
@@ -1660,6 +1867,22 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
       ctx.restore();
     }
 
+    // T7 Cloud Macaron Light-Buoyancy Floating Motes
+    if (!e.isWildcard && !e.isYarnBall && !isFrozen && e.tier === 7) {
+      ctx.save();
+      for (let mk = 0; mk < 3; mk++) {
+        const phase = (nowSec * 0.9 + mk * 0.33 + e.id * 0.17) % 1;
+        const mxOff = Math.sin(nowSec * 2.2 + mk * 2.1 + e.id) * (e.r * 0.62);
+        const myOff = e.r * 0.55 - phase * (e.r * 1.15);
+        ctx.globalAlpha = (1 - phase) * 0.65;
+        ctx.fillStyle = mk % 2 === 0 ? '#e6d4ff' : '#b8f5e8';
+        ctx.beginPath();
+        ctx.arc(e.x + mxOff, e.y + myOff, 3.2 - phase * 1.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
     // T9 Crown Cat Soufflé ×2 Global Aura Halo
     if (isSouffle) {
       const ap = 0.6 + 0.4 * Math.sin(nowSec * 5);
@@ -1734,6 +1957,14 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
     }
 
     // Servable Gold Bell Ring + Bouncing Tap-to-Serve Pill (with storybook serve_bell icon!)
+    const isNearOrderSub =
+      !isServable &&
+      !isFrozen &&
+      !e.isWildcard &&
+      !e.isYarnBall &&
+      Array.isArray(gameState.nearOrderSubTiers) &&
+      gameState.nearOrderSubTiers.includes(e.tier);
+
     if (isServable && !isTargetingMode) {
       const sp = 0.65 + 0.35 * Math.sin(nowSec * 7 + e.id);
       ctx.save();
@@ -1779,6 +2010,33 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
       const drewBell = UI.drawUiIcon(ctx, sprites, 'serve_bell', px0 + 10.5, pillY, 13.5);
       const tx = drewBell ? px0 + 18 + (pillW - 22) * 0.5 : e.x;
       UI.drawFitText(ctx, pillTxt, tx, pillY + 0.5, pillW - (drewBell ? 22 : 8), 9.5, 8, 900, '#fff6db', 'center');
+      ctx.restore();
+    } else if (isNearOrderSub && !isTargetingMode && e.age > 0.35) {
+      // 1-Merge-Away (`差1合`) tactical hint ring + micro-pill
+      const np = 0.55 + 0.45 * Math.sin(nowSec * 5.2 + e.id);
+      ctx.save();
+      ctx.strokeStyle = `rgba(92, 224, 146, ${0.55 + 0.32 * np})`;
+      ctx.lineWidth = 2.0;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.r + 3.2, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      const tagW = 36;
+      const tagH = 14;
+      const ty0 = Math.min(JAR.floorY - tagH - 1, e.y + e.r - 6);
+      UI.roundRectPath(ctx, e.x - tagW * 0.5, ty0, tagW, tagH, 7);
+      ctx.fillStyle = 'rgba(26, 78, 48, 0.90)';
+      ctx.fill();
+      ctx.lineWidth = 1.1;
+      ctx.strokeStyle = '#92f2b8';
+      ctx.stroke();
+      ctx.fillStyle = '#e8fff0';
+      ctx.font = UI.fontStr(8.2, 900);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('差1合', e.x, ty0 + tagH * 0.5 + 0.3);
       ctx.restore();
     }
 

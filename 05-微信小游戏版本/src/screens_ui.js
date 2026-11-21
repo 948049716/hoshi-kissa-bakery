@@ -954,6 +954,26 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
       h: (servableEnt.r * 2 + 30) * jarBox.scale
     };
   }
+  const glazeObs = (gameState.obstacles || []).find((o) => o && o.type === 'glaze_ring');
+  if (glazeObs) {
+    const rx = (glazeObs.rx || 48) + 12;
+    const ry = (glazeObs.ry || 15) + 16;
+    guideTargets.glazeRing = {
+      x: jarBox.x + (glazeObs.x - rx) * jarBox.scale,
+      y: jarBox.y + (glazeObs.y - ry) * jarBox.scale,
+      w: rx * 2 * jarBox.scale,
+      h: ry * 2 * jarBox.scale
+    };
+  }
+  const frozenEnts = (gameState.entities || []).filter((e) => e && !e.merged && e.frozenHp > 0);
+  if (frozenEnts.length > 0) {
+    guideTargets.frozenTreats = frozenEnts.map((fe) => ({
+      x: jarBox.x + (fe.x - fe.r - 12) * jarBox.scale,
+      y: jarBox.y + (fe.y - fe.r - 14) * jarBox.scale,
+      w: (fe.r * 2 + 24) * jarBox.scale,
+      h: (fe.r * 2 + 28) * jarBox.scale
+    }));
+  }
 
   // 4. Unified Floating In-Jar Overlays
   if (isWide && gameState.mode === 'rush' && gameState.running && !gameState.over) {
@@ -969,7 +989,7 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
     });
   }
 
-  // Unified Shop Event Banner
+  // Unified Shop Event Banner (auto-fades while actively aiming so trajectory stays clear)
   if (gameState.activeEvent && gameState.running && !gameState.over) {
     const ev = gameState.activeEvent;
     let iconKey = 'serve_bell';
@@ -990,6 +1010,10 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
     const bw = Math.min(width - 24, isWide ? 316 : 278);
     const bx = jarBox.x + jarBox.w * 0.5 - bw * 0.5;
     const by = jarBox.y + 82 * jarBox.scale;
+    ctx.save();
+    if (gameState.aim && gameState.aim.active) {
+      ctx.globalAlpha = 0.32;
+    }
     UI.drawNoticeBanner(ctx, bx, by, bw, 25, {
       icon: iconKey,
       sprites,
@@ -999,6 +1023,7 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
       rightReserve: 56
     });
     UI.drawTagBadge(ctx, bx + bw - 50, by + 4.5, 44, 16, meta, 'amber', 9.5);
+    ctx.restore();
   }
 
   // Unified Tool & Active Chef Skill Targeting Banner
@@ -1485,6 +1510,25 @@ function hasTierReadyInJar(gameState, tier) {
   return gameState.entities.some((e) => !e.merged && !e.isWildcard && !e.isYarnBall && !(e.frozenHp > 0) && e.tier === tier);
 }
 
+function isTierOneMergeAway(gameState, tier) {
+  return (
+    tier >= 2 &&
+    !hasTierReadyInJar(gameState, tier) &&
+    Array.isArray(gameState.nearOrderSubTiers) &&
+    gameState.nearOrderSubTiers.includes(tier - 1)
+  );
+}
+
+function formatSkipBtnLabel(gameState, compact) {
+  if (gameState.skipCooldown > 0) return `${Math.ceil(gameState.skipCooldown)}s`;
+  if (gameState.mode === 'chef') {
+    if ((gameState.freeSkipsLeft || 0) > 0) return compact ? '免费换' : '免费换单';
+    if ((gameState.coins || 0) >= 3) return compact ? '换3币' : '换单3币';
+    return compact ? '折鲜换' : '折鲜换单';
+  }
+  return '换单';
+}
+
 function renderMobileSubBar(ctx, x, y, w, h, app, hits, guideTargets) {
   const { gameState, sprites } = app;
   UI.drawParchmentSheet(ctx, x, y, w, h, 9);
@@ -1500,11 +1544,17 @@ function renderMobileSubBar(ctx, x, y, w, h, app, hits, guideTargets) {
     ctx.fillText(`${Math.max(0, gameState.rushTimer).toFixed(1)}s`, x + 28, y + h * 0.5 + 0.5);
 
     const orders = gameState.orders || [];
-    let sx = x + 84;
-    ctx.fillStyle = '#7e4b10';
-    ctx.font = UI.fontStr(9.5, 800);
-    ctx.fillText('上菜+3s:', sx, y + h * 0.5 + 0.5);
-    sx += 44;
+    let sx = x + 82;
+    const streak = gameState.rushServeStreak || 0;
+    if (streak >= 2 && (gameState.rushStreakTimer || 0) > 0) {
+      UI.drawTagBadge(ctx, sx, y + 8, 48, 18, `连出×${streak}`, 'amber', 9);
+      sx += 52;
+    } else {
+      ctx.fillStyle = '#7e4b10';
+      ctx.font = UI.fontStr(9.5, 800);
+      ctx.fillText('上菜延时:', sx, y + h * 0.5 + 0.5);
+      sx += 46;
+    }
     const shownTiers = [];
     for (let oi = 0; oi < orders.length; oi++) {
       const o = orders[oi];
@@ -1516,11 +1566,12 @@ function renderMobileSubBar(ctx, x, y, w, h, app, hits, guideTargets) {
     for (let i = 0; i < shownTiers.length; i++) {
       const t = shownTiers[i];
       const ready = hasTierReadyInJar(gameState, t);
+      const near = !ready && isTierOneMergeAway(gameState, t);
       UI.roundRectPath(ctx, sx, y + 5, 24, 24, 6);
-      ctx.fillStyle = ready ? '#fff0a8' : '#fff9eb';
+      ctx.fillStyle = ready ? '#fff0a8' : near ? '#ebfaef' : '#fff9eb';
       ctx.fill();
-      ctx.lineWidth = ready ? 1.8 : 1.2;
-      ctx.strokeStyle = ready ? '#d47c12' : '#bfa06f';
+      ctx.lineWidth = ready || near ? 1.8 : 1.2;
+      ctx.strokeStyle = ready ? '#d47c12' : near ? '#3ca365' : '#bfa06f';
       ctx.stroke();
       if (sprites.base[t]) {
         UI.drawContainImage(ctx, sprites.base[t], sx + 12, y + 17, 19, 19);
@@ -1535,53 +1586,58 @@ function renderMobileSubBar(ctx, x, y, w, h, app, hits, guideTargets) {
 
   if (gameState.mode === 'zen') {
     UI.drawUiIcon(ctx, sprites, 'mode_zen', x + 17, y + h * 0.5, 19);
-    UI.drawFitText(ctx, '中央定角弹射 · 探索 9 阶甜品异能', x + 30, y + h * 0.5, w - 118, 10.5, 8.8, 800, '#4A2C2A');
+    UI.drawFitText(ctx, '中央定角恒速弹射 · 探索 9 阶甜品异能', x + 30, y + h * 0.5, w - 118, 10.5, 8.8, 800, '#4A2C2A');
 
     UI.drawUiIcon(ctx, sprites, 'icon_gift', x + w - 62, y + h * 0.5, 15);
     UI.drawFitText(ctx, `${gameState.zenNextMilestone}分`, x + w - 8, y + h * 0.5, 46, 10, 8.5, 800, '#8f4e1b', 'right');
     return;
   }
 
-  // Chef Mode: Compact Dual-Table Order Strip
+  // Chef Mode: Compact Dual-Table Order Strip (tap table chip or skip btn for single-table reroll)
   const orders = gameState.orders || [];
   const skipCooling = gameState.skipCooldown > 0;
-  const skipTxt = skipCooling ? `${Math.ceil(gameState.skipCooldown)}s` : '换单';
-  const skW = 40;
+  const skipTxt = formatSkipBtnLabel(gameState, true);
+  const skW = 44;
   const skX = x + w - skW - 5;
   UI.drawPillButton(ctx, skX, y + 6, skW, 22, {
-    style: 'wood',
+    style: !skipCooling && (gameState.freeSkipsLeft || 0) > 0 ? 'active' : 'wood',
     text: skipTxt,
-    fontSize: 9.5,
+    fontSize: 9.0,
     disabled: skipCooling
   });
   hits.add('m_skip_order', skX, y + 4, skW, 26, () => app.skipOrder());
 
   let cx = x + 6;
-  const maxRightX = skX - 6;
+  const maxRightX = skX - 5;
   for (let oi = 0; oi < orders.length; oi++) {
     const ord = orders[oi];
     if (!ord) continue;
     const isJudge = !!ord.isJudgeRush;
     const isVip = ord.kind === 'vip';
     const anyReady = !ord.completed && ord.slots.some((s) => !s.done && hasTierReadyInJar(gameState, s.tier));
+    const anyNear = !anyReady && !ord.completed && ord.slots.some((s) => !s.done && isTierOneMergeAway(gameState, s.tier));
     const slotCnt = ord.slots.length;
-    const chipW = Math.min(maxRightX - cx, 42 + slotCnt * 26 + 26);
-    if (chipW < 54) break;
+    const chipW = Math.min(maxRightX - cx, 40 + slotCnt * 25 + 26);
+    if (chipW < 52) break;
 
     UI.roundRectPath(ctx, cx, y + 3, chipW, h - 6, 7);
     ctx.fillStyle = isJudge
       ? '#ffe6bf'
       : anyReady
       ? '#fff2c2'
+      : anyNear
+      ? '#f1fbf4'
       : isVip
       ? '#fbf0e6'
       : '#fff9ec';
     ctx.fill();
-    ctx.lineWidth = anyReady || isJudge ? 1.8 : 1.2;
+    ctx.lineWidth = anyReady || isJudge ? 1.8 : anyNear ? 1.5 : 1.2;
     ctx.strokeStyle = isJudge
       ? '#c95614'
       : anyReady
       ? '#cf8214'
+      : anyNear
+      ? '#3ca365'
       : isVip
       ? '#be8c68'
       : '#c7a46e';
@@ -1593,15 +1649,16 @@ function renderMobileSubBar(ctx, x, y, w, h, app, hits, guideTargets) {
     ctx.textBaseline = 'middle';
     ctx.fillText(isJudge ? '急单' : isVip ? 'VIP' : '快餐', cx + 5, y + h * 0.5 + 0.5);
 
-    let sx = cx + (isVip ? 28 : 30);
+    let sx = cx + (isVip ? 27 : 29);
     for (let si = 0; si < slotCnt; si++) {
       const sl = ord.slots[si];
       const slotReady = !sl.done && hasTierReadyInJar(gameState, sl.tier);
+      const slotNear = !sl.done && !slotReady && isTierOneMergeAway(gameState, sl.tier);
       UI.roundRectPath(ctx, sx, y + 5, 23, 23, 6);
-      ctx.fillStyle = sl.done ? '#e3f7e8' : slotReady ? '#ffe88c' : '#fffdf6';
+      ctx.fillStyle = sl.done ? '#e3f7e8' : slotReady ? '#ffe88c' : slotNear ? '#ebfaef' : '#fffdf6';
       ctx.fill();
-      ctx.lineWidth = slotReady ? 1.6 : 1.1;
-      ctx.strokeStyle = sl.done ? '#3f9663' : slotReady ? '#d47c12' : '#bfa06f';
+      ctx.lineWidth = slotReady || slotNear ? 1.6 : 1.1;
+      ctx.strokeStyle = sl.done ? '#3f9663' : slotReady ? '#d47c12' : slotNear ? '#3ca365' : '#bfa06f';
       ctx.stroke();
       if (sprites.base[sl.tier]) {
         UI.drawContainImage(ctx, sprites.base[sl.tier], sx + 11.5, y + 16.5, 18, 18);
@@ -1615,18 +1672,31 @@ function renderMobileSubBar(ctx, x, y, w, h, app, hits, guideTargets) {
         ctx.font = UI.fontStr(7.5, 900);
         ctx.textAlign = 'center';
         ctx.fillText('✓', sx + 20, y + 7.5);
+      } else if (slotNear) {
+        ctx.fillStyle = '#2c8a52';
+        ctx.beginPath();
+        ctx.arc(sx + 20, y + 7, 4.8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = UI.fontStr(6.8, 900);
+        ctx.textAlign = 'center';
+        ctx.fillText('合', sx + 20, y + 7.5);
       }
-      sx += 25;
+      sx += 24;
     }
 
-    if (cx + chipW - sx >= 20) {
+    if (cx + chipW - sx >= 19) {
       ctx.fillStyle = ord.freshSteps > 0 ? '#b44810' : '#9c836a';
       ctx.font = UI.fontStr(8.5, 800);
       ctx.textAlign = 'right';
       ctx.fillText(ord.freshSteps > 0 ? `${ord.freshSteps}步` : '常', cx + chipW - 4, y + h * 0.5 + 0.5);
     }
 
-    cx += chipW + 5;
+    if (!isJudge) {
+      hits.add(`m_skip_table_${oi}`, cx, y + 3, chipW, h - 6, () => app.skipOrder(oi));
+    }
+
+    cx += chipW + 4;
   }
 }
 
@@ -1782,15 +1852,15 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
     UI.drawKissaCard(ctx, ix + 8, oy, iw - 16, oh, { tone: 'soft', radius: 9 });
     guideTargets.orderBar = { x: ix + 8, y: oy, w: iw - 16, h: oh };
     UI.drawUiIcon(ctx, sprites, 'serve_bell', ix + 21, oy + 14, 15);
-    UI.drawFitText(ctx, '双桌点单 · 点罐内上菜', ix + 31, oy + 14, iw - 102, 11, 9, 900, '#4A2C2A');
+    UI.drawFitText(ctx, '双桌点单 · 点单桌可换', ix + 31, oy + 14, iw - 108, 10.8, 8.8, 900, '#4A2C2A');
     const cooling = gameState.skipCooldown > 0;
-    UI.drawPillButton(ctx, ix + iw - 64, oy + 4, 48, 20, {
-      style: 'wood',
-      text: cooling ? `${Math.ceil(gameState.skipCooldown)}s` : '换单',
-      fontSize: 9.5,
+    UI.drawPillButton(ctx, ix + iw - 70, oy + 4, 54, 20, {
+      style: !cooling && (gameState.freeSkipsLeft || 0) > 0 ? 'active' : 'wood',
+      text: formatSkipBtnLabel(gameState, false),
+      fontSize: 9.2,
       disabled: cooling
     });
-    hits.add('wide_skip_order', ix + iw - 64, oy + 4, 48, 20, () => app.skipOrder());
+    hits.add('wide_skip_order', ix + iw - 70, oy + 4, 54, 20, () => app.skipOrder());
 
     const orders = gameState.orders || [];
     const rowH = Math.max(54, Math.floor((oh - 34) / 2));
@@ -1801,6 +1871,7 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
       const isVip = ord.kind === 'vip';
       const ry = oy + 28 + oi * (rowH + 5);
       const anyReady = !ord.completed && ord.slots.some((s) => !s.done && hasTierReadyInJar(gameState, s.tier));
+      const anyNear = !anyReady && !ord.completed && ord.slots.some((s) => !s.done && isTierOneMergeAway(gameState, s.tier));
       UI.drawKissaCard(ctx, ix + 14, ry, iw - 28, rowH, {
         tone: anyReady || isJudge ? 'selected' : 'cream',
         radius: 8
@@ -1834,11 +1905,12 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
       for (let si = 0; si < ord.slots.length; si++) {
         const sl = ord.slots[si];
         const slotReady = !sl.done && hasTierReadyInJar(gameState, sl.tier);
+        const slotNear = !sl.done && !slotReady && isTierOneMergeAway(gameState, sl.tier);
         UI.roundRectPath(ctx, sx, ry + 21, 26, 26, 7);
-        ctx.fillStyle = sl.done ? '#e3f7e8' : slotReady ? '#ffe88c' : '#fffdf6';
+        ctx.fillStyle = sl.done ? '#e3f7e8' : slotReady ? '#ffe88c' : slotNear ? '#ebfaef' : '#fffdf6';
         ctx.fill();
-        ctx.lineWidth = slotReady ? 1.8 : 1.2;
-        ctx.strokeStyle = sl.done ? '#3f9663' : slotReady ? '#d47c12' : '#bfa06f';
+        ctx.lineWidth = slotReady || slotNear ? 1.8 : 1.2;
+        ctx.strokeStyle = sl.done ? '#3f9663' : slotReady ? '#d47c12' : slotNear ? '#3ca365' : '#bfa06f';
         ctx.stroke();
         if (sprites.base[sl.tier]) {
           UI.drawContainImage(ctx, sprites.base[sl.tier], sx + 13, ry + 34, 21, 21);
@@ -1852,6 +1924,15 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
           ctx.font = UI.fontStr(7.5, 900);
           ctx.textAlign = 'center';
           ctx.fillText('✓', sx + 23, ry + 24.5);
+        } else if (slotNear) {
+          ctx.fillStyle = '#2c8a52';
+          ctx.beginPath();
+          ctx.arc(sx + 23, ry + 24, 5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#fff';
+          ctx.font = UI.fontStr(7, 900);
+          ctx.textAlign = 'center';
+          ctx.fillText('合', sx + 23, ry + 24.5);
         }
         sx += 30;
       }
@@ -1859,14 +1940,14 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
       const infoX = ix + iw - 20;
       UI.drawFitText(
         ctx,
-        anyReady ? '点罐内上菜!' : `完单 +¥${ord.bonusScore}`,
+        anyReady ? '点罐内上菜!' : anyNear ? '差1合出菜!' : `完单 +¥${ord.bonusScore}`,
         infoX,
         ry + 34,
         iw - 28 - (sx - ix),
         9.6,
         8,
         800,
-        anyReady ? '#b4320c' : '#724640',
+        anyReady ? '#b4320c' : anyNear ? '#2c8a52' : '#724640',
         'right'
       );
 
@@ -1884,6 +1965,10 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
           800,
           isVip ? '#8c3818' : '#8a5018'
         );
+      }
+
+      if (!isJudge) {
+        hits.add(`wide_skip_table_${oi}`, ix + 14, ry, iw - 28, rowH, () => app.skipOrder(oi));
       }
     }
     return;
@@ -1976,7 +2061,22 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
   UI.drawKissaCard(ctx, ix + 8, oy, iw - 16, oh, { tone: 'soft', radius: 9 });
   guideTargets.orderBar = { x: ix + 8, y: oy, w: iw - 16, h: oh };
   if (gameState.mode === 'rush') {
-    UI.drawFitText(ctx, '弹射狂欢 · 点击上菜 +3.0s', ix + 16, oy + 16, iw - 32, 11.5, 9.5, 800, '#4A2C2A');
+    const streak = gameState.rushServeStreak || 0;
+    const rushHdr =
+      streak >= 2 && (gameState.rushStreakTimer || 0) > 0
+        ? `⚡ 连出 ×${streak} (${gameState.rushStreakTimer.toFixed(1)}s)`
+        : '弹射狂欢 · 连出倍率叠升';
+    UI.drawFitText(
+      ctx,
+      rushHdr,
+      ix + 16,
+      oy + 16,
+      iw - 32,
+      11.5,
+      9.5,
+      900,
+      streak >= 2 ? '#b43d08' : '#4A2C2A'
+    );
     ctx.fillStyle = gameState.rushTimer <= 15 ? '#d93025' : '#a63d0c';
     ctx.font = UI.fontStr(24, 900);
     ctx.textAlign = 'center';
@@ -1990,11 +2090,12 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
         const sl = ord.slots[si];
         if (sl.done) continue;
         const ready = hasTierReadyInJar(gameState, sl.tier);
+        const near = !ready && isTierOneMergeAway(gameState, sl.tier);
         UI.roundRectPath(ctx, rx, oy + 64, 34, 34, 8);
-        ctx.fillStyle = ready ? '#ffe88c' : '#fff9eb';
+        ctx.fillStyle = ready ? '#ffe88c' : near ? '#ebfaef' : '#fff9eb';
         ctx.fill();
-        ctx.lineWidth = ready ? 2 : 1.3;
-        ctx.strokeStyle = ready ? '#d47c12' : '#bfa06f';
+        ctx.lineWidth = ready || near ? 2 : 1.3;
+        ctx.strokeStyle = ready ? '#d47c12' : near ? '#3ca365' : '#bfa06f';
         ctx.stroke();
         if (sprites.base[sl.tier]) {
           UI.drawContainImage(ctx, sprites.base[sl.tier], rx + 17, oy + 81, 26, 26);
@@ -2004,19 +2105,19 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
     }
     UI.drawWrappedText(
       ctx,
-      `下次祝福：${gameState.rushNextMilestone} 分\n溢罐吹散减 5s · 上菜 +3.0s`,
+      `下次祝福：${gameState.rushNextMilestone} 分\n12秒内连出上菜叠至 ×2.5 · 延时 +4.5s`,
       ix + 16,
       oy + 106,
       iw - 32,
       15,
-      UI.fontStr(10.5, 700),
+      UI.fontStr(10.2, 700),
       '#724640'
     );
   } else {
     UI.drawFitText(ctx, '悠闲经典模式', ix + 18, oy + 18, iw - 36, 12.5, 10, 900, '#4A2C2A');
     UI.drawWrappedText(
       ctx,
-      `下次祝福：${gameState.zenNextMilestone} 分\n\n罐口中央定角瞄准，撞玻璃壁弹射享 ×1.5 加成！`,
+      `下次祝福：${gameState.zenNextMilestone} 分\n\n罐口中央定角恒速瞄准，撞玻璃壁弹射享 ×1.5 加成！`,
       ix + 18,
       oy + 38,
       iw - 36,
@@ -2053,15 +2154,23 @@ function renderWideRightBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) 
 
   if (gameState.mode === 'chef') {
     const relBoxH = 68;
-    UI.drawKissaCard(ctx, ix + 10, nextSectionY, iw - 20, relBoxH, { tone: 'soft', radius: 9 });
+    const activeSyns = app.getActiveSynergies ? app.getActiveSynergies() : [];
+    const synShort =
+      activeSyns.length > 0
+        ? ` · ${activeSyns.map((s) => `${s.def.tag}${s.tier}`).join(' ')}`
+        : '';
+    UI.drawKissaCard(ctx, ix + 10, nextSectionY, iw - 20, relBoxH, {
+      tone: activeSyns.length > 0 ? 'selected' : 'soft',
+      radius: 9
+    });
     UI.drawFitText(
       ctx,
-      `流派秘方 (${(gameState.relics || []).length}/${MAX_RELIC_SLOTS})`,
+      `秘方 (${(gameState.relics || []).length}/${MAX_RELIC_SLOTS})${synShort}`,
       ix + 17,
       nextSectionY + 13,
       iw - 82,
-      10.5,
-      8.8,
+      10.2,
+      8.2,
       900,
       '#4A2C2A'
     );
@@ -2140,22 +2249,86 @@ function renderWideRightBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) 
 }
 
 function renderToast(ctx, width, headerBottom, app) {
-  if (!app.toastText || app.toastTimer <= 0) return;
-  const alpha = Math.min(1, app.toastTimer * 3);
+  if (app.activeModal === 'mode_guide') return;
+  const cur = app.toastCurrent && app.toastCurrent.timer > 0 ? app.toastCurrent : null;
+  const minor = app.minorToast && app.minorToast.timer > 0 ? app.minorToast : null;
+  if (!cur && !minor && (!app.toastText || app.toastTimer <= 0)) return;
+
+  const metrics = app.metrics ? app.metrics() : { width, height: 667, safeBottom: 0 };
+  const gs = app.gameState || {};
+  const isInPlay = !app.isLobbyOpen && !app.activeModal;
+  const isWide = width >= 820;
+  const aimDim = isInPlay && gs.aim && gs.aim.active ? 0.34 : 1.0;
+
+  let baseY = headerBottom + 6;
+  if (isInPlay) {
+    // Anchor gameplay toasts near bottom rim above tool dock so Top HUD (¥0/¥1200) and turret aim line are NEVER occluded!
+    const toolsDockY =
+      metrics.height -
+      Math.max(isWide ? 10 : 8, (metrics.safeBottom || 0) + (isWide ? 8 : 6)) -
+      (isWide ? 66 : 62);
+    const hasBlessBtn =
+      (gs.pendingBlessings || 0) > 0 &&
+      !gs.activeToolMode &&
+      !gs.activeSkillMode &&
+      gs.running &&
+      !gs.over;
+    baseY = hasBlessBtn ? toolsDockY - 66 : toolsDockY - 33;
+  } else if (app.activeModal) {
+    // Anchor modal toasts above bottom modal footer so modal headers/titles/reroll buttons stay 100% clear!
+    const botBound = metrics.height - Math.max(12, (metrics.safeBottom || 0) + 10);
+    baseY = botBound - 96;
+  }
+
+  const primary = cur || minor || { text: app.toastText, timer: app.toastTimer, level: 'minor' };
+  const isMajor = primary.level === 'major';
+  const queueLen = app.toastQueue ? app.toastQueue.length : 0;
+
   ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.font = UI.fontStr(12, 800);
-  const maxW = Math.min(460, width - 24);
-  const tw = Math.min(maxW, Math.max(150, ctx.measureText(app.toastText).width + 32));
+  ctx.globalAlpha = Math.min(1, primary.timer * 3.2) * aimDim;
+  const fontSz = isMajor ? 11.4 : 10.6;
+  ctx.font = UI.fontStr(fontSz, 800);
+  const maxW = Math.min(isMajor ? 450 : 390, width - 22);
+  const extraReserve = isMajor && queueLen > 0 ? 34 : 12;
+  const tw = Math.min(maxW, Math.max(isMajor ? 156 : 124, ctx.measureText(primary.text).width + 26 + extraReserve));
+  const th = isMajor ? 27 : 23;
   const tx = (width - tw) * 0.5;
-  const ty = headerBottom + 6;
-  UI.drawNoticeBanner(ctx, tx, ty, tw, 28, {
-    text: app.toastText,
-    fontSize: 11.5,
+
+  UI.drawNoticeBanner(ctx, tx, baseY, tw, th, {
+    text: primary.text,
+    fontSize: fontSz,
     align: 'center',
-    rightReserve: 12
+    borderColor: isMajor ? '#ffe070' : '#d2a668',
+    topCol: isMajor ? 'rgba(84, 42, 24, 0.95)' : 'rgba(66, 38, 28, 0.88)',
+    botCol: isMajor ? 'rgba(54, 26, 16, 0.97)' : 'rgba(46, 25, 19, 0.91)',
+    rightReserve: extraReserve
   });
+  if (isMajor && queueLen > 0) {
+    UI.drawTagBadge(ctx, tx + tw - 30, baseY + 5, 24, 17, `+${queueLen}`, 'amber', 8.8);
+  }
   ctx.restore();
+
+  // Secondary non-competing minor pill when a major banner is simultaneously active
+  if (cur && cur.level === 'major' && minor && minor.text !== cur.text) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, minor.timer * 3.2) * aimDim * 0.94;
+    ctx.font = UI.fontStr(10, 800);
+    const mMaxW = Math.min(350, width - 34);
+    const mw = Math.min(mMaxW, Math.max(110, ctx.measureText(minor.text).width + 24));
+    const mh = 21;
+    const mx = (width - mw) * 0.5;
+    const my = isInPlay ? baseY - mh - 4 : baseY + th + 4;
+    UI.drawNoticeBanner(ctx, mx, my, mw, mh, {
+      text: minor.text,
+      fontSize: 9.8,
+      align: 'center',
+      borderColor: '#cfa56e',
+      topCol: 'rgba(62, 36, 26, 0.86)',
+      botCol: 'rgba(44, 24, 18, 0.90)',
+      rightReserve: 10
+    });
+    ctx.restore();
+  }
 }
 
 module.exports = {

@@ -16,6 +16,7 @@ const {
   getShiftConfig,
   MAX_RELIC_SLOTS,
   RELIC_ARCHETYPES,
+  ARCHETYPE_SYNERGIES,
   RELICS,
   DECK_MODS,
   getChefRank
@@ -160,6 +161,10 @@ function collectGuideSpotlights(focus, gt, width, height) {
     raw = [gt.danger, gt.dock];
   } else if (focus === 'hold_milestone') {
     raw = [gt.hold, gt.orderBar];
+  } else if (focus === 'glaze_ring') {
+    raw = [gt.glazeRing || gt.launcher];
+  } else if (focus === 'frozen') {
+    raw = Array.isArray(gt.frozenTreats) && gt.frozenTreats.length > 0 ? gt.frozenTreats : [gt.launcher];
   }
   const pad = 5;
   const out = [];
@@ -276,6 +281,14 @@ function drawGuideSpotlightGestures(ctx, focus, gt, sprites, nowSec) {
     const s = gt.hold;
     const bob = Math.sin(nowSec * 6.0) * 3.5;
     UI.drawUiIcon(ctx, sprites, 'icon_paw_guide', s.x + s.w * 0.75, s.y + s.h + 12 + bob, 30, 0.95, -0.15);
+  } else if (focus === 'glaze_ring' && gt.glazeRing) {
+    const s = gt.glazeRing;
+    const bob = Math.sin(nowSec * 6.0) * 4;
+    UI.drawUiIcon(ctx, sprites, 'icon_paw_guide', s.x + s.w + 8, s.y + s.h * 0.5 + bob, 31 + pulse * 2, 0.96, -0.3);
+  } else if (focus === 'frozen' && Array.isArray(gt.frozenTreats) && gt.frozenTreats[0]) {
+    const s = gt.frozenTreats[0];
+    const bob = Math.sin(nowSec * 6.2) * 4;
+    UI.drawUiIcon(ctx, sprites, 'icon_paw_guide', s.x + s.w * 0.85, s.y - 6 + bob, 31 + pulse * 2, 0.96, -0.2);
   }
 }
 
@@ -358,7 +371,7 @@ function renderModeGuideModal(ctx, metrics, app, hits, nowSec) {
 
   UI.drawPillButton(ctx, ix + iw - skipW, iy + 2, skipW, 26, {
     style: 'wood',
-    text: '跳过指引',
+    text: def.isMechanicTip ? '关闭提示' : '跳过指引',
     fontSize: 10.2,
     radius: 13
   });
@@ -421,15 +434,22 @@ function renderModeGuideModal(ctx, metrics, app, hits, nowSec) {
     ctx.stroke();
   }
 
-  const nextW = isLast ? 118 : 102;
+  const nextW = isLast ? (def.isMechanicTip ? 138 : 118) : 102;
   const nextX = ix + iw - nextW;
+  const nextLabel = isLast
+    ? def.isMechanicTip
+      ? '明白了！继续营业'
+      : app.isLobbyOpen
+      ? '明白了！'
+      : '开始营业！'
+    : '下一步 ›';
   UI.drawPillButton(ctx, nextX, footerY, nextW, footerH, {
     style: 'cta',
     icon: isLast ? def.icon : '',
     sprites,
     iconSize: 18,
-    text: isLast ? (app.isLobbyOpen ? '明白了！' : '开始营业！') : '下一步 ›',
-    fontSize: 12.5,
+    text: nextLabel,
+    fontSize: 12.2,
     fontWeight: 900,
     radius: 11
   });
@@ -801,37 +821,37 @@ function renderHelpModal(ctx, metrics, app, hits) {
   const cards = [
     {
       icon: 'icon_launcher',
-      title: '中央定角发射 × 撞壁弹射',
+      title: '定角恒速发射 × 撞壁弹射',
       lines: [
-        '• 发射口固定在罐口正中央，不可左右移动，专注调整发射角度！',
-        '• 在罐内拖动预览轨迹，撞玻璃壁反弹合成触发【弹壁神球 ×1.5】',
+        '• 发射口固定中央且初速度恒定！左右拖动只调角度，不必担心力度偏差',
+        '• 撞玻璃侧壁反弹合成触发【弹壁神球 ×1.5】，瞄准时实时预览甜品异能范围',
         '• 上滑移出罐口取消发射；点击右上角「暂存」可随时调换手牌'
       ]
     },
     {
       icon: 'serve_bell',
-      title: '点选亮铃上菜 × 抽底雪崩',
+      title: '亮铃上菜 × 单桌换单 × 抽底雪崩',
       lines: [
-        '• 符合顾客订单的甜品会在罐内亮起【上菜】餐铃，直接点击即可端走！',
-        '• 抽走后 2.6 秒内塌落连合享【雪崩 ×1.4~×3.2】，2 连还返步数！',
-        '• 90 秒狂欢上菜直接 +3.0 秒续命；9 阶猫神留罐 ×2 或点它献礼'
+        '• 符合订单亮【上菜】餐铃点击端走；差一步合出的甜品会亮【差1合】绿标！',
+        '• 点单桌可单独换该桌订单（每幕首换免费）；上菜后塌落享【雪崩 ×1.4~×3.2】',
+        '• 90秒狂欢 12 秒内连出叠至 ×2.5 并延时 +4.5 秒；9阶猫神留罐 ×2'
       ]
     },
     {
       icon: 'icon_gift',
       title: '9 阶甜品异能 × 搭档招牌技',
       lines: [
-        '• 泡芙高弹、抹茶柔磁、柠檬清蓝莓、大福聚拢、甜甜圈旋搅、马卡龙微浮、蒙布朗压碎',
-        '• 上菜蓄满底部中央头像即可释放招牌技：蜜柑捞底、星兔移形、柴柴重锤',
+        '• 泡芙高弹、抹茶柔磁、柠檬清小果、大福聚拢、甜甜圈旋搅、马卡龙微浮、蒙布朗压碎',
+        '• 上菜蓄满底部头像释放招牌技：蜜柑捞底、露娜移形+共鸣、麦吉破冰重锤',
         '• 打开「甜品图鉴」可随时查阅每一阶甜品的物理特性与异能'
       ]
     },
     {
       icon: 'icon_shop',
-      title: '5 幕夜班闯关 × 后厨流派构筑',
+      title: '5 幕闯关 × #流派 2/3 件套装共鸣',
       lines: [
-        '• 在限定步数内达标营业额即过关，提前达标点【立即打烊】赚步数利息币',
-        '• 每幕过关进【后厨整备间】，用秘方币搭配 4 槽流派秘方与改造手牌池',
+        '• 达标营业额即过关，提前达标点【立即打烊】把剩步折算为利息币',
+        '• 整备间集齐同标签（#雪崩/#弹壁/#异能/#贪婪）2 件与 3 件秘方激活强力套装共鸣！',
         '• 热炉传承保留最高 2 颗甜品进下幕，5 幕通关可挑战无尽午夜加时！'
       ]
     }
@@ -1050,20 +1070,21 @@ function renderPrepShopModal(ctx, metrics, app, hits) {
   const coins = gameState.coins || 0;
 
   // 1. Sticky Header: Illustrated Icon + Title + Coin Chip + Reroll Button
-  const rerollW = isWide ? 98 : 82;
+  const rerollW = isWide ? 98 : 84;
   const coinVal = String(coins);
   const coinW = Math.max(60, 34 + coinVal.length * 8);
   drawModalHeader(ctx, f, sprites, 'icon_shop', '后厨整备间 · 流派构筑', null, rerollW + coinW + 14);
 
+  const isFreeReroll = shop.rerollCost === 0;
   const canReroll = coins >= shop.rerollCost;
   const rerollX = f.ix + f.iw - rerollW;
   UI.drawPillButton(ctx, rerollX, f.iy + 1, rerollW, 28, {
-    style: 'wood',
+    style: isFreeReroll ? 'active' : 'wood',
     icon: 'icon_restart',
     sprites,
     iconSize: 15,
-    text: `刷 ${shop.rerollCost}`,
-    fontSize: 11,
+    text: isFreeReroll ? '免单首刷' : `刷 ${shop.rerollCost}`,
+    fontSize: isFreeReroll ? 10.2 : 11,
     disabled: !canReroll
   });
   hits.add('prep_reroll', rerollX, f.iy + 1, rerollW, 28, () => app.rerollPrepShop());
@@ -1098,10 +1119,10 @@ function renderPrepShopModal(ctx, metrics, app, hits) {
   const sum = shop.shiftSummary;
   const receiptH = sum ? 42 : 0;
   const nextPreviewH = 44;
-  const equippedH = 66;
+  const equippedH = 84;
   const relicCols = isWide ? 3 : 1;
   const relicGap = 8;
-  const relicCardH = isWide ? 156 : 94;
+  const relicCardH = isWide ? 162 : 96;
   const relicRows = Math.ceil((shop.relicOffers || []).length / relicCols);
   const relicsSectionH = 20 + relicRows * relicCardH + Math.max(0, relicRows - 1) * relicGap;
 
@@ -1135,12 +1156,12 @@ function renderPrepShopModal(ctx, metrics, app, hits) {
     UI.drawUiIcon(ctx, sprites, 'icon_paw_guide', f.ix + 18, curY + tipH * 0.5, 22);
     UI.drawWrappedText(
       ctx,
-      '新手指引：最多装备 4 张秘方（点上方槽位可半价卖出换流派），往下滑动还能改造手牌池！',
+      '构筑提示：凑齐 2 件或 3 件同 #标签 秘方即激活套装共鸣！点上方槽位可半价卖出换流派，下滑可改手牌池。',
       f.ix + 34,
       curY + 8,
       tipW - 44,
       13.5,
-      UI.fontStr(9.8, 800),
+      UI.fontStr(9.6, 800),
       '#5c3310',
       'left',
       2
@@ -1155,9 +1176,10 @@ function renderPrepShopModal(ctx, metrics, app, hits) {
       sum.carried && sum.carried.length > 0
         ? sum.carried.map((c) => `${c.tier}阶${TIERS[c.tier - 1].name}`).join(' + ')
         : '全新起炉';
+    const synSalaryTxt = sum.synergyBonusCoins > 0 ? ` · #贪婪+${sum.synergyBonusCoins}` : '';
     UI.drawFitText(
       ctx,
-      `第 ${sum.shift} 幕过关！基薪+${sum.baseCoins} · 剩${sum.stepsSaved}步息+${sum.stepInterest}${sum.cleanTip > 0 ? ` · 清理+${sum.cleanTip}` : ''}`,
+      `第 ${sum.shift} 幕过关！基薪+${sum.baseCoins} · 剩${sum.stepsSaved}步息+${sum.stepInterest}${sum.cleanTip > 0 ? ` · 清理+${sum.cleanTip}` : ''}${synSalaryTxt}`,
       f.ix + 9,
       curY + 14,
       f.iw - 24,
@@ -1216,25 +1238,26 @@ function renderPrepShopModal(ctx, metrics, app, hits) {
     curY += nextPreviewH + 8;
   }
 
-  // 3b. Equipped Relics Bar (4 Slots — tap equipped to sell for 50% refund!)
+  // 3b. Equipped Relics Bar + 4-Archetype Synergy Progress Strip
   const eqW = f.iw - 6;
+  const archCounts = app.getArchetypeCounts ? app.getArchetypeCounts() : { cascade: 0, bank: 0, trait: 0, greed: 0 };
   UI.drawKissaCard(ctx, f.ix, curY, eqW, equippedH, { tone: 'soft', radius: 10 });
   UI.drawFitText(
     ctx,
     `已装备秘方 (${(gameState.relics || []).length}/${MAX_RELIC_SLOTS})`,
     f.ix + 9,
-    curY + 13,
+    curY + 12,
     eqW * 0.55,
     11,
     9,
     900,
     '#4A2C2A'
   );
-  UI.drawFitText(ctx, '点槽位可半价卖出换流派', f.ix + eqW - 9, curY + 13, eqW * 0.5, 9.5, 8, 700, '#8f4e1b', 'right');
+  UI.drawFitText(ctx, '点槽位半价卖 · 同#标签2/3件共鸣', f.ix + eqW - 9, curY + 12, eqW * 0.55, 9.2, 7.8, 700, '#8f4e1b', 'right');
 
   const slotGap = 6;
   const slotW = (eqW - 18 - slotGap * (MAX_RELIC_SLOTS - 1)) / MAX_RELIC_SLOTS;
-  const slotY = curY + 24;
+  const slotY = curY + 22;
   const slotH = 35;
   for (let i = 0; i < MAX_RELIC_SLOTS; i++) {
     const sx = f.ix + 9 + i * (slotW + slotGap);
@@ -1251,16 +1274,30 @@ function renderPrepShopModal(ctx, metrics, app, hits) {
     if (def) {
       const sellVal = Math.floor(def.price * 0.5);
       UI.drawFitText(ctx, `${def.icon} ${def.name}`, sx + slotW * 0.5, slotY + 12, slotW - 6, 10, 7.8, 900, '#4A2C2A', 'center');
-      UI.drawFitText(ctx, `卖出 +${sellVal}`, sx + slotW * 0.5, slotY + 26, slotW - 6, 8.8, 7.5, 800, '#a34814', 'center');
+      UI.drawFitText(ctx, `${arch ? arch.tag : ''} · 卖+${sellVal}`, sx + slotW * 0.5, slotY + 26, slotW - 6, 8.4, 7.2, 800, '#a34814', 'center');
       addClippedHit(hits, `prep_sell_${def.id}`, sx, slotY - app.modalScrollY, slotW, slotH, () => app.sellRelic(def.id), clipRect);
     } else {
       UI.drawFitText(ctx, '空秘方槽', sx + slotW * 0.5, slotY + slotH * 0.5, slotW - 6, 9.5, 8, 700, '#9c805e', 'center');
     }
   }
+
+  // 4-Archetype Set Synergy Progress Strip (#雪崩 / #弹壁 / #异能 / #贪婪)
+  const archKeys = ['cascade', 'bank', 'trait', 'greed'];
+  const synPillY = curY + 61;
+  const synPillH = 17;
+  for (let ai = 0; ai < archKeys.length; ai++) {
+    const ak = archKeys[ai];
+    const aDef = RELIC_ARCHETYPES[ak];
+    const cnt = archCounts[ak] || 0;
+    const px = f.ix + 9 + ai * (slotW + slotGap);
+    const activeTier = cnt >= 3 ? 3 : cnt >= 2 ? 2 : 0;
+    const lbl = activeTier >= 3 ? `${aDef.tag} 3件★` : activeTier === 2 ? `${aDef.tag} 2件✦` : `${aDef.tag} ${cnt}/2`;
+    UI.drawTagBadge(ctx, px, synPillY, slotW, synPillH, lbl, activeTier > 0 ? 'amber' : 'soft', 8.4);
+  }
   curY += equippedH + 10;
 
-  // 3c. 3 Relic Offers Shelf
-  UI.drawFitText(ctx, '流派规则秘方（限选装备，构筑核心流派）', f.ix, curY + 8, eqW, 11.5, 9.5, 900, '#4A2C2A');
+  // 3c. 3 Relic Offers Shelf (with live #Tag Synergy Callouts!)
+  UI.drawFitText(ctx, '流派规则秘方（集齐 2 / 3 件同 #标签 激活套装共鸣）', f.ix, curY + 8, eqW, 11.5, 9.2, 900, '#4A2C2A');
   curY += 20;
 
   const rCardW = (eqW - relicGap * (relicCols - 1)) / relicCols;
@@ -1269,28 +1306,50 @@ function renderPrepShopModal(ctx, metrics, app, hits) {
     const offer = shop.relicOffers[i];
     const def = RELICS.find((r) => r.id === offer.id);
     if (!def) continue;
-    const arch = RELIC_ARCHETYPES[def.archetype] || { icon: '✦', name: '秘方', color: '#8f4716', bg: '#fff4d8' };
+    const arch = RELIC_ARCHETYPES[def.archetype] || { icon: '✦', name: '秘方', tag: '#秘方', color: '#8f4716', bg: '#fff4d8' };
+    const synDef = ARCHETYPE_SYNERGIES[def.archetype];
+    const curArchCnt = archCounts[def.archetype] || 0;
     const col = i % relicCols;
     const row = Math.floor(i / relicCols);
     const cx = f.ix + col * (rCardW + relicGap);
     const cy = curY + row * (relicCardH + relicGap);
     const bought = !!offer.bought;
     const canBuy = !bought && !fullSlots && coins >= def.price;
+    const willHitSyn = !bought && (curArchCnt === 1 || curArchCnt === 2);
 
     UI.drawKissaCard(ctx, cx, cy, rCardW, relicCardH, {
-      tone: bought ? 'equipped' : 'cream',
+      tone: bought ? 'equipped' : willHitSyn ? 'selected' : 'cream',
       borderColor: bought ? undefined : arch.color,
       radius: 11
     });
 
-    const tagTxt = `${arch.name} · ${def.rarityLabel}`;
+    const tagTxt = `${arch.tag || arch.name}(${curArchCnt}/2) · ${def.rarityLabel}`;
     const tagTone = def.rarity === 'legendary' ? 'amber' : def.rarity === 'rare' ? 'plum' : 'soft';
-    UI.drawTagBadge(ctx, cx + 8, cy + 7, Math.min(rCardW - 16, 108), 16, tagTxt, tagTone, 8.6);
+    UI.drawTagBadge(ctx, cx + 8, cy + 6, Math.min(rCardW - 16, 114), 16, tagTxt, tagTone, 8.4);
+
+    if (willHitSyn && synDef) {
+      const synBadgeTxt = curArchCnt === 2 ? '★凑3件质变!' : '✦凑2件共鸣!';
+      const sbW = 74;
+      UI.drawTagBadge(ctx, cx + rCardW - sbW - 8, cy + 6, sbW, 16, synBadgeTxt, 'amber', 8.2);
+    }
 
     if (isWide) {
-      UI.drawFitText(ctx, `${def.icon} ${def.name}`, cx + 10, cy + 36, rCardW - 20, 13.5, 10.5, 900, '#4A2C2A');
-      UI.drawWrappedText(ctx, def.desc, cx + 10, cy + 50, rCardW - 20, 14, UI.fontStr(10.2, 600), '#6d443a', 'left', 4);
-      const bY = cy + relicCardH - 30;
+      UI.drawFitText(ctx, `${def.icon} ${def.name}`, cx + 10, cy + 35, rCardW - 20, 13.2, 10.2, 900, '#4A2C2A');
+      UI.drawWrappedText(ctx, def.desc, cx + 10, cy + 49, rCardW - 20, 13.5, UI.fontStr(10, 600), '#6d443a', 'left', willHitSyn ? 3 : 4);
+      if (willHitSyn && synDef) {
+        UI.drawFitText(
+          ctx,
+          `套装：${curArchCnt === 2 ? synDef.short3 : synDef.short2}`,
+          cx + 10,
+          cy + relicCardH - 41,
+          rCardW - 20,
+          9.2,
+          7.8,
+          800,
+          '#9c4708'
+        );
+      }
+      const bY = cy + relicCardH - 29;
       UI.drawPillButton(ctx, cx + 10, bY, rCardW - 20, 23, {
         style: bought ? 'equipped' : canBuy ? 'cta' : 'wood',
         icon: !bought && !fullSlots ? 'icon_coin' : '',
@@ -1305,10 +1364,34 @@ function renderPrepShopModal(ctx, metrics, app, hits) {
       }
     } else {
       const btnW = 86;
-      UI.drawFitText(ctx, `${def.icon} ${def.name}`, cx + 10, cy + 34, rCardW - btnW - 22, 13, 10.5, 900, '#4A2C2A');
-      UI.drawWrappedText(ctx, def.desc, cx + 10, cy + 46, rCardW - btnW - 22, 13, UI.fontStr(9.8, 600), '#6d443a', 'left', 3);
+      UI.drawFitText(ctx, `${def.icon} ${def.name}`, cx + 10, cy + 33, rCardW - btnW - 22, 12.8, 10.2, 900, '#4A2C2A');
+      UI.drawWrappedText(
+        ctx,
+        def.desc,
+        cx + 10,
+        cy + 45,
+        rCardW - btnW - 22,
+        12.5,
+        UI.fontStr(9.6, 600),
+        '#6d443a',
+        'left',
+        willHitSyn ? 2 : 3
+      );
+      if (willHitSyn && synDef) {
+        UI.drawFitText(
+          ctx,
+          `共鸣：${curArchCnt === 2 ? synDef.short3 : synDef.short2}`,
+          cx + 10,
+          cy + relicCardH - 13,
+          rCardW - btnW - 22,
+          9,
+          7.6,
+          800,
+          '#9c4708'
+        );
+      }
       const bX = cx + rCardW - btnW - 8;
-      const bY = cy + relicCardH * 0.5 - 14;
+      const bY = cy + relicCardH * 0.5 - 12;
       UI.drawPillButton(ctx, bX, bY, btnW, 28, {
         style: bought ? 'equipped' : canBuy ? 'cta' : 'wood',
         icon: !bought && !fullSlots ? 'icon_coin' : '',
@@ -1528,13 +1611,15 @@ function renderRelicsModal(ctx, metrics, app, hits) {
     });
   }
 
+  const activeSynergies = app.getActiveSynergies ? app.getActiveSynergies() : [];
   const equipped = (gameState.relics || []).map((id) => RELICS.find((r) => r.id === id)).filter(Boolean);
   const activeMods = DECK_MODS.filter((m) => app.getDeckModCount(m.id) > 0);
 
   const affixSectionH = shiftAffixes.length > 0 ? 22 + shiftAffixes.length * 64 + 6 : 0;
+  const synergySectionH = activeSynergies.length > 0 ? 22 + activeSynergies.length * 60 + 6 : 0;
   const equippedSectionH = 22 + (equipped.length === 0 ? 64 : equipped.length * 68);
   const modsSectionH = 22 + (activeMods.length === 0 ? 28 : activeMods.length * 44);
-  const totalH = 62 + affixSectionH + equippedSectionH + modsSectionH + 12;
+  const totalH = 62 + affixSectionH + synergySectionH + equippedSectionH + modsSectionH + 12;
 
   app.modalMaxScroll = Math.max(0, totalH - bodyH);
   app.modalScrollY = Math.max(0, Math.min(app.modalScrollY, app.modalMaxScroll));
@@ -1569,20 +1654,40 @@ function renderRelicsModal(ctx, metrics, app, hits) {
     curY += 6;
   }
 
+  // Active Archetype Set Synergies Section
+  if (activeSynergies.length > 0) {
+    UI.drawFitText(ctx, '已激活流派套装共鸣', f.ix, curY + 8, cardW, 11.5, 9.5, 900, '#4A2C2A');
+    curY += 22;
+    for (const syn of activeSynergies) {
+      const aDef = RELIC_ARCHETYPES[syn.id] || { name: '流派共鸣', color: '#c48823' };
+      UI.drawKissaCard(ctx, f.ix, curY, cardW, 54, {
+        tone: 'selected',
+        borderColor: aDef.color,
+        radius: 10
+      });
+      UI.drawFitText(ctx, `${syn.def.tag} · ${aDef.name}`, f.ix + 10, curY + 15, cardW - 96, 11.8, 9.5, 900, '#4A2C2A');
+      UI.drawTagBadge(ctx, f.ix + cardW - 82, curY + 7, 74, 16, `${syn.tier}件共鸣中`, 'amber', 8.8);
+      const synDesc = syn.tier >= 3 ? `${syn.def.short2} · ${syn.def.short3}` : syn.def.tier2Desc;
+      UI.drawWrappedText(ctx, synDesc, f.ix + 10, curY + 26, cardW - 20, 12, UI.fontStr(9.4, 700), '#6b380a', 'left', 2);
+      curY += 60;
+    }
+    curY += 6;
+  }
+
   // Equipped Relics List
   UI.drawFitText(ctx, `已装备流派秘方 (${equipped.length}/${MAX_RELIC_SLOTS})`, f.ix, curY + 8, cardW, 11.5, 9.5, 900, '#4A2C2A');
   curY += 22;
   if (equipped.length === 0) {
     UI.drawKissaCard(ctx, f.ix, curY, cardW, 56, { tone: 'soft', radius: 10 });
     UI.drawFitText(ctx, '尚未装备流派秘方', f.ix + cardW * 0.5, curY + 20, cardW - 20, 12.5, 10, 800, '#724640', 'center');
-    UI.drawFitText(ctx, '通关当前幕次后即可进入【后厨整备间】选购 16 张规则秘方！', f.ix + cardW * 0.5, curY + 38, cardW - 20, 10, 8.5, 600, '#8f5b34', 'center');
+    UI.drawFitText(ctx, '通关当前幕次后即可进入【后厨整备间】选购 16 张规则秘方（同#标签2/3件激活套装共鸣）！', f.ix + cardW * 0.5, curY + 38, cardW - 20, 10, 8.2, 600, '#8f5b34', 'center');
     curY += 64;
   } else {
     for (const def of equipped) {
-      const arch = RELIC_ARCHETYPES[def.archetype] || { icon: '✦', name: '秘方', color: '#8f4716', bg: '#fff4d8' };
+      const arch = RELIC_ARCHETYPES[def.archetype] || { icon: '✦', name: '秘方', tag: '#秘方', color: '#8f4716', bg: '#fff4d8' };
       UI.drawKissaCard(ctx, f.ix, curY, cardW, 62, { borderColor: arch.color, radius: 10 });
-      UI.drawFitText(ctx, `${def.icon} ${def.name}`, f.ix + 10, curY + 16, cardW - 92, 12, 9.5, 900, '#4A2C2A');
-      UI.drawTagBadge(ctx, f.ix + cardW - 76, curY + 8, 68, 16, arch.name, 'amber', 8.8);
+      UI.drawFitText(ctx, `${def.icon} ${def.name}`, f.ix + 10, curY + 16, cardW - 96, 12, 9.5, 900, '#4A2C2A');
+      UI.drawTagBadge(ctx, f.ix + cardW - 80, curY + 8, 72, 16, `${arch.tag || arch.name}`, 'amber', 8.8);
       UI.drawWrappedText(ctx, def.desc, f.ix + 10, curY + 28, cardW - 20, 13, UI.fontStr(10, 600), '#6d443a', 'left', 2);
       curY += 68;
     }

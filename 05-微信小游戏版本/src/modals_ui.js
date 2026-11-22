@@ -692,8 +692,30 @@ function renderShopModal(ctx, metrics, app, hits) {
   }
 }
 
+function drawCircularAvatar(ctx, img, cx, cy, r, bgStyle = '#fff6df', strokeStyle = '#9c6e3b') {
+  ctx.save();
+  ctx.fillStyle = bgStyle;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  if (img) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, r - 1.5, 0, Math.PI * 2);
+    ctx.clip();
+    UI.drawCoverImage(ctx, img, cx - r, cy - r, r * 2, r * 2, 0.5);
+    ctx.restore();
+  }
+  ctx.lineWidth = 1.6;
+  ctx.strokeStyle = strokeStyle;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function renderCareerModal(ctx, metrics, app, hits) {
-  const f = renderModalBackdropAndFrame(ctx, metrics, app, 660, metrics.height * 0.84, hits);
+  const f = renderModalBackdropAndFrame(ctx, metrics, app, 660, metrics.height * 0.86, hits);
   const { saveData, sprites } = app;
   const st = saveData.lifetimeStats || {};
 
@@ -702,14 +724,205 @@ function renderCareerModal(ctx, metrics, app, hits) {
     f,
     sprites,
     'icon_trophy',
-    '星夜吃茶 · 营业履历',
+    '星夜吃茶 · 店长履历与排行',
     `当前烘焙头衔：${getChefRank(app.getCareerTopScore())}`,
     64
   );
   drawCloseButton(ctx, f, hits, app);
 
-  const bodyY = f.iy + 44;
-  const bodyH = f.iy + f.ih - bodyY;
+  // 1. Chef ID Card (店长名片 + 微信昵称头像授权 + 云存档状态)
+  const cardY = f.iy + 40;
+  const cardH = 54;
+  UI.drawKissaCard(ctx, f.ix, cardY, f.iw, cardH, { tone: 'amber', radius: 11 });
+
+  const avCx = f.ix + 28;
+  const avCy = cardY + cardH * 0.5;
+  const avImg = app.getPlayerAvatarImg ? app.getPlayerAvatarImg() : sprites.patrons.mikan;
+  drawCircularAvatar(ctx, avImg, avCx, avCy, 19, '#fff9eb', '#8a5222');
+  hits.add('career_avatar_cycle', f.ix + 6, cardY + 5, 44, 44, () => app.cycleProfileAvatarPreset());
+
+  const isAuth = !!(saveData.playerProfile && saveData.playerProfile.authorized);
+  const authBtnW = 92;
+  const authBtnH = 30;
+  const authBtnX = f.ix + f.iw - authBtnW - 8;
+  const authBtnY = cardY + (cardH - authBtnH) * 0.5;
+
+  UI.drawPillButton(ctx, authBtnX, authBtnY, authBtnW, authBtnH, {
+    style: isAuth ? 'equipped' : 'cta',
+    text: isAuth ? '✓ 已绑名片' : '微信授权名片',
+    fontSize: 10.5,
+    radius: 10
+  });
+  app.userInfoBtnRect = { x: authBtnX, y: authBtnY, w: authBtnW, h: authBtnH };
+  hits.add('career_auth_btn', authBtnX, authBtnY, authBtnW, authBtnH, () => app.onTapCareerAuthFallback());
+
+  const infoX = f.ix + 54;
+  const infoW = Math.max(80, authBtnX - infoX - 8);
+  const dispName = app.getPlayerDisplayName ? app.getPlayerDisplayName() : '星夜店长';
+  UI.drawFitText(ctx, dispName, infoX, cardY + 18, infoW, 12.8, 10, 900, '#4A2C2A');
+
+  const cs = app.cloudState || { status: 'idle', syncing: false };
+  let syncLine = '💾 本地实时存档 · 开通云开发自动跨端同步';
+  let syncColor = '#724640';
+  if (cs.syncing) {
+    syncLine = '☁️ 正在与微信云端同步进度…';
+    syncColor = '#8a5222';
+  } else if (cs.status === 'synced') {
+    syncLine = isAuth ? '☁️ 云端已同步 · 微信名片已展示在全服榜' : '☁️ 云端已自动备份 · 授权可展示昵称头像';
+    syncColor = '#2d6a43';
+  }
+  UI.drawFitText(ctx, syncLine, infoX, cardY + 37, infoW, 9.8, 8.0, 700, syncColor);
+
+  // 2. Career Sub-Tabs ('stats' | 'rank')
+  const tabY = cardY + cardH + 6;
+  const tabH = 29;
+  const tabGap = 8;
+  const tabW = (f.iw - tabGap) * 0.5;
+  const isRankTab = app.activeCareerTab === 'rank';
+
+  UI.drawPillButton(ctx, f.ix, tabY, tabW, tabH, {
+    style: !isRankTab ? 'active' : 'wood',
+    icon: 'icon_book',
+    sprites,
+    iconSize: 16,
+    text: '履历与勋章',
+    fontSize: 11.2,
+    radius: 9
+  });
+  hits.add('career_tab_stats', f.ix, tabY, tabW, tabH, () => app.setCareerTab('stats'));
+
+  UI.drawPillButton(ctx, f.ix + tabW + tabGap, tabY, tabW, tabH, {
+    style: isRankTab ? 'active' : 'wood',
+    icon: 'icon_trophy',
+    sprites,
+    iconSize: 16,
+    text: '全服店长榜',
+    fontSize: 11.2,
+    radius: 9
+  });
+  hits.add('career_tab_rank', f.ix + tabW + tabGap, tabY, tabW, tabH, () => app.setCareerTab('rank'));
+
+  const contentTopY = tabY + tabH + 7;
+
+  // 3A. Tab: Global Chef Leaderboard
+  if (isRankTab) {
+    const subH = 26;
+    const refreshW = 54;
+    const modeGap = 6;
+    const modeBtnW = (f.iw - refreshW - modeGap * 2) * 0.5;
+    const lbMode = app.leaderboardMode === 'rush' ? 'rush' : 'chef';
+    const lb = app.leaderboardState || { loading: false, list: [], myRank: null, myScore: 0, isLocalFallback: true };
+
+    UI.drawPillButton(ctx, f.ix, contentTopY, modeBtnW, subH, {
+      style: lbMode === 'chef' ? 'cta' : 'wood',
+      icon: 'mode_chef',
+      sprites,
+      iconSize: 15,
+      text: '主厨闯关榜',
+      fontSize: 10.5,
+      radius: 8
+    });
+    hits.add('rank_mode_chef', f.ix, contentTopY, modeBtnW, subH, () => app.setLeaderboardMode('chef'));
+
+    UI.drawPillButton(ctx, f.ix + modeBtnW + modeGap, contentTopY, modeBtnW, subH, {
+      style: lbMode === 'rush' ? 'cta' : 'wood',
+      icon: 'mode_rush',
+      sprites,
+      iconSize: 15,
+      text: '90秒狂欢榜',
+      fontSize: 10.5,
+      radius: 8
+    });
+    hits.add('rank_mode_rush', f.ix + modeBtnW + modeGap, contentTopY, modeBtnW, subH, () => app.setLeaderboardMode('rush'));
+
+    const refX = f.ix + f.iw - refreshW;
+    UI.drawPillButton(ctx, refX, contentTopY, refreshW, subH, {
+      style: 'wood',
+      text: lb.loading ? '…' : '刷新',
+      fontSize: 10.2,
+      radius: 8
+    });
+    hits.add('rank_refresh', refX, contentTopY, refreshW, subH, () => app.fetchLeaderboard(true));
+
+    // Pinned My Rank Footer
+    const myBarH = 34;
+    const myBarY = f.iy + f.ih - myBarH;
+    UI.drawKissaCard(ctx, f.ix, myBarY, f.iw, myBarH, { tone: 'equipped', radius: 9 });
+    const myRankTxt = lb.myRank ? `我的当前排名：第 ${lb.myRank} 名` : '我的排名：完成一局即可上榜';
+    const myScoreTxt = lbMode === 'chef' ? `最高营业额 ¥${lb.myScore || 0}` : `最高得分 ${lb.myScore || 0}`;
+    UI.drawFitText(ctx, myRankTxt, f.ix + 10, myBarY + myBarH * 0.5, f.iw * 0.56, 11, 9, 900, '#2b5839');
+    UI.drawFitText(ctx, myScoreTxt, f.ix + f.iw - 10, myBarY + myBarH * 0.5, f.iw * 0.4, 11.2, 9, 900, '#8a4314', 'right');
+
+    // Scrollable Leaderboard Rows
+    const noteY = contentTopY + subH + 4;
+    const noteTxt = lb.loading
+      ? '☁️ 正在同步全服店长成绩…'
+      : lb.isLocalFallback
+      ? '📌 店内标杆榜（开通云开发后自动升级全服实时榜）'
+      : '☁️ 微信云开发实时排行 · 前 50 名星夜店长';
+    UI.drawFitText(ctx, noteTxt, f.ix + 2, noteY + 6, f.iw - 4, 9.5, 8.0, 700, '#7c5540');
+
+    const listY = noteY + 15;
+    const listH = Math.max(70, myBarY - 6 - listY);
+    const clipRect = { x: f.ix - 2, y: listY, w: f.iw + 4, h: listH };
+    app.modalScrollRect = clipRect;
+
+    const rows = lb.list || [];
+    const rowH = 40;
+    const rowGap = 5;
+    const totalH = Math.max(listH, rows.length * (rowH + rowGap));
+    app.modalMaxScroll = Math.max(0, totalH - listH);
+    app.modalScrollY = Math.max(0, Math.min(app.modalScrollY, app.modalMaxScroll));
+
+    beginModalScrollBody(ctx, clipRect.x, clipRect.y, clipRect.w, clipRect.h, app.modalScrollY);
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const ry = listY + i * (rowH + rowGap);
+      if (ry + rowH < listY + app.modalScrollY - 10 || ry > listY + app.modalScrollY + listH + 10) {
+        continue;
+      }
+      const tone = r.isMe ? 'equipped' : r.rank <= 3 ? 'amber' : 'cream';
+      UI.drawKissaCard(ctx, f.ix, ry, f.iw - 6, rowH, { tone, radius: 9 });
+
+      const rankLabel = r.rank === 1 ? '🥇' : r.rank === 2 ? '🥈' : r.rank === 3 ? '🥉' : `${r.rank}`;
+      UI.drawFitText(
+        ctx,
+        rankLabel,
+        f.ix + 18,
+        ry + rowH * 0.5,
+        28,
+        r.rank <= 3 ? 15 : 11.5,
+        9.5,
+        900,
+        r.rank <= 3 ? '#945014' : '#6c493a',
+        'center'
+      );
+
+      const rAvImg = app.getPlayerAvatarImg ? app.getPlayerAvatarImg(r.avatarUrl, r.avatarPreset) : sprites.patrons.mikan;
+      drawCircularAvatar(ctx, rAvImg, f.ix + 48, ry + rowH * 0.5, 14, '#fff7e2', '#9c6e3b');
+
+      const scoreStr = lbMode === 'chef' ? `¥${r.score || 0}` : `${r.score || 0}分`;
+      const scoreW = 78;
+      const nameX = f.ix + 68;
+      const nameMaxW = Math.max(68, f.iw - 6 - scoreW - 76);
+      const titleTag = r.isMe ? `${r.nickName}（我）` : r.nickName;
+      UI.drawFitText(ctx, titleTag, nameX, ry + 14, nameMaxW, 11.5, 9.2, 900, '#4A2C2A');
+
+      const subDesc =
+        lbMode === 'chef'
+          ? `最高第${r.bestShiftReached || 1}幕 · ${getChefRank(r.score || 0)}`
+          : getChefRank(r.score || 0);
+      UI.drawFitText(ctx, subDesc, nameX, ry + 29, nameMaxW, 9.2, 7.8, 700, '#7a5240');
+
+      UI.drawFitText(ctx, scoreStr, f.ix + f.iw - 16, ry + rowH * 0.5, scoreW, 13, 10, 900, '#9a4316', 'right');
+    }
+    endModalScrollBody(ctx, clipRect.x, clipRect.y, clipRect.w, clipRect.h, app.modalScrollY, app.modalMaxScroll);
+    return;
+  }
+
+  // 3B. Tab: Career Stats & Achievements
+  const bodyY = contentTopY;
+  const bodyH = Math.max(90, f.iy + f.ih - bodyY);
   const clipRect = { x: f.ix - 2, y: bodyY, w: f.iw + 4, h: bodyH };
   app.modalScrollRect = clipRect;
 

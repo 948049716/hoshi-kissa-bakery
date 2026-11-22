@@ -36,6 +36,8 @@ const StarlightAudio = require('./audio');
 const UI = require('./ui_draw');
 const ScreensUI = require('./screens_ui');
 const ModalsUI = require('./modals_ui');
+const CloudConfig = require('./cloud_config');
+const SaveSync = require('./save_sync');
 
 const LAUNCH_X = JAR.canvasW * 0.5;
 const LAUNCH_Y = JAR.dropY + 4;
@@ -59,116 +61,166 @@ function createApp() {
     createAudioContext: platform.createAudioContext
   });
 
-  // Load Persistent Save Data (4.0 backward-compatible migration)
-  let saveData = loadSaveData();
-  function loadSaveData() {
-    const defaults = {
-      bestChef: 0,
-      bestZen: 0,
-      bestRush: 0,
-      unlockedTiers: [1, 2, 3, 4],
-      bgmTrack: 'waltz',
-      sfxEnabled: true,
-      bankStardust: 30,
-      selectedPatron: 'mikan',
-      unlockedPatrons: ['mikan'],
-      equippedTheme: 'amber',
-      unlockedThemes: ['amber'],
-      shopUpgrades: { up_tools: 0, up_fever: 0, up_combo: 0, up_dust: 0 },
-      seenModeGuides: { chef: false, rush: false, zen: false },
-      seenTips: { prep_shop: false, glaze_ring: false, frozen: false },
-      lifetimeStats: {
-        runsPlayed: 0,
-        ordersCompleted: 0,
-        servesTotal: 0,
-        bankShotsTotal: 0,
-        maxAvalancheEver: 0,
-        bestShiftReached: 0,
-        shiftsClearedTotal: 0,
-        fiveShiftClears: 0,
-        soufflesMade: 0,
-        yarnBroken: 0,
-        maxComboEver: 1
-      }
-    };
-    const parsed = platform.getStorageJSON(STORAGE_KEY);
-    if (!parsed || typeof parsed !== 'object') return defaults;
+  // Load Persistent Save Data & Optional Mid-Run Breakpoint Snapshot (Offline-First + WeChat CloudBase)
+  let saveData = SaveSync.normalizeSaveData(platform.getStorageJSON(STORAGE_KEY));
+  let initialSavedRun = SaveSync.validateActiveRunSnapshot(platform.getStorageJSON(SaveSync.ACTIVE_RUN_STORAGE_KEY));
 
-    const bestChef = Number(parsed.bestChef) || 0;
-    const bestZen = Number(parsed.bestZen) || 0;
-    const bestRush = Number(parsed.bestRush) || 0;
-    const unlockedPatrons = Array.isArray(parsed.unlockedPatrons)
-      ? Array.from(new Set(['mikan', ...parsed.unlockedPatrons.filter((id) => PATRONS.some((p) => p.id === id))]))
-      : ['mikan'];
-    const selectedPatron = unlockedPatrons.includes(parsed.selectedPatron) ? parsed.selectedPatron : 'mikan';
-    const unlockedThemes = Array.isArray(parsed.unlockedThemes)
-      ? Array.from(new Set(['amber', ...parsed.unlockedThemes.filter((id) => !!JAR_THEMES[id])]))
-      : ['amber'];
-    const equippedTheme = unlockedThemes.includes(parsed.equippedTheme) ? parsed.equippedTheme : 'amber';
-    const upRaw = parsed.shopUpgrades && typeof parsed.shopUpgrades === 'object' ? parsed.shopUpgrades : {};
-    const clampLv = (v) => Math.max(0, Math.min(3, Math.floor(Number(v) || 0)));
-    const stRaw = parsed.lifetimeStats && typeof parsed.lifetimeStats === 'object' ? parsed.lifetimeStats : {};
-    const sgRaw = parsed.seenModeGuides && typeof parsed.seenModeGuides === 'object' ? parsed.seenModeGuides : {};
-    const tpRaw = parsed.seenTips && typeof parsed.seenTips === 'object' ? parsed.seenTips : {};
+  const cloudState = {
+    status: 'idle', // 'idle' | 'syncing' | 'synced' | 'local_only'
+    openidSuffix: '',
+    revision: 0,
+    lastSyncAt: 0,
+    syncing: false
+  };
+  let cloudPushTimer = null;
+  let cloudDirty = false;
+  let pendingCloudActiveRun = undefined;
+  let pendingClearCloudRun = false;
 
-    let bankStardust;
-    if (typeof parsed.bankStardust === 'number' && Number.isFinite(parsed.bankStardust)) {
-      bankStardust = Math.max(0, Math.floor(parsed.bankStardust));
-    } else if (bestChef > 0 || bestZen > 0) {
-      bankStardust = Math.max(60, Math.min(260, 60 + Math.floor(Math.max(bestChef, bestZen) / 300)));
-    } else {
-      bankStardust = defaults.bankStardust;
+  function persistSaveData(opts = {}) {
+    saveData.updatedAt = Date.now();
+    const spent = SaveSync.computeSpentStardust(saveData);
+    saveData.totalEarnedStardust = Math.max(
+      30,
+      saveData.totalEarnedStardust || 30,
+      (saveData.bankStardust || 0) + spent
+    );
+    platform.setStorageJSON(STORAGE_KEY, saveData);
+    platform.setWxFriendCloudScore(saveData.bestChef, saveData.bestRush, saveData.bestZen);
+    if (!opts.skipCloud) {
+      scheduleCloudPush(!!opts.immediate);
     }
-
-    return {
-      bestChef,
-      bestZen,
-      bestRush,
-      unlockedTiers: Array.isArray(parsed.unlockedTiers) ? parsed.unlockedTiers : [1, 2, 3, 4],
-      bgmTrack:
-        parsed.bgmTrack === 'waltz' || parsed.bgmTrack === 'bossa' || parsed.bgmTrack === 'off'
-          ? parsed.bgmTrack
-          : 'waltz',
-      sfxEnabled: typeof parsed.sfxEnabled === 'boolean' ? parsed.sfxEnabled : true,
-      bankStardust,
-      selectedPatron,
-      unlockedPatrons,
-      equippedTheme,
-      unlockedThemes,
-      shopUpgrades: {
-        up_tools: clampLv(upRaw.up_tools),
-        up_fever: clampLv(upRaw.up_fever),
-        up_combo: clampLv(upRaw.up_combo),
-        up_dust: clampLv(upRaw.up_dust)
-      },
-      seenModeGuides: {
-        chef: !!sgRaw.chef,
-        rush: !!sgRaw.rush,
-        zen: !!sgRaw.zen
-      },
-      seenTips: {
-        prep_shop: !!tpRaw.prep_shop,
-        glaze_ring: !!tpRaw.glaze_ring,
-        frozen: !!tpRaw.frozen
-      },
-      lifetimeStats: {
-        runsPlayed: Math.max(0, Math.floor(Number(stRaw.runsPlayed) || 0)),
-        ordersCompleted: Math.max(0, Math.floor(Number(stRaw.ordersCompleted) || 0)),
-        servesTotal: Math.max(0, Math.floor(Number(stRaw.servesTotal) || 0)),
-        bankShotsTotal: Math.max(0, Math.floor(Number(stRaw.bankShotsTotal) || 0)),
-        maxAvalancheEver: Math.max(0, Math.floor(Number(stRaw.maxAvalancheEver) || 0)),
-        bestShiftReached: Math.max(0, Math.floor(Number(stRaw.bestShiftReached) || 0)),
-        shiftsClearedTotal: Math.max(0, Math.floor(Number(stRaw.shiftsClearedTotal) || 0)),
-        fiveShiftClears: Math.max(0, Math.floor(Number(stRaw.fiveShiftClears) || 0)),
-        soufflesMade: Math.max(0, Math.floor(Number(stRaw.soufflesMade) || 0)),
-        yarnBroken: Math.max(0, Math.floor(Number(stRaw.yarnBroken) || 0)),
-        maxComboEver: Math.max(1, Math.floor(Number(stRaw.maxComboEver) || 1))
-      }
-    };
   }
 
-  function persistSaveData() {
+  function saveActiveRunCheckpoint(opts = {}) {
+    if (!app) return;
+    const snap = SaveSync.serializeActiveRun(gameState, app.activeModal);
+    if (!snap) return;
+    app.savedRun = snap;
+    platform.setStorageJSON(SaveSync.ACTIVE_RUN_STORAGE_KEY, snap);
+    if (opts.syncCloud) {
+      pendingCloudActiveRun = snap;
+      pendingClearCloudRun = false;
+      scheduleCloudPush(true);
+    }
+  }
+
+  function clearActiveRunCheckpoint(syncCloud = false) {
+    if (app) app.savedRun = null;
+    platform.removeStorage(SaveSync.ACTIVE_RUN_STORAGE_KEY);
+    pendingCloudActiveRun = undefined;
+    pendingClearCloudRun = true;
+    if (syncCloud) {
+      scheduleCloudPush(true);
+    }
+  }
+
+  async function flushCloudPush() {
+    if (cloudPushTimer) {
+      clearTimeout(cloudPushTimer);
+      cloudPushTimer = null;
+    }
+    if (!CloudConfig.ENABLE_CLOUD_SYNC || cloudState.status === 'local_only') {
+      return { ok: false, reason: 'local_only' };
+    }
+    cloudDirty = false;
+    cloudState.syncing = true;
+    const payload = {
+      action: 'push',
+      metaSave: saveData,
+      profile: saveData.playerProfile
+    };
+    if (pendingClearCloudRun) {
+      payload.clearActiveRun = true;
+      pendingClearCloudRun = false;
+    } else if (pendingCloudActiveRun !== undefined) {
+      payload.activeRun = pendingCloudActiveRun;
+      pendingCloudActiveRun = undefined;
+    }
+
+    const res = await platform.callCloudFunction(CloudConfig.CLOUD_FUNCTION_NAME, payload);
+    cloudState.syncing = false;
+    if (res && res.ok) {
+      cloudState.status = 'synced';
+      cloudState.revision = res.revision || cloudState.revision + 1;
+      cloudState.lastSyncAt = Date.now();
+      if (res.openidSuffix) cloudState.openidSuffix = res.openidSuffix;
+      if (res.metaSave) {
+        const merged = SaveSync.mergeSaveData(saveData, res.metaSave, res.profile);
+        Object.assign(saveData, merged);
+        platform.setStorageJSON(STORAGE_KEY, saveData);
+      }
+      return res;
+    }
+    cloudState.status = 'local_only';
+    return res || { ok: false };
+  }
+
+  function scheduleCloudPush(immediate = false) {
+    if (!CloudConfig.ENABLE_CLOUD_SYNC || cloudState.status === 'local_only') return;
+    cloudDirty = true;
+    if (cloudPushTimer) {
+      clearTimeout(cloudPushTimer);
+      cloudPushTimer = null;
+    }
+    if (immediate) {
+      flushCloudPush();
+    } else {
+      cloudPushTimer = setTimeout(() => {
+        flushCloudPush();
+      }, CloudConfig.SYNC_DEBOUNCE_MS || 1800);
+    }
+  }
+
+  async function bootCloudSync() {
+    if (!CloudConfig.ENABLE_CLOUD_SYNC) {
+      cloudState.status = 'local_only';
+      return;
+    }
+    const inited = platform.initCloud(CloudConfig.CLOUD_ENV_ID);
+    if (!inited) {
+      cloudState.status = 'local_only';
+      return;
+    }
+    cloudState.status = 'syncing';
+    cloudState.syncing = true;
+    const res = await platform.callCloudFunction(CloudConfig.CLOUD_FUNCTION_NAME, { action: 'pull' });
+    cloudState.syncing = false;
+    if (!res || !res.ok) {
+      cloudState.status = 'local_only';
+      return;
+    }
+
+    cloudState.status = 'synced';
+    cloudState.openidSuffix = res.openidSuffix || '';
+    cloudState.revision = res.revision || 1;
+    cloudState.lastSyncAt = Date.now();
+
+    const beforeCloudChef = (res.metaSave && res.metaSave.bestChef) || 0;
+    const beforeCloudEarned = (res.metaSave && res.metaSave.totalEarnedStardust) || 30;
+    const merged = SaveSync.mergeSaveData(saveData, res.metaSave, res.profile);
+    Object.assign(saveData, merged);
     platform.setStorageJSON(STORAGE_KEY, saveData);
+
+    audio.bgmTrack = saveData.bgmTrack;
+    audio.bgmEnabled = saveData.bgmTrack !== 'off';
+    audio.setSfxEnabled(saveData.sfxEnabled);
+    if (saveData.playerProfile && saveData.playerProfile.avatarUrl && app) {
+      app.ensureRemoteAvatar(saveData.playerProfile.avatarUrl);
+    }
+
+    if (app && !app.savedRun && res.activeRun) {
+      const cloudRun = SaveSync.validateActiveRunSnapshot(res.activeRun);
+      if (cloudRun) {
+        app.savedRun = cloudRun;
+        platform.setStorageJSON(SaveSync.ACTIVE_RUN_STORAGE_KEY, cloudRun);
+      }
+    }
+
+    // Push back if new cloud user or local progress is ahead of cloud
+    if (res.isNewUser || saveData.bestChef > beforeCloudChef || saveData.totalEarnedStardust > beforeCloudEarned) {
+      scheduleCloudPush(true);
+    }
   }
 
   audio.bgmTrack = saveData.bgmTrack;
@@ -414,9 +466,24 @@ function createApp() {
     sprites,
     saveData,
     gameState,
+    cloudState,
+    savedRun: initialSavedRun,
     isLobbyOpen: true,
     activeModal: null, // 'shop' | 'career' | 'help' | 'mode_guide' | 'compendium' | 'blessing' | 'gameover' | null
     activeShopTab: 'upgrades',
+    activeCareerTab: 'stats', // 'stats' | 'rank'
+    leaderboardMode: 'chef', // 'chef' | 'rush'
+    leaderboardState: {
+      loading: false,
+      mode: 'chef',
+      list: [],
+      myRank: null,
+      myScore: 0,
+      isLocalFallback: false,
+      lastFetchedAt: 0
+    },
+    userInfoBtnRect: null,
+    remoteAvatars: {},
     guideMode: 'chef',
     guideStep: 0,
     lobbySpeechIndex: 0,
@@ -743,16 +810,256 @@ function createApp() {
       }
     },
 
+    ensureRemoteAvatar(url) {
+      if (!url || typeof url !== 'string') return null;
+      if (this.remoteAvatars[url]) return this.remoteAvatars[url];
+      this.remoteAvatars[url] = { loading: true, img: null };
+      platform.loadImage(url).then((img) => {
+        this.remoteAvatars[url] = { loading: false, img: img || null };
+      });
+      return null;
+    },
+
+    getPlayerDisplayName() {
+      const prof = saveData.playerProfile || {};
+      if (prof.nickName && prof.nickName.trim()) return prof.nickName.trim();
+      const suffix = cloudState.openidSuffix ? `#${cloudState.openidSuffix}` : '';
+      return `星夜店长${suffix}`;
+    },
+
+    getPlayerAvatarPreset() {
+      const prof = saveData.playerProfile || {};
+      if (prof.avatarPreset && ['mikan', 'luna', 'mugi'].includes(prof.avatarPreset)) {
+        return prof.avatarPreset;
+      }
+      return saveData.selectedPatron || 'mikan';
+    },
+
+    getPlayerAvatarImg(overrideUrl = '', overridePreset = '') {
+      const url = overrideUrl || (saveData.playerProfile && saveData.playerProfile.avatarUrl) || '';
+      if (url) {
+        const entry = this.remoteAvatars[url];
+        if (!entry) {
+          this.ensureRemoteAvatar(url);
+        } else if (entry.img) {
+          return entry.img;
+        }
+      }
+      const preset = overridePreset || this.getPlayerAvatarPreset();
+      return sprites.patrons[preset] || sprites.patrons.mikan || null;
+    },
+
+    cycleProfileAvatarPreset() {
+      audio.ensureCtx();
+      audio.playPatronSelect();
+      const order = ['mikan', 'luna', 'mugi'];
+      const cur = this.getPlayerAvatarPreset();
+      const next = order[(order.indexOf(cur) + 1) % order.length];
+      if (!saveData.playerProfile) {
+        saveData.playerProfile = SaveSync.normalizeProfile(null, next);
+      }
+      saveData.playerProfile.avatarPreset = next;
+      saveData.playerProfile.updatedAt = Date.now();
+      persistSaveData();
+      const p = PATRONS.find((it) => it.id === next);
+      this.showToast(`🐾 已切换名片头像：${p ? p.name : next}`);
+    },
+
+    async applyPlayerProfileAuth({ nickName, avatarUrl = '', avatarPreset = null, authorized = true } = {}) {
+      if (!saveData.playerProfile) {
+        saveData.playerProfile = SaveSync.normalizeProfile(null, saveData.selectedPatron);
+      }
+      if (nickName && nickName.trim()) {
+        saveData.playerProfile.nickName = nickName.trim().slice(0, 16);
+      }
+      if (typeof avatarUrl === 'string') {
+        saveData.playerProfile.avatarUrl = avatarUrl.slice(0, 512);
+        if (avatarUrl) this.ensureRemoteAvatar(avatarUrl);
+      }
+      if (avatarPreset && ['mikan', 'luna', 'mugi'].includes(avatarPreset)) {
+        saveData.playerProfile.avatarPreset = avatarPreset;
+      }
+      saveData.playerProfile.authorized = !!authorized;
+      saveData.playerProfile.updatedAt = Date.now();
+      persistSaveData({ immediate: true });
+      if (CloudConfig.ENABLE_CLOUD_SYNC && cloudState.status !== 'local_only') {
+        await platform.callCloudFunction(CloudConfig.CLOUD_FUNCTION_NAME, {
+          action: 'updateProfile',
+          profile: saveData.playerProfile
+        });
+      }
+      this.fetchLeaderboard(true);
+      this.showToast(`🪪 店长名片已同步：${this.getPlayerDisplayName()}！`, { level: 'major' });
+    },
+
+    onTapCareerAuthFallback() {
+      audio.ensureCtx();
+      audio.playPatronSelect();
+      const personas = [
+        { nickName: '星夜店长·小蜜柑', avatarPreset: 'mikan' },
+        { nickName: '星月主厨·露娜', avatarPreset: 'luna' },
+        { nickName: '元气主厨·麦吉', avatarPreset: 'mugi' }
+      ];
+      const curName = (saveData.playerProfile && saveData.playerProfile.nickName) || '';
+      const curIdx = personas.findIndex((p) => p.nickName === curName);
+      const pick = personas[(curIdx + 1) % personas.length];
+      this.applyPlayerProfileAuth({
+        nickName: pick.nickName,
+        avatarUrl: (saveData.playerProfile && saveData.playerProfile.avatarUrl) || '',
+        avatarPreset: pick.avatarPreset,
+        authorized: true
+      });
+    },
+
+    openCareer(tab = 'stats') {
+      audio.ensureCtx();
+      audio.playTilt();
+      this.activeCareerTab = tab === 'rank' ? 'rank' : 'stats';
+      this.openModal('career');
+      if (this.activeCareerTab === 'rank') {
+        this.fetchLeaderboard(false);
+      }
+    },
+
+    setCareerTab(tab) {
+      const next = tab === 'rank' ? 'rank' : 'stats';
+      if (this.activeCareerTab === next) return;
+      audio.ensureCtx();
+      audio.playTilt();
+      this.activeCareerTab = next;
+      this.modalScrollY = 0;
+      if (next === 'rank') {
+        this.fetchLeaderboard(false);
+      }
+    },
+
+    setLeaderboardMode(mode) {
+      const next = mode === 'rush' ? 'rush' : 'chef';
+      if (this.leaderboardMode === next) return;
+      audio.ensureCtx();
+      audio.playTilt();
+      this.leaderboardMode = next;
+      this.modalScrollY = 0;
+      this.fetchLeaderboard(true);
+    },
+
+    async fetchLeaderboard(force = false) {
+      const mode = this.leaderboardMode === 'rush' ? 'rush' : 'chef';
+      const now = Date.now();
+      if (
+        !force &&
+        !this.leaderboardState.loading &&
+        this.leaderboardState.list.length > 0 &&
+        this.leaderboardState.mode === mode &&
+        now - (this.leaderboardState.lastFetchedAt || 0) < 8000
+      ) {
+        return;
+      }
+      this.leaderboardState.loading = true;
+      this.leaderboardState.mode = mode;
+
+      const field = mode === 'rush' ? 'bestRush' : 'bestChef';
+      const localMyScore = saveData[field] || 0;
+      let rows = [];
+      let isLocalFallback = false;
+
+      if (CloudConfig.ENABLE_CLOUD_SYNC && cloudState.status !== 'local_only') {
+        const res = await platform.callCloudFunction(CloudConfig.CLOUD_FUNCTION_NAME, {
+          action: 'leaderboard',
+          mode
+        });
+        if (res && res.ok && Array.isArray(res.list)) {
+          rows = res.list.map((r) => ({ ...r }));
+        } else {
+          isLocalFallback = true;
+        }
+      } else {
+        isLocalFallback = true;
+      }
+
+      if (rows.length < 5) {
+        const existingNames = new Set(rows.map((r) => r.nickName));
+        for (const npc of platform.getDefaultNpcRivals()) {
+          if (existingNames.has(npc.nickName)) continue;
+          rows.push({
+            id: `npc_${npc.nickName}`,
+            isMe: false,
+            nickName: npc.nickName,
+            avatarUrl: '',
+            avatarPreset: npc.avatarPreset,
+            score: npc[field] || 0,
+            bestShiftReached: npc.bestShiftReached || 3
+          });
+        }
+      }
+
+      const meIdx = rows.findIndex((r) => r.isMe);
+      const meEntry = {
+        id: 'me',
+        isMe: true,
+        nickName: this.getPlayerDisplayName(),
+        avatarUrl: (saveData.playerProfile && saveData.playerProfile.avatarUrl) || '',
+        avatarPreset: this.getPlayerAvatarPreset(),
+        score: Math.max(localMyScore, meIdx >= 0 ? rows[meIdx].score || 0 : 0),
+        bestShiftReached: (saveData.lifetimeStats && saveData.lifetimeStats.bestShiftReached) || 1
+      };
+      if (meIdx >= 0) {
+        rows[meIdx] = meEntry;
+      } else if (meEntry.score > 0) {
+        rows.push(meEntry);
+      }
+
+      rows.sort((a, b) => (b.score || 0) - (a.score || 0));
+      const ranked = rows.slice(0, 50).map((r, idx) => {
+        if (r.avatarUrl) this.ensureRemoteAvatar(r.avatarUrl);
+        return { ...r, rank: idx + 1 };
+      });
+      const finalMe = ranked.find((r) => r.isMe);
+
+      this.leaderboardState = {
+        loading: false,
+        mode,
+        list: ranked,
+        myRank: finalMe ? finalMe.rank : null,
+        myScore: meEntry.score,
+        isLocalFallback,
+        lastFetchedAt: Date.now()
+      };
+    },
+
+    hasResumableRun(mode = gameState.mode) {
+      return !!(this.savedRun && this.savedRun.mode === mode);
+    },
+
+    resumeSavedRun() {
+      if (!this.savedRun) return false;
+      const ok = resumeSavedRunFn(this.savedRun);
+      if (ok) {
+        audio.ensureCtx();
+        audio.playStartCafe();
+        this.isLobbyOpen = false;
+        this.syncAudioMood();
+        this.showToast(`▶️ 已恢复第 ${gameState.shift} 幕营业进度！`, { level: 'major' });
+      }
+      return ok;
+    },
+
     returnToLobby() {
+      if (!this.isLobbyOpen && gameState.running && !gameState.over) {
+        saveActiveRunCheckpoint({ syncCloud: false });
+      }
       gameState.running = false;
       gameState.paused = false;
       cancelToolMode();
       audio.setFeverMode(false);
       audio.setDangerLevel(0);
+      this.toastCurrent = null;
+      this.toastQueue = [];
+      this.minorToast = null;
+      this.syncToastLegacyFields();
       this.activeModal = null;
       this.isLobbyOpen = true;
       this.syncAudioMood();
-      this.showToast('🏠 已回到星夜吃茶大厅');
     },
 
     startNewRun(mode = gameState.mode, opts = {}) {
@@ -1419,6 +1726,7 @@ function createApp() {
       spawnPopup(ent.x, ent.y - 20, `👑 主菜献礼! +¥${pts}`, '#ffe570', 22);
       showComboBanner('👑 星冠猫神主菜大满贯!', `+¥${pts} · +${dust}⭐ · 净化${cleansed}颗小糖`, '#ffe570');
       app.showToast(`👑 献上星冠猫神舒芙蕾！+¥${pts} · 招牌技满能！`, { level: 'major' });
+      saveActiveRunCheckpoint();
       return true;
     }
 
@@ -1558,6 +1866,7 @@ function createApp() {
       app.showToast(`🔔 已端上【${def.name}】+${currSym}${servePts}！还差 1 份完成 VIP 套餐～`, { level: 'minor' });
     }
 
+    saveActiveRunCheckpoint();
     return true;
   }
 
@@ -1869,6 +2178,7 @@ function createApp() {
     app.syncToastLegacyFields();
     gameState.paused = true;
     app.openModal('prep_shop');
+    saveActiveRunCheckpoint({ syncCloud: true });
   }
 
   function completeCurrentShift(wasEarly = false) {
@@ -1920,6 +2230,7 @@ function createApp() {
         stardustPreview: preview.finalEarned
       };
       app.openModal('shift_victory');
+      saveActiveRunCheckpoint({ syncCloud: true });
       return;
     }
 
@@ -1965,6 +2276,7 @@ function createApp() {
     } else {
       app.showToast(`${def.icon} 已装备秘方【${def.name}】！`);
     }
+    saveActiveRunCheckpoint();
   }
 
   function sellRelicFn(relicId) {
@@ -1979,6 +2291,7 @@ function createApp() {
     gameState.coins += refund;
     if (relicId === 'rel_bumpers') syncObstaclesForShift();
     app.showToast(`🪙 已卖出【${def.name}】，返还 +${refund} 🪙`);
+    saveActiveRunCheckpoint();
   }
 
   function buyDeckModFn(modId) {
@@ -2012,6 +2325,7 @@ function createApp() {
       gameState.tools.spoon += 1;
     }
     app.showToast(`${def.icon} 原料改造成功：【${def.name}】！`);
+    saveActiveRunCheckpoint();
   }
 
   function rerollPrepShopFn() {
@@ -2030,6 +2344,7 @@ function createApp() {
     shop.relicOffers = relicOffers;
     shop.modOffers = modOffers;
     app.showToast(cost === 0 ? '🌙 眠眠星兔免单刷新货架！' : '🔄 已刷新整备间货架！');
+    saveActiveRunCheckpoint();
   }
 
   function beginShift(shiftNum, isCarryOver = false, carriedOverride = null, forcedHazards = null, opts = {}) {
@@ -2193,6 +2508,9 @@ function createApp() {
       } else if (frozenSeeded > 0 && (!saveData.seenTips || !saveData.seenTips.frozen)) {
         app.openModeGuide('tip_frozen', 0);
       }
+    }
+    if (cfg.shift > 1) {
+      saveActiveRunCheckpoint();
     }
   }
 
@@ -2885,6 +3203,7 @@ function createApp() {
     gameState.heldActionAnim = null;
     gameState.heldActionCooldown = 1.5 + Math.random() * 1.5;
     clampDropX();
+    saveActiveRunCheckpoint();
     return true;
   }
 
@@ -3873,13 +4192,15 @@ function createApp() {
     const finalEarned = calc.finalEarned;
 
     saveData.bankStardust = (saveData.bankStardust || 0) + finalEarned;
+    saveData.totalEarnedStardust = (saveData.totalEarnedStardust || 0) + finalEarned;
     saveData.lifetimeStats.runsPlayed = (saveData.lifetimeStats.runsPlayed || 0) + 1;
     saveData.lifetimeStats.ordersCompleted = (saveData.lifetimeStats.ordersCompleted || 0) + gameState.ordersCompleted;
     saveData.lifetimeStats.maxComboEver = Math.max(saveData.lifetimeStats.maxComboEver || 1, gameState.maxCombo);
     if (gameState.mode === 'chef') {
       saveData.lifetimeStats.bestShiftReached = Math.max(saveData.lifetimeStats.bestShiftReached || 0, gameState.shift);
     }
-    persistSaveData();
+    clearActiveRunCheckpoint(false);
+    persistSaveData({ immediate: true });
 
     app.goSettlement = {
       reason,
@@ -3905,7 +4226,11 @@ function createApp() {
     }
   }
 
-  function startNewRunFn(mode = gameState.mode) {
+  function startNewRunFn(mode = gameState.mode, opts = {}) {
+    const preserveCheckpoint = !!(opts && opts.preserveCheckpoint);
+    if (!preserveCheckpoint) {
+      clearActiveRunCheckpoint(false);
+    }
     gameState.mode = mode;
     gameState.running = true;
     gameState.paused = false;
@@ -4074,6 +4399,10 @@ function createApp() {
     audio.setDangerLevel(0);
     audio.unlock();
 
+    if (preserveCheckpoint) {
+      return;
+    }
+
     if (mode === 'chef') {
       beginShift(1, false);
     } else {
@@ -4089,6 +4418,135 @@ function createApp() {
     } else {
       setPatronSpeech(activePatron, `🍵 悠闲经典开启！拖动瞄准可预览甜品异能范围与弹壁折射哦～`, 5.0);
     }
+  }
+
+  function resumeSavedRunFn(rawSnap) {
+    const snap = SaveSync.validateActiveRunSnapshot(rawSnap);
+    if (!snap) return false;
+
+    startNewRunFn(snap.mode, { preserveCheckpoint: true });
+    const cfg = getShiftConfig(snap.shift || 1);
+
+    gameState.score = snap.score || 0;
+    gameState.displayScore = gameState.score;
+    gameState.stardust = snap.stardust !== undefined ? snap.stardust : 30;
+    gameState.shift = snap.shift || 1;
+    gameState.shiftName = snap.shiftName || cfg.name;
+    gameState.shiftBadge = snap.shiftBadge || cfg.badge;
+    gameState.shiftModifier = snap.shiftModifier !== undefined ? snap.shiftModifier : cfg.modifier || null;
+    gameState.shiftHazards = Array.isArray(snap.shiftHazards) ? [...snap.shiftHazards] : [];
+    gameState.shiftsClearedThisRun = snap.shiftsClearedThisRun || 0;
+    gameState.shiftRevenue = snap.shiftRevenue || 0;
+    gameState.displayShiftRevenue = gameState.shiftRevenue;
+    gameState.shiftTarget = snap.shiftTarget || cfg.target;
+    gameState.stepsMax = snap.stepsMax || cfg.steps;
+    gameState.stepsLeft = snap.stepsLeft !== undefined ? snap.stepsLeft : gameState.stepsMax;
+    gameState.shiftStepsUsed = snap.shiftStepsUsed || 0;
+    gameState.shiftStepRefunds = snap.shiftStepRefunds || 0;
+    gameState.freeSkipsLeft = snap.freeSkipsLeft !== undefined ? snap.freeSkipsLeft : 1;
+    gameState.mugiBankCoinHits = snap.mugiBankCoinHits || 0;
+    gameState.shiftClearedFlag = !!snap.shiftClearedFlag;
+    gameState.coins = snap.coins || 0;
+    gameState.relics = Array.isArray(snap.relics) ? [...snap.relics] : [];
+    gameState.deckMods = { ...gameState.deckMods, ...(snap.deckMods || {}) };
+    gameState.nextShiftBonusSteps = snap.nextShiftBonusSteps || 0;
+    gameState.antigravDropCounter = snap.antigravDropCounter || 0;
+    gameState.dropsMadeThisRun = snap.dropsMadeThisRun || 0;
+    gameState.soufflesMadeThisRun = snap.soufflesMadeThisRun || 0;
+    gameState.yarnBrokenThisRun = snap.yarnBrokenThisRun || 0;
+    gameState.iceShatteredThisRun = snap.iceShatteredThisRun || 0;
+    gameState.glazeHitsThisRun = snap.glazeHitsThisRun || 0;
+    gameState.servesCompleted = snap.servesCompleted || 0;
+    gameState.ordersCompleted = snap.ordersCompleted || 0;
+    gameState.bankShotsLanded = snap.bankShotsLanded || 0;
+    gameState.maxAvalancheRun = snap.maxAvalancheRun || 0;
+    gameState.maxCombo = snap.maxCombo || 1;
+    gameState.maxTierRun = snap.maxTierRun || 4;
+    gameState.seenThisRun = new Set(Array.isArray(snap.seenThisRun) ? snap.seenThisRun : [1, 2, 3, 4]);
+    gameState.skillEnergy = Number(snap.skillEnergy) || 0;
+    gameState.nextShotMeteor = !!snap.nextShotMeteor;
+    gameState.feverEnergy = Number(snap.feverEnergy) || 0;
+    gameState.tools = { ...gameState.tools, ...(snap.tools || {}) };
+    gameState.perks = { ...(snap.perks || {}) };
+    gameState.pendingBlessings = snap.pendingBlessings || 0;
+    gameState.dropsUntilRainbow = snap.dropsUntilRainbow || getRainbowPityBase();
+    gameState.canHoldThisTurn = snap.canHoldThisTurn !== false;
+    gameState.curTier = snap.curTier || 2;
+    gameState.curMeta = { wildcard: false, golden: false, ...(snap.curMeta || {}) };
+    gameState.nextTier = snap.nextTier || 1;
+    gameState.nextMeta = { wildcard: false, golden: false, ...(snap.nextMeta || {}) };
+    gameState.holdTier = snap.holdTier || null;
+    gameState.holdMeta = snap.holdMeta ? { ...snap.holdMeta } : null;
+    gameState.zenNextMilestone = snap.zenNextMilestone || 600;
+    gameState.rushTimer = Math.max(5.0, Number(snap.rushTimer) || 90.0);
+    gameState.rushNextMilestone = snap.rushNextMilestone || 1200;
+    gameState.activeEvent = snap.activeEvent ? { ...snap.activeEvent } : null;
+
+    syncObstaclesForShift();
+
+    gameState.entities = [];
+    for (const e of snap.entities) {
+      if (e.isYarnBall) {
+        const yb = createYarnBallEntity(e.x, e.y);
+        yb.vx = 0;
+        yb.vy = 0;
+        yb.vr = 0;
+        yb.yarnHp = e.yarnHp || 2;
+        yb.age = 1.0;
+      } else {
+        const ent = createEntity(e.tier || 1, e.x, e.y, 0, 0, false, e.angle || 0, 0, {
+          wildcard: !!e.isWildcard,
+          golden: !!e.isGolden,
+          frozenHp: e.frozenHp || 0,
+          preSettled: true
+        });
+        ent.agedStacks = e.agedStacks || 0;
+      }
+    }
+
+    if (snap.mode !== 'zen' && Array.isArray(snap.orders) && snap.orders.length > 0) {
+      gameState.orders = snap.orders.map((o) => ({
+        uid: o.uid || `ord_res_${Math.random().toString(36).slice(2, 7)}`,
+        kind: o.kind || 'quick',
+        slotOrigin: o.slotOrigin || o.kind || 'quick',
+        isJudgeRush: !!o.isJudgeRush,
+        isStarterBlitz: !!o.isStarterBlitz,
+        bonusSteps: o.bonusSteps || 0,
+        label: o.label || (o.kind === 'vip' ? '👑 VIP桌' : '⚡ 快餐桌'),
+        patron: PATRONS.find((p) => p.id === o.patronId) || PATRONS[0],
+        slots: (o.slots || []).map((s) => ({ tier: s.tier || 3, done: !!s.done })),
+        bonusScore: o.bonusScore || 100,
+        rewardDust: o.rewardDust || 12,
+        freshSteps: o.freshSteps || 0,
+        freshMax: o.freshMax || 6,
+        freshMult: o.freshMult || 1.35,
+        staleMult: o.staleMult || 1.0,
+        completed: !!o.completed
+      }));
+      gameState.order = gameState.orders[1] || gameState.orders[0] || null;
+    } else if (snap.mode !== 'zen') {
+      initOrders();
+    } else {
+      gameState.orders = [];
+      gameState.order = null;
+    }
+
+    if (snap.resumeModal === 'prep_shop' && snap.prepShop) {
+      gameState.prepShop = JSON.parse(JSON.stringify(snap.prepShop));
+      gameState.paused = true;
+      app.openModal('prep_shop');
+    } else if (snap.resumeModal === 'shift_victory' && snap.victoryOffer) {
+      gameState.victoryOffer = JSON.parse(JSON.stringify(snap.victoryOffer));
+      gameState.paused = true;
+      app.openModal('shift_victory');
+    } else {
+      app.activeModal = null;
+      gameState.paused = false;
+      app.syncAudioMood();
+    }
+
+    setPatronSpeech(app.activePatron, `欢迎回来呀店长！第 ${gameState.shift} 幕热炉已保温就绪～`, 4.5);
+    return true;
   }
 
   // Tool & Active Chef Skill Canvas Targeting Click (prefers exact hit & closest center in crowded jars)
@@ -4799,7 +5257,22 @@ function createApp() {
       ScreensUI.renderPlayScreen(ctx, metrics, app, hits, nowSec);
     }
 
+    app.userInfoBtnRect = null;
     ModalsUI.renderActiveModal(ctx, metrics, app, hits, nowSec);
+    platform.syncUserInfoButton(
+      app.activeModal === 'career' ? app.userInfoBtnRect : null,
+      (res) => {
+        if (res && res.ok) {
+          app.applyPlayerProfileAuth({
+            nickName: res.nickName,
+            avatarUrl: res.avatarUrl || '',
+            authorized: true
+          });
+        } else if (res && res.cancelled) {
+          app.showToast('🐾 未授权也没关系，可使用猫咪店长名片继续游玩～');
+        }
+      }
+    );
 
     const { topY, headerH } = ScreensUI.computeTopHeaderGeometry(metrics);
     ScreensUI.renderToast(ctx, metrics.width, topY + headerH, app);
@@ -4821,7 +5294,15 @@ function createApp() {
   // Lifecycle & WeChat Share setup
   platform.bindLifecycle(
     () => audio.setTabHidden(false),
-    () => audio.setTabHidden(true)
+    () => {
+      audio.setTabHidden(true);
+      if (!app.isLobbyOpen && gameState.running && !gameState.over) {
+        saveActiveRunCheckpoint({ syncCloud: false });
+      }
+      if (cloudDirty) {
+        flushCloudPush();
+      }
+    }
   );
   platform.setupShare(() => ({
     title: gameState.score > 0
@@ -4839,6 +5320,35 @@ function createApp() {
       lobbyOpen: app.isLobbyOpen,
       activeModal: app.activeModal,
       activeShopTab: app.activeShopTab,
+      activeCareerTab: app.activeCareerTab,
+      leaderboardMode: app.leaderboardMode,
+      leaderboardState: {
+        loading: !!app.leaderboardState.loading,
+        mode: app.leaderboardState.mode || app.leaderboardMode,
+        myRank: app.leaderboardState.myRank,
+        myScore: app.leaderboardState.myScore || 0,
+        isLocalFallback: !!app.leaderboardState.isLocalFallback,
+        count: (app.leaderboardState.list || []).length,
+        top3: (app.leaderboardState.list || []).slice(0, 3).map((r) => ({
+          rank: r.rank,
+          nickName: r.nickName,
+          score: r.score,
+          isMe: !!r.isMe
+        }))
+      },
+      cloudState: { ...cloudState },
+      playerProfile: { ...(saveData.playerProfile || {}) },
+      hasSavedRun: app.hasResumableRun(gameState.mode),
+      savedRun: app.savedRun
+        ? {
+            mode: app.savedRun.mode,
+            shift: app.savedRun.shift,
+            score: app.savedRun.score,
+            shiftRevenue: app.savedRun.shiftRevenue,
+            resumeModal: app.savedRun.resumeModal
+          }
+        : null,
+      userInfoBtnRect: app.userInfoBtnRect ? { ...app.userInfoBtnRect } : null,
       guideMode: app.guideMode,
       guideStep: app.guideStep,
       mode: gameState.mode,
@@ -4990,7 +5500,11 @@ function createApp() {
       return true;
     },
     addBankStardust: (amt) => {
-      saveData.bankStardust = Math.max(0, (saveData.bankStardust || 0) + (Number(amt) || 0));
+      const delta = Number(amt) || 0;
+      saveData.bankStardust = Math.max(0, (saveData.bankStardust || 0) + delta);
+      if (delta > 0) {
+        saveData.totalEarnedStardust = (saveData.totalEarnedStardust || 0) + delta;
+      }
       persistSaveData();
     },
     addShiftRevenue: (amt) => addScore(Math.max(0, Number(amt) || 0)),
@@ -5069,6 +5583,12 @@ function createApp() {
     queueBlessing: (r = '测试祝福') => queueBlessing(r),
     openBlessing: () => app.openBlessingModal(),
     openModeGuide: (m, step = 0) => app.openModeGuide(m, step),
+    openCareer: (tab = 'stats') => app.openCareer(tab),
+    resumeRun: () => app.resumeSavedRun(),
+    saveCheckpoint: (syncCloud = false) => saveActiveRunCheckpoint({ syncCloud }),
+    mockAuthProfile: (prof) => app.applyPlayerProfileAuth(prof || { nickName: '测试星夜主厨', authorized: true }),
+    forceCloudSync: () => bootCloudSync(),
+    flushCloud: () => flushCloudPush(),
     togglePhysicsDebug: (val) => app.toggleDebugPhysics(val),
     startMode: (mode, opts = {}) => app.startNewRun(mode, { skipGuide: true, ...opts }),
     returnToLobby: () => app.returnToLobby(),
@@ -5081,6 +5601,10 @@ function createApp() {
 
   preloadAssets().then(() => {
     app.syncAudioMood();
+    if (saveData.playerProfile && saveData.playerProfile.avatarUrl) {
+      app.ensureRemoteAvatar(saveData.playerProfile.avatarUrl);
+    }
+    bootCloudSync();
     raf(mainLoop);
   });
 

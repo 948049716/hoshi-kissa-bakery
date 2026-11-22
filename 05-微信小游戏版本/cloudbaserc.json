@@ -1,0 +1,12 @@
+{
+  "envId": "dev-d0ggz3zx89d349af3",
+  "functionRoot": "./cloudfunctions",
+  "functions": [
+    {
+      "name": "kissa_sync",
+      "timeout": 10,
+      "runtime": "Nodejs16.13",
+      "installDependency": true
+    }
+  ]
+}

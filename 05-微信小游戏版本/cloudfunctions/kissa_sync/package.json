@@ -1,0 +1,9 @@
+{
+  "name": "kissa_sync",
+  "version": "1.0.0",
+  "description": "Hoshi Kissa WeChat Mini Game Cloud Save, Profile & Leaderboard Function",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}

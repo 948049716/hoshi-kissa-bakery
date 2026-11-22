@@ -153,6 +153,22 @@ function setStorageJSON(key, value) {
   } catch (_) {}
 }
 
+function removeStorage(key) {
+  try {
+    if (hasWx) {
+      if (typeof wx.removeStorageSync === 'function') {
+        wx.removeStorageSync(key);
+      } else {
+        wx.setStorageSync(key, '');
+      }
+      return;
+    }
+    if (g.localStorage) {
+      g.localStorage.removeItem(key);
+    }
+  } catch (_) {}
+}
+
 function createAudioContext() {
   if (hasWx) {
     try {
@@ -327,6 +343,289 @@ function triggerShare(payload) {
   return false;
 }
 
+// ============================================================================
+// WeChat Cloud Development (`wx.cloud`) & Native UserInfo Authorization Layer
+// ============================================================================
+let cloudInitialized = false;
+let cloudReady = false;
+let activeUserInfoBtn = null;
+let activeUserInfoRectKey = '';
+
+const DEFAULT_NPC_RIVALS = [
+  { nickName: '月光甜点师·小葵', avatarPreset: 'luna', bestChef: 24800, bestRush: 7680, bestZen: 14200, bestShiftReached: 6 },
+  { nickName: '焦糖布丁喵', avatarPreset: 'mikan', bestChef: 18600, bestRush: 6150, bestZen: 10800, bestShiftReached: 5 },
+  { nickName: '柴柴烘焙坊', avatarPreset: 'mugi', bestChef: 14200, bestRush: 5420, bestZen: 8900, bestShiftReached: 5 },
+  { nickName: '星露茶会·奈奈', avatarPreset: 'luna', bestChef: 9600, bestRush: 4280, bestZen: 6500, bestShiftReached: 4 },
+  { nickName: '晚风舒芙蕾', avatarPreset: 'mikan', bestChef: 5200, bestRush: 2860, bestZen: 4200, bestShiftReached: 3 }
+];
+
+function initCloud(envId = '') {
+  if (cloudInitialized) return cloudReady;
+  cloudInitialized = true;
+
+  if (hasWx) {
+    try {
+      if (typeof wx.onNeedPrivacyAuthorization === 'function') {
+        wx.onNeedPrivacyAuthorization((resolve) => {
+          if (typeof resolve === 'function') {
+            resolve({ event: 'exposureAuthorization' });
+          }
+        });
+      }
+    } catch (_) {}
+
+    if (wx.cloud && typeof wx.cloud.init === 'function') {
+      try {
+        const opts = { traceUser: true };
+        if (envId && typeof envId === 'string' && envId.trim()) {
+          opts.env = envId.trim();
+        }
+        wx.cloud.init(opts);
+        cloudReady = true;
+        return true;
+      } catch (_) {
+        cloudReady = false;
+        return false;
+      }
+    }
+    cloudReady = false;
+    return false;
+  }
+
+  cloudReady = true;
+  return true;
+}
+
+function runBrowserMockCloud(data = {}) {
+  const action = data.action || 'pull';
+  const key = '__hoshi_browser_cloud_doc_v1__';
+  let doc = getStorageJSON(key);
+  const openidSuffix = 'CAFE';
+
+  if (action === 'pull') {
+    if (!doc) {
+      doc = {
+        openidSuffix,
+        profile: { nickName: `星夜店长#${openidSuffix}`, avatarUrl: '', avatarPreset: 'mikan', authorized: false, updatedAt: 0 },
+        bestChef: 0,
+        bestRush: 0,
+        bestZen: 0,
+        bestShiftReached: 0,
+        metaSave: null,
+        activeRun: null,
+        revision: 1
+      };
+      setStorageJSON(key, doc);
+    }
+    return Promise.resolve({ ok: true, ...doc });
+  }
+
+  if (action === 'push') {
+    const nextMeta = data.metaSave || (doc && doc.metaSave) || null;
+    const nextProfile = data.profile || (doc && doc.profile) || {
+      nickName: `星夜店长#${openidSuffix}`,
+      avatarUrl: '',
+      avatarPreset: 'mikan',
+      authorized: false,
+      updatedAt: Date.now()
+    };
+    const nextActiveRun = data.clearActiveRun
+      ? null
+      : data.activeRun !== undefined
+      ? data.activeRun
+      : doc
+      ? doc.activeRun
+      : null;
+    doc = {
+      openidSuffix,
+      profile: nextProfile,
+      bestChef: Math.max((doc && doc.bestChef) || 0, (nextMeta && nextMeta.bestChef) || 0),
+      bestRush: Math.max((doc && doc.bestRush) || 0, (nextMeta && nextMeta.bestRush) || 0),
+      bestZen: Math.max((doc && doc.bestZen) || 0, (nextMeta && nextMeta.bestZen) || 0),
+      bestShiftReached: Math.max(
+        (doc && doc.bestShiftReached) || 0,
+        (nextMeta && nextMeta.lifetimeStats && nextMeta.lifetimeStats.bestShiftReached) || 0
+      ),
+      metaSave: nextMeta,
+      activeRun: nextActiveRun,
+      revision: ((doc && doc.revision) || 0) + 1
+    };
+    setStorageJSON(key, doc);
+    return Promise.resolve({ ok: true, ...doc });
+  }
+
+  if (action === 'updateProfile') {
+    doc = doc || { openidSuffix, bestChef: 0, bestRush: 0, bestZen: 0, bestShiftReached: 0, revision: 1 };
+    doc.profile = { ...(doc.profile || {}), ...(data.profile || {}), updatedAt: Date.now() };
+    setStorageJSON(key, doc);
+    return Promise.resolve({ ok: true, openidSuffix, profile: doc.profile });
+  }
+
+  if (action === 'leaderboard') {
+    const mode = data.mode === 'rush' ? 'rush' : data.mode === 'zen' ? 'zen' : 'chef';
+    const field = mode === 'rush' ? 'bestRush' : mode === 'zen' ? 'bestZen' : 'bestChef';
+    const rows = DEFAULT_NPC_RIVALS.map((r, i) => ({
+      id: `npc_${i}`,
+      isMe: false,
+      nickName: r.nickName,
+      avatarUrl: '',
+      avatarPreset: r.avatarPreset,
+      score: r[field] || 0,
+      bestShiftReached: r.bestShiftReached
+    }));
+    const myScore = doc ? doc[field] || 0 : 0;
+    if (myScore > 0) {
+      rows.push({
+        id: 'me',
+        isMe: true,
+        nickName: (doc && doc.profile && doc.profile.nickName) || `星夜店长#${openidSuffix}`,
+        avatarUrl: (doc && doc.profile && doc.profile.avatarUrl) || '',
+        avatarPreset: (doc && doc.profile && doc.profile.avatarPreset) || 'mikan',
+        score: myScore,
+        bestShiftReached: (doc && doc.bestShiftReached) || 1
+      });
+    }
+    rows.sort((a, b) => b.score - a.score);
+    const list = rows.map((r, idx) => ({ ...r, rank: idx + 1 }));
+    const meRow = list.find((r) => r.isMe);
+    return Promise.resolve({
+      ok: true,
+      mode,
+      list,
+      myRank: meRow ? meRow.rank : null,
+      myScore
+    });
+  }
+
+  return Promise.resolve({ ok: false, reason: 'unknown_action' });
+}
+
+function callCloudFunction(name, data = {}) {
+  if (!cloudInitialized) initCloud('');
+  if (!cloudReady) {
+    return Promise.resolve({ ok: false, reason: 'cloud_unavailable', fallbackRows: DEFAULT_NPC_RIVALS });
+  }
+
+  if (hasWx) {
+    if (!wx.cloud || typeof wx.cloud.callFunction !== 'function') {
+      return Promise.resolve({ ok: false, reason: 'cloud_unavailable', fallbackRows: DEFAULT_NPC_RIVALS });
+    }
+    return new Promise((resolve) => {
+      try {
+        const maybePromise = wx.cloud.callFunction({
+          name,
+          data,
+          success: (res) => {
+            resolve((res && res.result) || { ok: false, reason: 'empty_result' });
+          },
+          fail: (err) => {
+            resolve({
+              ok: false,
+              reason: 'call_failed',
+              errMsg: (err && err.errMsg) || String(err || ''),
+              fallbackRows: DEFAULT_NPC_RIVALS
+            });
+          }
+        });
+        if (maybePromise && typeof maybePromise.then === 'function') {
+          maybePromise.catch(() => {});
+        }
+      } catch (err) {
+        resolve({ ok: false, reason: 'call_exception', errMsg: String(err || ''), fallbackRows: DEFAULT_NPC_RIVALS });
+      }
+    });
+  }
+
+  return runBrowserMockCloud(data);
+}
+
+function setWxFriendCloudScore(bestChef = 0, bestRush = 0, bestZen = 0) {
+  if (!hasWx || typeof wx.setUserCloudStorage !== 'function') return;
+  try {
+    wx.setUserCloudStorage({
+      KVDataList: [
+        { key: 'bestChef', value: String(Math.floor(bestChef || 0)) },
+        { key: 'bestRush', value: String(Math.floor(bestRush || 0)) },
+        { key: 'bestZen', value: String(Math.floor(bestZen || 0)) }
+      ]
+    });
+  } catch (_) {}
+}
+
+function destroyUserInfoButton() {
+  if (activeUserInfoBtn) {
+    try {
+      activeUserInfoBtn.destroy();
+    } catch (_) {}
+    activeUserInfoBtn = null;
+    activeUserInfoRectKey = '';
+  }
+}
+
+function syncUserInfoButton(rectOrNull, onAuthResult) {
+  if (!rectOrNull || !hasWx || typeof wx.createUserInfoButton !== 'function') {
+    destroyUserInfoButton();
+    return false;
+  }
+
+  const left = Math.round(rectOrNull.x);
+  const top = Math.round(rectOrNull.y);
+  const width = Math.max(24, Math.round(rectOrNull.w));
+  const height = Math.max(20, Math.round(rectOrNull.h));
+  const key = `${left},${top},${width},${height}`;
+
+  if (activeUserInfoBtn && activeUserInfoRectKey === key) {
+    return true;
+  }
+
+  destroyUserInfoButton();
+  try {
+    const btn = wx.createUserInfoButton({
+      type: 'text',
+      text: '',
+      style: {
+        left,
+        top,
+        width,
+        height,
+        lineHeight: height,
+        backgroundColor: 'rgba(0, 0, 0, 0)',
+        borderColor: 'rgba(0, 0, 0, 0)',
+        borderWidth: 0,
+        borderRadius: 12,
+        color: 'rgba(0, 0, 0, 0)',
+        textAlign: 'center',
+        fontSize: 12
+      }
+    });
+    if (btn && typeof btn.onTap === 'function') {
+      btn.onTap((res) => {
+        if (res && res.userInfo && res.userInfo.nickName) {
+          if (onAuthResult) {
+            onAuthResult({
+              ok: true,
+              nickName: res.userInfo.nickName,
+              avatarUrl: res.userInfo.avatarUrl || ''
+            });
+          }
+        } else if (onAuthResult) {
+          onAuthResult({ ok: false, cancelled: true });
+        }
+      });
+    }
+    activeUserInfoBtn = btn;
+    activeUserInfoRectKey = key;
+    return true;
+  } catch (_) {
+    destroyUserInfoButton();
+    return false;
+  }
+}
+
+function getDefaultNpcRivals() {
+  return DEFAULT_NPC_RIVALS.map((r) => ({ ...r }));
+}
+
 function getGlobal() {
   return g;
 }
@@ -339,6 +638,7 @@ module.exports = {
   loadImage,
   getStorageJSON,
   setStorageJSON,
+  removeStorage,
   createAudioContext,
   bindLifecycle,
   bindPointerEvents,
@@ -346,5 +646,11 @@ module.exports = {
   vibrateShort,
   setupShare,
   triggerShare,
+  initCloud,
+  callCloudFunction,
+  setWxFriendCloudScore,
+  syncUserInfoButton,
+  destroyUserInfoButton,
+  getDefaultNpcRivals,
   getGlobal
 };

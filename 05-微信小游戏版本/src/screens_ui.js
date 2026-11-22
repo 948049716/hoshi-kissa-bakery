@@ -277,17 +277,35 @@ function renderLobbyScreen(ctx, metrics, app, hits, nowSec) {
   });
   hits.add('lobby_bank', padX, topY, bankW, btnS, () => app.openShop('upgrades'));
 
-  if (isWide) {
-    const rankLabel = `星夜吃茶 · ${getChefRank(app.getCareerTopScore())}`;
-    const rankX = padX + bankW + 8;
-    const rankMaxW = rx - 10 - rankX;
-    if (rankMaxW >= 150) {
-      UI.drawPillButton(ctx, rankX, topY, Math.min(220, rankMaxW), btnS, {
-        style: 'dark',
-        text: rankLabel,
-        fontSize: 12
-      });
+  // Cloud Sync & Chef Profile Pill (clear of both Bank Chip and Right Utility / Capsule Buttons)
+  const cloudX = padX + bankW + 6;
+  const availCloudW = rx - 6 - cloudX;
+  if (availCloudW >= 66) {
+    const cs = app.cloudState || { status: 'idle', syncing: false };
+    const isAuth = !!(saveData.playerProfile && saveData.playerProfile.authorized);
+    let shortCloudTxt = '💾本地档';
+    let fullCloudTxt = `💾 本地存档 · ${app.getPlayerDisplayName()}`;
+    let pillStyle = 'dark';
+    if (cs.syncing) {
+      shortCloudTxt = '☁️同步中';
+      fullCloudTxt = '☁️ 微信云同步中…';
+    } else if (cs.status === 'synced') {
+      shortCloudTxt = isAuth ? '🪪已授权' : '☁️已云存';
+      fullCloudTxt = `☁️ 已云同步 · ${app.getPlayerDisplayName()}`;
+      pillStyle = isAuth ? 'equipped' : 'dark';
+    } else if (isAuth) {
+      shortCloudTxt = '🪪店长卡';
+      fullCloudTxt = `🪪 ${app.getPlayerDisplayName()}`;
     }
+    const useWideLabel = availCloudW >= 165;
+    const pillW = useWideLabel ? Math.min(236, availCloudW) : Math.min(82, availCloudW);
+    UI.drawPillButton(ctx, cloudX, topY, pillW, btnS, {
+      style: pillStyle,
+      text: useWideLabel ? fullCloudTxt : shortCloudTxt,
+      fontSize: useWideLabel ? 11.5 : 10.2,
+      radius: Math.round(btnS * 0.5)
+    });
+    hits.add('lobby_cloud_status', cloudX, topY, pillW, btnS, () => app.openCareer('stats'));
   }
 
   const contentTop = topY + headerH + 6;
@@ -312,7 +330,7 @@ function renderMobileLobbyLayout(ctx, width, height, padX, contentTop, footerPad
   const dockItems = [
     { id: 'btn_shop', icon: 'icon_shop', text: '吃茶小铺', dot: hasAffordable, fn: () => app.openShop('upgrades') },
     { id: 'btn_comp', icon: 'icon_book', text: '甜品图鉴', dot: false, fn: () => app.openModal('compendium') },
-    { id: 'btn_career', icon: 'icon_trophy', text: '营业履历', dot: false, fn: () => app.openModal('career') }
+    { id: 'btn_career', icon: 'icon_trophy', text: '营业履历', dot: false, fn: () => app.openCareer('stats') }
   ];
   for (let i = 0; i < dockItems.length; i++) {
     const d = dockItems[i];
@@ -531,7 +549,7 @@ function renderWideLobbyLayout(ctx, width, height, padX, contentTop, footerPadB,
   const dockItems = [
     { id: 'btn_shop', icon: 'icon_shop', text: '吃茶小铺', dot: hasAffordable, fn: () => app.openShop('upgrades') },
     { id: 'btn_comp', icon: 'icon_book', text: '甜品图鉴', dot: false, fn: () => app.openModal('compendium') },
-    { id: 'btn_career', icon: 'icon_trophy', text: '营业履历', dot: false, fn: () => app.openModal('career') }
+    { id: 'btn_career', icon: 'icon_trophy', text: '营业履历', dot: false, fn: () => app.openCareer('stats') }
   ];
   for (let i = 0; i < dockItems.length; i++) {
     const d = dockItems[i];
@@ -609,22 +627,65 @@ function renderUnifiedModeCard(ctx, x, y, w, h, app, hits, isWide, compact) {
   const innerX = ix + inPad;
   const innerW = iw - inPad * 2;
 
-  // Primary Start CTA anchored at bottom of card
+  // Primary Start CTA anchored at bottom of card (with Mid-Run Breakpoint Resume Split Row!)
   const ctaH = compact ? 42 : isWide ? 48 : 45;
   const ctaY = iy + ih - inPad - ctaH;
   const selModeDef = LOBBY_MODES.find((m) => m.id === gameState.mode) || LOBBY_MODES[0];
 
-  UI.drawPillButton(ctx, innerX, ctaY, innerW, ctaH, {
-    style: 'cta',
-    icon: selModeDef.icon,
-    sprites,
-    iconSize: ctaH - 14,
-    text: `开门营业 · ${selModeDef.shortTitle}`,
-    fontSize: isWide ? 16.5 : 15.5,
-    fontWeight: 900,
-    radius: 13
-  });
-  hits.add('btn_start', innerX, ctaY, innerW, ctaH, () => app.startNewRun());
+  if (app.hasResumableRun && app.hasResumableRun(gameState.mode) && app.savedRun) {
+    const sr = app.savedRun;
+    let resumeLabel = `继续第${sr.shift || 1}幕营业`;
+    if (sr.mode === 'chef') {
+      if (sr.resumeModal === 'prep_shop' && sr.prepShop) {
+        resumeLabel = `继续第${sr.prepShop.nextShiftNum || sr.shift + 1}幕整备`;
+      } else if (sr.resumeModal === 'shift_victory') {
+        resumeLabel = '继续第5幕凯旋';
+      } else {
+        resumeLabel = `继续第${sr.shift || 1}幕 · ¥${sr.shiftRevenue || 0}`;
+      }
+    } else if (sr.mode === 'rush') {
+      resumeLabel = `继续狂欢 · ${Math.ceil(sr.rushTimer || 30)}s`;
+    } else {
+      resumeLabel = `继续本局 · ${sr.score || 0}分`;
+    }
+
+    const gap = 8;
+    const newW = Math.round(Math.max(88, innerW * 0.34));
+    const resW = innerW - newW - gap;
+
+    UI.drawPillButton(ctx, innerX, ctaY, resW, ctaH, {
+      style: 'cta',
+      icon: selModeDef.icon,
+      sprites,
+      iconSize: ctaH - 16,
+      text: resumeLabel,
+      fontSize: isWide ? 14.5 : 13.0,
+      fontWeight: 900,
+      radius: 13
+    });
+    hits.add('btn_resume_run', innerX, ctaY, resW, ctaH, () => app.resumeSavedRun());
+
+    UI.drawPillButton(ctx, innerX + resW + gap, ctaY, newW, ctaH, {
+      style: 'wood',
+      text: '新开一局',
+      fontSize: isWide ? 13.2 : 12.0,
+      fontWeight: 900,
+      radius: 13
+    });
+    hits.add('btn_start', innerX + resW + gap, ctaY, newW, ctaH, () => app.startNewRun());
+  } else {
+    UI.drawPillButton(ctx, innerX, ctaY, innerW, ctaH, {
+      style: 'cta',
+      icon: selModeDef.icon,
+      sprites,
+      iconSize: ctaH - 14,
+      text: `开门营业 · ${selModeDef.shortTitle}`,
+      fontSize: isWide ? 16.5 : 15.5,
+      fontWeight: 900,
+      radius: 13
+    });
+    hits.add('btn_start', innerX, ctaY, innerW, ctaH, () => app.startNewRun());
+  }
 
   // Selected Mode Summary & Guide Strip right above CTA
   const infoH = compact ? 44 : 50;
@@ -2275,9 +2336,9 @@ function renderToast(ctx, width, headerBottom, app) {
       !gs.over;
     baseY = hasBlessBtn ? toolsDockY - 66 : toolsDockY - 33;
   } else if (app.activeModal) {
-    // Anchor modal toasts above bottom modal footer so modal headers/titles/reroll buttons stay 100% clear!
+    // Anchor modal toasts above bottom modal footer so modal headers/titles/pinned rank bars stay 100% clear!
     const botBound = metrics.height - Math.max(12, (metrics.safeBottom || 0) + 10);
-    baseY = botBound - 96;
+    baseY = botBound - 114;
   }
 
   const primary = cur || minor || { text: app.toastText, timer: app.toastTimer, level: 'minor' };

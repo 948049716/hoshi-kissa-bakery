@@ -1,0 +1,89 @@
+name: Deploy WeChat MiniGame & CloudBase
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '小游戏版本号 (例如 4.0.1，留空自动按构建号递增)'
+        required: false
+        default: ''
+      desc:
+        description: '版本备注'
+        required: false
+        default: '云开发与小游戏自动部署'
+  push:
+    branches:
+      - main
+    paths:
+      - '05-微信小游戏版本/**'
+      - 'scripts/ci_upload_minigame.mjs'
+      - '.github/workflows/deploy-wechat-minigame.yml'
+
+jobs:
+  deploy-cloudfunction:
+    name: 部署微信云函数 (kissa_sync)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Syntax check Cloud Function & Client JS
+        run: |
+          for f in 05-微信小游戏版本/game.js 05-微信小游戏版本/src/*.js 05-微信小游戏版本/cloudfunctions/kissa_sync/index.js; do
+            node --check "$f"
+          done
+
+      - name: Deploy kissa_sync to CloudBase (dev-d0ggz3zx89d349af3)
+        env:
+          TCB_SECRET_ID: ${{ secrets.TCB_SECRET_ID }}
+          TCB_SECRET_KEY: ${{ secrets.TCB_SECRET_KEY }}
+          TCB_ENV_ID: dev-d0ggz3zx89d349af3
+        run: |
+          if [ -z "$TCB_SECRET_ID" ] || [ -z "$TCB_SECRET_KEY" ]; then
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              echo "::error::请在 GitHub 仓库 Settings -> Secrets -> Actions 中配置 TCB_SECRET_ID 和 TCB_SECRET_KEY！"
+              exit 1
+            else
+              echo "::notice::未配置 TCB_SECRET_ID / TCB_SECRET_KEY，跳过云函数自动部署。"
+              exit 0
+            fi
+          fi
+          npm install -g @cloudbase/cli
+          tcb login --apiKeyId "$TCB_SECRET_ID" --apiKey "$TCB_SECRET_KEY"
+          tcb fn deploy kissa_sync --dir 05-微信小游戏版本/cloudfunctions/kissa_sync -e "$TCB_ENV_ID" --force
+
+  upload-minigame:
+    name: 上传微信小游戏体验版 (miniprogram-ci)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Upload Mini Game via miniprogram-ci
+        env:
+          WX_APPID: wx923bf8440b65a1af
+          WX_PRIVATE_KEY: ${{ secrets.WX_PRIVATE_KEY }}
+          WX_VERSION: ${{ inputs.version != '' && inputs.version || format('4.0.{0}', github.run_number) }}
+          WX_DESC: ${{ inputs.desc != '' && inputs.desc || github.event.head_commit.message }}
+        run: |
+          if [ -z "$WX_PRIVATE_KEY" ]; then
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              echo "::error::请在 GitHub 仓库 Settings -> Secrets -> Actions 中配置 WX_PRIVATE_KEY！"
+              exit 1
+            else
+              echo "::notice::未配置 WX_PRIVATE_KEY，跳过小游戏自动上传。"
+              exit 0
+            fi
+          fi
+          npm install --no-save miniprogram-ci
+          node scripts/ci_upload_minigame.mjs

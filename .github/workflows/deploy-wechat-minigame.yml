@@ -55,7 +55,24 @@ jobs:
           fi
           npm install -g @cloudbase/cli
           tcb login --apiKeyId "$TCB_SECRET_ID" --apiKey "$TCB_SECRET_KEY"
-          tcb fn deploy kissa_sync --dir 05-微信小游戏版本/cloudfunctions/kissa_sync -e "$TCB_ENV_ID" --force
+
+          FOUND_REGION=""
+          for r in ap-shanghai ap-guangzhou ap-beijing ap-chengdu; do
+            echo "Checking CloudBase region: $r ..."
+            OUT=$(tcb env list -r "$r" 2>&1 || true)
+            if echo "$OUT" | grep -q "$TCB_ENV_ID"; then
+              FOUND_REGION="$r"
+              echo "Found $TCB_ENV_ID in region: $FOUND_REGION"
+              break
+            fi
+          done
+
+          if [ -z "$FOUND_REGION" ]; then
+            echo "::error::在当前 SecretId 对应的腾讯云账号下未找到环境 $TCB_ENV_ID（已检查上海/广州/北京/成都）。请确认：1) 申请 API 密钥时使用的是【开通云开发的同一个微信号】扫码登录腾讯云；2) 若使用子账号，已授予 QcloudTCBFullAccess 权限。"
+            exit 1
+          fi
+
+          tcb fn deploy kissa_sync --dir 05-微信小游戏版本/cloudfunctions/kissa_sync -e "$TCB_ENV_ID" -r "$FOUND_REGION" --force
 
   upload-minigame:
     name: 上传微信小游戏体验版 (miniprogram-ci)
@@ -77,13 +94,8 @@ jobs:
           WX_DESC: ${{ inputs.desc != '' && inputs.desc || github.event.head_commit.message }}
         run: |
           if [ -z "$WX_PRIVATE_KEY" ]; then
-            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-              echo "::error::请在 GitHub 仓库 Settings -> Secrets -> Actions 中配置 WX_PRIVATE_KEY！"
-              exit 1
-            else
-              echo "::notice::未配置 WX_PRIVATE_KEY，跳过小游戏自动上传。"
-              exit 0
-            fi
+            echo "::notice::未配置 WX_PRIVATE_KEY，本次跳过小游戏客户端上传（如需自动上传体验版，请添加 WX_PRIVATE_KEY Secret）。"
+            exit 0
           fi
           npm install --no-save miniprogram-ci
           node scripts/ci_upload_minigame.mjs

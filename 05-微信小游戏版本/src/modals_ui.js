@@ -148,6 +148,8 @@ function renderActiveModal(ctx, metrics, app, hits, nowSec = Date.now() / 1000) 
   }
 
   if (modal === 'mode_guide') renderModeGuideModal(ctx, metrics, app, hits, nowSec);
+  else if (modal === 'pause') renderPauseModal(ctx, metrics, app, hits);
+  else if (modal === 'confirm') renderConfirmModal(ctx, metrics, app, hits);
   else if (modal === 'shop') renderShopModal(ctx, metrics, app, hits);
   else if (modal === 'career') renderCareerModal(ctx, metrics, app, hits);
   else if (modal === 'help') renderHelpModal(ctx, metrics, app, hits);
@@ -157,6 +159,166 @@ function renderActiveModal(ctx, metrics, app, hits, nowSec = Date.now() / 1000) 
   else if (modal === 'shift_victory') renderShiftVictoryModal(ctx, metrics, app, hits);
   else if (modal === 'relics') renderRelicsModal(ctx, metrics, app, hits);
   else if (modal === 'gameover') renderGameOverModal(ctx, metrics, app, hits);
+}
+
+function renderPauseModal(ctx, metrics, app, hits) {
+  const f = renderModalBackdropAndFrame(ctx, metrics, app, 400, Math.min(368, metrics.height * 0.78), hits);
+  const { gameState, sprites, audio } = app;
+  app.modalScrollRect = null;
+  app.modalMaxScroll = 0;
+
+  drawModalHeader(ctx, f, sprites, 'icon_pause', '营业小憩 · 已暂停', null, 38);
+  drawCloseButton(ctx, f, hits, app);
+
+  const infoY = f.iy + 36;
+  UI.drawKissaCard(ctx, f.ix, infoY, f.iw, 42, { tone: 'amber', radius: 10 });
+  const statusLine =
+    gameState.mode === 'chef'
+      ? `第 ${gameState.shift} 幕 · 营业额 ¥${gameState.shiftRevenue}/¥${gameState.shiftTarget} · 剩 ${gameState.stepsLeft} 步`
+      : gameState.mode === 'rush'
+      ? `90秒狂欢 · 剩余 ${Math.max(0, gameState.rushTimer).toFixed(1)}s · 得分 ${gameState.score}`
+      : `悠闲经典 · 当前得分 ${gameState.score}`;
+  UI.drawFitText(ctx, statusLine, f.ix + f.iw * 0.5, infoY + 21, f.iw - 16, 11.2, 8.8, 800, '#5c3310', 'center');
+
+  const resumeY = infoY + 52;
+  UI.drawPillButton(ctx, f.ix, resumeY, f.iw, 42, {
+    style: 'cta',
+    icon: gameState.mode === 'rush' ? 'mode_rush' : gameState.mode === 'zen' ? 'mode_zen' : 'mode_chef',
+    sprites,
+    iconSize: 20,
+    text: '继续营业',
+    fontSize: 14.5,
+    fontWeight: 900,
+    radius: 12
+  });
+  hits.add('pause_resume', f.ix, resumeY, f.iw, 42, () => app.closeModal());
+
+  const gap = 8;
+  const colW = (f.iw - gap) * 0.5;
+  const r1Y = resumeY + 52;
+  const rowH = 36;
+
+  UI.drawPillButton(ctx, f.ix, r1Y, colW, rowH, {
+    style: audio.bgmEnabled ? 'active' : 'wood',
+    icon: 'icon_bgm',
+    sprites,
+    iconSize: 17,
+    mutedSlash: !audio.bgmEnabled,
+    text: audio.bgmEnabled ? '音乐：开' : '音乐：关',
+    fontSize: 11.5,
+    radius: 10
+  });
+  hits.add('pause_bgm', f.ix, r1Y, colW, rowH, () => app.cycleBgm());
+
+  UI.drawPillButton(ctx, f.ix + colW + gap, r1Y, colW, rowH, {
+    style: audio.sfxEnabled ? 'active' : 'wood',
+    icon: 'icon_sfx',
+    sprites,
+    iconSize: 17,
+    mutedSlash: !audio.sfxEnabled,
+    text: audio.sfxEnabled ? '音效：开' : '音效：关',
+    fontSize: 11.5,
+    radius: 10
+  });
+  hits.add('pause_sfx', f.ix + colW + gap, r1Y, colW, rowH, () => app.toggleSfx());
+
+  const r2Y = r1Y + rowH + 8;
+  UI.drawPillButton(ctx, f.ix, r2Y, colW, rowH, {
+    style: 'wood',
+    icon: 'icon_help',
+    sprites,
+    iconSize: 17,
+    text: '模式指引',
+    fontSize: 11.5,
+    radius: 10
+  });
+  hits.add('pause_guide', f.ix, r2Y, colW, rowH, () => app.openModeGuide(gameState.mode, 0));
+
+  UI.drawPillButton(ctx, f.ix + colW + gap, r2Y, colW, rowH, {
+    style: 'wood',
+    icon: 'icon_book',
+    sprites,
+    iconSize: 17,
+    text: '甜品图鉴',
+    fontSize: 11.5,
+    radius: 10
+  });
+  hits.add('pause_comp', f.ix + colW + gap, r2Y, colW, rowH, () => app.openModal('compendium'));
+
+  const r3Y = r2Y + rowH + 10;
+  UI.drawPillButton(ctx, f.ix, r3Y, colW, rowH, {
+    style: 'wood',
+    icon: 'icon_restart',
+    sprites,
+    iconSize: 17,
+    text: '重新开局',
+    fontSize: 11.5,
+    radius: 10
+  });
+  hits.add('pause_restart', f.ix, r3Y, colW, rowH, () => app.requestRestartRun('pause'));
+
+  UI.drawPillButton(ctx, f.ix + colW + gap, r3Y, colW, rowH, {
+    style: 'wood',
+    icon: 'icon_home',
+    sprites,
+    iconSize: 17,
+    text: '存盘回厅',
+    fontSize: 11.5,
+    radius: 10
+  });
+  hits.add('pause_lobby', f.ix + colW + gap, r3Y, colW, rowH, () => app.returnToLobby());
+}
+
+function renderConfirmModal(ctx, metrics, app, hits) {
+  const f = renderModalBackdropAndFrame(ctx, metrics, app, 376, 214, hits);
+  const { sprites } = app;
+  const dlg = app.confirmDialog || {
+    title: '确认操作',
+    message: '确定继续吗？',
+    confirmText: '确认',
+    cancelText: '取消'
+  };
+  app.modalScrollRect = null;
+  app.modalMaxScroll = 0;
+
+  drawModalHeader(ctx, f, sprites, 'icon_warn', dlg.title || '确认操作', null, 12);
+
+  const msgY = f.iy + 38;
+  const msgH = f.ih - 86;
+  UI.drawKissaCard(ctx, f.ix, msgY, f.iw, msgH, { tone: 'soft', radius: 10 });
+  UI.drawWrappedText(
+    ctx,
+    dlg.message || '',
+    f.ix + 12,
+    msgY + 14,
+    f.iw - 24,
+    16,
+    UI.fontStr(11.5, 700),
+    '#4A2C2A',
+    'left',
+    3
+  );
+
+  const btnY = f.iy + f.ih - 38;
+  const gap = 10;
+  const btnW = (f.iw - gap) * 0.5;
+  UI.drawPillButton(ctx, f.ix, btnY, btnW, 38, {
+    style: 'wood',
+    text: dlg.cancelText || '取消',
+    fontSize: 12.5,
+    fontWeight: 800,
+    radius: 11
+  });
+  hits.add('confirm_cancel', f.ix, btnY, btnW, 38, () => app.confirmCancel());
+
+  UI.drawPillButton(ctx, f.ix + btnW + gap, btnY, btnW, 38, {
+    style: 'danger',
+    text: dlg.confirmText || '确认',
+    fontSize: 12.5,
+    fontWeight: 900,
+    radius: 11
+  });
+  hits.add('confirm_accept', f.ix + btnW + gap, btnY, btnW, 38, () => app.confirmAccept());
 }
 
 function collectGuideSpotlights(focus, gt, width, height) {
@@ -771,6 +933,10 @@ function renderCareerModal(ctx, metrics, app, hits) {
     syncIcon = 'icon_cloud';
     syncLine = '云端同步中…';
     syncColor = '#8a5222';
+  } else if (cs.status === 'retry_pending') {
+    syncIcon = 'icon_cloud';
+    syncLine = '网络波动 · 待自动重连同步…';
+    syncColor = '#a35610';
   } else if (cs.status === 'synced') {
     syncIcon = 'icon_cloud';
     syncLine = isAuth ? '云端已同步 · 已展示全服榜' : '云端已备份';
@@ -868,8 +1034,8 @@ function renderCareerModal(ctx, metrics, app, hits) {
     const noteTxt = lb.loading
       ? '同步全服成绩中…'
       : lb.isLocalFallback
-      ? '店内标杆榜'
-      : '全服实时榜 · 前 50 名';
+      ? '店内标杆陪练榜'
+      : '全服实时榜 · 前 50 名（含店内陪练标杆）';
     UI.drawUiIcon(ctx, sprites, noteIcon, f.ix + 8, noteY + 6, 13);
     UI.drawFitText(ctx, noteTxt, f.ix + 18, noteY + 6.5, f.iw - 20, 9.5, 8.0, 700, '#7c5540');
 
@@ -907,15 +1073,21 @@ function renderCareerModal(ctx, metrics, app, hits) {
       const scoreStr = lbMode === 'chef' ? `¥${r.score || 0}` : `${r.score || 0}`;
       const scoreW = 74;
       const nameX = f.ix + 68;
-      const nameMaxW = Math.max(68, f.iw - 6 - scoreW - 76);
+      const npcBadgeW = r.isNpc ? 34 : 0;
+      const nameMaxW = Math.max(54, f.iw - 6 - scoreW - 76 - (npcBadgeW ? npcBadgeW + 6 : 0));
       const titleTag = r.isMe ? `${r.nickName} (我)` : r.nickName;
       UI.drawFitText(ctx, titleTag, nameX, ry + 14, nameMaxW, 11.5, 9.2, 900, '#4A2C2A');
+      if (r.isNpc) {
+        ctx.font = UI.fontStr(11.5, 900);
+        const drawnW = Math.min(nameMaxW, ctx.measureText(titleTag).width);
+        UI.drawTagBadge(ctx, nameX + drawnW + 5, ry + 6, npcBadgeW, 15, '陪练', 'soft', 8.0);
+      }
 
       const subDesc =
         lbMode === 'chef'
           ? `第${r.bestShiftReached || 1}幕 · ${getChefRank(r.score || 0)}`
           : getChefRank(r.score || 0);
-      UI.drawFitText(ctx, subDesc, nameX, ry + 29, nameMaxW, 9.2, 7.8, 700, '#7a5240');
+      UI.drawFitText(ctx, subDesc, nameX, ry + 29, nameMaxW + npcBadgeW, 9.2, 7.8, 700, '#7a5240');
 
       UI.drawFitText(ctx, scoreStr, f.ix + f.iw - 16, ry + rowH * 0.5, scoreW, 13, 10, 900, '#9a4316', 'right');
     }
@@ -1029,34 +1201,34 @@ function renderHelpModal(ctx, metrics, app, hits) {
   const cards = [
     {
       icon: 'icon_launcher',
-      title: '定角弹射',
+      title: '定角真弹壁',
       lines: [
-        '• 中央恒速发射，拖动调角预览落点',
-        '• 撞壁反弹合成 ×1.5，上滑罐口取消'
+        '• 中央恒速发射，拖动调角预览落点，上滑取消',
+        '• 首碰侧壁反弹合成享 ×1.5 弹壁奖（轻点发射零误触）'
       ]
     },
     {
       icon: 'serve_bell',
-      title: '上菜雪崩',
+      title: '独立上菜与热冷博弈',
       lines: [
-        '• 点亮铃甜品上菜，引发抽底雪崩连合',
-        '• 点订单桌可单桌换单（每幕首换免费）'
+        '• 点订单【上菜】按钮或长按罐内亮铃甜品出餐',
+        '• 趁热免步，冷单耗1步（引发抽底雪崩立返1步！）'
       ]
     },
     {
       icon: 'icon_alchemy',
-      title: '甜品异能与招牌技',
+      title: '异能、星露与招牌技',
       lines: [
-        '• 2~9 阶甜品自带弹射/清杂/聚拢等异能',
+        '• 局内赚星露补摇罐/升阶勺，打烊结算永久星尘',
         '• 上菜蓄满底部头像释放伙伴专属主动技'
       ]
     },
     {
       icon: 'icon_shop',
-      title: '5幕构筑与共鸣',
+      title: '热炉跨幕与18秘方共鸣',
       lines: [
-        '• 达标可提前打烊赚利息币，进整备间购秘方',
-        '• 同标签 2/3 件秘方激活流派套装共鸣'
+        '• 罐内甜品跨幕保留传承，整备间购秘方与改造',
+        '• 同标签 2/3 件秘方激活 #雪崩/#弹壁/#异能/#贪婪 共鸣'
       ]
     }
   ];
@@ -1359,11 +1531,18 @@ function renderPrepShopModal(ctx, metrics, app, hits) {
   // 3a. Shift Clear Receipt Banner
   if (sum) {
     UI.drawKissaCard(ctx, f.ix, curY, f.iw - 6, receiptH, { tone: 'amber', radius: 10 });
-    const carriedNames =
-      sum.carried && sum.carried.length > 0
-        ? sum.carried.map((c) => `${c.tier}阶${TIERS[c.tier - 1].name}`).join(' + ')
-        : '全新起炉';
-    const synSalaryTxt = sum.synergyBonusCoins > 0 ? ` · #贪婪+${sum.synergyBonusCoins}` : '';
+    let carriedNames = '全新起炉';
+    if (sum.carried && sum.carried.length > 0) {
+      const sortedCarried = [...sum.carried].sort((a, b) => (b.tier || 0) - (a.tier || 0));
+      const topLabels = sortedCarried
+        .slice(0, 3)
+        .map((c) => `${c.tier}阶${TIERS[c.tier - 1].name}`)
+        .join(' + ');
+      carriedNames =
+        sortedCarried.length > 3 ? `${topLabels} 等共${sortedCarried.length}颗热炉留罐` : topLabels;
+    }
+    const greedBonusVal = sum.greedBonus || sum.synergyBonusCoins || 0;
+    const synSalaryTxt = greedBonusVal > 0 ? ` · #贪婪+${greedBonusVal}` : '';
     UI.drawUiIcon(ctx, sprites, 'icon_coin', f.ix + 17, curY + receiptH * 0.5, 20);
     UI.drawFitText(
       ctx,
@@ -1754,10 +1933,10 @@ function renderShiftVictoryModal(ctx, metrics, app, hits) {
   const py = tY2 + tileH + 10;
   UI.drawKissaCard(ctx, f.ix, py, f.iw, 52, { tone: 'amber', radius: 11 });
   UI.drawUiIcon(ctx, sprites, 'icon_stardust', f.ix + 18, py + 17, 18);
-  UI.drawFitText(ctx, '已锁定通关星尘（含 +35 完赛奖）', f.ix + 31, py + 17, f.iw - 41, 11.2, 9, 800, '#6b3b0c');
+  UI.drawFitText(ctx, '已锁定通关星尘（含 +40 完赛奖）', f.ix + 31, py + 17, f.iw - 41, 11.2, 9, 800, '#6b3b0c');
   UI.drawFitText(
     ctx,
-    `当前可得 +${offer.stardustPreview || 135} 星尘（进无尽可继续叠加）`,
+    `当前可得 +${offer.stardustPreview || 140} 星尘（进无尽可继续叠加）`,
     f.ix + 10,
     py + 36,
     f.iw - 20,
@@ -1856,9 +2035,9 @@ function renderRelicsModal(ctx, metrics, app, hits) {
     shiftAffixes.push({
       icon: 'yarn_ball',
       title: '猫猫派对',
-      status: '6/12步事件',
+      status: '6/12步流星',
       tone: 'plum',
-      desc: '含捣蛋毛线球（震碎+¥750 & +10币），6/12步触发事件',
+      desc: '含捣蛋毛线球（震碎+¥750 & +10币），6/12步触发流星镀金夜',
       color: '#9c426d',
       bg: '#fcedf4'
     });
@@ -2104,26 +2283,51 @@ function renderGameOverModal(ctx, metrics, app, hits) {
   hits.add('go_play_again', f.ix, actY, f.iw, 42, () => app.restartRun());
 
   const secY = actY + 48;
-  const secW = (f.iw - 8) / 2;
+  const secGap = 6;
+  const secW = (f.iw - secGap * 2) / 3;
   UI.drawPillButton(ctx, f.ix, secY, secW, 34, {
     style: 'wood',
     icon: 'icon_home',
     sprites,
-    iconSize: 18,
-    text: '回大厅',
-    fontSize: 12.5
+    iconSize: 16,
+    text: '大厅',
+    fontSize: 11.8
   });
   hits.add('go_back_lobby', f.ix, secY, secW, 34, () => app.returnToLobby());
 
-  UI.drawPillButton(ctx, f.ix + secW + 8, secY, secW, 34, {
+  const shopBtnX = f.ix + secW + secGap;
+  const canBuyShop = Boolean(goSettlement && goSettlement.hasAffordable);
+  UI.drawPillButton(ctx, shopBtnX, secY, secW, 34, {
+    style: canBuyShop ? 'active' : 'wood',
+    icon: 'icon_shop',
+    sprites,
+    iconSize: 16,
+    text: '去小铺',
+    fontSize: 11.8
+  });
+  if (canBuyShop) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(shopBtnX + secW - 7, secY + 6, 4.8, 0, Math.PI * 2);
+    ctx.fillStyle = '#e53935';
+    ctx.fill();
+    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = '#fff8ee';
+    ctx.stroke();
+    ctx.restore();
+  }
+  hits.add('go_open_shop', shopBtnX, secY, secW, 34, () => app.openShopFromGameOver());
+
+  const shareBtnX = shopBtnX + secW + secGap;
+  UI.drawPillButton(ctx, shareBtnX, secY, secW, 34, {
     style: 'wood',
     icon: 'icon_gift',
     sprites,
-    iconSize: 18,
-    text: '分享战绩',
-    fontSize: 12.5
+    iconSize: 16,
+    text: '分享',
+    fontSize: 11.8
   });
-  hits.add('go_share', f.ix + secW + 8, secY, secW, 34, () => app.shareResult());
+  hits.add('go_share', shareBtnX, secY, secW, 34, () => app.shareResult());
 }
 
 module.exports = {

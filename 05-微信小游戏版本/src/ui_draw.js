@@ -123,6 +123,27 @@ function drawContainImage(ctx, img, cx, cy, maxW, maxH) {
 function drawUiIcon(ctx, sprites, iconKey, cx, cy, size, alpha = 1, rot = 0) {
   if (!sprites || !iconKey || size <= 0) return false;
 
+  if (iconKey === 'icon_pause') {
+    ctx.save();
+    if (alpha < 1) ctx.globalAlpha *= alpha;
+    ctx.translate(cx, cy);
+    if (rot) ctx.rotate(rot);
+    const bw = Math.max(2.6, size * 0.19);
+    const bh = Math.max(7, size * 0.56);
+    const gap = Math.max(2.2, size * 0.14);
+    ctx.fillStyle = '#fff5cf';
+    ctx.strokeStyle = '#4A2C2A';
+    ctx.lineWidth = Math.max(1.2, size * 0.075);
+    for (const dir of [-1, 1]) {
+      const rx = dir * (gap * 0.5 + bw * 0.5) - bw * 0.5;
+      roundRectPath(ctx, rx, -bh * 0.5, bw, bh, bw * 0.45);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+    return true;
+  }
+
   // Standalone decorative / tool / dessert sprites check
   let standalone = null;
   if (iconKey === 'serve_bell') standalone = sprites.serveBell;

@@ -911,8 +911,12 @@
                 }
                 a.vr += (nx >= 0 ? 1 : -1) * 3.5;
 
-                if (a.lastBumperHitAge === undefined || a.age - a.lastBumperHitAge > 0.1) {
+                if (
+                  (a.bumperRewardCount || 0) < 3 &&
+                  (a.lastBumperHitAge === undefined || a.age - a.lastBumperHitAge > 0.18)
+                ) {
                   a.lastBumperHitAge = a.age;
+                  a.bumperRewardCount = (a.bumperRewardCount || 0) + 1;
                   bumperHits.push({
                     body: a,
                     bumper: ob,
@@ -944,6 +948,7 @@
                 a.vx = side * Math.max(85, Math.abs(a.vx) * 0.42);
                 a.inContact = true;
                 a.hasCollided = true;
+                if (!(a.wallBounces > 0)) a.hitBodyBeforeWall = true;
                 ob.hitFlash = Math.max(ob.hitFlash || 0, 0.25);
                 updateBodyWorld(a);
               }
@@ -954,6 +959,7 @@
             if (collideBodyPair(divBody, a, contacts)) {
               a.inContact = true;
               a.hasCollided = true;
+              if (!(a.wallBounces > 0)) a.hitBodyBeforeWall = true;
               const spd = Math.hypot(a.vx, a.vy);
               if (spd > 135) {
                 ob.hitFlash = Math.max(ob.hitFlash || 0, Math.min(0.32, spd / 1400));
@@ -1069,6 +1075,8 @@
           if (collideBodyPair(a, b, contacts)) {
             a.inContact = true;
             b.inContact = true;
+            if (!(a.wallBounces > 0)) a.hitBodyBeforeWall = true;
+            if (!(b.wallBounces > 0)) b.hitBodyBeforeWall = true;
             if (aLanded || bLanded) {
               a.hasCollided = true;
               b.hasCollided = true;
@@ -1089,7 +1097,7 @@
       preStepContacts(contacts);
       solveVelocityContacts(contacts, VELOCITY_ITERS);
 
-      // 4. Collect strong impact telemetry & side-wall bank-shot bounces (glass jar wall ONLY)
+      // 4. Collect strong impact telemetry & TRUE side-wall bank-shot bounces (must hit glass side wall BEFORE hitting other pastries!)
       for (let i = 0; i < contacts.length; i++) {
         const c = contacts[i];
         if (c.initialVn < -85 && c.jnAcc > 0) {
@@ -1105,9 +1113,11 @@
           if (
             c.a.isJarWall &&
             Math.abs(c.nx) > 0.85 &&
-            Math.abs(c.ny) < 0.25 &&
+            Math.abs(c.ny) < 0.28 &&
+            -c.initialVn > 110 &&
             c.b.isBankLaunched &&
-            c.b.age < 1.9
+            !c.b.hitBodyBeforeWall &&
+            c.b.age < 1.6
           ) {
             if (c.b.lastWallBounceAge === undefined || c.b.age - c.b.lastWallBounceAge > 0.08) {
               c.b.wallBounces = (c.b.wallBounces || 0) + 1;

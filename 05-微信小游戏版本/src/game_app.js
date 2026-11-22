@@ -61,21 +61,31 @@ function createApp() {
     createAudioContext: platform.createAudioContext
   });
 
-  // Load Persistent Save Data & Optional Mid-Run Breakpoint Snapshot (Offline-First + WeChat CloudBase)
+  // Load Persistent Save Data & Per-Mode Mid-Run Breakpoint Snapshots (Offline-First + WeChat CloudBase)
   let saveData = SaveSync.normalizeSaveData(platform.getStorageJSON(STORAGE_KEY));
-  let initialSavedRun = SaveSync.validateActiveRunSnapshot(platform.getStorageJSON(SaveSync.ACTIVE_RUN_STORAGE_KEY));
+  let savedRunsMap = SaveSync.normalizeSavedRunsMap(
+    platform.getStorageJSON(SaveSync.ACTIVE_RUNS_STORAGE_KEY),
+    platform.getStorageJSON(SaveSync.ACTIVE_RUN_STORAGE_KEY)
+  );
 
   const cloudState = {
-    status: 'idle', // 'idle' | 'syncing' | 'synced' | 'local_only'
+    status: 'idle', // 'idle' | 'syncing' | 'synced' | 'retry_pending' | 'local_only'
+    cloudAvailable: false,
     openidSuffix: '',
     revision: 0,
+    retryCount: 0,
+    lastError: '',
+    conflictMerged: false,
+    validationWarnings: [],
     lastSyncAt: 0,
     syncing: false
   };
   let cloudPushTimer = null;
+  let cloudRetryTimer = null;
+  let checkpointTimer = null;
   let cloudDirty = false;
-  let pendingCloudActiveRun = undefined;
-  let pendingClearCloudRun = false;
+  let pendingClearMode = null;
+  let pendingRunReport = null;
 
   function persistSaveData(opts = {}) {
     saveData.updatedAt = Date.now();
@@ -92,27 +102,75 @@ function createApp() {
     }
   }
 
+  function persistSavedRunsLocal() {
+    platform.setStorageJSON(SaveSync.ACTIVE_RUNS_STORAGE_KEY, savedRunsMap);
+    const primary = savedRunsMap[gameState.mode] || savedRunsMap.chef || savedRunsMap.rush || savedRunsMap.zen || null;
+    if (primary) {
+      platform.setStorageJSON(SaveSync.ACTIVE_RUN_STORAGE_KEY, primary);
+    } else {
+      platform.removeStorage(SaveSync.ACTIVE_RUN_STORAGE_KEY);
+    }
+  }
+
   function saveActiveRunCheckpoint(opts = {}) {
     if (!app) return;
+    if (checkpointTimer) {
+      clearTimeout(checkpointTimer);
+      checkpointTimer = null;
+    }
     const snap = SaveSync.serializeActiveRun(gameState, app.activeModal);
     if (!snap) return;
-    app.savedRun = snap;
-    platform.setStorageJSON(SaveSync.ACTIVE_RUN_STORAGE_KEY, snap);
+    savedRunsMap[snap.mode] = snap;
+    if (pendingClearMode === snap.mode) pendingClearMode = null;
+    persistSavedRunsLocal();
     if (opts.syncCloud) {
-      pendingCloudActiveRun = snap;
-      pendingClearCloudRun = false;
       scheduleCloudPush(true);
     }
   }
 
-  function clearActiveRunCheckpoint(syncCloud = false) {
-    if (app) app.savedRun = null;
-    platform.removeStorage(SaveSync.ACTIVE_RUN_STORAGE_KEY);
-    pendingCloudActiveRun = undefined;
-    pendingClearCloudRun = true;
+  function scheduleCheckpointSave(delayMs = 1200) {
+    if (checkpointTimer) clearTimeout(checkpointTimer);
+    checkpointTimer = setTimeout(() => {
+      checkpointTimer = null;
+      if (!app.isLobbyOpen && gameState.running && !gameState.over) {
+        saveActiveRunCheckpoint({ syncCloud: false });
+      }
+    }, delayMs);
+  }
+
+  function clearActiveRunCheckpoint(modeOrSync = false, maybeSyncCloud = false) {
+    if (checkpointTimer) {
+      clearTimeout(checkpointTimer);
+      checkpointTimer = null;
+    }
+    const targetMode =
+      typeof modeOrSync === 'string' && ['chef', 'rush', 'zen'].includes(modeOrSync) ? modeOrSync : gameState.mode;
+    const syncCloud = typeof modeOrSync === 'boolean' ? modeOrSync : !!maybeSyncCloud;
+    if (savedRunsMap[targetMode]) {
+      savedRunsMap[targetMode] = null;
+    }
+    pendingClearMode = targetMode;
+    persistSavedRunsLocal();
     if (syncCloud) {
       scheduleCloudPush(true);
     }
+  }
+
+  function scheduleCloudBackoffRetry() {
+    if (!cloudState.cloudAvailable || cloudState.status === 'local_only') return;
+    if (cloudRetryTimer) {
+      clearTimeout(cloudRetryTimer);
+      cloudRetryTimer = null;
+    }
+    if (cloudState.retryCount >= 4) return;
+    const delayMs = Math.min(24000, 1500 * Math.pow(2, cloudState.retryCount));
+    cloudState.retryCount++;
+    cloudState.status = 'retry_pending';
+    cloudRetryTimer = setTimeout(() => {
+      cloudRetryTimer = null;
+      if (cloudDirty) flushCloudPush();
+      else bootCloudSync();
+    }, delayMs);
   }
 
   async function flushCloudPush() {
@@ -120,50 +178,86 @@ function createApp() {
       clearTimeout(cloudPushTimer);
       cloudPushTimer = null;
     }
-    if (!CloudConfig.ENABLE_CLOUD_SYNC || cloudState.status === 'local_only') {
+    if (!CloudConfig.ENABLE_CLOUD_SYNC || !cloudState.cloudAvailable || cloudState.status === 'local_only') {
       return { ok: false, reason: 'local_only' };
+    }
+    if (cloudRetryTimer) {
+      clearTimeout(cloudRetryTimer);
+      cloudRetryTimer = null;
     }
     cloudDirty = false;
     cloudState.syncing = true;
+    const clearMode = pendingClearMode;
+    const runReport = pendingRunReport;
+    pendingClearMode = null;
+    pendingRunReport = null;
+
+    const primaryRun = savedRunsMap.chef || savedRunsMap.rush || savedRunsMap.zen || null;
     const payload = {
       action: 'push',
+      baseRevision: cloudState.revision || 0,
       metaSave: saveData,
-      profile: saveData.playerProfile
+      profile: saveData.playerProfile,
+      savedRuns: { ...savedRunsMap },
+      activeRun: primaryRun
     };
-    if (pendingClearCloudRun) {
-      payload.clearActiveRun = true;
-      pendingClearCloudRun = false;
-    } else if (pendingCloudActiveRun !== undefined) {
-      payload.activeRun = pendingCloudActiveRun;
-      pendingCloudActiveRun = undefined;
+    if (clearMode) {
+      payload.clearSavedRunMode = clearMode;
+      if (!primaryRun) payload.clearActiveRun = true;
+    }
+    if (runReport) {
+      payload.runReport = runReport;
     }
 
     const res = await platform.callCloudFunction(CloudConfig.CLOUD_FUNCTION_NAME, payload);
     cloudState.syncing = false;
     if (res && res.ok) {
       cloudState.status = 'synced';
+      cloudState.retryCount = 0;
+      cloudState.lastError = '';
+      cloudState.conflictMerged = !!res.conflictMerged;
+      cloudState.validationWarnings = Array.isArray(res.validationWarnings) ? res.validationWarnings : [];
       cloudState.revision = res.revision || cloudState.revision + 1;
       cloudState.lastSyncAt = Date.now();
       if (res.openidSuffix) cloudState.openidSuffix = res.openidSuffix;
       if (res.metaSave) {
         const merged = SaveSync.mergeSaveData(saveData, res.metaSave, res.profile);
+        merged.lastSyncedEarnedStardust = merged.totalEarnedStardust;
         Object.assign(saveData, merged);
         platform.setStorageJSON(STORAGE_KEY, saveData);
       }
+      if (res.savedRuns) {
+        savedRunsMap = SaveSync.mergeSavedRunsMaps(savedRunsMap, res.savedRuns, res.activeRun || null);
+        if (clearMode) savedRunsMap[clearMode] = null;
+        persistSavedRunsLocal();
+      }
       return res;
     }
-    cloudState.status = 'local_only';
+
+    if (res && res.reason === 'cloud_unavailable') {
+      cloudState.cloudAvailable = false;
+      cloudState.status = 'local_only';
+      return res;
+    }
+
+    // Transient failure: retain dirty state & schedule exponential backoff retry!
+    cloudDirty = true;
+    if (clearMode && !pendingClearMode) pendingClearMode = clearMode;
+    if (runReport && !pendingRunReport) pendingRunReport = runReport;
+    cloudState.lastError = (res && (res.errMsg || res.reason)) || 'network_error';
+    scheduleCloudBackoffRetry();
     return res || { ok: false };
   }
 
   function scheduleCloudPush(immediate = false) {
-    if (!CloudConfig.ENABLE_CLOUD_SYNC || cloudState.status === 'local_only') return;
+    if (!CloudConfig.ENABLE_CLOUD_SYNC || cloudState.status === 'local_only' || !cloudState.cloudAvailable) return;
     cloudDirty = true;
     if (cloudPushTimer) {
       clearTimeout(cloudPushTimer);
       cloudPushTimer = null;
     }
     if (immediate) {
+      cloudState.retryCount = 0;
       flushCloudPush();
     } else {
       cloudPushTimer = setTimeout(() => {
@@ -174,24 +268,35 @@ function createApp() {
 
   async function bootCloudSync() {
     if (!CloudConfig.ENABLE_CLOUD_SYNC) {
+      cloudState.cloudAvailable = false;
       cloudState.status = 'local_only';
       return;
     }
     const inited = platform.initCloud(CloudConfig.CLOUD_ENV_ID);
     if (!inited) {
+      cloudState.cloudAvailable = false;
       cloudState.status = 'local_only';
       return;
     }
+    cloudState.cloudAvailable = true;
     cloudState.status = 'syncing';
     cloudState.syncing = true;
     const res = await platform.callCloudFunction(CloudConfig.CLOUD_FUNCTION_NAME, { action: 'pull' });
     cloudState.syncing = false;
     if (!res || !res.ok) {
-      cloudState.status = 'local_only';
+      if (res && res.reason === 'cloud_unavailable') {
+        cloudState.cloudAvailable = false;
+        cloudState.status = 'local_only';
+      } else {
+        cloudState.lastError = (res && (res.errMsg || res.reason)) || 'pull_failed';
+        scheduleCloudBackoffRetry();
+      }
       return;
     }
 
     cloudState.status = 'synced';
+    cloudState.retryCount = 0;
+    cloudState.lastError = '';
     cloudState.openidSuffix = res.openidSuffix || '';
     cloudState.revision = res.revision || 1;
     cloudState.lastSyncAt = Date.now();
@@ -199,6 +304,7 @@ function createApp() {
     const beforeCloudChef = (res.metaSave && res.metaSave.bestChef) || 0;
     const beforeCloudEarned = (res.metaSave && res.metaSave.totalEarnedStardust) || 30;
     const merged = SaveSync.mergeSaveData(saveData, res.metaSave, res.profile);
+    merged.lastSyncedEarnedStardust = merged.totalEarnedStardust;
     Object.assign(saveData, merged);
     platform.setStorageJSON(STORAGE_KEY, saveData);
 
@@ -209,12 +315,9 @@ function createApp() {
       app.ensureRemoteAvatar(saveData.playerProfile.avatarUrl);
     }
 
-    if (app && !app.savedRun && res.activeRun) {
-      const cloudRun = SaveSync.validateActiveRunSnapshot(res.activeRun);
-      if (cloudRun) {
-        app.savedRun = cloudRun;
-        platform.setStorageJSON(SaveSync.ACTIVE_RUN_STORAGE_KEY, cloudRun);
-      }
+    if (res.savedRuns || res.activeRun) {
+      savedRunsMap = SaveSync.mergeSavedRunsMaps(savedRunsMap, res.savedRuns || null, res.activeRun || null);
+      persistSavedRunsLocal();
     }
 
     // Push back if new cloud user or local progress is ahead of cloud
@@ -512,9 +615,15 @@ function createApp() {
     saveData,
     gameState,
     cloudState,
-    savedRun: initialSavedRun,
+    get savedRuns() {
+      return savedRunsMap;
+    },
+    get savedRun() {
+      return savedRunsMap[gameState.mode] || null;
+    },
     isLobbyOpen: true,
-    activeModal: null, // 'shop' | 'career' | 'help' | 'mode_guide' | 'compendium' | 'blessing' | 'gameover' | null
+    activeModal: null, // 'shop' | 'career' | 'help' | 'mode_guide' | 'compendium' | 'pause' | 'confirm' | 'prep_shop' | 'shift_victory' | 'relics' | 'gameover' | null
+    confirmDialog: null,
     activeShopTab: 'upgrades',
     activeCareerTab: 'stats', // 'stats' | 'rank'
     leaderboardMode: 'chef', // 'chef' | 'rush'
@@ -575,7 +684,7 @@ function createApp() {
     },
     getFeverMultiplier() {
       if (gameState.feverTimer <= 0) return 1;
-      return Math.min(5, 2 + Math.max(0, gameState.comboCount - 1) * 0.75);
+      return Math.min(3.0, 2.0 + Math.max(0, gameState.comboCount - 1) * 0.25);
     },
 
     syncToastLegacyFields() {
@@ -657,7 +766,6 @@ function createApp() {
     },
 
     toggleDebugPhysics(forceVal) {
-      if (this.activeModal === 'blessing') this.closeModal();
       gameState.debugPhysics = typeof forceVal === 'boolean' ? forceVal : !gameState.debugPhysics;
       if (typeof forceVal !== 'boolean') {
         this.showToast(gameState.debugPhysics ? '已开启物理轮廓' : '已关闭物理轮廓', { icon: 'icon_toolbox', tone: 'info' });
@@ -698,8 +806,9 @@ function createApp() {
     },
 
     openModal(name) {
-      if (this.activeModal === 'blessing' && name !== 'blessing') {
-        gameState.paused = false;
+      if (!this.isLobbyOpen && gameState.running && !gameState.over) {
+        gameState.paused = true;
+        resetAimingState();
       }
       this.activeModal = name;
       this.modalScrollY = 0;
@@ -716,9 +825,79 @@ function createApp() {
         this.finishModeGuide();
         return;
       }
+      if (this.activeModal === 'confirm') {
+        const ret = this.confirmDialog && this.confirmDialog.returnModal;
+        this.confirmDialog = null;
+        if (ret) {
+          this.activeModal = ret;
+          this.syncAudioMood();
+          return;
+        }
+      }
       this.activeModal = null;
       this.modalScrollY = 0;
       this.modalMaxScroll = 0;
+      if (!this.isLobbyOpen && gameState.running && !gameState.over) {
+        gameState.paused = false;
+      }
+      this.syncAudioMood();
+    },
+
+    togglePause() {
+      if (this.isLobbyOpen || !gameState.running || gameState.over) return;
+      audio.ensureCtx();
+      audio.playTilt();
+      if (this.activeModal === 'pause') {
+        this.closeModal();
+      } else if (!this.activeModal) {
+        saveActiveRunCheckpoint({ syncCloud: false });
+        this.openModal('pause');
+      }
+    },
+
+    openConfirm(cfg) {
+      audio.ensureCtx();
+      audio.playTilt();
+      this.confirmDialog = {
+        title: (cfg && cfg.title) || '确认操作',
+        message: (cfg && cfg.message) || '',
+        confirmText: (cfg && cfg.confirmText) || '确认',
+        cancelText: (cfg && cfg.cancelText) || '取消',
+        returnModal: (cfg && cfg.returnModal) || null,
+        onConfirm: (cfg && cfg.onConfirm) || null,
+        onCancel: (cfg && cfg.onCancel) || null
+      };
+      this.openModal('confirm');
+    },
+
+    confirmAccept() {
+      const dlg = this.confirmDialog;
+      this.confirmDialog = null;
+      this.activeModal = null;
+      if (dlg && typeof dlg.onConfirm === 'function') {
+        dlg.onConfirm();
+      } else {
+        if (!this.isLobbyOpen && gameState.running && !gameState.over) {
+          gameState.paused = false;
+        }
+        this.syncAudioMood();
+      }
+    },
+
+    confirmCancel() {
+      const dlg = this.confirmDialog;
+      this.confirmDialog = null;
+      if (dlg && typeof dlg.onCancel === 'function') {
+        this.activeModal = null;
+        dlg.onCancel();
+        return;
+      }
+      if (dlg && dlg.returnModal) {
+        this.activeModal = dlg.returnModal;
+        this.syncAudioMood();
+        return;
+      }
+      this.activeModal = null;
       if (!this.isLobbyOpen && gameState.running && !gameState.over) {
         gameState.paused = false;
       }
@@ -781,6 +960,11 @@ function createApp() {
     openShop(tab = 'upgrades') {
       this.activeShopTab = tab;
       this.openModal('shop');
+    },
+
+    openShopFromGameOver() {
+      this.returnToLobby();
+      this.openShop('upgrades');
     },
 
     setShopTab(tab) {
@@ -933,7 +1117,7 @@ function createApp() {
       saveData.playerProfile.authorized = !!authorized;
       saveData.playerProfile.updatedAt = Date.now();
       persistSaveData({ immediate: true });
-      if (CloudConfig.ENABLE_CLOUD_SYNC && cloudState.status !== 'local_only') {
+      if (CloudConfig.ENABLE_CLOUD_SYNC && cloudState.cloudAvailable && cloudState.status !== 'local_only') {
         await platform.callCloudFunction(CloudConfig.CLOUD_FUNCTION_NAME, {
           action: 'updateProfile',
           profile: saveData.playerProfile
@@ -1014,13 +1198,13 @@ function createApp() {
       let rows = [];
       let isLocalFallback = false;
 
-      if (CloudConfig.ENABLE_CLOUD_SYNC && cloudState.status !== 'local_only') {
+      if (CloudConfig.ENABLE_CLOUD_SYNC && cloudState.cloudAvailable && cloudState.status !== 'local_only') {
         const res = await platform.callCloudFunction(CloudConfig.CLOUD_FUNCTION_NAME, {
           action: 'leaderboard',
           mode
         });
         if (res && res.ok && Array.isArray(res.list)) {
-          rows = res.list.map((r) => ({ ...r }));
+          rows = res.list.map((r) => ({ ...r, isNpc: !!r.isNpc }));
         } else {
           isLocalFallback = true;
         }
@@ -1035,6 +1219,7 @@ function createApp() {
           rows.push({
             id: `npc_${npc.nickName}`,
             isMe: false,
+            isNpc: true,
             nickName: npc.nickName,
             avatarUrl: '',
             avatarPreset: npc.avatarPreset,
@@ -1048,6 +1233,7 @@ function createApp() {
       const meEntry = {
         id: 'me',
         isMe: true,
+        isNpc: false,
         nickName: this.getPlayerDisplayName(),
         avatarUrl: (saveData.playerProfile && saveData.playerProfile.avatarUrl) || '',
         avatarPreset: this.getPlayerAvatarPreset(),
@@ -1079,18 +1265,20 @@ function createApp() {
     },
 
     hasResumableRun(mode = gameState.mode) {
-      return !!(this.savedRun && this.savedRun.mode === mode);
+      return !!savedRunsMap[mode];
     },
 
-    resumeSavedRun() {
-      if (!this.savedRun) return false;
-      const ok = resumeSavedRunFn(this.savedRun);
+    resumeSavedRun(mode = gameState.mode) {
+      const snap = savedRunsMap[mode];
+      if (!snap) return false;
+      const ok = resumeSavedRunFn(snap);
       if (ok) {
         audio.ensureCtx();
         audio.playStartCafe();
         this.isLobbyOpen = false;
         this.syncAudioMood();
-        this.showToast(`已恢复第 ${gameState.shift} 幕`, { level: 'major', icon: 'mode_chef', tone: 'success' });
+        const label = snap.mode === 'chef' ? `已恢复第 ${gameState.shift} 幕` : '已恢复对局';
+        this.showToast(label, { level: 'major', icon: 'mode_chef', tone: 'success' });
       }
       return ok;
     },
@@ -1108,6 +1296,7 @@ function createApp() {
       this.toastQueue = [];
       this.minorToast = null;
       this.syncToastLegacyFields();
+      this.confirmDialog = null;
       this.activeModal = null;
       this.isLobbyOpen = true;
       this.syncAudioMood();
@@ -1122,10 +1311,48 @@ function createApp() {
       }
     },
 
+    requestStartNewRun(mode = gameState.mode) {
+      if (this.hasResumableRun(mode)) {
+        const sr = savedRunsMap[mode];
+        const desc =
+          mode === 'chef'
+            ? `当前主厨模式有第 ${sr.shift || 1} 幕（¥${sr.shiftRevenue || 0}）未完存档，新开将仅覆盖主厨模式旧档（不影响其他模式）。`
+            : '当前模式有未完对局存档，新开将覆盖该模式进度。';
+        this.openConfirm({
+          title: '覆盖旧局新开？',
+          message: desc,
+          confirmText: '确认新开',
+          cancelText: '继续旧局',
+          onConfirm: () => this.startNewRun(mode),
+          onCancel: () => this.resumeSavedRun(mode)
+        });
+        return;
+      }
+      this.startNewRun(mode);
+    },
+
     restartRun() {
       startNewRunFn(gameState.mode);
       audio.playStartCafe();
       this.showToast('已重新开业', { icon: 'icon_restart', tone: 'info' });
+    },
+
+    requestRestartRun(fromModal = null) {
+      if (
+        !gameState.over &&
+        (gameState.dropsMadeThisRun >= 1 || gameState.shift > 1 || gameState.servesCompleted >= 1 || gameState.score > 0)
+      ) {
+        this.openConfirm({
+          title: '确定重新开始？',
+          message: '重开将清空当前这一局的进度与秘方构筑。',
+          confirmText: '确认重开',
+          cancelText: '返回继续',
+          returnModal: fromModal,
+          onConfirm: () => this.restartRun()
+        });
+        return;
+      }
+      this.restartRun();
     },
 
     shareResult() {
@@ -1201,24 +1428,43 @@ function createApp() {
         const e = gameState.entities[i];
         if (!e.merged && !e.isWildcard && !e.isYarnBall && !(e.frozenHp > 0) && e.tier >= 6) highCount++;
       }
-      return highCount > 0 ? Math.pow(1.35, highCount) : 1.0;
+      return 1 + Math.min(3, highCount) * 0.25;
     },
     getInterestMult() {
       if (!this.hasRelic('rel_interest')) return 1.0;
-      const stacks = Math.floor((gameState.coins || 0) / 10);
-      return 1 + Math.min(1.05, stacks * 0.07);
+      const relicBonus = (Array.isArray(gameState.relics) ? gameState.relics.length : 0) * 0.08;
+      const coinBonus = Math.floor((gameState.coins || 0) / 10) * 0.05;
+      return 1 + Math.min(0.65, relicBonus + coinBonus);
     },
     getGreedSynergyMult() {
-      return this.getArchetypeCount('greed') >= 3 ? 1.3 : 1.0;
+      return this.getArchetypeCount('greed') >= 3 ? 1.25 : 1.0;
     },
     getGlobalRevenueMult() {
-      return this.getSouffleAuraMult() * this.getCrownAuraMult() * this.getInterestMult() * this.getGreedSynergyMult();
+      const raw =
+        this.getSouffleAuraMult() *
+        (1 +
+          (this.getCrownAuraMult() - 1) +
+          (this.getInterestMult() - 1) +
+          (this.getGreedSynergyMult() - 1));
+      return Math.min(2.6, raw);
     },
     isEntityServable(entity) {
       return findServableMatch(entity);
     },
     serveEntity(entityId) {
       return serveEntityById(entityId);
+    },
+    serveOrderTable(tableIdx) {
+      return serveOrderByTableIndex(tableIdx);
+    },
+    serveReadyOrder() {
+      return serveAnyReadyOrder();
+    },
+    serveSouffle() {
+      const s = gameState.entities.find(
+        (e) => !e.merged && !e.isWildcard && !e.isYarnBall && !(e.frozenHp > 0) && e.tier === 9
+      );
+      return s ? serveEntityById(s.id) : false;
     },
     activateChefSkill() {
       activateChefSkillFn();
@@ -1234,7 +1480,6 @@ function createApp() {
     finishVictoryRun() { finishVictoryRunFn(); },
     openRelicsModal() {
       if (!gameState.running || gameState.over || this.activeModal) return;
-      gameState.paused = true;
       this.openModal('relics');
     },
 
@@ -1366,114 +1611,71 @@ function createApp() {
     }
   }
 
-  function rollBlessingChoices() {
-    const eligible = BLESSINGS.filter((b) => b.repeatable || app.getPerkLevel(b.id) < b.maxLv);
-    const pool = [...eligible];
-    const picked = [];
-    while (picked.length < 3 && pool.length > 0) {
-      const idx = Math.floor(Math.random() * pool.length);
-      picked.push(pool.splice(idx, 1)[0]);
-    }
-    return picked;
-  }
+  const ZEN_COMPAT_RELIC_IDS = new Set([
+    'rel_shockwave',
+    'rel_prism',
+    'rel_bouncy',
+    'rel_bumpers',
+    'rel_ricochet',
+    'rel_lemonade',
+    'rel_antigrav',
+    'rel_resonance',
+    'rel_crit_star',
+    'rel_crown_aura'
+  ]);
 
-  function queueBlessing(reason = '订单完成') {
-    gameState.pendingBlessings++;
-    gameState.blessingLastReason = reason;
-    audio.playBlessingReady();
-    spawnSparkleBurst(JAR.canvasW / 2, JAR.floorY + 12, '#ffe27a', 16);
-  }
-
-  function openBlessingModalFn() {
-    if (!gameState.running || gameState.over || gameState.pendingBlessings <= 0) return;
-    if (app.isLobbyOpen || app.activeModal === 'gameover') return;
-    if (gameState.activeToolMode) cancelToolMode();
-
-    if (!gameState.blessingChoices || gameState.blessingChoices.length === 0) {
-      gameState.blessingChoices = rollBlessingChoices();
-    }
-    const reason = gameState.blessingLastReason || '心愿达成';
-    gameState.blessingSubText =
-      gameState.pendingBlessings > 1
-        ? `${reason} · 可连选 ${gameState.pendingBlessings} 次`
-        : `${reason} · 任选 1 项强化本局`;
-    gameState.paused = true;
-    gameState.blessingLockUntil = Date.now() + 140;
-    app.openModal('blessing');
-    audio.playBlessingOpen();
-  }
-
-  function applyBlessingFn(id) {
-    if (Date.now() < gameState.blessingLockUntil) return;
-    const def = BLESSINGS.find((b) => b.id === id);
-    if (!def) return;
-
-    audio.playBlessingPick();
-    if (!def.repeatable) {
-      gameState.perks[id] = Math.min(def.maxLv, app.getPerkLevel(id) + 1);
-    }
-
-    if (id === 'rainbow') {
-      gameState.dropsUntilRainbow = Math.min(gameState.dropsUntilRainbow, getRainbowPityBase());
-      grantNextRainbow('彩虹眷顾');
-    } else if (id === 'fever') {
-      if (gameState.feverTimer > 0) {
-        gameState.feverTimer += 3.5;
-        gameState.feverMaxDuration = Math.max(gameState.feverMaxDuration, gameState.feverTimer);
-      } else {
-        addFeverEnergy(45);
-      }
-    } else if (id === 'toolbox') {
-      gameState.tools.shake++;
-      gameState.tools.spoon++;
-      addSkillEnergy(100, true);
-      const gained = addRunStardust(25);
-      spawnPopup(JAR.canvasW / 2, 220, `摇+1 勺+1 满能 +${gained}星尘`, '#ffe57e', 16.5);
-    } else if (id === 'cleanse') {
-      const smalls = gameState.entities
-        .filter((e) => !e.isWildcard && !e.isYarnBall && !(e.frozenHp > 0) && e.tier <= 2)
-        .sort((a, b) => a.y - b.y)
-        .slice(0, 4);
-      const removeIds = new Set(smalls.map((e) => e.id));
-      let gainedPts = 0;
-      let gainedDustBase = 0;
-      for (const s of smalls) {
-        gainedPts += 45;
-        gainedDustBase += 6;
-        spawnSparkleBurst(s.x, s.y, '#9be8ff', 14);
-        spawnShockwave(s.x, s.y, 44, '#9be8ff', 2.8);
-      }
-      if (removeIds.size > 0) {
-        gameState.entities = gameState.entities.filter((e) => !removeIds.has(e.id));
-        addScore(gainedPts);
-        addRunStardust(gainedDustBase);
-        spawnPopup(JAR.canvasW / 2, 210, `吹散 ${removeIds.size} 颗 +${gainedPts}`, '#b6f4ff', 17.5);
-      } else {
-        const gained = addRunStardust(20);
-        spawnPopup(JAR.canvasW / 2, 210, `罐内清爽 +${gained}星尘`, '#b6f4ff', 16.5);
-      }
-    }
-
-    const lvTag = def.repeatable ? '' : ` Lv.${app.getPerkLevel(id)}`;
-    const pickedSummary = `${def.name}${lvTag}`;
-    gameState.pendingBlessings = Math.max(0, gameState.pendingBlessings - 1);
-    gameState.blessingChoices = [];
-
-    if (gameState.pendingBlessings > 0 && app.activeModal === 'blessing') {
-      gameState.blessingLockUntil = Date.now() + 180;
-      gameState.blessingChoices = rollBlessingChoices();
-      gameState.blessingSubText = `已得 ${pickedSummary} · 还剩 ${gameState.pendingBlessings} 次`;
-      spawnSparkleBurst(JAR.canvasW / 2, 240, '#ffe27a', 18);
+  function grantMilestoneRelicOrSupply(reason = '里程碑达成') {
+    gameState.pendingBlessings = 0;
+    if (gameState.mode === 'chef') {
+      const c = addCoins(6);
+      const d = addRunStardust(12);
+      audio.playBlessingReady();
+      app.showToast(`${reason} · +${c}币 +${d}星露`, { level: 'minor', icon: 'icon_coin', tone: 'success' });
       return;
     }
 
-    app.activeModal = null;
-    gameState.paused = false;
-    app.syncAudioMood();
-    app.showToast(`获得祝福 · ${pickedSummary}`, { level: 'major', icon: def.icon || 'icon_gift', tone: 'success' });
-    spawnSparkleBurst(JAR.canvasW / 2, 240, '#ffe27a', 26);
-    spawnShockwave(JAR.canvasW / 2, 250, 150, '#ffe47a', 3.5);
-    gameState.jarFlash = 0.55;
+    const ownedSet = new Set(gameState.relics || []);
+    const pool = RELICS.filter((r) => {
+      if (ownedSet.has(r.id)) return false;
+      if (gameState.mode === 'zen') return ZEN_COMPAT_RELIC_IDS.has(r.id);
+      return r.id !== 'rel_interest' && r.id !== 'rel_perpetual';
+    });
+
+    if (gameState.relics.length < MAX_RELIC_SLOTS && pool.length > 0) {
+      const pick = pool[Math.floor(Math.random() * pool.length)];
+      gameState.relics.push(pick.id);
+      if (pick.id === 'rel_bumpers') syncObstaclesForShift();
+      if (pick.id === 'rel_double_vip') initOrders();
+      audio.playBlessingPick();
+      spawnSparkleBurst(JAR.canvasW / 2, 230, '#ffe27a', 20);
+      app.showToast(`${reason} · 获赠秘方【${pick.name}】`, {
+        level: 'major',
+        icon: pick.icon || 'icon_gift',
+        tone: 'success'
+      });
+    } else {
+      gameState.tools.shake++;
+      addSkillEnergy(45, true);
+      const dust = addRunStardust(18);
+      audio.playBlessingReady();
+      app.showToast(`${reason} · 摇罐+1 技+45% +${dust}星露`, {
+        level: 'major',
+        icon: 'icon_toolbox',
+        tone: 'success'
+      });
+    }
+  }
+
+  function queueBlessing(reason = '里程碑达成') {
+    grantMilestoneRelicOrSupply(reason);
+  }
+
+  function openBlessingModalFn() {
+    // Legacy 3.0 Blessing modal merged into unified Relics system
+  }
+
+  function applyBlessingFn(_id) {
+    // Legacy 3.0 Blessing modal merged into unified Relics system
   }
 
   function unlockTier(tier) {
@@ -1488,7 +1690,7 @@ function createApp() {
   }
 
   // =========================================================================
-  // 4.0 Dual-Table Orders, Tap-to-Serve Relics & 5-Shift Roguelike Engine
+  // 4.1 Dual-Table Orders, Dedicated/Long-Press Serve & Persistent-Jar Roguelike
   // =========================================================================
   let nextOrderUid = 1;
 
@@ -1515,7 +1717,6 @@ function createApp() {
       if (isInitial) {
         reqTiers = [3];
       } else if (isRushMode && doneCount < 3) {
-        // Early Rush blitz orders ask for fast T2~T3 treats so players enter serve streak immediately!
         reqTiers = [Math.random() < 0.55 ? 2 : 3];
       } else {
         const cap = Math.min(5, Math.max(4, maxMade - 1));
@@ -1531,26 +1732,27 @@ function createApp() {
         const tB = Math.min(6, Math.max(4, tA + 1 + (Math.random() < 0.35 ? 1 : 0)));
         reqTiers = [tA, tB].sort((a, b) => a - b);
       } else {
-        const tHigh = Math.min(7, Math.max(5, Math.min(maxMade + 1, 5 + Math.floor(doneCount / 3))));
+        const maxVipSingle = gameState.mode === 'chef' && gameState.shift < 5 ? 6 : 7;
+        const tHigh = Math.min(maxVipSingle, Math.max(5, Math.min(maxMade, 5 + Math.floor(doneCount / 4))));
         reqTiers = [tHigh];
       }
     }
 
-    const mikanVipMult = saveData.selectedPatron === 'mikan' && kind === 'vip' ? 1.15 : 1.0;
+    const mikanAllMult = saveData.selectedPatron === 'mikan' ? 1.2 : 1.0;
     const greedVipMult = app.getArchetypeCount('greed') >= 2 && kind === 'vip' ? 1.2 : 1.0;
-    const doubleVipMult = app.hasRelic('rel_double_vip') && kind === 'vip' ? 1.4 : 1.0;
-    const shiftScale = gameState.mode === 'chef' ? 1 + Math.max(0, gameState.shift - 1) * 0.14 : 1.0;
+    const doubleVipMult = app.hasRelic('rel_double_vip') && kind === 'vip' ? 1.2 : 1.0;
+    const shiftScale = gameState.mode === 'chef' ? 1 + Math.max(0, gameState.shift - 1) * 0.12 : 1.0;
     const starterBlitzFlat = isStarterBlitz ? 90 : 0;
     const baseBonusScore = Math.round(
       (reqTiers.reduce((acc, t) => acc + TIERS[t - 1].servePoints * (kind === 'vip' ? 0.55 : 0.35), kind === 'vip' ? 140 : 60) +
         starterBlitzFlat) *
-        mikanVipMult *
+        mikanAllMult *
         greedVipMult *
         doubleVipMult *
         shiftScale
     );
     const rewardDust = Math.round(
-      ((kind === 'vip' ? 22 : 10) + reqTiers.reduce((acc, t) => acc + t * 2, 0)) * mikanVipMult
+      ((kind === 'vip' ? 20 : 10) + reqTiers.reduce((acc, t) => acc + t * 2, 0)) * mikanAllMult
     );
     const freshMax = isJudgeRush ? 4 : isFastFresh ? 5 : kind === 'vip' ? 8 : 6;
     const baseFreshMult = isJudgeRush ? 2.5 : isFastFresh ? 2.0 : isStarterBlitz ? 1.65 : kind === 'vip' ? 1.5 : 1.35;
@@ -1590,12 +1792,20 @@ function createApp() {
     gameState.order = vip;
   }
 
-  function findServableMatch(entity) {
+  function findServableMatch(entity, preferredOrderUid = null) {
     if (!entity || entity.merged || entity.isWildcard || entity.isYarnBall || entity.frozenHp > 0) return null;
     if (entity.tier === 9) {
       return { kind: 'souffle', order: null, slotIdx: -1 };
     }
     if (!gameState.orders || gameState.orders.length === 0) return null;
+
+    if (preferredOrderUid !== null) {
+      const pref = gameState.orders.find((o) => o && !o.completed && o.uid === preferredOrderUid);
+      if (pref) {
+        const sIdx = pref.slots.findIndex((s) => !s.done && s.tier === entity.tier);
+        if (sIdx !== -1) return { kind: pref.kind, order: pref, slotIdx: sIdx };
+      }
+    }
 
     // Prioritize Judge Rush / VIP table, then Quick table
     let best = null;
@@ -1617,7 +1827,7 @@ function createApp() {
     return best;
   }
 
-  function findServableEntityAt(x, y, pad = 12) {
+  function findServableEntityAt(x, y, pad = 10) {
     for (let i = gameState.entities.length - 1; i >= 0; i--) {
       const e = gameState.entities[i];
       if (e.merged) continue;
@@ -1627,6 +1837,32 @@ function createApp() {
       if (d <= e.r + pad) return e;
     }
     return null;
+  }
+
+  function serveOrderByTableIndex(tableIdx) {
+    if (!gameState.running || gameState.over || gameState.paused) return false;
+    const ord = gameState.orders && gameState.orders[tableIdx];
+    if (!ord || ord.completed) return false;
+    const neededTiers = new Set(ord.slots.filter((s) => !s.done).map((s) => s.tier));
+    if (neededTiers.size === 0) return false;
+    // Prefer bottom-most (largest Y) matching treat so serving naturally excavates the bottom for Serve Cascade!
+    const candidates = gameState.entities
+      .filter((e) => !e.merged && !e.isWildcard && !e.isYarnBall && !(e.frozenHp > 0) && neededTiers.has(e.tier))
+      .sort((a, b) => b.y - a.y);
+    if (candidates.length === 0) return false;
+    return serveEntityById(candidates[0].id, ord.uid);
+  }
+
+  function serveAnyReadyOrder() {
+    if (!gameState.orders || gameState.orders.length === 0) return false;
+    const orderPriority = gameState.orders
+      .map((o, idx) => ({ o, idx }))
+      .filter((it) => it.o && !it.o.completed)
+      .sort((a, b) => (b.o.isJudgeRush ? 1 : 0) - (a.o.isJudgeRush ? 1 : 0) || (b.o.kind === 'vip' ? 1 : 0) - (a.o.kind === 'vip' ? 1 : 0));
+    for (const it of orderPriority) {
+      if (serveOrderByTableIndex(it.idx)) return true;
+    }
+    return false;
   }
 
   function wakeNeighborsAfterRemoval(rx, ry, removedR) {
@@ -1644,12 +1880,13 @@ function createApp() {
     }
   }
 
-  function startCascadeWindow(originX, originY) {
+  function startCascadeWindow(originX, originY, refundStaleStep = false) {
     const baseDur = app.hasRelic('rel_domino') ? 4.2 : 2.6;
     const synBonus = app.getArchetypeCount('cascade') >= 2 ? 0.8 : 0;
     const dur = baseDur + synBonus + getComboUpgradeBonus();
     gameState.serveCascadeTimer = Math.max(gameState.serveCascadeTimer, dur);
     gameState.serveCascadeMerges = 0;
+    gameState.cascadeStaleRefundPending = !!refundStaleStep;
     gameState.serveCascadeOrigin = { x: originX, y: originY };
   }
 
@@ -1699,12 +1936,30 @@ function createApp() {
     notifyTreatSynthesized(nextTier, pick);
   }
 
-  function serveEntityById(entityId) {
+  function serveEntityById(entityId, preferredOrderUid = null) {
     if (!gameState.running || gameState.over || gameState.paused) return false;
     const ent = gameState.entities.find((e) => e.id === entityId && !e.merged);
     if (!ent) return false;
-    const match = findServableMatch(ent);
+    const match = findServableMatch(ent, preferredOrderUid);
     if (!match) return false;
+
+    // Chef Mode Spatial & Step Tradeoff: Fresh orders serve for 0 steps; Stale orders cost 1 step (refunded on Cascade!)
+    let staleStepCharged = false;
+    if (gameState.mode === 'chef' && match.kind !== 'souffle' && match.order) {
+      const isOrderFresh = match.order.freshSteps > 0;
+      if (!isOrderFresh) {
+        if (gameState.stepsLeft <= 0) {
+          app.showToast('冷单上菜需消耗 1 步（趁热单免步）', { level: 'minor', icon: 'icon_warn', tone: 'warn' });
+          return false;
+        }
+        gameState.stepsLeft = Math.max(0, gameState.stepsLeft - 1);
+        gameState.shiftStepsUsed++;
+        staleStepCharged = true;
+        if (gameState.stepsLeft === 0) {
+          gameState.shiftResolveDelay = Math.max(gameState.shiftResolveDelay, 1.35);
+        }
+      }
+    }
 
     audio.ensureCtx();
     audio.playServeBell();
@@ -1714,7 +1969,7 @@ function createApp() {
     gameState.entities = gameState.entities.filter((e) => e.id !== ent.id);
     wakeNeighborsAfterRemoval(ent.x, ent.y, ent.r);
     applyAftershockPulse(ent.x, ent.y);
-    startCascadeWindow(ent.x, ent.y);
+    startCascadeWindow(ent.x, ent.y, staleStepCharged);
 
     // Relic: rel_echo — T4~T8 re-fire their dessert trait on serve!
     if (app.hasRelic('rel_echo') && ent.tier >= 4 && ent.tier <= 8) {
@@ -1736,7 +1991,7 @@ function createApp() {
       dur: 0.34
     });
 
-    spawnSparkleBurst(ent.x, ent.y, '#ffe47a', 22);
+    spawnSparkleBurst(ent.x, ent.y, '#ffe47a', 20);
     spawnShockwave(ent.x, ent.y, ent.r * 2.1 + 36, '#ffe47a', 3.6);
     gameState.jarFlash = Math.max(gameState.jarFlash, 0.38);
 
@@ -1744,15 +1999,23 @@ function createApp() {
     saveData.lifetimeStats.servesTotal = (saveData.lifetimeStats.servesTotal || 0) + 1;
     persistSaveData();
 
+    // Mikan Patron Buff: first serve each shift grants +25% bonus signature skill energy
+    if (saveData.selectedPatron === 'mikan' && !gameState.mikanFirstServeUsed) {
+      gameState.mikanFirstServeUsed = true;
+      addSkillEnergy(25, true);
+    }
+
     const feverMult = app.getFeverMultiplier();
-    const goldMult = ent.isGolden ? 1.8 : 1.0;
+    const goldMult = ent.isGolden ? 1.6 : 1.0;
     const globalMult = app.getGlobalRevenueMult();
 
     // Special Case: T9 Crown Cat Soufflé Grand Slam!
     if (match.kind === 'souffle') {
-      const pts = Math.round(
-        TIERS[8].servePoints * feverMult * goldMult * app.getCrownAuraMult() * app.getInterestMult() * app.getGreedSynergyMult()
+      const nonSouffleGlobal = Math.min(
+        2.2,
+        1 + (app.getCrownAuraMult() - 1) + (app.getInterestMult() - 1) + (app.getGreedSynergyMult() - 1)
       );
+      const pts = Math.round(TIERS[8].servePoints * Math.min(5.0, feverMult * goldMult * nonSouffleGlobal));
       addScore(pts);
       const dust = addRunStardust(48);
       if (gameState.mode === 'chef') addCoins(15);
@@ -1775,44 +2038,41 @@ function createApp() {
         gameState.rushTimer += 6.0;
       }
       spawnPopup(ent.x, ent.y - 20, `主菜献礼 +¥${pts}`, '#ffe570', 21);
-      showComboBanner('星冠猫神献礼', `+¥${pts} · +${dust}星尘 · 净化${cleansed}颗`, '#ffe570', 'icon_crown');
-      saveActiveRunCheckpoint();
+      showComboBanner('星冠猫神献礼', `+¥${pts} · +${dust}星露 · 净化${cleansed}颗`, '#ffe570', 'icon_crown', 3);
+      scheduleCheckpointSave();
       return true;
     }
 
-    // Standard / VIP Table Serve
+    // Standard / VIP Table Serve (additive bonus cap to prevent runaway multiplication)
     const ord = match.order;
     const def = TIERS[ent.tier - 1];
     const isFresh = ord.freshSteps > 0;
     const freshMult = isFresh ? ord.freshMult : (ord.staleMult || 1.0);
-    const mikanVipMult = saveData.selectedPatron === 'mikan' && ord.kind === 'vip' ? 1.15 : 1.0;
-    const greedVipMult = app.getArchetypeCount('greed') >= 2 && ord.kind === 'vip' ? 1.2 : 1.0;
-    const doubleVipMult = app.hasRelic('rel_double_vip') && ord.kind === 'vip' ? 1.4 : 1.0;
-    const agedMult = app.hasRelic('rel_aged') && ent.agedStacks > 0 ? 1 + ent.agedStacks * 0.3 : 1.0;
+    const mikanAllBonus = saveData.selectedPatron === 'mikan' ? 0.2 : 0;
+    const greedVipBonus = app.getArchetypeCount('greed') >= 2 && ord.kind === 'vip' ? 0.2 : 0;
+    const doubleVipBonus = app.hasRelic('rel_double_vip') && ord.kind === 'vip' ? 0.2 : 0;
+    const agedBonus = app.hasRelic('rel_aged') && ent.agedStacks > 0 ? Math.min(1.5, ent.agedStacks * 0.3) : 0;
 
     // 90s Rush Mode: Consecutive Serve Streak Multiplier & Escalating Time Bonus!
+    let rushStreakBonus = 0;
     let rushStreakMult = 1.0;
     let rushAddSec = 3.0;
     if (gameState.mode === 'rush') {
       gameState.rushServeStreak = (gameState.rushStreakTimer > 0 ? gameState.rushServeStreak : 0) + 1;
       gameState.rushStreakTimer = 12.0;
       gameState.rushMaxStreak = Math.max(gameState.rushMaxStreak || 0, gameState.rushServeStreak);
-      rushStreakMult = Math.min(2.5, +(1 + (gameState.rushServeStreak - 1) * 0.35).toFixed(2));
+      rushStreakBonus = Math.min(1.5, (gameState.rushServeStreak - 1) * 0.35);
+      rushStreakMult = +(1 + rushStreakBonus).toFixed(2);
       rushAddSec = +(Math.min(4.5, 3.0 + Math.min(3, gameState.rushServeStreak - 1) * 0.5) + (ord.isStarterBlitz ? 0.5 : 0)).toFixed(1);
     }
 
-    const servePts = Math.round(
-      def.servePoints *
-        feverMult *
-        goldMult *
-        freshMult *
-        globalMult *
-        mikanVipMult *
-        greedVipMult *
-        doubleVipMult *
-        agedMult *
-        rushStreakMult
+    const additiveServeBonus = Math.min(
+      4.2,
+      1 + (feverMult - 1) + mikanAllBonus + greedVipBonus + doubleVipBonus + agedBonus + rushStreakBonus
     );
+    const totalServeMult = Math.min(8.0, freshMult * goldMult * globalMult * additiveServeBonus);
+    const servePts = Math.round(def.servePoints * totalServeMult);
+
     addScore(servePts);
     const blitzFeverBonus = ord.isStarterBlitz ? 16 : 0;
     const streakFeverBonus = gameState.mode === 'rush' ? Math.min(18, (gameState.rushServeStreak - 1) * 6) : 0;
@@ -1837,8 +2097,8 @@ function createApp() {
     }
 
     ord.slots[match.slotIdx].done = true;
-    const agedTag = agedMult > 1 ? `陈酿×${agedMult.toFixed(1)} ` : '';
-    const freshTag = isFresh ? '热腾腾 ' : '';
+    const agedTag = agedBonus > 0 ? `陈酿+${Math.round(agedBonus * 100)}% ` : '';
+    const freshTag = isFresh ? '热单 ' : staleStepCharged ? '冷单-1步 ' : '';
     const currSym = gameState.mode === 'chef' ? '¥' : '';
     spawnPopup(ent.x, ent.y - 16, `${agedTag}${freshTag}+${currSym}${servePts}`, '#ffe67e', 18);
 
@@ -1846,18 +2106,20 @@ function createApp() {
     if (ord.slots.every((s) => s.done)) {
       ord.completed = true;
       gameState.ordersCompleted++;
-      const bonusPts = Math.round(ord.bonusScore * feverMult * freshMult * globalMult * rushStreakMult);
+      const orderMult = Math.min(6.5, freshMult * globalMult * Math.min(2.8, feverMult * rushStreakMult));
+      const bonusPts = Math.round(ord.bonusScore * orderMult);
       const dust = addRunStardust(Math.round(ord.rewardDust * freshMult));
       addScore(bonusPts);
       addFeverEnergy(ord.kind === 'vip' ? 24 : 14);
       if (ord.kind === 'vip') addSkillEnergy(25);
       audio.playOrderComplete();
 
-      // VIP Freshness Coin Bonus (+8 coins in Chef 5-Shift mode)
+      // VIP Coin Bonus (+8 coins fresh / +4 coins stale in Chef 5-Shift mode)
       let coinNote = '';
-      if (gameState.mode === 'chef' && ord.kind === 'vip' && isFresh) {
-        addCoins(8);
-        coinNote = ' · +8币';
+      if (gameState.mode === 'chef' && ord.kind === 'vip') {
+        const vipCoins = isFresh ? 8 : 4;
+        addCoins(vipCoins);
+        coinNote = ` · +${vipCoins}币`;
       }
       // Shift 5 Judge Rush Order step reward (+2 steps + cancel end-of-steps settle!)
       let stepNote = '';
@@ -1877,25 +2139,21 @@ function createApp() {
 
       if (ord.kind === 'vip') {
         if (isFresh) grantNextRainbow('VIP极速上菜');
-        queueBlessing(isFresh ? 'VIP 鲜度大单达成' : 'VIP 心愿单达成');
         showComboBanner(
           ord.isJudgeRush ? '评委急单大胜' : 'VIP 套餐上齐',
-          `+${currSym}${servePts + bonusPts} · +${dust}星尘${coinNote}${stepNote}`,
+          `+${currSym}${servePts + bonusPts} · +${dust}星露${coinNote}${stepNote}`,
           '#ffe378',
-          ord.isJudgeRush ? 'icon_judge' : 'icon_crown'
+          ord.isJudgeRush ? 'icon_judge' : 'icon_crown',
+          2
         );
       } else {
-        if (gameState.ordersCompleted % 2 === 0) {
-          queueBlessing('连续出餐达标');
-          if (!gameState.activeEvent && gameState.mode === 'chef' && gameState.shiftModifier !== 'party_events') {
-            setTimeout(() => {
-              if (gameState.running && !gameState.over && !gameState.activeEvent) {
-                triggerShopEvent();
-              }
-            }, 900);
-          }
+        gameState.quickOrdersCompleted = (gameState.quickOrdersCompleted || 0) + 1;
+        let quickTip = '';
+        if (gameState.mode === 'chef' && gameState.quickOrdersCompleted % 2 === 0) {
+          addCoins(4);
+          quickTip = ' · 翻台+4币';
         }
-        app.showToast(`快餐出单 +${currSym}${servePts + bonusPts} · +${dust}星尘`, {
+        app.showToast(`快餐出单 +${currSym}${servePts + bonusPts} · +${dust}星露${quickTip}`, {
           level: 'minor',
           icon: 'serve_bell',
           tone: 'success'
@@ -1920,7 +2178,7 @@ function createApp() {
       });
     }
 
-    saveActiveRunCheckpoint();
+    scheduleCheckpointSave();
     return true;
   }
 
@@ -2027,9 +2285,10 @@ function createApp() {
         const remInterest = gameState.stepsLeft * 4;
         showComboBanner(
           `第 ${gameState.shift} 幕达标`,
-          remInterest > 0 ? `可点打烊换 +${remInterest}币，或继续刷分` : '本幕圆满达标',
+          remInterest > 0 ? `可点打烊换 +${remInterest}币，或继续留罐布局` : '本幕圆满达标',
           '#ffe570',
-          'icon_trophy'
+          'icon_trophy',
+          3
         );
       }
     }
@@ -2037,22 +2296,22 @@ function createApp() {
     if (gameState.mode === 'zen') {
       while (gameState.score >= gameState.zenNextMilestone) {
         const hit = gameState.zenNextMilestone;
-        gameState.zenNextMilestone = hit < 1400 ? 1400 : hit < 2800 ? 2800 : hit < 4800 ? 4800 : hit + 3000;
-        queueBlessing(`达成 ${hit} 分里程碑`);
+        gameState.zenNextMilestone = hit < 1400 ? 1400 : hit < 2800 ? 2800 : hit < 4800 ? 4800 : hit + 3200;
+        grantMilestoneRelicOrSupply(`达成 ${hit} 分`);
       }
     }
 
     if (gameState.mode === 'rush') {
       while (gameState.score >= gameState.rushNextMilestone) {
         const hit = gameState.rushNextMilestone;
-        gameState.rushNextMilestone = hit < 2800 ? 2800 : hit < 5000 ? 5000 : hit + 3200;
-        queueBlessing(`突破 ${hit} 分`);
+        gameState.rushNextMilestone = hit < 2600 ? 2600 : hit < 4800 ? 4800 : hit + 3400;
+        grantMilestoneRelicOrSupply(`突破 ${hit} 分`);
       }
     }
   }
 
   // =========================================================================
-  // 4.0 Phase 2: 5-Shift Progression, Carry-Over & Inter-Shift Prep Shop
+  // 4.1 Persistent-Jar 5-Shift Progression & Inter-Shift Prep Shop
   // =========================================================================
   const ENDLESS_HAZARD_PAIRS = [
     ['glaze_ring', 'divider'],
@@ -2085,8 +2344,8 @@ function createApp() {
     const n = Math.max(1, Math.floor(Number(shiftNum) || 1));
     if (n === 1) return [];
     if (n === 2) return ['glaze_ring'];
-    // Shift 3 focuses purely on teaching Frozen Treats without stacking a stage obstacle!
-    if (n === 3) return [];
+    // Shift 3 Mini-Boss now features real stage Butter Bumpers + 2 Frozen Treats!
+    if (n === 3) return ['bumpers'];
     // Shift 4 introduces random stage obstacles (divider / bumpers / fast_fresh) + Midnight Party!
     if (n === 4) {
       const pool = ['divider', 'bumpers', 'fast_fresh'];
@@ -2168,12 +2427,23 @@ function createApp() {
     gameState.obstacles = obs;
   }
 
+  /**
+   * Persistent Hot-Oven Jar: carries ALL existing non-yarn desserts (up to 12) across shifts
+   * so spatial layout and serving-to-excavate genuinely matter from Shift 1 through Shift 5!
+   */
   function computeCarryOverPlan() {
     const desserts = gameState.entities
-      .filter((e) => !e.merged && !e.isWildcard && !e.isYarnBall)
-      .sort((a, b) => b.tier - a.tier || (b.isGolden ? 1 : 0) - (a.isGolden ? 1 : 0));
-    const carried = desserts.slice(0, 2).map((e) => ({ tier: e.tier, isGolden: !!e.isGolden }));
-    const leftoverLow = desserts.slice(2).filter((e) => e.tier <= 4).length;
+      .filter((e) => !e.merged && !e.isYarnBall && !(e.frozenHp > 0))
+      .sort((a, b) => b.y - a.y || b.tier - a.tier);
+    const carried = desserts.slice(0, 12).map((e) => ({
+      tier: e.tier,
+      isGolden: !!e.isGolden,
+      isWildcard: !!e.isWildcard,
+      agedStacks: e.agedStacks || 0,
+      x: +e.x.toFixed(1),
+      y: +e.y.toFixed(1)
+    }));
+    const leftoverLow = desserts.slice(12).filter((e) => e.tier <= 4).length;
     return { carried, cleanTip: leftoverLow };
   }
 
@@ -2228,7 +2498,6 @@ function createApp() {
     app.toastQueue = [];
     app.minorToast = null;
     app.syncToastLegacyFields();
-    gameState.paused = true;
     app.openModal('prep_shop');
     saveActiveRunCheckpoint({ syncCloud: true });
   }
@@ -2422,16 +2691,18 @@ function createApp() {
     gameState.shiftStepRefunds = 0;
     gameState.freeSkipsLeft = 1;
     gameState.mugiBankCoinHits = 0;
+    gameState.mikanFirstServeUsed = false;
     gameState.shiftClearedFlag = false;
     gameState.shiftResolveDelay = 0;
     gameState.dangerDuration = 0;
     gameState.activeEvent = null;
     gameState.serveCascadeTimer = 0;
     gameState.serveCascadeMerges = 0;
+    gameState.cascadeStaleRefundPending = false;
     gameState.antigravTimer = 0;
     gameState.globalResonanceTimer = 0;
 
-    // Rebuild jar board with Hot-Oven Carry-Over (top 2 treats) + fresh shift starter treats!
+    // Rebuild jar board with Persistent Jar Carry-Over (up to 12 treats) + stage mechanics!
     gameState.entities = [];
     gameState.flyingServes = [];
     gameState.shockwaves = [];
@@ -2442,7 +2713,6 @@ function createApp() {
     if (!isCarryOver || cfg.shift === 1) {
       spawnStarterBoard('chef');
     } else {
-      // Fresh starter ingredients tailored to each shift (including frozen Boss pieces!)
       const extraSpecs =
         cfg.shift === 2
           ? [{ tier: 2 }, { tier: 3 }]
@@ -2453,37 +2723,57 @@ function createApp() {
           : [{ tier: 4, frozenHp: 1 }, { tier: 5, frozenHp: 1 }, { tier: 3 }];
       frozenSeeded = extraSpecs.filter((s) => s.frozenHp > 0).length;
 
+      const frozenExtras = extraSpecs.filter((s) => s.frozenHp > 0);
+      const normalExtras =
+        carried.length < 2
+          ? extraSpecs.filter(
+              (s) => !(s.frozenHp > 0) && !carried.some((c) => c.tier === s.tier && !c.isWildcard)
+            )
+          : [];
+
       const hasDivider = app.hasShiftHazard('divider');
       if (hasDivider) {
         // Divider-safe split-bay placement: strictly keep every treat inside Left [30,213] or Right [227,410]
+        const leftLaneX = [76, 168, 122];
+        const rightLaneX = [364, 272, 318];
+        let leftIdx = 0;
+        let rightIdx = 0;
         let leftTopY = JAR.floorY - 6;
         let rightTopY = JAR.floorY - 6;
         const placeInChamber = (tier, chamber, metaOpts) => {
-          const r = TIERS[tier - 1].radius;
+          const r = metaOpts && metaOpts.wildcard ? WILDCARD_RADIUS : TIERS[tier - 1].radius;
           let cx;
           let cy;
           if (chamber === 'left') {
-            cx = Math.max(JAR.left + r + 5, Math.min(213 - r - 5, 122));
-            cy = Math.max(JAR.neckY + r + 28, leftTopY - r - 5);
-            leftTopY = cy - r - 4;
+            const rawX = leftLaneX[leftIdx % leftLaneX.length];
+            leftIdx++;
+            cx = Math.max(JAR.left + r + 5, Math.min(213 - r - 5, rawX));
+            cy = Math.max(JAR.dangerY + r + 18, leftTopY - r * 1.15 - 2);
+            leftTopY = Math.min(leftTopY, cy - r * 0.65);
           } else {
-            cx = Math.max(227 + r + 5, Math.min(JAR.right - r - 5, 318));
-            cy = Math.max(JAR.neckY + r + 28, rightTopY - r - 5);
-            rightTopY = cy - r - 4;
+            const rawX = rightLaneX[rightIdx % rightLaneX.length];
+            rightIdx++;
+            cx = Math.max(227 + r + 5, Math.min(JAR.right - r - 5, rawX));
+            cy = Math.max(JAR.dangerY + r + 18, rightTopY - r * 1.15 - 2);
+            rightTopY = Math.min(rightTopY, cy - r * 0.65);
           }
-          createEntity(tier, cx, cy, 0, 0, false, 0, 0, {
+          const ent = createEntity(tier, cx, cy, 0, 0, false, 0, 0, {
             preSettled: true,
-            preSettledAge: cy < JAR.dangerY + r + 18 ? 0.35 : 1.0,
+            preSettledAge: 0.35,
             ...metaOpts
           });
+          if (metaOpts && metaOpts.agedStacks) ent.agedStacks = metaOpts.agedStacks;
         };
 
         for (let ci = 0; ci < carried.length; ci++) {
           const c = carried[ci];
-          placeInChamber(c.tier, ci % 2 === 0 ? 'left' : 'right', { golden: !!c.isGolden });
+          const prefChamber = typeof c.x === 'number' ? (c.x < 220 ? 'left' : 'right') : ci % 2 === 0 ? 'left' : 'right';
+          placeInChamber(c.tier, prefChamber, {
+            golden: !!c.isGolden,
+            wildcard: !!c.isWildcard,
+            agedStacks: c.agedStacks || 0
+          });
         }
-        const frozenExtras = extraSpecs.filter((s) => s.frozenHp > 0);
-        const normalExtras = extraSpecs.filter((s) => !(s.frozenHp > 0));
         for (let fi = 0; fi < frozenExtras.length; fi++) {
           const fs = frozenExtras[fi];
           placeInChamber(fs.tier, fi % 2 === 0 ? 'left' : 'right', { frozenHp: fs.frozenHp });
@@ -2493,24 +2783,33 @@ function createApp() {
           placeInChamber(ns.tier, leftTopY >= rightTopY ? 'left' : 'right', {});
         }
       } else {
-        const slotsX = [118, 322, 176, 264, 220];
+        const slotsX = [108, 332, 178, 262, 220, 142, 298];
         let slotIdx = 0;
         for (const c of carried) {
-          const cx = slotsX[slotIdx % slotsX.length];
+          const r = c.isWildcard ? WILDCARD_RADIUS : TIERS[c.tier - 1].radius;
+          const rawX = typeof c.x === 'number' ? c.x : slotsX[slotIdx % slotsX.length];
+          const rawY = typeof c.y === 'number' ? c.y : JAR.floorY - r - 8;
           slotIdx++;
-          const r = TIERS[c.tier - 1].radius;
-          createEntity(c.tier, cx, JAR.floorY - r - 8, 0, 0, false, 0, 0, {
+          const cx = Math.max(JAR.left + r + 6, Math.min(JAR.right - r - 6, rawX));
+          const cy = Math.max(JAR.dangerY + r + 20, Math.min(JAR.floorY - r - 6, rawY));
+          const ent = createEntity(c.tier, cx, cy, 0, 0, false, 0, 0, {
             preSettled: true,
-            golden: !!c.isGolden
+            preSettledAge: 0.35,
+            golden: !!c.isGolden,
+            wildcard: !!c.isWildcard
           });
+          if (c.agedStacks) ent.agedStacks = c.agedStacks;
         }
-        for (const spec of extraSpecs) {
+        const combinedExtras = [...frozenExtras, ...normalExtras];
+        for (const spec of combinedExtras) {
           const cx = slotsX[slotIdx % slotsX.length];
           slotIdx++;
           const r = TIERS[spec.tier - 1].radius;
-          const baseOffset = spec.frozenHp > 0 ? 58 : 78;
-          createEntity(spec.tier, cx, JAR.floorY - r - baseOffset - slotIdx * 6, 0, 0, false, 0, 0, {
+          const baseOffset = spec.frozenHp > 0 ? 78 : 96;
+          const cy = Math.max(JAR.dangerY + r + 22, JAR.floorY - r - baseOffset - (slotIdx % 4) * 8);
+          createEntity(spec.tier, cx, cy, 0, 0, false, 0, 0, {
             preSettled: true,
+            preSettledAge: 0.35,
             frozenHp: spec.frozenHp || 0
           });
         }
@@ -2552,7 +2851,8 @@ function createApp() {
         `第 ${cfg.shift} 幕 · ${cfg.name}`,
         `目标 ¥${cfg.target} · ${gameState.stepsMax}步${hazSummary}`,
         '#ffe570',
-        shiftIcon
+        shiftIcon,
+        3
       );
       const speechNote = hazDefs.length > 0
         ? `本幕机关：${hazDefs.map((h) => h.name).join(' + ')}！${cfg.desc}`
@@ -2599,14 +2899,12 @@ function createApp() {
 
   function addFeverEnergy(amount) {
     if (gameState.feverTimer > 0) return;
-    const feverLv = app.getPerkLevel('fever');
     const rushMult = gameState.mode === 'rush' ? 1.85 : 1.0;
-    const meteorMult = gameState.activeEvent && gameState.activeEvent.kind === 'meteor' ? 1.3 : 1.0;
-    const boosted = amount * (1 + feverLv * 0.28) * rushMult * meteorMult;
+    const meteorMult = gameState.activeEvent && gameState.activeEvent.kind === 'meteor' ? 1.25 : 1.0;
+    const boosted = amount * rushMult * meteorMult;
     gameState.feverEnergy = Math.min(100, gameState.feverEnergy + boosted);
     if (gameState.feverEnergy >= 100) {
-      const lunaFeverBonus = saveData.selectedPatron === 'luna' ? 2.0 : 0;
-      const dur = 10.0 + feverLv * 3.5 + lunaFeverBonus;
+      const dur = 10.0;
       gameState.feverMaxDuration = dur;
       gameState.feverTimer = dur;
       gameState.feverBonusUsed = 0;
@@ -2616,14 +2914,10 @@ function createApp() {
       audio.playFeverStart();
       audio.setFeverMode(true);
       platform.vibrateShort('medium');
-      setPatronSpeech(app.activePatron, '星光狂热开启！连击最高 5 倍冲呀！', 4.8);
-      spawnSparkleBurst(JAR.canvasW / 2, 240, '#ffdf6b', 36);
+      setPatronSpeech(app.activePatron, '星光狂热开启！全罐磁吸加速连合！', 4.8);
+      spawnSparkleBurst(JAR.canvasW / 2, 240, '#ffdf6b', 28);
       spawnShockwave(JAR.canvasW / 2, 260, 190, '#ffd85d', 4.5);
-      showComboBanner('星光磁吸狂热', `${dur.toFixed(0)}秒极速连击 · 最高 5×`, '#ffe36e', 'icon_flame');
-
-      if (gameState.mode === 'rush') {
-        queueBlessing('狂热充能达成');
-      }
+      showComboBanner('星光磁吸狂热', `${dur.toFixed(0)}秒磁吸连合 · 最高 3×`, '#ffe36e', 'icon_flame', 2);
     }
   }
 
@@ -2676,21 +2970,16 @@ function createApp() {
 
   function triggerShopEvent(forcedKind = null) {
     if (!gameState.running || gameState.over) return null;
-    let kind = forcedKind;
-    if (!kind) {
-      const candidates = ['meteor', 'yarn', 'chime'].filter((k) => k !== gameState.lastEventKind);
-      kind = candidates[Math.floor(Math.random() * candidates.length)];
-    }
-    if (kind === 'yarn' && !forcedKind && (isJarNearDanger() || hasYarnBallInJar())) {
-      kind = Math.random() < 0.5 ? 'meteor' : 'chime';
-    }
+    if (!forcedKind && gameState.mode === 'zen') return null;
+    // Consolidated random event: ONLY Meteor Wish ('meteor') fires organically (forcedKind still supported for Act 4 / debug)
+    const kind = forcedKind || 'meteor';
     gameState.lastEventKind = kind;
     audio.playEventStart(kind);
     const activePatron = app.activePatron;
 
     if (kind === 'meteor') {
       gameState.activeEvent = { kind: 'meteor', timer: 12.0, maxTimer: 12.0 };
-      let remaining = 4;
+      let remaining = 3;
       if (!gameState.curMeta.wildcard && !gameState.curMeta.golden && remaining > 0) {
         if (Math.random() < 0.75) gameState.curMeta.golden = true;
         remaining--;
@@ -2704,21 +2993,20 @@ function createApp() {
         { x: JAR.right - 20, y: JAR.neckY + 26, vx: -360, vy: 135, life: 0.95, maxLife: 0.95 },
         { x: JAR.right - 70, y: JAR.neckY + 58, vx: -320, vy: 125, life: 1.15, maxLife: 1.15 }
       );
-      showComboBanner('流星许愿夜', '75% 镀金 · 狂热充能 +30%', '#ffe888', 'icon_stardust');
+      showComboBanner('流星镀金夜', '后续手牌 75% 镀金 · 狂热充能 +25%', '#ffe888', 'icon_stardust', 2);
       setPatronSpeech(activePatron, '流星把面糊镀上金糖霜啦，快许愿！', 4.4);
     } else if (kind === 'yarn') {
       gameState.activeEvent = { kind: 'yarn', timer: 0, maxTimer: 0 };
       const sx = 120 + Math.random() * 200;
       createYarnBallEntity(sx, JAR.neckY + 24);
       spawnSparkleBurst(sx, JAR.neckY + 28, '#ff9cb8', 18);
-      showComboBanner('猫咪捣蛋时间', '附近合成2次或摇罐震碎爆赏', '#ffa8c4', 'yarn_ball');
+      showComboBanner('猫咪捣蛋时间', '附近合成2次或摇罐震碎爆赏', '#ffa8c4', 'yarn_ball', 2);
       setPatronSpeech(activePatron, '毛线球滚进去啦！在旁边合两次震碎它！', 4.6);
     } else {
       gameState.activeEvent = { kind: 'chime', timer: 14.0, maxTimer: 14.0 };
       gameState.jarFlash = Math.max(gameState.jarFlash, 0.5);
-      spawnSparkleBurst(JAR.canvasW / 2, JAR.neckY + 30, '#ffe072', 24);
-      showComboBanner('黄金烘焙钟', '14秒全合成 +45% · 连击 +0.5s', '#ffe26a', 'serve_bell');
-      setPatronSpeech(activePatron, '壁炉黄金钟响了！趁 14 秒疯狂连锁！', 4.4);
+      spawnSparkleBurst(JAR.canvasW / 2, JAR.neckY + 30, '#ffe072', 20);
+      showComboBanner('黄金烘焙钟', '14秒连击窗延长 +0.5s', '#ffe26a', 'serve_bell', 2);
     }
     return kind;
   }
@@ -2769,7 +3057,7 @@ function createApp() {
         gameState.jarFlash = Math.max(gameState.jarFlash, 0.5);
         const coinTxt = coinBonus > 0 ? ` +${coinBonus}币` : '';
         spawnPopup(yb.x, yb.y - 18, `爆裂 +${pts}${coinTxt}`, '#ffe57e', 18);
-        showComboBanner('毛线球爆裂', `+${pts} · +${dust}星尘${coinTxt} · +25%狂热`, '#ffb3d6', 'yarn_ball');
+        showComboBanner('毛线球爆裂', `+${pts} · +${dust}星露${coinTxt} · +25%狂热`, '#ffb3d6', 'yarn_ball', 2);
       }
     }
 
@@ -2785,6 +3073,7 @@ function createApp() {
   function spawnIceShatterParticles(x, y, r = 30) {
     const colors = ['#e8fcff', '#a4e8ff', '#62c4f8', '#ffffff'];
     for (let i = 0; i < 18; i++) {
+      if (gameState.particles.length >= 160) break;
       const ang = (Math.PI * 2 * i) / 18 + (Math.random() - 0.5) * 0.35;
       const spd = 90 + Math.random() * 170;
       gameState.particles.push({
@@ -2859,13 +3148,12 @@ function createApp() {
 
     audio.playWindGust();
     platform.vibrateShort('medium');
-    showComboBanner('星风吹散', `清顶 ${clearCount} 颗 · -5.0s`, '#ff9b82', 'icon_wind');
+    showComboBanner('星风吹散', `清顶 ${clearCount} 颗 · -5.0s`, '#ff9b82', 'icon_wind', 2);
   }
 
   // Tool & Chef Signature Skill Actions
   function armOrUseToolFn(key) {
-    if (!gameState.running || gameState.over) return;
-    if (app.activeModal === 'blessing') app.closeModal();
+    if (!gameState.running || gameState.over || gameState.paused) return;
     audio.ensureCtx();
 
     if (gameState.activeSkillMode) {
@@ -2881,12 +3169,12 @@ function createApp() {
     if (gameState.tools[key] <= 0) {
       const cost = gameState.toolCosts[key];
       if (gameState.stardust < cost) {
-        app.showToast(`星尘不足（需 ${cost}）`, { icon: 'icon_stardust', tone: 'warn' });
+        app.showToast(`星露不足（需 ${cost}）`, { icon: 'icon_stardust', tone: 'warn' });
         return;
       }
       gameState.stardust -= cost;
       gameState.tools[key] = 1;
-      app.showToast(`-${cost} 星尘补充道具`, { icon: 'icon_stardust', tone: 'info' });
+      app.showToast(`-${cost} 星露补充道具`, { icon: 'icon_stardust', tone: 'info' });
     }
 
     if (key === 'shake') {
@@ -2913,8 +3201,7 @@ function createApp() {
   }
 
   function activateChefSkillFn() {
-    if (!gameState.running || gameState.over) return;
-    if (app.activeModal === 'blessing') app.closeModal();
+    if (!gameState.running || gameState.over || gameState.paused) return;
     audio.ensureCtx();
 
     if (gameState.activeSkillMode) {
@@ -2955,7 +3242,7 @@ function createApp() {
       audio.playChefSkill('mugi');
       platform.vibrateShort('medium');
       spawnSparkleBurst(gameState.dropX, JAR.dropY + 12, '#ff8e52', 24);
-      showComboBanner('元气重锤装填', '撞击首颗甜品直接升阶 + 震波', '#ff9e66', 'icon_flame');
+      showComboBanner('元气重锤装填', '撞击首颗甜品直接升阶 + 震波', '#ff9e66', 'icon_flame', 2);
     }
   }
 
@@ -2967,8 +3254,7 @@ function createApp() {
   }
 
   function swapHoldPocketFn() {
-    if (!gameState.running || gameState.over || gameState.activeToolMode || gameState.activeSkillMode) return;
-    if (app.activeModal === 'blessing') app.closeModal();
+    if (!gameState.running || gameState.over || gameState.paused || gameState.activeToolMode || gameState.activeSkillMode) return;
     if (!gameState.canHoldThisTurn) {
       app.showToast('发射后再交换暂存', { icon: 'icon_restart', tone: 'warn' });
       return;
@@ -3008,7 +3294,7 @@ function createApp() {
       speed,
       launchVx: Math.sin(ang) * speed,
       launchVy: Math.cos(ang) * speed,
-      isAngled: Math.abs(ang) > 0.035
+      isAngled: Math.abs(ang) >= 0.155
     };
   }
 
@@ -3071,10 +3357,14 @@ function createApp() {
       frozenFlash: 0,
       isBankLaunched: !!meta.isBankLaunched,
       isMeteorShot: !!meta.isMeteorShot,
+      hitBodyBeforeWall: false,
+      lastWallBounceAge: undefined,
       wallBounces: 0,
       agedStacks: 0,
       bumperCrit: false,
       bumperHits: 0,
+      bumperRewardCount: 0,
+      lastBumperHitAge: -1,
       resonanceTimer: 0,
       spinBoostTimer: 0,
       spinBoostDir: 1,
@@ -3140,7 +3430,8 @@ function createApp() {
       finalVy *= boost;
     }
 
-    const angledShot = isBankLaunched || Math.abs(finalVx) > 55;
+    // Require genuine deliberate lateral bank angle (|vx| >= 140 px/s) to arm Bank-Shot
+    const angledShot = Math.abs(finalVx) >= 140 || (isBankLaunched && Math.abs(finalVx) >= 125);
     const dropped = createEntity(
       gameState.curTier,
       LAUNCH_X,
@@ -3173,19 +3464,26 @@ function createApp() {
       if (gameState.stepsLeft === 0) {
         gameState.shiftResolveDelay = 1.35;
       }
-      // Shift 4 Midnight Cat Party: scheduled events on step 6 & 12
+      // Shift 4 Midnight Cat Party: scheduled Meteor Wish on step 6 & 12
       if (gameState.shiftModifier === 'party_events') {
-        if (gameState.shiftStepsUsed === 6) triggerShopEvent('meteor');
-        else if (gameState.shiftStepsUsed === 12) triggerShopEvent('chime');
+        if (gameState.shiftStepsUsed === 6 || gameState.shiftStepsUsed === 12) triggerShopEvent('meteor');
       }
       // Shift 5 / Endless Grand Prix: every 6 steps triggers Judge Rush Order (+2 steps reward!)
+      // Never overwrite a half-completed VIP order — route to table 0 if table 1 already has progress!
       if (gameState.shiftModifier === 'grand_prix' && gameState.shiftStepsUsed > 0 && gameState.shiftStepsUsed % 6 === 0) {
+        const vipHasPartial =
+          gameState.orders.length >= 2 &&
+          gameState.orders[1] &&
+          !gameState.orders[1].completed &&
+          gameState.orders[1].slots.some((s) => s.done);
+        const targetIdx = vipHasPartial ? 0 : 1;
         const rushOrd = generateTableOrder('vip', false, { isJudgeRush: true });
-        if (gameState.orders.length >= 2) gameState.orders[1] = rushOrd;
+        rushOrd.slotOrigin = targetIdx === 0 ? 'quick' : 'vip';
+        if (gameState.orders.length >= 2) gameState.orders[targetIdx] = rushOrd;
         else gameState.orders.push(rushOrd);
         gameState.order = rushOrd;
         audio.playOrderStamp();
-        showComboBanner('评委突击急单', '4步内出餐 ×2.5 · 返 +2步', '#ffe570', 'icon_judge');
+        showComboBanner('评委突击急单', '4步内出餐 ×2.5 · 返 +2步', '#ffe570', 'icon_judge', 2);
       }
     }
 
@@ -3199,7 +3497,7 @@ function createApp() {
       }
     }
 
-    // Relic: rel_antigrav — every 4 drops flips gravity for 1.3s (×2.2 merges!)
+    // Relic: rel_antigrav — every 4 drops flips gravity for 1.3s (+80% merge bonus!)
     if (app.hasRelic('rel_antigrav')) {
       gameState.antigravDropCounter = (gameState.antigravDropCounter || 0) + 1;
       if (gameState.antigravDropCounter >= 4) {
@@ -3211,7 +3509,7 @@ function createApp() {
           if (!e.merged) e.vy -= 95 + Math.random() * 55;
         }
         spawnSparkleBurst(JAR.canvasW * 0.5, 290, '#d6b2ff', 24);
-        showComboBanner('月光反重力洗牌', '1.3秒重力倒置 · 合成 ×2.2', '#dfc2ff', 'icon_ufo');
+        showComboBanner('月光反重力洗牌', '1.3秒重力倒置 · 合成 +80%', '#dfc2ff', 'icon_ufo', 2);
       }
     }
 
@@ -3258,13 +3556,14 @@ function createApp() {
     gameState.heldActionAnim = null;
     gameState.heldActionCooldown = 1.5 + Math.random() * 1.5;
     clampDropX();
-    saveActiveRunCheckpoint();
+    scheduleCheckpointSave(1200);
     return true;
   }
 
-  // Particles & FX
+  // Particles & FX (capped at 160 to guarantee smooth 60fps on budget devices)
   function spawnSparkleBurst(x, y, color, count = 16) {
     for (let i = 0; i < count; i++) {
+      if (gameState.particles.length >= 160) break;
       const ang = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.4;
       const spd = 65 + Math.random() * 175;
       gameState.particles.push({
@@ -3288,6 +3587,7 @@ function createApp() {
     const tx = -ny;
     const ty = nx;
     for (let i = 0; i < count; i++) {
+      if (gameState.particles.length >= 160) break;
       const side = (Math.random() - 0.5) * 2;
       const tangSpd = side * (35 + Math.random() * 95 * (0.5 + intensity));
       const normSpd = (18 + Math.random() * 55) * (0.4 + intensity * 0.6);
@@ -3324,16 +3624,25 @@ function createApp() {
     gameState.shockwaves.push({ x, y, r: 8, maxR, color, lineWidth, life: 0.38, maxLife: 0.38 });
   }
 
-  function showComboBanner(text, sub = '', color = '#ffe56b', icon = '') {
-    gameState.comboBanner = { text, sub, color, icon, life: 1.35, maxLife: 1.35 };
+  function showComboBanner(text, sub = '', color = '#ffe56b', icon = '', priority = 1) {
+    if (
+      gameState.comboBanner &&
+      gameState.comboBanner.life > 0.25 &&
+      (gameState.comboBanner.priority || 1) > priority
+    ) {
+      return;
+    }
+    gameState.comboBanner = { text, sub, color, icon, priority, life: 1.35, maxLife: 1.35 };
   }
 
   function applyMergeShockwaveImpulse(mx, my, bornR, nextTier, excludeId) {
     const shockLv = app.getPerkLevel('shockwave');
+    const hasShockRelic = app.hasRelic('rel_shockwave');
+    const relicShockMult = hasShockRelic ? 1.65 : 1.0;
     const isFever = gameState.feverTimer > 0;
     const mugiBoost = saveData.selectedPatron === 'mugi' && nextTier >= 4 ? 1.3 : 1.0;
-    const blastRadius = bornR * (2.35 + shockLv * 0.55) + 40;
-    const baseForce = (55 + nextTier * 18 + shockLv * 52 + (isFever ? 32 : 0)) * mugiBoost;
+    const blastRadius = (bornR * (2.35 + shockLv * 0.55) + 40) * relicShockMult;
+    const baseForce = (55 + nextTier * 18 + shockLv * 52 + (isFever ? 32 : 0)) * mugiBoost * relicShockMult;
 
     for (const other of gameState.entities) {
       if (other.id === excludeId || other.merged) continue;
@@ -3389,7 +3698,7 @@ function createApp() {
     const traitCnt = app.getArchetypeCount('trait');
     const rMult = traitCnt >= 2 ? 1.22 : 1.0;
 
-    // Archetype Synergy: #异能 2-piece (+¥60) & 3-piece (+15% skill & +4 stardust)
+    // Archetype Synergy: #异能 2-piece (+¥60) & 3-piece (+15% skill & +4星露)
     if (tier >= 3 && traitCnt >= 2) {
       const synPts = Math.round(60 * app.getFeverMultiplier() * app.getGlobalRevenueMult());
       addScore(synPts);
@@ -3577,7 +3886,7 @@ function createApp() {
         if (wb.count === 1) {
           spawnPopup(wb.x + wb.nx * 24, wb.y - 10, '弹壁', '#b4f6ff', 13);
         } else if (wb.count === 2 && app.hasRelic('rel_bouncy')) {
-          spawnPopup(wb.x + wb.nx * 24, wb.y - 10, '二段弹壁 ×2.8', '#9cf4ff', 14.5);
+          spawnPopup(wb.x + wb.nx * 24, wb.y - 10, '二段弹壁 +90%', '#9cf4ff', 14.5);
         }
       }
     }
@@ -3612,7 +3921,7 @@ function createApp() {
           triggerDessertTrait(tgt, tgt.x, tgt.y);
           notifyTreatSynthesized(nextTier, tgt);
           spawnPopup(tgt.x, tgt.y - tgt.r * 0.6, `重锤升阶 +${pts}`, '#ffba78', 18);
-          showComboBanner('元气重锤命中', `${def.name} 升阶 +${pts}`, '#ffaa66', 'icon_flame');
+          showComboBanner('元气重锤命中', `${def.name} 升阶 +${pts}`, '#ffaa66', 'icon_flame', 2);
         }
       }
     }
@@ -3661,12 +3970,12 @@ function createApp() {
       const critLv = app.getPerkLevel('critJump');
       const goldenLv = app.getPerkLevel('golden');
       const rainbowLv = app.getPerkLevel('rainbow');
+      const hasCritRelic = app.hasRelic('rel_crit_star');
       const upComboBonus = getComboUpgradeBonus();
       const isChimeEvent = !!(gameState.activeEvent && gameState.activeEvent.kind === 'chime');
-      const chimeScoreMult = isChimeEvent ? 1.45 : 1.0;
       const chimeComboBonus = isChimeEvent ? 0.5 : 0;
       const globalMult = app.getGlobalRevenueMult();
-      const antiGravMult = gameState.antigravTimer > 0 ? 2.2 : 1.0;
+      const antiGravActive = gameState.antigravTimer > 0;
       const cascadeArchCnt = app.getArchetypeCount('cascade');
       const bankArchCnt = app.getArchetypeCount('bank');
 
@@ -3675,14 +3984,18 @@ function createApp() {
         const isTwinWild = !!(a.isWildcard && b.isWildcard);
         const isWildMerge = !isTwinWild && !!(a.isWildcard || b.isWildcard);
         const isGoldenMerge = !!(a.isGolden || b.isGolden);
-        const maxBounces = Math.max(
-          a.age < 2.4 ? a.wallBounces || 0 : 0,
-          b.age < 2.4 ? b.wallBounces || 0 : 0
-        );
+        const aBounces =
+          a.age < 2.2 && typeof a.lastWallBounceAge === 'number' && a.age - a.lastWallBounceAge <= 1.35
+            ? a.wallBounces || 0
+            : 0;
+        const bBounces =
+          b.age < 2.2 && typeof b.lastWallBounceAge === 'number' && b.age - b.lastWallBounceAge <= 1.35
+            ? b.wallBounces || 0
+            : 0;
+        const maxBounces = Math.max(aBounces, bBounces);
         const isBankShot = maxBounces > 0;
         const isMeteorMerge = !!(a.isMeteorShot || b.isMeteorShot);
         const hasBumperCrit = !!(a.bumperCrit || b.bumperCrit);
-        const bumperMult = hasBumperCrit ? 1.35 : 1.0;
 
         const targetBody = isWildMerge ? (a.isWildcard ? b : a) : null;
         const mx = targetBody ? targetBody.x : (a.x + b.x) * 0.5;
@@ -3704,63 +4017,81 @@ function createApp() {
         // Base skill recharge from merging
         addSkillEnergy(5);
 
-        // Luna Rainbow Wildcard Merge Bounty (+5 coins in Chef & +6 stardust)
+        // Luna Rainbow Wildcard Merge Bounty (+5 coins in Chef & +6星露)
         if ((isWildMerge || isTwinWild) && saveData.selectedPatron === 'luna') {
           const lunaDust = addRunStardust(6);
           const lunaCoin = gameState.mode === 'chef' ? addCoins(5) : 0;
-          spawnPopup(mx, my - 46, `星兔虹赏${lunaCoin > 0 ? ` +${lunaCoin}币` : ''} +${lunaDust}星尘`, '#e5caff', 13);
+          spawnPopup(mx, my - 46, `星兔虹赏${lunaCoin > 0 ? ` +${lunaCoin}币` : ''} +${lunaDust}星露`, '#e5caff', 13);
         }
 
         // Serve Cascade Avalanche detection!
-        let cascadeMult = 1.0;
+        let cascadeAdd = 0;
         let cascadeHitNum = 0;
         if (gameState.serveCascadeTimer > 0) {
           gameState.serveCascadeMerges++;
           cascadeHitNum = gameState.serveCascadeMerges;
           const extendMin = app.hasRelic('rel_domino') ? 2.6 : 1.85;
           gameState.serveCascadeTimer = Math.max(gameState.serveCascadeTimer, extendMin);
-          cascadeMult =
-            (CASCADE_MULTIPLIERS[Math.min(CASCADE_MULTIPLIERS.length - 1, cascadeHitNum)] +
-              (app.hasRelic('rel_domino') ? cascadeHitNum * 0.5 : 0)) *
-            (cascadeArchCnt >= 3 ? 1.35 : 1.0);
+          cascadeAdd =
+            CASCADE_MULTIPLIERS[Math.min(CASCADE_MULTIPLIERS.length - 1, cascadeHitNum)] -
+            1 +
+            (app.hasRelic('rel_domino') ? cascadeHitNum * 0.35 : 0) +
+            (cascadeArchCnt >= 3 ? 0.5 : 0);
           if (cascadeHitNum > gameState.maxAvalancheRun) gameState.maxAvalancheRun = cascadeHitNum;
           if (cascadeHitNum > (saveData.lifetimeStats.maxAvalancheEver || 0)) {
             saveData.lifetimeStats.maxAvalancheEver = cascadeHitNum;
             persistSaveData();
           }
           audio.playCascadeHit(cascadeHitNum);
+
+          // Refund the 1-step stale order serve cost immediately on the FIRST cascade merge!
+          if (cascadeHitNum >= 1 && gameState.cascadeStaleRefundPending && gameState.mode === 'chef') {
+            gameState.cascadeStaleRefundPending = false;
+            gameState.stepsLeft++;
+            gameState.shiftResolveDelay = 0;
+            spawnPopup(JAR.canvasW / 2, 122, '巧手抽底 · 返还1步', '#9cf4ff', 15.5);
+          }
+
           if (cascadeHitNum === 2) {
             addSkillEnergy(20);
             const avDust = addRunStardust(12);
             const hasPerpetual = app.hasRelic('rel_perpetual');
+            const refundCap = hasPerpetual ? 6 : 3;
             let stepStr = '';
-            if (gameState.mode === 'chef' && (hasPerpetual || gameState.shiftStepRefunds < 3)) {
+            if (gameState.mode === 'chef' && gameState.shiftStepRefunds < refundCap) {
               gameState.stepsLeft++;
               gameState.shiftStepRefunds++;
+              gameState.shiftResolveDelay = 0;
               stepStr = ' · +1步';
-              if (hasPerpetual && gameState.orders && gameState.orders.length > 0) {
+              if (
+                hasPerpetual &&
+                gameState.orders &&
+                gameState.orders.length > 0 &&
+                gameState.orders[0] &&
+                !gameState.orders[0].slots.some((s) => s.done)
+              ) {
                 gameState.orders[0] = generateTableOrder(gameState.orders[0].slotOrigin || 'quick', false, {
                   doubleFresh: true
                 });
                 spawnPopup(JAR.canvasW / 2, 120, '翻台永动 · 鲜度翻倍', '#ffe588', 15);
               }
             }
-            spawnPopup(JAR.canvasW / 2, 148, `抽底雪崩连爆${stepStr} +20%技 +${avDust}星尘`, '#9cf4ff', 16.5);
+            spawnPopup(JAR.canvasW / 2, 148, `抽底雪崩连爆${stepStr} +20%技 +${avDust}星露`, '#9cf4ff', 16.5);
           }
         }
 
-        // Bank-Shot multiplier (rel_prism, rel_bouncy, rel_ricochet, #弹壁 synergy, Mugi patron & T2 Peach Puff)
-        let bankMult = 1.0;
+        // Bank-Shot additive bonus (rel_prism, rel_bouncy, rel_ricochet, #弹壁 synergy, Mugi patron & T2 Peach Puff)
+        let bankAdd = 0;
         let ricochetLeap = false;
         const forceBankGold = isBankShot && bankArchCnt >= 3;
         if (isBankShot) {
           const isT2Bank = !isWildMerge && !isTwinWild && a.tier === 2;
-          let baseBank = app.hasRelic('rel_prism') ? 2.0 : 1.5;
-          if (maxBounces >= 2 && app.hasRelic('rel_bouncy')) {
-            baseBank = Math.max(baseBank, 2.8);
-          }
-          const bankSynBonus = bankArchCnt >= 2 ? 0.35 : 0;
-          bankMult = baseBank + bankSynBonus + (saveData.selectedPatron === 'mugi' ? 0.4 : 0) + (isT2Bank ? 0.3 : 0);
+          bankAdd =
+            (app.hasRelic('rel_prism') ? 0.9 : 0.5) +
+            (maxBounces >= 2 && app.hasRelic('rel_bouncy') ? 0.4 : 0) +
+            (bankArchCnt >= 2 ? 0.3 : 0) +
+            (saveData.selectedPatron === 'mugi' ? 0.35 : 0) +
+            (isT2Bank ? 0.25 : 0);
           gameState.bankShotsLanded++;
           saveData.lifetimeStats.bankShotsTotal = (saveData.lifetimeStats.bankShotsTotal || 0) + 1;
           persistSaveData();
@@ -3792,13 +4123,17 @@ function createApp() {
             spawnPopup(mx + 26, my - 26, '+80 · +20%技', '#ffd27a', 13);
           } else {
             const mugiDust = addRunStardust(4);
-            spawnPopup(mx + 26, my - 26, `+${mugiDust}星尘 · +20%技`, '#ffd27a', 13);
+            spawnPopup(mx + 26, my - 26, `+${mugiDust}星露 · +20%技`, '#ffd27a', 13);
           }
         }
 
         const feverMult = app.getFeverMultiplier();
-        const comboStep = 0.28 + comboLv * 0.22;
-        const comboBonus = 1 + Math.min(2.2, (gameState.comboCount - 1) * comboStep);
+        const feverAdd = gameState.feverTimer > 0 ? Math.max(0, feverMult - 1) : 0;
+        const comboStep = 0.25 + comboLv * 0.15;
+        const comboAdd = Math.min(1.5, (gameState.comboCount - 1) * comboStep);
+        const antiGravAdd = antiGravActive ? 0.8 : 0;
+        const bumperAdd = hasBumperCrit ? 0.35 : 0;
+        const chimeAdd = isChimeEvent ? 0.35 : 0;
 
         if (gameState.feverTimer > 0 && gameState.comboCount >= 3 && gameState.feverBonusUsed < 4.5) {
           const ext = 0.8;
@@ -3820,9 +4155,11 @@ function createApp() {
 
         if (isTwinWild) {
           const born = createEntity(5, mx, my, mvx, mvy - 30, true, 0, 0, { golden: true });
-          const pts = Math.round(
-            480 * feverMult * comboBonus * chimeScoreMult * bankMult * cascadeMult * globalMult * antiGravMult * bumperMult
+          const twinSkillPool = Math.min(
+            4.5,
+            1 + comboAdd + feverAdd + bankAdd + cascadeAdd + antiGravAdd + bumperAdd + chimeAdd
           );
+          const pts = Math.round(480 * Math.min(8.0, twinSkillPool * globalMult));
           addScore(pts);
           addRunStardust(24);
           addFeverEnergy(45);
@@ -3835,7 +4172,7 @@ function createApp() {
           gameState.hitstopTimer = Math.max(gameState.hitstopTimer, 0.048);
           gameState.screenShake = Math.max(gameState.screenShake, 5.5);
           gameState.jarFlash = Math.max(gameState.jarFlash, 0.65);
-          showComboBanner('双彩虹奇迹', `黄金大福诞生 +${pts}`, '#ff9fd2', 'icon_rainbow');
+          showComboBanner('双彩虹奇迹', `黄金大福诞生 +${pts}`, '#ff9fd2', 'icon_rainbow', 2);
           spawnPopup(mx, my - 30, `双虹奇迹 +${pts}`, '#ffe57e', 20);
           notifyTreatSynthesized(5, born);
           continue;
@@ -3843,28 +4180,21 @@ function createApp() {
 
         const baseTier = targetBody ? targetBody.tier : a.tier;
         if (baseTier < 9) {
-          const critChance = critLv * 0.14 + (isMeteorMerge ? 0.5 : 0);
+          const critChance = (hasCritRelic ? 0.18 : 0) + critLv * 0.14 + (isMeteorMerge ? 0.5 : 0);
           const isCrit = baseTier <= 7 && (ricochetLeap || (critChance > 0 && Math.random() < critChance));
           const nextTier = Math.min(9, baseTier + (isCrit ? 2 : 1));
           const def = TIERS[nextTier - 1];
           const inheritGold = forceBankGold || (isGoldenMerge && Math.random() < 0.22 + goldenLv * 0.12);
           const born = createEntity(nextTier, mx, my, mvx, mvy, true, mAngle, mVr, { golden: inheritGold });
 
-          const goldMult = isGoldenMerge ? 2.5 : 1;
-          const critMult = isCrit ? 2.0 : 1;
-          const pts = Math.round(
-            def.points *
-              feverMult *
-              comboBonus *
-              goldMult *
-              critMult *
-              chimeScoreMult *
-              bankMult *
-              cascadeMult *
-              globalMult *
-              antiGravMult *
-              bumperMult
+          const critAdd = isCrit ? 0.75 : 0;
+          const skillPool = Math.min(
+            4.5,
+            1 + comboAdd + feverAdd + bankAdd + cascadeAdd + antiGravAdd + bumperAdd + chimeAdd + critAdd
           );
+          const goldMult = isGoldenMerge ? 2.0 : 1.0;
+          const totalMergeMult = Math.min(8.0, skillPool * goldMult * globalMult);
+          const pts = Math.round(def.points * totalMergeMult);
           addScore(pts);
 
           let dustBase = nextTier >= 4 ? Math.max(1, Math.floor(nextTier / 2)) : 0;
@@ -3886,7 +4216,7 @@ function createApp() {
           spawnShockwave(
             mx,
             my,
-            def.radius * 1.9 + 26 + app.getPerkLevel('shockwave') * 12,
+            def.radius * 1.9 + 26 + (app.hasRelic('rel_shockwave') ? 22 : 0),
             isWildMerge ? '#ff99cc' : isGoldenMerge ? '#ffe169' : isBankShot ? '#9cf4ff' : def.color,
             isCrit || isGoldenMerge || isBankShot ? 4.4 : 3.2
           );
@@ -3913,45 +4243,48 @@ function createApp() {
           }
 
           const sym = gameState.mode === 'chef' ? '¥' : '';
+          const bankDisplay = +(1 + bankAdd).toFixed(1);
+          const cascadeDisplay = +(1 + cascadeAdd).toFixed(1);
           let label = `+${sym}${pts}`;
           let popColor = isChimeEvent ? '#ffe778' : '#ffffff';
           let popSize = 15;
           if (cascadeHitNum >= 1) {
-            label = `雪崩×${cascadeMult.toFixed(1)} +${sym}${pts}`;
+            label = `雪崩×${cascadeDisplay.toFixed(1)} +${sym}${pts}`;
             popColor = '#9cf4ff';
             popSize = 18 + Math.min(4, cascadeHitNum);
-            showComboBanner(`抽底雪崩 ${cascadeHitNum} 连`, `倍率 ×${cascadeMult.toFixed(1)} · +${sym}${pts}`, '#9cf4ff', 'icon_wave');
-          } else if (antiGravMult > 1) {
-            label = `反重力×2.2 +${sym}${pts}`;
+            showComboBanner(`抽底雪崩 ${cascadeHitNum} 连`, `倍率 ×${cascadeDisplay.toFixed(1)} · +${sym}${pts}`, '#9cf4ff', 'icon_wave', 2);
+          } else if (antiGravActive) {
+            label = `反重力+80% +${sym}${pts}`;
             popColor = '#dfc2ff';
             popSize = 18;
           } else if (isBankShot) {
             label = ricochetLeap
               ? `神枪跳阶+2 +${sym}${pts}`
-              : `弹壁×${bankMult.toFixed(1)} +${sym}${pts}`;
+              : `弹壁×${bankDisplay.toFixed(1)} +${sym}${pts}`;
             popColor = '#9cf4ff';
             popSize = 18;
             showComboBanner(
               ricochetLeap ? '神枪跳阶箭' : '弹壁神球',
-              `${def.name} ×${bankMult.toFixed(1)} · +${sym}${pts}`,
+              `${def.name} ×${bankDisplay.toFixed(1)} · +${sym}${pts}`,
               '#9cf4ff',
-              ricochetLeap ? 'icon_arrow' : 'icon_billiard'
+              ricochetLeap ? 'icon_arrow' : 'icon_billiard',
+              1
             );
           } else if (isCrit) {
             label = `奇迹跳阶+2 +${sym}${pts}`;
             popColor = '#ffe46b';
             popSize = 19;
-            showComboBanner(`奇迹跳阶 · ${def.name}`, `双倍暴击 +${sym}${pts}`, '#ffe46b', 'icon_bolt');
+            showComboBanner(`奇迹跳阶 · ${def.name}`, `跳阶暴击 +${sym}${pts}`, '#ffe46b', 'icon_bolt', 2);
           } else if (isGoldenMerge) {
-            label = `黄金×2.5 +${sym}${pts}`;
+            label = `黄金×2.0 +${sym}${pts}`;
             popColor = '#ffe678';
             popSize = 18;
-            showComboBanner('黄金暴击 ×2.5', `+${sym}${pts} · +${dustGain}星尘`, '#ffe272', 'icon_stardust');
+            showComboBanner('黄金暴击 ×2.0', `+${sym}${pts} · +${dustGain}星露`, '#ffe272', 'icon_stardust', 1);
           } else if (isWildMerge) {
             label = `彩虹升阶 +${sym}${pts}`;
             popColor = '#ffb7e2';
             popSize = 18;
-            showComboBanner('彩虹升阶', `${def.name} +${sym}${pts}`, '#ffb7e2', 'icon_rainbow');
+            showComboBanner('彩虹升阶', `${def.name} +${sym}${pts}`, '#ffb7e2', 'icon_rainbow', 1);
           } else if (gameState.comboCount >= 2) {
             label = `${gameState.comboCount}连合 +${sym}${pts}`;
             popColor = '#ffe46b';
@@ -3961,7 +4294,7 @@ function createApp() {
               : gameState.comboCount >= 3
               ? '多米诺连锁'
               : '丝滑连击';
-            showComboBanner(`${gameState.comboCount} 连合`, subTxt, gameState.comboCount >= 4 ? '#ff9fd2' : '#ffe46b', 'icon_bolt');
+            showComboBanner(`${gameState.comboCount} 连合`, subTxt, gameState.comboCount >= 4 ? '#ff9fd2' : '#ffe46b', 'icon_bolt', 1);
           }
           spawnPopup(mx, my - def.radius * 0.6, label, popColor, popSize);
 
@@ -3969,14 +4302,13 @@ function createApp() {
             gameState.soufflesMadeThisRun++;
             saveData.lifetimeStats.soufflesMade = (saveData.lifetimeStats.soufflesMade || 0) + 1;
             persistSaveData();
-            setPatronSpeech(app.activePatron, '星冠猫神诞生！留罐翻倍或点击献礼！', 5.0);
-            showComboBanner('星冠猫神诞生', '留罐全场 ×2.0 · 点击献礼 +¥3200', '#ffe46b', 'icon_crown');
+            setPatronSpeech(app.activePatron, '星冠猫神诞生！留罐翻倍或点献礼按钮！', 5.0);
+            showComboBanner('星冠猫神诞生', '留罐全场 ×2.0 · 顶部胶囊可献礼', '#ffe46b', 'icon_crown', 3);
           }
           notifyTreatSynthesized(nextTier, born);
         } else {
-          const pts = Math.round(
-            (isWildMerge ? 1800 : 2800) * feverMult * comboBonus * chimeScoreMult * globalMult * antiGravMult
-          );
+          const supPool = Math.min(4.5, 1 + comboAdd + feverAdd + antiGravAdd + chimeAdd);
+          const pts = Math.round((isWildMerge ? 1800 : 2800) * Math.min(8.0, supPool * globalMult));
           addScore(pts);
           addRunStardust(55);
           addFeverEnergy(65);
@@ -3990,7 +4322,7 @@ function createApp() {
           gameState.screenShake = Math.max(gameState.screenShake, 7.5);
           gameState.jarFlash = Math.max(gameState.jarFlash, 0.85);
           spawnPopup(mx, my, `星冠超新星 +${pts}`, '#ffe570', 22);
-          showComboBanner('星冠超新星', `+${pts} · 净化小甜品`, '#ffe570', 'icon_crown');
+          showComboBanner('星冠超新星', `+${pts} · 净化小甜品`, '#ffe570', 'icon_crown', 3);
           gameState.entities = gameState.entities.filter((e) => {
             if (!e.isWildcard && !e.isYarnBall && !(e.frozenHp > 0) && e.tier <= 2 && Math.hypot(e.x - mx, e.y - my) < 190) {
               spawnSparkleBurst(e.x, e.y, '#9be0ff', 8);
@@ -4029,7 +4361,7 @@ function createApp() {
 
     if (anyDanger) {
       gameState.dangerDuration += dt;
-      if (gameState.dangerDuration > 2.65) {
+      if (gameState.dangerDuration > 3.2) {
         if (gameState.mode === 'rush') triggerRushEmergencyGust();
         else triggerGameOver();
       }
@@ -4037,7 +4369,7 @@ function createApp() {
       gameState.dangerDuration = Math.max(0, gameState.dangerDuration - dt * 2.2);
     }
 
-    const overflowDanger = Math.max(0, Math.min(1, (gameState.dangerDuration - 0.45) / 2.1));
+    const overflowDanger = Math.max(0, Math.min(1, (gameState.dangerDuration - 0.45) / 2.6));
     const rushDanger =
       gameState.mode === 'rush' && gameState.rushTimer <= 15.0
         ? Math.min(1, 0.35 + ((15.0 - gameState.rushTimer) / 15.0) * 0.65)
@@ -4180,47 +4512,33 @@ function createApp() {
     const souffleBonus = gameState.soufflesMadeThisRun > 0 ? 25 : 0;
     const parts = [];
     let rawEarned = 0;
-    let pityApplied = false;
 
     if (gameState.mode === 'chef') {
-      const shiftPart = (gameState.shiftsClearedThisRun || 0) * 20;
-      const revPart = Math.floor(gameState.score / 650);
-      const clear5Bonus =
-        (gameState.shiftsClearedThisRun || 0) >= 5 || (gameState.shift >= 5 && (gameState.shiftsClearedThisRun || 0) >= 1)
-          ? 35
-          : 0;
+      const shiftsCleared = gameState.shiftsClearedThisRun || 0;
+      const shiftPart = shiftsCleared * 22;
+      const revPart = Math.floor(gameState.score / 480);
+      const clear5Bonus = shiftsCleared >= 5 ? 40 : 0;
       rawEarned = shiftPart + revPart + souffleBonus + clear5Bonus;
-      if (gameState.dropsMadeThisRun >= 5 && rawEarned < 18) {
-        rawEarned = 18;
-        pityApplied = true;
-      }
-      if (pityApplied) {
-        parts.push('营业保底 18⭐');
+      if (gameState.score >= 600 && rawEarned < 6) {
+        rawEarned = 6;
+        parts.push('认真营业保底 6⭐');
       } else {
-        if (shiftPart > 0) parts.push(`过关${gameState.shiftsClearedThisRun}幕+${shiftPart}`);
+        if (shiftPart > 0) parts.push(`过关${shiftsCleared}幕+${shiftPart}`);
         parts.push(`营业额+${revPart}`);
         if (souffleBonus > 0) parts.push(`猫神+${souffleBonus}`);
         if (clear5Bonus > 0) parts.push(`5幕完赛+${clear5Bonus}`);
       }
     } else {
-      const scorePart = Math.floor(gameState.score / 260);
-      const dustPart = Math.floor(gameState.stardust * 0.35);
-      const rushBonus = gameState.mode === 'rush' && gameState.rushFinished ? 10 : 0;
+      const scorePart = Math.floor(gameState.score / 280);
+      const dustPart = gameState.score >= 400 ? Math.min(12, Math.floor(gameState.stardust * 0.2)) : 0;
+      const rushBonus = gameState.mode === 'rush' && gameState.rushFinished && gameState.score >= 1200 ? 10 : 0;
       rawEarned = scorePart + dustPart + souffleBonus + rushBonus;
-      if (gameState.dropsMadeThisRun >= 5 && rawEarned < 15) {
-        rawEarned = 15;
-        pityApplied = true;
-      }
-      if (pityApplied) {
-        parts.push('营业保底 15⭐');
-      } else {
-        parts.push(`得分+${scorePart}`);
-        if (dustPart > 0) parts.push(`余尘+${dustPart}`);
-        if (souffleBonus > 0) parts.push(`猫神+${souffleBonus}`);
-        if (rushBonus > 0) parts.push(`狂欢完赛+${rushBonus}`);
-      }
+      parts.push(`得分+${scorePart}`);
+      if (dustPart > 0) parts.push(`余露折算+${dustPart}`);
+      if (souffleBonus > 0) parts.push(`猫神+${souffleBonus}`);
+      if (rushBonus > 0) parts.push(`狂欢完赛+${rushBonus}`);
     }
-    if (dustMult > 1) parts.push(`糖霜壶×${dustMult.toFixed(2).replace(/0$/, '')}`);
+    if (dustMult > 1 && rawEarned > 0) parts.push(`糖霜壶×${dustMult.toFixed(2).replace(/0$/, '')}`);
     const finalEarned = Math.round(rawEarned * dustMult);
     const nextBank = isPreview ? (saveData.bankStardust || 0) + finalEarned : saveData.bankStardust || 0;
     return { finalEarned, parts, nextBank };
@@ -4232,6 +4550,8 @@ function createApp() {
     gameState.running = false;
     gameState.paused = false;
     gameState.runEndReason = reason;
+    gameState.longPressServe = null;
+    resetAimingState();
     cancelToolMode();
     audio.setFeverMode(false);
     audio.setDangerLevel(0);
@@ -4253,7 +4573,15 @@ function createApp() {
     if (gameState.mode === 'chef') {
       saveData.lifetimeStats.bestShiftReached = Math.max(saveData.lifetimeStats.bestShiftReached || 0, gameState.shift);
     }
-    clearActiveRunCheckpoint(false);
+
+    pendingRunReport = {
+      mode: gameState.mode,
+      score: gameState.score,
+      shiftsCleared: gameState.shiftsClearedThisRun || 0,
+      drops: gameState.dropsMadeThisRun || 0,
+      durationSec: Math.max(1, Math.round((Date.now() - (gameState.runStartedAt || Date.now() - 8000)) / 1000))
+    };
+    clearActiveRunCheckpoint(gameState.mode, false);
     persistSaveData({ immediate: true });
 
     app.goSettlement = {
@@ -4283,13 +4611,17 @@ function createApp() {
   function startNewRunFn(mode = gameState.mode, opts = {}) {
     const preserveCheckpoint = !!(opts && opts.preserveCheckpoint);
     if (!preserveCheckpoint) {
-      clearActiveRunCheckpoint(false);
+      if (!app.isLobbyOpen && gameState.running && !gameState.over && gameState.mode !== mode) {
+        saveActiveRunCheckpoint({ syncCloud: false });
+      }
+      clearActiveRunCheckpoint(mode, false);
     }
     gameState.mode = mode;
     gameState.running = true;
     gameState.paused = false;
     gameState.over = false;
     gameState.runEndReason = null;
+    gameState.runStartedAt = Date.now();
     gameState.score = 0;
     gameState.displayScore = 0;
     gameState.stardust = 30;
@@ -4302,7 +4634,11 @@ function createApp() {
     gameState.bankShotsLanded = 0;
     gameState.serveCascadeTimer = 0;
     gameState.serveCascadeMerges = 0;
+    gameState.cascadeStaleRefundPending = false;
     gameState.maxAvalancheRun = 0;
+    gameState.mikanFirstServeUsed = false;
+    gameState.quickOrdersCompleted = 0;
+    gameState.longPressServe = null;
 
     // Reset 5-Shift Roguelike state
     gameState.shift = 1;
@@ -4337,7 +4673,7 @@ function createApp() {
     const upDustLv = app.getUpgradeLevel('up_dust');
     const upDustDef = SHOP_UPGRADES.find((u) => u.id === 'up_dust');
     const dustStartCoins = (upDustDef && upDustDef.startCoins && upDustDef.startCoins[upDustLv]) || 0;
-    const mikanStartCoins = saveData.selectedPatron === 'mikan' ? 8 : 0;
+    const mikanStartCoins = saveData.selectedPatron === 'mikan' ? 12 : 0;
     gameState.coins = mode === 'chef' ? mikanStartCoins + dustStartCoins : 0;
 
     const upFeverLv = app.getUpgradeLevel('up_fever');
@@ -4446,6 +4782,7 @@ function createApp() {
     app.minorToast = null;
     app.syncToastLegacyFields();
     app.goSettlement = null;
+    app.confirmDialog = null;
     app.activeModal = null;
     app.isLobbyOpen = false;
     app.syncAudioMood();
@@ -4468,7 +4805,7 @@ function createApp() {
     if (mode === 'chef') {
       setPatronSpeech(activePatron, activePatron.greet, 5.0);
     } else if (mode === 'rush') {
-      setPatronSpeech(activePatron, '90秒弹射狂欢！连续上菜最高 +4.5s & ×2.5！', 5.0);
+      setPatronSpeech(activePatron, '90秒弹射狂欢！点【上菜】或长按甜品出餐续时！', 5.0);
     } else {
       setPatronSpeech(activePatron, '悠闲经典开启！拖动瞄准预览折射与异能范围～', 5.0);
     }
@@ -4481,6 +4818,7 @@ function createApp() {
     startNewRunFn(snap.mode, { preserveCheckpoint: true });
     const cfg = getShiftConfig(snap.shift || 1);
 
+    gameState.runStartedAt = snap.startedAt || Date.now();
     gameState.score = snap.score || 0;
     gameState.displayScore = gameState.score;
     gameState.stardust = snap.stardust !== undefined ? snap.stardust : 30;
@@ -4499,6 +4837,9 @@ function createApp() {
     gameState.shiftStepRefunds = snap.shiftStepRefunds || 0;
     gameState.freeSkipsLeft = snap.freeSkipsLeft !== undefined ? snap.freeSkipsLeft : 1;
     gameState.mugiBankCoinHits = snap.mugiBankCoinHits || 0;
+    gameState.mikanFirstServeUsed = !!snap.mikanFirstServeUsed;
+    gameState.quickOrdersCompleted = snap.quickOrdersCompleted || 0;
+    gameState.dangerDuration = Math.max(0, Math.min(3.1, Number(snap.dangerDuration) || 0));
     gameState.shiftClearedFlag = !!snap.shiftClearedFlag;
     gameState.coins = snap.coins || 0;
     gameState.relics = Array.isArray(snap.relics) ? [...snap.relics] : [];
@@ -4522,7 +4863,7 @@ function createApp() {
     gameState.feverEnergy = Number(snap.feverEnergy) || 0;
     gameState.tools = { ...gameState.tools, ...(snap.tools || {}) };
     gameState.perks = { ...(snap.perks || {}) };
-    gameState.pendingBlessings = snap.pendingBlessings || 0;
+    gameState.pendingBlessings = 0;
     gameState.dropsUntilRainbow = snap.dropsUntilRainbow || getRainbowPityBase();
     gameState.canHoldThisTurn = snap.canHoldThisTurn !== false;
     gameState.curTier = snap.curTier || 2;
@@ -4655,10 +4996,13 @@ function createApp() {
       wakeNeighborsAfterRemoval(target.x, target.y, target.r);
       startCascadeWindow(target.x, target.y);
 
-      // Preserve current held treat into HOLD if empty, then put scooped treat into hand
+      // Preserve current held treat into HOLD if empty, or push into NEXT so zero treats are ever lost!
       if (gameState.holdTier === null) {
         gameState.holdTier = gameState.curTier;
         gameState.holdMeta = { ...gameState.curMeta };
+      } else {
+        gameState.nextTier = gameState.curTier;
+        gameState.nextMeta = { ...gameState.curMeta };
       }
       gameState.curTier = target.tier;
       gameState.curMeta = { wildcard: false, golden: !!target.isGolden };
@@ -4669,7 +5013,7 @@ function createApp() {
       spawnSparkleBurst(target.x, target.y, '#ffe47a', 24);
       spawnShockwave(target.x, target.y, target.r * 2.2 + 30, '#ffe47a', 3.6);
       spawnPopup(target.x, target.y - 14, '金勺捞底', '#ffe680', 18);
-      showComboBanner('金勺捞底发动', '触发抽底雪崩 · 甜品已捞回', '#ffe47a', 'tool_spoon');
+      showComboBanner('金勺捞底发动', '触发抽底雪崩 · 甜品已捞回', '#ffe47a', 'tool_spoon', 2);
       cancelToolMode();
       return;
     }
@@ -4720,7 +5064,7 @@ function createApp() {
       spawnShockwave(first.x, first.y, first.r + 36, '#d8b4ff', 3.4);
       spawnShockwave(target.x, target.y, target.r + 36, '#ffe47a', 3.4);
       spawnPopup((first.x + target.x) * 0.5, Math.min(first.y, target.y) - 16, '星月移形', '#e5caff', 18);
-      showComboBanner('星月移形', '位置对调 · 2秒全罐柔磁', '#d8b4ff', 'icon_moon');
+      showComboBanner('星月移形', '位置对调 · 2秒全罐柔磁', '#d8b4ff', 'icon_moon', 2);
       cancelToolMode();
     }
   }
@@ -4746,7 +5090,7 @@ function createApp() {
         return;
       }
       if (target.tier >= 9) {
-        app.showToast('已达最高阶，点击即可献礼', { icon: 'icon_crown', tone: 'info' });
+        app.showToast('已达最高阶，可点献礼胶囊或长按献礼', { icon: 'icon_crown', tone: 'info' });
         return;
       }
       if (gameState.tools.spoon <= 0) return;
@@ -4761,7 +5105,7 @@ function createApp() {
       target.squishVel = 0;
       target.squishAngle = Math.PI * 0.5;
 
-      const pts = Math.round(def.points * app.getFeverMultiplier() * app.getSouffleAuraMult());
+      const pts = Math.round(def.points * app.getFeverMultiplier() * app.getGlobalRevenueMult());
       addScore(pts);
       unlockTier(nextTier);
       if (nextTier === 9) {
@@ -4779,11 +5123,10 @@ function createApp() {
     }
   }
 
-  // Unified Pointer & Touch Event Handling (4.0 Fixed-Speed Angle Aim + Tap-to-Serve Arbitration)
+  // Unified Pointer & Touch Event Handling (Fixed-Center Turret Angle Aim + Long-Press-to-Serve Arbitration)
   let pendingUiHit = null;
   let uiDragMoved = false;
   let dragStartPos = { x: 0, y: 0, lastY: 0, active: false };
-  let pendingServe = { entityId: null, downLx: 0, downLy: 0 };
   let aimingState = { active: false, pointerType: 'touch', lastStableX: 220 };
 
   function toJarLogical(x, y) {
@@ -4824,7 +5167,7 @@ function createApp() {
 
   function resetAimingState() {
     aimingState.active = false;
-    pendingServe.entityId = null;
+    gameState.longPressServe = null;
     gameState.aim.active = false;
     gameState.aim.cancelled = false;
     gameState.aim.stretchBand = 0;
@@ -4840,7 +5183,7 @@ function createApp() {
       dragStartPos = { x, y, lastY: y, active: true };
       uiDragMoved = false;
       pendingUiHit = hit;
-      pendingServe.entityId = null;
+      gameState.longPressServe = null;
 
       if (app.activeModal || hit) {
         return;
@@ -4857,12 +5200,7 @@ function createApp() {
           return;
         }
         if (ly >= -30 && ly <= JAR.floorY + 24 && lx >= -30 && lx <= JAR.canvasW + 30) {
-          // Check Tap-to-Serve arbitration first!
-          const servable = findServableEntityAt(lx, ly, 12);
-          if (servable) {
-            pendingServe = { entityId: servable.id, downLx: lx, downLy: ly };
-            return;
-          }
+          // Arm fixed-center turret aiming everywhere in the jar AND arm optional long-press serve if holding still on a servable treat!
           clampDropX();
           aimingState = { active: true, pointerType, lastStableX: LAUNCH_X };
           gameState.aim.active = true;
@@ -4872,6 +5210,21 @@ function createApp() {
             gameState.touchAim.lastStableX = LAUNCH_X;
           }
           updateAimVector(lx, ly, pointerType);
+
+          const servable = findServableEntityAt(lx, ly, 12);
+          if (servable) {
+            const holdDur = servable.tier === 9 ? 0.45 : 0.32;
+            gameState.longPressServe = {
+              entityId: servable.id,
+              tier: servable.tier,
+              downLx: lx,
+              downLy: ly,
+              pointerType,
+              elapsed: 0,
+              duration: holdDur,
+              progress: 0
+            };
+          }
         }
       }
     },
@@ -4898,18 +5251,11 @@ function createApp() {
           gameState.hoveredEntityId = hitEntity ? hitEntity.id : null;
           return;
         }
-        // If dragging >= 12px off a servable treat, seamlessly hand off to angle aiming!
-        if (pendingServe.entityId !== null) {
-          if (Math.hypot(lx - pendingServe.downLx, ly - pendingServe.downLy) >= 12) {
-            pendingServe.entityId = null;
-            clampDropX();
-            aimingState = { active: true, pointerType, lastStableX: LAUNCH_X };
-            gameState.aim.active = true;
-            gameState.aim.stretchBand = 0;
-            if (pointerType === 'touch') gameState.touchAim.active = true;
-            updateAimVector(lx, ly, pointerType);
+        // Dragging >= 10px cancels long-press-to-serve and continues smooth turret angle aiming
+        if (gameState.longPressServe) {
+          if (Math.hypot(lx - gameState.longPressServe.downLx, ly - gameState.longPressServe.downLy) >= 10) {
+            gameState.longPressServe = null;
           }
-          return;
         }
         if (aimingState.active) {
           updateAimVector(lx, ly, pointerType);
@@ -4928,8 +5274,17 @@ function createApp() {
       if (app.activeModal) {
         if (!uiDragMoved && pendingUiHit) {
           if (pendingUiHit.id === 'modal_backdrop') {
-            if (app.activeModal === 'mode_guide') app.nextModeGuideStep();
-            else if (app.activeModal !== 'gameover') app.closeModal();
+            if (app.activeModal === 'mode_guide') {
+              app.nextModeGuideStep();
+            } else if (
+              app.activeModal !== 'gameover' &&
+              app.activeModal !== 'prep_shop' &&
+              app.activeModal !== 'shift_victory' &&
+              app.activeModal !== 'pause' &&
+              app.activeModal !== 'confirm'
+            ) {
+              app.closeModal();
+            }
           } else if (pendingUiHit.onClick) {
             pendingUiHit.onClick();
           }
@@ -4947,12 +5302,8 @@ function createApp() {
         return;
       }
 
-      if (pendingServe.entityId !== null) {
-        const serveId = pendingServe.entityId;
-        pendingServe.entityId = null;
-        serveEntityById(serveId);
-        return;
-      }
+      // Quick tap (< 0.32s) cancels unfinished long-press and fires turret shot normally (zero misfire!)
+      gameState.longPressServe = null;
 
       if (aimingState.active) {
         const { lx, ly } = toJarLogical(x, y);
@@ -4962,7 +5313,7 @@ function createApp() {
         }
         const vx = gameState.aim.launchVx;
         const vy = gameState.aim.launchVy;
-        const isAngled = Math.abs(gameState.aim.angle) > 0.035;
+        const isAngled = Math.abs(gameState.aim.angle) >= 0.155;
         resetAimingState();
         if (cancelled) return;
         dropCurrentTreat(vx, vy, isAngled);
@@ -4999,7 +5350,13 @@ function createApp() {
         app.closeModal();
         return;
       }
-      cancelToolMode();
+      if (gameState.activeToolMode || gameState.activeSkillMode) {
+        cancelToolMode();
+        return;
+      }
+      if (!app.isLobbyOpen && gameState.running && !gameState.over) {
+        app.togglePause();
+      }
       return;
     }
     if (key === 'p' || key === 'P') {
@@ -5009,18 +5366,18 @@ function createApp() {
       }
       return;
     }
+    if (app.activeModal === 'confirm') {
+      if (key === 'Enter') {
+        if (ev && ev.preventDefault) ev.preventDefault();
+        app.confirmAccept();
+      }
+      return;
+    }
     if (!gameState.running || gameState.over || app.isLobbyOpen) return;
     if (app.activeModal === 'mode_guide') {
       if (key === ' ' || key === 'Enter' || key === 'ArrowRight') {
         if (ev && ev.preventDefault) ev.preventDefault();
         app.nextModeGuideStep();
-      }
-      return;
-    }
-    if (app.activeModal === 'blessing') {
-      if (key === '1' || key === '2' || key === '3') {
-        const ch = gameState.blessingChoices[Number(key) - 1];
-        if (ch) app.applyBlessing(ch.id);
       }
       return;
     }
@@ -5037,6 +5394,9 @@ function createApp() {
       clampDropX();
       syncIdleAimFromAngle(0);
       audio.playTilt();
+    } else if (key === 's' || key === 'S') {
+      if (ev && ev.preventDefault) ev.preventDefault();
+      app.serveReadyOrder();
     } else if (key === ' ' || key === 'ArrowDown' || key === 'Enter') {
       if (ev && ev.preventDefault) ev.preventDefault();
       const shot = computeTurretShotFromAngle(gameState.aimAngle);
@@ -5044,8 +5404,6 @@ function createApp() {
     } else if (key === 'h' || key === 'H' || key === 'c' || key === 'C' || key === 'Shift') {
       if (ev && ev.preventDefault) ev.preventDefault();
       app.swapHoldPocket();
-    } else if (key === 'b' || key === 'B') {
-      if (gameState.pendingBlessings > 0) app.openBlessingModal();
     } else if (key === '1') app.armOrUseTool('shake');
     else if (key === '2' || key === 'f' || key === 'F') app.activateChefSkill();
     else if (key === '3') app.armOrUseTool('spoon');
@@ -5079,8 +5437,8 @@ function createApp() {
         readyCounts[e.tier] = (readyCounts[e.tier] || 0) + 1;
       }
     }
-    const curWild = !!(gameState.curMeta && gameState.curMeta.isWildcard);
-    const holdWild = !!(gameState.holdMeta && gameState.holdMeta.isWildcard);
+    const curWild = !!(gameState.curMeta && gameState.curMeta.wildcard);
+    const holdWild = !!(gameState.holdMeta && gameState.holdMeta.wildcard);
     const out = [];
     for (const tierKey of Object.keys(neededByTier)) {
       const targetTier = Number(tierKey);
@@ -5129,6 +5487,23 @@ function createApp() {
     }
 
     if (gameState.running && !gameState.over && !gameState.paused) {
+      // Advance Long-Press-to-Serve radial hold timer in jar!
+      if (gameState.longPressServe) {
+        const lp = gameState.longPressServe;
+        const lpEnt = gameState.entities.find((e) => e.id === lp.entityId && !e.merged);
+        if (!lpEnt || !findServableMatch(lpEnt)) {
+          gameState.longPressServe = null;
+        } else {
+          lp.elapsed += dt;
+          lp.progress = Math.min(1, lp.elapsed / Math.max(0.1, lp.duration));
+          if (lp.elapsed >= lp.duration) {
+            const serveId = lp.entityId;
+            resetAimingState();
+            serveEntityById(serveId);
+          }
+        }
+      }
+
       if (gameState.dropCooldown > 0) gameState.dropCooldown = Math.max(0, gameState.dropCooldown - dt);
       if (gameState.rushGustCooldown > 0) gameState.rushGustCooldown = Math.max(0, gameState.rushGustCooldown - dt);
       if (gameState.rushStreakTimer > 0) {
@@ -5144,6 +5519,7 @@ function createApp() {
         gameState.serveCascadeTimer = Math.max(0, gameState.serveCascadeTimer - dt);
         if (gameState.serveCascadeTimer === 0) {
           gameState.serveCascadeMerges = 0;
+          gameState.cascadeStaleRefundPending = false;
         }
       }
 
@@ -5348,22 +5724,35 @@ function createApp() {
     }
   }
 
-  // Lifecycle & WeChat Share setup
-  platform.bindLifecycle(
-    () => audio.setTabHidden(false),
-    () => {
-      audio.setTabHidden(true);
-      if (!app.isLobbyOpen && gameState.running && !gameState.over) {
-        saveActiveRunCheckpoint({ syncCloud: false });
-      }
-      if (cloudDirty) {
-        flushCloudPush();
-      }
+  // Lifecycle & WeChat Share setup (auto-pause + checkpoint on background hide / incoming call)
+  function handleAppShow() {
+    audio.setTabHidden(false);
+    app.syncAudioMood();
+    if (cloudDirty || cloudState.status === 'retry_pending') {
+      cloudState.retryCount = 0;
+      flushCloudPush();
     }
-  );
+  }
+
+  function handleAppHide() {
+    audio.setTabHidden(true);
+    resetAimingState();
+    if (!app.isLobbyOpen && gameState.running && !gameState.over) {
+      gameState.paused = true;
+      if (!app.activeModal) {
+        app.openModal('pause');
+      }
+      saveActiveRunCheckpoint({ syncCloud: false });
+    }
+    if (cloudDirty) {
+      flushCloudPush();
+    }
+  }
+
+  platform.bindLifecycle(handleAppShow, handleAppHide);
   platform.setupShare(() => ({
     title: gameState.score > 0
-      ? `我在星夜吃茶闯到第 ${gameState.shift} 幕拿下了 ¥${gameState.score}！快来体验 16 种秘方流派构筑`
+      ? `我在星夜吃茶闯到第 ${gameState.shift} 幕拿下了 ¥${gameState.score}！快来体验 18 种秘方流派构筑`
       : '星夜吃茶 · 喵呜甜品合合乐｜手绘弹射物理肉鸽合成小游戏'
   }));
 
@@ -5376,6 +5765,13 @@ function createApp() {
       height: metrics.height,
       lobbyOpen: app.isLobbyOpen,
       activeModal: app.activeModal,
+      confirmDialog: app.confirmDialog
+        ? {
+            title: app.confirmDialog.title,
+            message: app.confirmDialog.message,
+            returnModal: app.confirmDialog.returnModal
+          }
+        : null,
       activeShopTab: app.activeShopTab,
       activeCareerTab: app.activeCareerTab,
       leaderboardMode: app.leaderboardMode,
@@ -5390,12 +5786,18 @@ function createApp() {
           rank: r.rank,
           nickName: r.nickName,
           score: r.score,
-          isMe: !!r.isMe
+          isMe: !!r.isMe,
+          isNpc: !!r.isNpc
         }))
       },
       cloudState: { ...cloudState },
       playerProfile: { ...(saveData.playerProfile || {}) },
       hasSavedRun: app.hasResumableRun(gameState.mode),
+      savedRuns: {
+        chef: !!savedRunsMap.chef,
+        rush: !!savedRunsMap.rush,
+        zen: !!savedRunsMap.zen
+      },
       savedRun: app.savedRun
         ? {
             mode: app.savedRun.mode,
@@ -5413,9 +5815,11 @@ function createApp() {
       paused: gameState.paused,
       over: gameState.over,
       runEndReason: gameState.runEndReason,
+      dangerDuration: +(gameState.dangerDuration || 0).toFixed(2),
+      longPressServe: gameState.longPressServe ? { ...gameState.longPressServe } : null,
       score: gameState.score,
       stardust: gameState.stardust,
-      // 4.0 Phase 2 & 3 5-Shift Roguelike + Hazards state
+      // 4.1 5-Shift Roguelike + Hazards state
       shift: gameState.shift,
       shiftName: gameState.shiftName,
       shiftModifier: gameState.shiftModifier,
@@ -5427,6 +5831,7 @@ function createApp() {
       stepsLeft: gameState.stepsLeft,
       stepsMax: gameState.stepsMax,
       shiftStepsUsed: gameState.shiftStepsUsed,
+      shiftStepRefunds: gameState.shiftStepRefunds || 0,
       shiftClearedFlag: gameState.shiftClearedFlag,
       iceShatteredThisRun: gameState.iceShatteredThisRun || 0,
       glazeHitsThisRun: gameState.glazeHitsThisRun || 0,
@@ -5611,12 +6016,19 @@ function createApp() {
       return true;
     },
     triggerJudgeRush: () => {
+      const vipHasPartial =
+        gameState.orders.length >= 2 &&
+        gameState.orders[1] &&
+        !gameState.orders[1].completed &&
+        gameState.orders[1].slots.some((s) => s.done);
+      const targetIdx = vipHasPartial ? 0 : 1;
       const rushOrd = generateTableOrder('vip', false, { isJudgeRush: true });
-      if (gameState.orders.length >= 2) gameState.orders[1] = rushOrd;
+      rushOrd.slotOrigin = targetIdx === 0 ? 'quick' : 'vip';
+      if (gameState.orders.length >= 2) gameState.orders[targetIdx] = rushOrd;
       else gameState.orders.push(rushOrd);
       gameState.order = rushOrd;
       audio.playOrderStamp();
-      showComboBanner('评委突击急单', '4步内出餐 ×2.5 · 返 +2步', '#ffe570', 'icon_judge');
+      showComboBanner('评委突击急单', '4步内出餐 ×2.5 · 返 +2步', '#ffe570', 'icon_judge', 2);
       return rushOrd.uid;
     },
     clearEntities: () => {
@@ -5624,6 +6036,9 @@ function createApp() {
       gameState.dangerDuration = 0;
     },
     serveById: (id) => serveEntityById(id),
+    serveTable: (idx) => app.serveOrderTable(idx),
+    serveReady: () => app.serveReadyOrder(),
+    serveSouffle: () => app.serveSouffle(),
     selectPatron: (id) => {
       if (!saveData.unlockedPatrons.includes(id)) saveData.unlockedPatrons.push(id);
       saveData.selectedPatron = id;
@@ -5636,12 +6051,14 @@ function createApp() {
     },
     triggerFever: () => addFeverEnergy(100),
     grantRainbow: () => grantNextRainbow('测试彩虹糖'),
-    queueBlessing: (r = '测试祝福') => queueBlessing(r),
-    openBlessing: () => app.openBlessingModal(),
+    queueBlessing: (r = '测试秘方') => grantMilestoneRelicOrSupply(r),
+    openBlessing: () => grantMilestoneRelicOrSupply('里程碑秘方'),
     openModeGuide: (m, step = 0) => app.openModeGuide(m, step),
     openCareer: (tab = 'stats') => app.openCareer(tab),
-    resumeRun: () => app.resumeSavedRun(),
+    resumeRun: (m = gameState.mode) => app.resumeSavedRun(m),
     saveCheckpoint: (syncCloud = false) => saveActiveRunCheckpoint({ syncCloud }),
+    triggerHide: () => handleAppHide(),
+    triggerShow: () => handleAppShow(),
     mockAuthProfile: (prof) => app.applyPlayerProfileAuth(prof || { nickName: '测试星夜主厨', authorized: true }),
     forceCloudSync: () => bootCloudSync(),
     flushCloud: () => flushCloudPush(),

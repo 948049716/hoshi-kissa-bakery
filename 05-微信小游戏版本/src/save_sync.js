@@ -1,5 +1,5 @@
 /**
- * Save Data Migration, Monotonic Cloud Merge & Mid-Run Breakpoint Snapshot Engine
+ * Save Data Migration, Lossless Delta Cloud Merge & Per-Mode Breakpoint Snapshot Engine
  * Shared by client `game_app.js` for offline-first WeChat CloudBase sync.
  */
 'use strict';
@@ -7,6 +7,12 @@
 const { PATRONS, JAR_THEMES, SHOP_UPGRADES, RELICS, DECK_MODS } = require('./constants');
 
 const ACTIVE_RUN_STORAGE_KEY = 'hoshi_kissa_active_run_v1';
+const ACTIVE_RUNS_STORAGE_KEY = 'hoshi_kissa_active_runs_v2';
+
+const MAX_PLAUSIBLE_CHEF = 350000;
+const MAX_PLAUSIBLE_RUSH = 85000;
+const MAX_PLAUSIBLE_ZEN = 180000;
+const MAX_OFFLINE_STARDUST_DELTA = 1500;
 
 function clampInt(val, min, max) {
   const n = Math.floor(Number(val) || 0);
@@ -64,6 +70,7 @@ function normalizeSaveData(parsed) {
     sfxEnabled: true,
     bankStardust: 30,
     totalEarnedStardust: 30,
+    lastSyncedEarnedStardust: 0,
     selectedPatron: 'mikan',
     unlockedPatrons: ['mikan'],
     equippedTheme: 'amber',
@@ -90,9 +97,9 @@ function normalizeSaveData(parsed) {
 
   if (!parsed || typeof parsed !== 'object') return defaults;
 
-  const bestChef = clampInt(parsed.bestChef, 0, 9999999);
-  const bestZen = clampInt(parsed.bestZen, 0, 9999999);
-  const bestRush = clampInt(parsed.bestRush, 0, 9999999);
+  const bestChef = clampInt(parsed.bestChef, 0, MAX_PLAUSIBLE_CHEF);
+  const bestZen = clampInt(parsed.bestZen, 0, MAX_PLAUSIBLE_ZEN);
+  const bestRush = clampInt(parsed.bestRush, 0, MAX_PLAUSIBLE_RUSH);
 
   const unlockedPatrons = Array.isArray(parsed.unlockedPatrons)
     ? Array.from(new Set(['mikan', ...parsed.unlockedPatrons.filter((id) => PATRONS.some((p) => p.id === id))]))
@@ -138,6 +145,7 @@ function normalizeSaveData(parsed) {
     sfxEnabled: typeof parsed.sfxEnabled === 'boolean' ? parsed.sfxEnabled : true,
     bankStardust,
     totalEarnedStardust: 30,
+    lastSyncedEarnedStardust: clampInt(parsed.lastSyncedEarnedStardust || 0, 0, 999999),
     selectedPatron,
     unlockedPatrons,
     equippedTheme,
@@ -176,9 +184,12 @@ function normalizeSaveData(parsed) {
   };
 
   const spent = computeSpentStardust(out);
-  const rawEarned = clampInt(parsed.totalEarnedStardust, 0, 9999999);
+  const rawEarned = clampInt(parsed.totalEarnedStardust, 0, 999999);
   out.totalEarnedStardust = Math.max(30, rawEarned, out.bankStardust + spent);
   out.bankStardust = Math.max(0, out.totalEarnedStardust - spent);
+  if (out.lastSyncedEarnedStardust > out.totalEarnedStardust) {
+    out.lastSyncedEarnedStardust = out.totalEarnedStardust;
+  }
   return out;
 }
 
@@ -252,7 +263,19 @@ function mergeSaveData(localRaw, cloudRaw, cloudProfile = null) {
   };
 
   const spent = computeSpentStardust(merged);
-  merged.totalEarnedStardust = Math.max(local.totalEarnedStardust, cloud.totalEarnedStardust, spent);
+  // Lossless additive delta merge when both devices diverged from a known synced baseline!
+  let additiveEarned = Math.max(local.totalEarnedStardust, cloud.totalEarnedStardust, spent);
+  const base = local.lastSyncedEarnedStardust || 0;
+  if (
+    base >= 30 &&
+    local.totalEarnedStardust > base &&
+    cloud.totalEarnedStardust > base
+  ) {
+    const localDelta = Math.min(MAX_OFFLINE_STARDUST_DELTA, local.totalEarnedStardust - base);
+    additiveEarned = Math.max(additiveEarned, cloud.totalEarnedStardust + localDelta);
+  }
+  merged.totalEarnedStardust = additiveEarned;
+  merged.lastSyncedEarnedStardust = merged.totalEarnedStardust;
   merged.bankStardust = Math.max(0, merged.totalEarnedStardust - spent);
   return merged;
 }
@@ -269,11 +292,13 @@ function serializeActiveRun(gameState, activeModal) {
   }
 
   return {
-    v: 1,
+    v: 2,
     savedAt: Date.now(),
+    startedAt: gameState.runStartedAt || Date.now(),
     mode: gameState.mode,
     score: gameState.score || 0,
     stardust: gameState.stardust || 0,
+    dangerDuration: +(gameState.dangerDuration || 0).toFixed(2),
     shift: gameState.shift || 1,
     shiftName: gameState.shiftName || '暮色试营业',
     shiftBadge: gameState.shiftBadge || '第1幕·试营',
@@ -288,6 +313,8 @@ function serializeActiveRun(gameState, activeModal) {
     shiftStepRefunds: gameState.shiftStepRefunds || 0,
     freeSkipsLeft: gameState.freeSkipsLeft !== undefined ? gameState.freeSkipsLeft : 1,
     mugiBankCoinHits: gameState.mugiBankCoinHits || 0,
+    mikanFirstServeUsed: !!gameState.mikanFirstServeUsed,
+    quickOrdersCompleted: gameState.quickOrdersCompleted || 0,
     shiftClearedFlag: !!gameState.shiftClearedFlag,
     coins: gameState.coins || 0,
     relics: [...(gameState.relics || [])].filter((id) => RELICS.some((r) => r.id === id)),
@@ -311,7 +338,7 @@ function serializeActiveRun(gameState, activeModal) {
     feverEnergy: +(gameState.feverEnergy || 0).toFixed(2),
     tools: { ...(gameState.tools || { shake: 2, spoon: 1 }) },
     perks: { ...(gameState.perks || {}) },
-    pendingBlessings: gameState.pendingBlessings || 0,
+    pendingBlessings: 0,
     dropsUntilRainbow: gameState.dropsUntilRainbow || 12,
     canHoldThisTurn: gameState.canHoldThisTurn !== false,
     curTier: gameState.curTier || 2,
@@ -375,12 +402,47 @@ function validateActiveRunSnapshot(snap) {
   return snap;
 }
 
+function normalizeSavedRunsMap(rawMap, legacySingleSnap = null) {
+  const out = { chef: null, rush: null, zen: null };
+  if (rawMap && typeof rawMap === 'object') {
+    for (const m of ['chef', 'rush', 'zen']) {
+      const v = validateActiveRunSnapshot(rawMap[m]);
+      if (v && v.mode === m) out[m] = v;
+    }
+  }
+  const leg = validateActiveRunSnapshot(legacySingleSnap);
+  if (leg && (!out[leg.mode] || (leg.savedAt || 0) > (out[leg.mode].savedAt || 0))) {
+    out[leg.mode] = leg;
+  }
+  return out;
+}
+
+function mergeSavedRunsMaps(localMap, cloudMap, cloudSingleLegacy = null) {
+  const a = normalizeSavedRunsMap(localMap, null);
+  const b = normalizeSavedRunsMap(cloudMap, cloudSingleLegacy);
+  const merged = { chef: null, rush: null, zen: null };
+  for (const m of ['chef', 'rush', 'zen']) {
+    if (a[m] && b[m]) {
+      merged[m] = (a[m].savedAt || 0) >= (b[m].savedAt || 0) ? a[m] : b[m];
+    } else {
+      merged[m] = a[m] || b[m] || null;
+    }
+  }
+  return merged;
+}
+
 module.exports = {
   ACTIVE_RUN_STORAGE_KEY,
+  ACTIVE_RUNS_STORAGE_KEY,
+  MAX_PLAUSIBLE_CHEF,
+  MAX_PLAUSIBLE_RUSH,
+  MAX_PLAUSIBLE_ZEN,
   computeSpentStardust,
   normalizeProfile,
   normalizeSaveData,
   mergeSaveData,
   serializeActiveRun,
-  validateActiveRunSnapshot
+  validateActiveRunSnapshot,
+  normalizeSavedRunsMap,
+  mergeSavedRunsMaps
 };

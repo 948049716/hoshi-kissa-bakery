@@ -1,10 +1,10 @@
 /**
- * 星夜吃茶 (Hoshi Kissa) 微信云开发聚合云函数 `kissa_sync`
+ * 星夜吃茶 (Hoshi Kissa) 微信云开发聚合云函数 `kissa_sync` (v4.1 安全校验与乐观锁版)
  *
  * 支持路由 (`event.action`):
  * - `pull`          : 静默获取 OPENID 并拉取玩家云存档（首次访问自动建表与建档）
- * - `push`          : 校验并无损单调合并永久进度 `metaSave` 与单局断点快照 `activeRun`
- * - `updateProfile` : 保存用户授权或自定义的店长昵称与头像
+ * - `push`          : 服务端合理性校验、乐观锁 `revision` 冲突检测、双端星尘增量合并与分模式断点同步
+ * - `updateProfile` : 保存用户授权或自定义的店长昵称与头像（防旧端覆盖）
  * - `leaderboard`   : 查询全服主厨闯关榜 / 90秒狂欢榜 / 悠闲榜 Top 50 及当前玩家排名
  */
 'use strict';
@@ -27,6 +27,14 @@ const UPGRADE_COSTS = {
   up_combo: [60, 120, 200],
   up_dust: [45, 95, 170]
 };
+
+const MAX_CHEF_SCORE = 350000;
+const MAX_RUSH_SCORE = 85000;
+const MAX_ZEN_SCORE = 180000;
+const MAX_PUSH_CHEF_DELTA = 120000;
+const MAX_PUSH_RUSH_DELTA = 65000;
+const MAX_PUSH_ZEN_DELTA = 100000;
+const MAX_OFFLINE_STARDUST_DELTA = 1500;
 
 let collectionChecked = false;
 async function ensurePlayersCollection() {
@@ -86,17 +94,22 @@ function computeSpentStardust(meta) {
 
 function sanitizeMetaSave(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
-  const unlockedPatrons = uniqStrings(src.unlockedPatrons, ['mikan']);
-  const unlockedThemes = uniqStrings(src.unlockedThemes, ['amber']);
+  const unlockedPatrons = uniqStrings(src.unlockedPatrons, ['mikan']).filter((id) => PATRON_COSTS[id] !== undefined);
+  const unlockedThemes = uniqStrings(src.unlockedThemes, ['amber']).filter((id) => THEME_COSTS[id] !== undefined);
   const ups = src.shopUpgrades && typeof src.shopUpgrades === 'object' ? src.shopUpgrades : {};
   const st = src.lifetimeStats && typeof src.lifetimeStats === 'object' ? src.lifetimeStats : {};
   const sg = src.seenModeGuides && typeof src.seenModeGuides === 'object' ? src.seenModeGuides : {};
   const tp = src.seenTips && typeof src.seenTips === 'object' ? src.seenTips : {};
 
+  const bestShift = clampInt(st.bestShiftReached, 0, 99);
+  // Cross-check Chef best score against highest shift ever reached
+  const shiftChefCap =
+    bestShift <= 1 ? 14000 : bestShift <= 3 ? 45000 : bestShift <= 5 ? 95000 : MAX_CHEF_SCORE;
+
   const out = {
-    bestChef: clampInt(src.bestChef, 0, 9999999),
-    bestRush: clampInt(src.bestRush, 0, 9999999),
-    bestZen: clampInt(src.bestZen, 0, 9999999),
+    bestChef: clampInt(src.bestChef, 0, shiftChefCap),
+    bestRush: clampInt(src.bestRush, 0, MAX_RUSH_SCORE),
+    bestZen: clampInt(src.bestZen, 0, MAX_ZEN_SCORE),
     unlockedTiers: uniqTierNums(src.unlockedTiers),
     bgmTrack: src.bgmTrack === 'bossa' || src.bgmTrack === 'off' ? src.bgmTrack : 'waltz',
     sfxEnabled: typeof src.sfxEnabled === 'boolean' ? src.sfxEnabled : true,
@@ -125,35 +138,110 @@ function sanitizeMetaSave(raw) {
       ordersCompleted: clampInt(st.ordersCompleted, 0, 9999999),
       servesTotal: clampInt(st.servesTotal, 0, 9999999),
       bankShotsTotal: clampInt(st.bankShotsTotal, 0, 9999999),
-      maxAvalancheEver: clampInt(st.maxAvalancheEver, 0, 999),
-      bestShiftReached: clampInt(st.bestShiftReached, 0, 999),
+      maxAvalancheEver: clampInt(st.maxAvalancheEver, 0, 99),
+      bestShiftReached: bestShift,
       shiftsClearedTotal: clampInt(st.shiftsClearedTotal, 0, 999999),
       fiveShiftClears: clampInt(st.fiveShiftClears, 0, 999999),
       soufflesMade: clampInt(st.soufflesMade, 0, 999999),
       yarnBroken: clampInt(st.yarnBroken, 0, 999999),
-      maxComboEver: clampInt(st.maxComboEver || 1, 1, 999)
+      maxComboEver: clampInt(st.maxComboEver || 1, 1, 99)
     },
+    lastSyncedEarnedStardust: clampInt(src.lastSyncedEarnedStardust || 0, 0, 999999),
     updatedAt: clampInt(src.updatedAt || Date.now(), 0, 9999999999999)
   };
 
   const spent = computeSpentStardust(out);
-  const rawBank = clampInt(src.bankStardust !== undefined ? src.bankStardust : 30, 0, 9999999);
-  const rawEarned = clampInt(src.totalEarnedStardust, 0, 9999999);
+  const rawBank = clampInt(src.bankStardust !== undefined ? src.bankStardust : 30, 0, 999999);
+  const rawEarned = clampInt(src.totalEarnedStardust, 0, 999999);
   out.totalEarnedStardust = Math.max(30, rawEarned, rawBank + spent);
   out.bankStardust = Math.max(0, out.totalEarnedStardust - spent);
   return out;
 }
 
-function mergeMetaSaves(serverRaw, clientRaw) {
-  if (!serverRaw) return sanitizeMetaSave(clientRaw);
-  if (!clientRaw) return sanitizeMetaSave(serverRaw);
+/**
+ * Server-side anti-cheat plausibility & per-push increment validation.
+ */
+function validateAndClampClientMeta(serverRaw, clientRaw, runReport = null) {
+  const warnings = [];
+  const client = sanitizeMetaSave(clientRaw);
+  const server = serverRaw ? sanitizeMetaSave(serverRaw) : null;
+
+  // 1. Optional per-run telemetry sanity check (duration & drops vs score)
+  if (runReport && typeof runReport === 'object') {
+    const dur = Number(runReport.durationSec) || 0;
+    const drops = Number(runReport.drops) || 0;
+    const score = Number(runReport.score) || 0;
+    const rMode = runReport.mode || 'chef';
+    if (score > 3000 && (dur < 3 || drops < 2)) {
+      warnings.push('implausible_run_duration_or_drops');
+      if (rMode === 'rush') client.bestRush = server ? server.bestRush : 0;
+      else if (rMode === 'zen') client.bestZen = server ? server.bestZen : 0;
+      else client.bestChef = server ? server.bestChef : 0;
+    } else if (dur > 0 && score / Math.max(5, dur) > 2200) {
+      warnings.push('implausible_score_velocity');
+      if (rMode === 'rush') client.bestRush = Math.min(client.bestRush, (server && server.bestRush) || 12000);
+      else if (rMode === 'zen') client.bestZen = Math.min(client.bestZen, (server && server.bestZen) || 18000);
+      else client.bestChef = Math.min(client.bestChef, (server && server.bestChef) || 25000);
+    }
+  }
+
+  // 2. Per-push delta guard relative to existing server save
+  if (server) {
+    if (client.bestChef - server.bestChef > MAX_PUSH_CHEF_DELTA) {
+      warnings.push('chef_delta_clamped');
+      client.bestChef = server.bestChef + MAX_PUSH_CHEF_DELTA;
+    }
+    if (client.bestRush - server.bestRush > MAX_PUSH_RUSH_DELTA) {
+      warnings.push('rush_delta_clamped');
+      client.bestRush = server.bestRush + MAX_PUSH_RUSH_DELTA;
+    }
+    if (client.bestZen - server.bestZen > MAX_PUSH_ZEN_DELTA) {
+      warnings.push('zen_delta_clamped');
+      client.bestZen = server.bestZen + MAX_PUSH_ZEN_DELTA;
+    }
+
+    const deltaRuns = Math.max(1, client.lifetimeStats.runsPlayed - server.lifetimeStats.runsPlayed);
+    const maxAllowedDustJump = Math.min(MAX_OFFLINE_STARDUST_DELTA, Math.max(360, deltaRuns * 260 + 120));
+    if (client.totalEarnedStardust - server.totalEarnedStardust > maxAllowedDustJump) {
+      warnings.push('stardust_delta_clamped');
+      client.totalEarnedStardust = server.totalEarnedStardust + maxAllowedDustJump;
+      const spent = computeSpentStardust(client);
+      client.bankStardust = Math.max(0, client.totalEarnedStardust - spent);
+    }
+  } else {
+    // First-time cloud upload cap for unlinked local storage
+    const initRuns = Math.max(1, client.lifetimeStats.runsPlayed);
+    const maxInitEarned = Math.min(3500, 120 + initRuns * 260);
+    if (client.totalEarnedStardust > maxInitEarned) {
+      warnings.push('initial_stardust_clamped');
+      client.totalEarnedStardust = maxInitEarned;
+      const spent = computeSpentStardust(client);
+      client.bankStardust = Math.max(0, client.totalEarnedStardust - spent);
+    }
+  }
+
+  return { sanitizedClient: client, warnings };
+}
+
+function mergeMetaSaves(serverRaw, validatedClient) {
+  if (!serverRaw) {
+    const only = sanitizeMetaSave(validatedClient);
+    only.lastSyncedEarnedStardust = only.totalEarnedStardust;
+    return only;
+  }
+  if (!validatedClient) return sanitizeMetaSave(serverRaw);
   const a = sanitizeMetaSave(serverRaw);
-  const b = sanitizeMetaSave(clientRaw);
+  const b = validatedClient;
   const preferB = (b.updatedAt || 0) >= (a.updatedAt || 0);
   const latest = preferB ? b : a;
 
-  const unlockedPatrons = uniqStrings([...a.unlockedPatrons, ...b.unlockedPatrons], ['mikan']);
-  const unlockedThemes = uniqStrings([...a.unlockedThemes, ...b.unlockedThemes], ['amber']);
+  const unlockedPatrons = uniqStrings([...a.unlockedPatrons, ...b.unlockedPatrons], ['mikan']).filter(
+    (id) => PATRON_COSTS[id] !== undefined
+  );
+  const unlockedThemes = uniqStrings([...a.unlockedThemes, ...b.unlockedThemes], ['amber']).filter(
+    (id) => THEME_COSTS[id] !== undefined
+  );
+
   const merged = {
     bestChef: Math.max(a.bestChef, b.bestChef),
     bestRush: Math.max(a.bestRush, b.bestRush),
@@ -198,8 +286,15 @@ function mergeMetaSaves(serverRaw, clientRaw) {
   };
 
   const spent = computeSpentStardust(merged);
-  merged.totalEarnedStardust = Math.max(a.totalEarnedStardust, b.totalEarnedStardust, spent);
-  merged.bankStardust = Math.max(0, merged.totalEarnedStardust - spent);
+  let totalEarned = Math.max(a.totalEarnedStardust, b.totalEarnedStardust, spent);
+  const base = b.lastSyncedEarnedStardust || 0;
+  if (base >= 30 && b.totalEarnedStardust > base && a.totalEarnedStardust > base) {
+    const clientDelta = Math.min(MAX_OFFLINE_STARDUST_DELTA, b.totalEarnedStardust - base);
+    totalEarned = Math.max(totalEarned, a.totalEarnedStardust + clientDelta);
+  }
+  merged.totalEarnedStardust = totalEarned;
+  merged.lastSyncedEarnedStardust = totalEarned;
+  merged.bankStardust = Math.max(0, totalEarned - spent);
   return merged;
 }
 
@@ -214,16 +309,79 @@ function sanitizeProfile(raw, openidSuffix) {
     avatarUrl,
     avatarPreset,
     authorized: !!src.authorized,
-    updatedAt: clampInt(src.updatedAt || Date.now(), 0, 9999999999999)
+    updatedAt: clampInt(src.updatedAt || 0, 0, 9999999999999)
   };
+}
+
+function mergeProfiles(serverRaw, clientRaw, openidSuffix) {
+  if (!serverRaw && !clientRaw) return sanitizeProfile(null, openidSuffix);
+  if (!serverRaw) return sanitizeProfile(clientRaw, openidSuffix);
+  if (!clientRaw) return sanitizeProfile(serverRaw, openidSuffix);
+  const s = sanitizeProfile(serverRaw, openidSuffix);
+  const c = sanitizeProfile(clientRaw, openidSuffix);
+  if (s.authorized && !c.authorized) return s;
+  if (c.authorized && !s.authorized) return c;
+  return (c.updatedAt || 0) >= (s.updatedAt || 0) ? c : s;
 }
 
 function sanitizeActiveRun(raw) {
   if (!raw || typeof raw !== 'object') return null;
   if (!['chef', 'rush', 'zen'].includes(raw.mode)) return null;
+  if (raw.mode === 'chef') {
+    raw.score = clampInt(raw.score, 0, MAX_CHEF_SCORE);
+    raw.shiftRevenue = clampInt(raw.shiftRevenue, 0, MAX_CHEF_SCORE);
+    raw.coins = clampInt(raw.coins, 0, 5000);
+  } else if (raw.mode === 'rush') {
+    raw.score = clampInt(raw.score, 0, MAX_RUSH_SCORE);
+  } else {
+    raw.score = clampInt(raw.score, 0, MAX_ZEN_SCORE);
+  }
   const str = JSON.stringify(raw);
-  if (str.length > 65000) return null; // Guard document size
+  if (str.length > 65000) return null;
   return raw;
+}
+
+function mergeSavedRuns(existingDoc, event) {
+  const out = { chef: null, rush: null, zen: null };
+  const prevMap = existingDoc && existingDoc.savedRuns && typeof existingDoc.savedRuns === 'object' ? existingDoc.savedRuns : {};
+  for (const m of ['chef', 'rush', 'zen']) {
+    if (prevMap[m]) out[m] = sanitizeActiveRun(prevMap[m]);
+  }
+  if (existingDoc && existingDoc.activeRun) {
+    const leg = sanitizeActiveRun(existingDoc.activeRun);
+    if (leg && (!out[leg.mode] || (leg.savedAt || 0) > (out[leg.mode].savedAt || 0))) {
+      out[leg.mode] = leg;
+    }
+  }
+
+  if (event.clearActiveRun && !event.clearSavedRunMode) {
+    return { chef: null, rush: null, zen: null };
+  }
+  if (event.clearSavedRunMode && ['chef', 'rush', 'zen'].includes(event.clearSavedRunMode)) {
+    out[event.clearSavedRunMode] = null;
+  }
+
+  if (event.savedRuns && typeof event.savedRuns === 'object') {
+    for (const m of ['chef', 'rush', 'zen']) {
+      if (event.savedRuns[m] === null) {
+        if (event.clearSavedRunMode === m) out[m] = null;
+      } else if (event.savedRuns[m]) {
+        const inc = sanitizeActiveRun(event.savedRuns[m]);
+        if (inc && (!out[m] || (inc.savedAt || 0) >= (out[m].savedAt || 0))) {
+          out[m] = inc;
+        }
+      }
+    }
+  } else if (event.activeRun !== undefined) {
+    if (event.activeRun === null) {
+      out.chef = null;
+    } else {
+      const inc = sanitizeActiveRun(event.activeRun);
+      if (inc) out[inc.mode] = inc;
+    }
+  }
+
+  return out;
 }
 
 exports.main = async (event = {}) => {
@@ -238,17 +396,21 @@ exports.main = async (event = {}) => {
   const action = event.action || 'pull';
   const docRef = db.collection(PLAYERS_COL).doc(openid);
 
-  let existing = null;
-  try {
-    const got = await docRef.get();
-    existing = got && got.data ? got.data : null;
-  } catch (_e) {
-    existing = null;
+  async function readExisting() {
+    try {
+      const got = await docRef.get();
+      return got && got.data ? got.data : null;
+    } catch (_e) {
+      return null;
+    }
   }
+
+  let existing = await readExisting();
 
   if (action === 'pull') {
     if (!existing) {
       const initMeta = sanitizeMetaSave(null);
+      initMeta.lastSyncedEarnedStardust = initMeta.totalEarnedStardust;
       const initProfile = sanitizeProfile(null, openidSuffix);
       const now = Date.now();
       const newDoc = {
@@ -260,6 +422,7 @@ exports.main = async (event = {}) => {
         bestShiftReached: 0,
         metaSave: initMeta,
         activeRun: null,
+        savedRuns: { chef: null, rush: null, zen: null },
         revision: 1,
         createdAt: now,
         updatedAt: now
@@ -272,65 +435,107 @@ exports.main = async (event = {}) => {
         profile: initProfile,
         metaSave: initMeta,
         activeRun: null,
+        savedRuns: newDoc.savedRuns,
         revision: 1
       };
     }
 
+    const savedRuns = mergeSavedRuns(existing, {});
+    const primaryRun = savedRuns.chef || savedRuns.rush || savedRuns.zen || null;
     return {
       ok: true,
       isNewUser: false,
       openidSuffix: existing.openidSuffix || openidSuffix,
       profile: existing.profile || sanitizeProfile(null, openidSuffix),
       metaSave: existing.metaSave || null,
-      activeRun: existing.activeRun || null,
+      activeRun: primaryRun,
+      savedRuns,
       revision: existing.revision || 1
     };
   }
 
   if (action === 'push') {
-    const mergedMeta = mergeMetaSaves(existing && existing.metaSave, event.metaSave);
-    const mergedProfile = event.profile
-      ? sanitizeProfile(event.profile, openidSuffix)
-      : (existing && existing.profile) || sanitizeProfile(null, openidSuffix);
+    const baseRev = Number(event.baseRevision) || 0;
+    let conflictMerged = false;
 
-    let nextActiveRun = existing ? existing.activeRun : null;
-    if (event.clearActiveRun) {
-      nextActiveRun = null;
-    } else if (event.activeRun !== undefined) {
-      nextActiveRun = sanitizeActiveRun(event.activeRun);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) existing = await readExisting();
+      if (existing && baseRev > 0 && baseRev < (existing.revision || 1)) {
+        conflictMerged = true;
+      }
+
+      const { sanitizedClient, warnings } = validateAndClampClientMeta(
+        existing && existing.metaSave,
+        event.metaSave,
+        event.runReport || null
+      );
+      const mergedMeta = mergeMetaSaves(existing && existing.metaSave, sanitizedClient);
+      const mergedProfile = mergeProfiles(existing && existing.profile, event.profile, openidSuffix);
+      const nextSavedRuns = mergeSavedRuns(existing, event);
+      const nextPrimaryRun = nextSavedRuns.chef || nextSavedRuns.rush || nextSavedRuns.zen || null;
+      const prevRev = (existing && existing.revision) || 0;
+      const nextRev = prevRev + 1;
+      const now = Date.now();
+
+      const payload = {
+        openidSuffix,
+        profile: mergedProfile,
+        bestChef: mergedMeta.bestChef,
+        bestRush: mergedMeta.bestRush,
+        bestZen: mergedMeta.bestZen,
+        bestShiftReached: mergedMeta.lifetimeStats.bestShiftReached,
+        metaSave: mergedMeta,
+        activeRun: nextPrimaryRun,
+        savedRuns: nextSavedRuns,
+        revision: nextRev,
+        updatedAt: now
+      };
+
+      if (!existing) {
+        payload.createdAt = now;
+        await docRef.set({ data: payload });
+        return {
+          ok: true,
+          openidSuffix,
+          profile: mergedProfile,
+          metaSave: mergedMeta,
+          activeRun: nextPrimaryRun,
+          savedRuns: nextSavedRuns,
+          revision: nextRev,
+          conflictMerged,
+          validationWarnings: warnings
+        };
+      }
+
+      // Optimistic concurrency check on `revision` to prevent lost updates
+      const updRes = await db
+        .collection(PLAYERS_COL)
+        .where({ _id: openid, revision: prevRev })
+        .update({ data: payload });
+
+      if (updRes && updRes.stats && updRes.stats.updated > 0) {
+        return {
+          ok: true,
+          openidSuffix,
+          profile: mergedProfile,
+          metaSave: mergedMeta,
+          activeRun: nextPrimaryRun,
+          savedRuns: nextSavedRuns,
+          revision: nextRev,
+          conflictMerged,
+          validationWarnings: warnings
+        };
+      }
+      conflictMerged = true;
     }
 
-    const nextRev = ((existing && existing.revision) || 0) + 1;
-    const now = Date.now();
-    const payload = {
-      openidSuffix,
-      profile: mergedProfile,
-      bestChef: mergedMeta.bestChef,
-      bestRush: mergedMeta.bestRush,
-      bestZen: mergedMeta.bestZen,
-      bestShiftReached: mergedMeta.lifetimeStats.bestShiftReached,
-      metaSave: mergedMeta,
-      activeRun: nextActiveRun,
-      revision: nextRev,
-      updatedAt: now
-    };
-    if (!existing) payload.createdAt = now;
-
-    await docRef.set({ data: payload });
-    return {
-      ok: true,
-      openidSuffix,
-      profile: mergedProfile,
-      metaSave: mergedMeta,
-      activeRun: nextActiveRun,
-      revision: nextRev
-    };
+    return { ok: false, reason: 'revision_conflict_retry_exhausted' };
   }
 
   if (action === 'updateProfile') {
-    const profile = sanitizeProfile(event.profile, openidSuffix);
     const now = Date.now();
     if (!existing) {
+      const profile = sanitizeProfile(event.profile, openidSuffix);
       const initMeta = sanitizeMetaSave(null);
       await docRef.set({
         data: {
@@ -342,29 +547,33 @@ exports.main = async (event = {}) => {
           bestShiftReached: 0,
           metaSave: initMeta,
           activeRun: null,
+          savedRuns: { chef: null, rush: null, zen: null },
           revision: 1,
           createdAt: now,
           updatedAt: now
         }
       });
-    } else {
-      await docRef.update({
-        data: {
-          profile,
-          updatedAt: now
-        }
-      });
+      return { ok: true, openidSuffix, profile };
     }
-    return { ok: true, openidSuffix, profile };
+    const mergedProf = mergeProfiles(existing.profile, event.profile, openidSuffix);
+    await docRef.update({
+      data: {
+        profile: mergedProf,
+        revision: (existing.revision || 1) + 1,
+        updatedAt: now
+      }
+    });
+    return { ok: true, openidSuffix, profile: mergedProf };
   }
 
   if (action === 'leaderboard') {
     const mode = event.mode === 'rush' ? 'rush' : event.mode === 'zen' ? 'zen' : 'chef';
     const scoreField = mode === 'rush' ? 'bestRush' : mode === 'zen' ? 'bestZen' : 'bestChef';
+    const maxCap = mode === 'rush' ? MAX_RUSH_SCORE : mode === 'zen' ? MAX_ZEN_SCORE : MAX_CHEF_SCORE;
 
     const topRes = await db
       .collection(PLAYERS_COL)
-      .where({ [scoreField]: _.gt(0) })
+      .where({ [scoreField]: _.gt(0).and(_.lte(maxCap)) })
       .orderBy(scoreField, 'desc')
       .limit(50)
       .get();
@@ -372,22 +581,23 @@ exports.main = async (event = {}) => {
     const list = (topRes.data || []).map((row, idx) => ({
       rank: idx + 1,
       isMe: row._id === openid,
+      isNpc: false,
       nickName: (row.profile && row.profile.nickName) || `星夜店长#${row.openidSuffix || '0000'}`,
       avatarUrl: (row.profile && row.profile.avatarUrl) || '',
       avatarPreset: (row.profile && row.profile.avatarPreset) || 'mikan',
-      score: row[scoreField] || 0,
+      score: Math.min(maxCap, row[scoreField] || 0),
       bestShiftReached: row.bestShiftReached || 0
     }));
 
     let myRank = null;
     const inTop = list.find((item) => item.isMe);
-    const myScore = existing ? existing[scoreField] || 0 : 0;
+    const myScore = existing ? Math.min(maxCap, existing[scoreField] || 0) : 0;
     if (inTop) {
       myRank = inTop.rank;
     } else if (myScore > 0) {
       const higherCnt = await db
         .collection(PLAYERS_COL)
-        .where({ [scoreField]: _.gt(myScore) })
+        .where({ [scoreField]: _.gt(myScore).and(_.lte(maxCap)) })
         .count();
       myRank = (higherCnt.total || 0) + 1;
     }

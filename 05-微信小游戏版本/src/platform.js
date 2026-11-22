@@ -25,7 +25,7 @@ function getSystemMetrics() {
     }
     const width = Math.max(320, win.windowWidth || 390);
     const height = Math.max(480, win.windowHeight || 844);
-    const dpr = Math.min(Math.max(1, win.pixelRatio || 2), 2.5);
+    const dpr = Math.min(Math.max(1, win.pixelRatio || 2), 2.0);
     const safeArea = win.safeArea || { top: win.statusBarHeight || 20, bottom: height, left: 0, right: width };
     const safeTop = Math.max(0, safeArea.top || 0);
     const safeBottom = Math.max(0, height - (safeArea.bottom || height));
@@ -52,7 +52,7 @@ function getSystemMetrics() {
 
   const width = Math.max(320, (g && g.innerWidth) || 390);
   const height = Math.max(480, (g && g.innerHeight) || 844);
-  const dpr = Math.min(Math.max(1, (g && g.devicePixelRatio) || 1), 2.5);
+  const dpr = Math.min(Math.max(1, (g && g.devicePixelRatio) || 1), 2.0);
   const mockRect = g && g.__WX_MOCK_CAPSULE__ ? g.__WX_MOCK_CAPSULE__ : null;
   const mockSafeTop = g && typeof g.__WX_MOCK_SAFE_TOP__ === 'number' ? g.__WX_MOCK_SAFE_TOP__ : 8;
   const mockSafeBottom = g && typeof g.__WX_MOCK_SAFE_BOTTOM__ === 'number' ? g.__WX_MOCK_SAFE_BOTTOM__ : 0;
@@ -173,7 +173,7 @@ function createAudioContext() {
   if (hasWx) {
     try {
       if (typeof wx.setInnerAudioOption === 'function') {
-        wx.setInnerAudioOption({ obeyMuteSwitch: false });
+        wx.setInnerAudioOption({ obeyMuteSwitch: true });
       }
     } catch (_) {}
     if (typeof wx.createWebAudioContext === 'function') {
@@ -539,14 +539,21 @@ function callCloudFunction(name, data = {}) {
   return runBrowserMockCloud(data);
 }
 
+let lastFriendCloudKey = '';
 function setWxFriendCloudScore(bestChef = 0, bestRush = 0, bestZen = 0) {
   if (!hasWx || typeof wx.setUserCloudStorage !== 'function') return;
+  const c = String(Math.floor(bestChef || 0));
+  const r = String(Math.floor(bestRush || 0));
+  const z = String(Math.floor(bestZen || 0));
+  const key = `${c}:${r}:${z}`;
+  if (key === lastFriendCloudKey) return;
+  lastFriendCloudKey = key;
   try {
     wx.setUserCloudStorage({
       KVDataList: [
-        { key: 'bestChef', value: String(Math.floor(bestChef || 0)) },
-        { key: 'bestRush', value: String(Math.floor(bestRush || 0)) },
-        { key: 'bestZen', value: String(Math.floor(bestZen || 0)) }
+        { key: 'bestChef', value: c },
+        { key: 'bestRush', value: r },
+        { key: 'bestZen', value: z }
       ]
     });
   } catch (_) {}
@@ -623,7 +630,7 @@ function syncUserInfoButton(rectOrNull, onAuthResult) {
 }
 
 function getDefaultNpcRivals() {
-  return DEFAULT_NPC_RIVALS.map((r) => ({ ...r }));
+  return DEFAULT_NPC_RIVALS.map((r) => ({ ...r, isNpc: true }));
 }
 
 function getGlobal() {

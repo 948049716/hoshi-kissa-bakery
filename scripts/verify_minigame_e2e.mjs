@@ -254,6 +254,14 @@ function buildPreviewHtml(moduleMap) {
             try {
               const payload = data || {};
               const action = payload.action || 'pull';
+              if (action === 'push' && (window.__WX_HARNESS__.failNextPushCount || 0) > 0) {
+                window.__WX_HARNESS__.failNextPushCount--;
+                const simErr = new Error('cloud.callFunction:fail transient network timeout');
+                setTimeout(() => {
+                  if (fail) fail(simErr);
+                }, 15);
+                return Promise.reject(simErr);
+              }
               const cloudKey = 'wx_cloud_kissa_doc_v1';
               let doc = null;
               try {
@@ -275,46 +283,80 @@ function buildPreviewHtml(moduleMap) {
                     bestShiftReached: 0,
                     metaSave: null,
                     activeRun: null,
+                    savedRuns: { chef: null, rush: null, zen: null },
                     revision: 1
                   };
                   localStorage.setItem(cloudKey, JSON.stringify(doc));
+                } else if (!doc.savedRuns) {
+                  doc.savedRuns = {
+                    chef: doc.activeRun && (!doc.activeRun.mode || doc.activeRun.mode === 'chef') ? doc.activeRun : null,
+                    rush: doc.activeRun && doc.activeRun.mode === 'rush' ? doc.activeRun : null,
+                    zen: doc.activeRun && doc.activeRun.mode === 'zen' ? doc.activeRun : null
+                  };
                 }
                 result = { ok: true, isNewUser, ...doc };
               } else if (action === 'push') {
-                const prevMeta = (doc && doc.metaSave) || {};
-                const inMeta = payload.metaSave || {};
-                const mergedChef = Math.max((doc && doc.bestChef) || 0, prevMeta.bestChef || 0, inMeta.bestChef || 0);
-                const mergedRush = Math.max((doc && doc.bestRush) || 0, prevMeta.bestRush || 0, inMeta.bestRush || 0);
-                const mergedZen = Math.max((doc && doc.bestZen) || 0, prevMeta.bestZen || 0, inMeta.bestZen || 0);
-                const mergedEarned = Math.max(30, prevMeta.totalEarnedStardust || 30, inMeta.totalEarnedStardust || 30);
-                const nextMeta = {
-                  ...prevMeta,
-                  ...inMeta,
-                  bestChef: mergedChef,
-                  bestRush: mergedRush,
-                  bestZen: mergedZen,
-                  totalEarnedStardust: mergedEarned
-                };
-                const nextActiveRun = payload.clearActiveRun
-                  ? null
-                  : payload.activeRun !== undefined
-                  ? payload.activeRun
-                  : doc
-                  ? doc.activeRun
-                  : null;
-                doc = {
-                  openidSuffix,
-                  profile: payload.profile || (doc && doc.profile) || { nickName: '星夜店长#' + openidSuffix, avatarUrl: '', avatarPreset: 'mikan', authorized: false, updatedAt: Date.now() },
-                  bestChef: mergedChef,
-                  bestRush: mergedRush,
-                  bestZen: mergedZen,
-                  bestShiftReached: Math.max((doc && doc.bestShiftReached) || 0, (inMeta.lifetimeStats && inMeta.lifetimeStats.bestShiftReached) || 0),
-                  metaSave: nextMeta,
-                  activeRun: nextActiveRun,
-                  revision: ((doc && doc.revision) || 0) + 1
-                };
-                localStorage.setItem(cloudKey, JSON.stringify(doc));
-                result = { ok: true, ...doc };
+                const prevRev = (doc && doc.revision) || 0;
+                if (typeof payload.baseRevision === 'number' && payload.baseRevision > 0 && prevRev > payload.baseRevision) {
+                  result = { ok: false, conflict: true, ...doc };
+                } else {
+                  const prevMeta = (doc && doc.metaSave) || {};
+                  const inMeta = payload.metaSave || {};
+                  const mergedChef = Math.max((doc && doc.bestChef) || 0, prevMeta.bestChef || 0, inMeta.bestChef || 0);
+                  const mergedRush = Math.max((doc && doc.bestRush) || 0, prevMeta.bestRush || 0, inMeta.bestRush || 0);
+                  const mergedZen = Math.max((doc && doc.bestZen) || 0, prevMeta.bestZen || 0, inMeta.bestZen || 0);
+                  const remEarned = prevMeta.totalEarnedStardust || 30;
+                  const inEarned = inMeta.totalEarnedStardust || 30;
+                  const baseSync =
+                    typeof payload.lastSyncedEarnedStardust === 'number'
+                      ? payload.lastSyncedEarnedStardust
+                      : typeof inMeta.lastSyncedEarnedStardust === 'number'
+                      ? inMeta.lastSyncedEarnedStardust
+                      : null;
+                  let mergedEarned = Math.max(30, remEarned, inEarned);
+                  if (baseSync !== null && baseSync >= 30 && inEarned >= baseSync && remEarned >= baseSync) {
+                    const deltaIn = Math.min(2500, Math.max(0, inEarned - baseSync));
+                    const deltaRem = Math.max(0, remEarned - baseSync);
+                    mergedEarned = Math.max(mergedEarned, baseSync + deltaIn + deltaRem);
+                  }
+                  const nextMeta = {
+                    ...prevMeta,
+                    ...inMeta,
+                    bestChef: mergedChef,
+                    bestRush: mergedRush,
+                    bestZen: mergedZen,
+                    totalEarnedStardust: mergedEarned,
+                    lastSyncedEarnedStardust: mergedEarned
+                  };
+                  const prevRuns = (doc && doc.savedRuns) || { chef: null, rush: null, zen: null };
+                  const inRuns = payload.savedRuns && typeof payload.savedRuns === 'object' ? payload.savedRuns : {};
+                  const nextSavedRuns = {
+                    chef: payload.clearActiveRun ? null : inRuns.chef !== undefined ? inRuns.chef : prevRuns.chef,
+                    rush: payload.clearActiveRun ? null : inRuns.rush !== undefined ? inRuns.rush : prevRuns.rush,
+                    zen: payload.clearActiveRun ? null : inRuns.zen !== undefined ? inRuns.zen : prevRuns.zen
+                  };
+                  if (payload.clearSavedRunMode && ['chef', 'rush', 'zen'].includes(payload.clearSavedRunMode)) {
+                    nextSavedRuns[payload.clearSavedRunMode] = null;
+                  }
+                  if (payload.activeRun && payload.activeRun.mode && ['chef', 'rush', 'zen'].includes(payload.activeRun.mode)) {
+                    nextSavedRuns[payload.activeRun.mode] = payload.activeRun;
+                  }
+                  const nextActiveRun = nextSavedRuns.chef || nextSavedRuns.rush || nextSavedRuns.zen || null;
+                  doc = {
+                    openidSuffix,
+                    profile: payload.profile || (doc && doc.profile) || { nickName: '星夜店长#' + openidSuffix, avatarUrl: '', avatarPreset: 'mikan', authorized: false, updatedAt: Date.now() },
+                    bestChef: mergedChef,
+                    bestRush: mergedRush,
+                    bestZen: mergedZen,
+                    bestShiftReached: Math.max((doc && doc.bestShiftReached) || 0, (inMeta.lifetimeStats && inMeta.lifetimeStats.bestShiftReached) || 0),
+                    metaSave: nextMeta,
+                    activeRun: nextActiveRun,
+                    savedRuns: nextSavedRuns,
+                    revision: prevRev + 1
+                  };
+                  localStorage.setItem(cloudKey, JSON.stringify(doc));
+                  result = { ok: true, ...doc };
+                }
               } else if (action === 'updateProfile') {
                 doc = doc || { openidSuffix, bestChef: 0, bestRush: 0, bestZen: 0, bestShiftReached: 0, revision: 1 };
                 doc.profile = { ...(doc.profile || {}), ...(payload.profile || {}), updatedAt: Date.now() };
@@ -325,15 +367,16 @@ function buildPreviewHtml(moduleMap) {
                 const mode = payload.mode === 'rush' ? 'rush' : 'chef';
                 const field = mode === 'rush' ? 'bestRush' : 'bestChef';
                 const rivals = [
-                  { id: 'r1', isMe: false, nickName: '月光甜点师·小葵', avatarUrl: '', avatarPreset: 'luna', score: mode === 'rush' ? 7680 : 24800, bestShiftReached: 6 },
-                  { id: 'r2', isMe: false, nickName: '焦糖布丁喵', avatarUrl: '', avatarPreset: 'mikan', score: mode === 'rush' ? 6150 : 18600, bestShiftReached: 5 },
-                  { id: 'r3', isMe: false, nickName: '柴柴烘焙坊', avatarUrl: '', avatarPreset: 'mugi', score: mode === 'rush' ? 5420 : 14200, bestShiftReached: 5 }
+                  { id: 'r1', isMe: false, isNpc: true, nickName: '月光甜点师·小葵', avatarUrl: '', avatarPreset: 'luna', score: mode === 'rush' ? 7680 : 24800, bestShiftReached: 6 },
+                  { id: 'r2', isMe: false, isNpc: true, nickName: '焦糖布丁喵', avatarUrl: '', avatarPreset: 'mikan', score: mode === 'rush' ? 6150 : 18600, bestShiftReached: 5 },
+                  { id: 'r3', isMe: false, isNpc: true, nickName: '柴柴烘焙坊', avatarUrl: '', avatarPreset: 'mugi', score: mode === 'rush' ? 5420 : 14200, bestShiftReached: 5 }
                 ];
                 const myScore = doc ? doc[field] || 0 : 0;
                 if (myScore > 0) {
                   rivals.push({
                     id: 'me',
                     isMe: true,
+                    isNpc: false,
                     nickName: (doc.profile && doc.profile.nickName) || ('星夜店长#' + openidSuffix),
                     avatarUrl: (doc.profile && doc.profile.avatarUrl) || '',
                     avatarPreset: (doc.profile && doc.profile.avatarPreset) || 'mikan',
@@ -650,6 +693,13 @@ async function run() {
     await sleep(160);
   }
 
+  async function longPressAt(x, y, holdMs = 390) {
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+    await sleep(holdMs);
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+    await sleep(180);
+  }
+
   async function tapHit(id) {
     const rect = await evalJS(`(() => {
       const st = window.__HOSHI_DEBUG__.getState();
@@ -842,20 +892,48 @@ async function run() {
   const jb = st.jarBox;
   assert(jb && jb.scale > 0, 'jarBox computed');
 
-  // 3A. True Tap-to-Serve on starter T3 -> triggers removal, score, skillEnergy, and Serve Cascade window!
+  // 3A. Zero-Misfire Quick Tap vs Dedicated 【上菜】 Button & Long-Press-to-Serve
   const starterT3 = st.entities.find((e) => e.isServable);
   assert(starterT3, 'Expected a servable starter treat');
   const t3ScreenX = Math.round(jb.x + starterT3.x * jb.scale);
   const t3ScreenY = Math.round(jb.y + starterT3.y * jb.scale);
-  const scoreBeforeServe = st.score;
+  const dropsBeforeQuickTap = st.dropsMadeThisRun;
   await tapAt(t3ScreenX, t3ScreenY);
   await sleep(220);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.servesCompleted >= 1, `Expected servesCompleted >= 1 after tap-to-serve, got ${st.servesCompleted}`);
-  assert(st.score > scoreBeforeServe, 'Expected tap-to-serve to award score');
-  assert(st.skillEnergy >= 30, `Expected tap-to-serve to charge skillEnergy >= 30, got ${st.skillEnergy}`);
+  assert(
+    st.servesCompleted === 0 && st.dropsMadeThisRun === dropsBeforeQuickTap + 1 && st.dropX === 220,
+    `Quick tap on servable treat must aim & shoot from fixed turret (dropX=220) without misfire serving: serves=${st.servesCompleted}, drops=${st.dropsMadeThisRun}, dropX=${st.dropX}`
+  );
+  await waitForCooldown();
+
+  // Dedicated 【上菜】 button on order bar serves cleanly
+  const serveBtnHit = st.hits.find((h) => h.id === 'm_serve_order_0' || h.id === 'm_serve_order_1');
+  assert(serveBtnHit, `Expected dedicated m_serve_order_* button when servable treat exists, hits=${st.hits.map((h) => h.id).join(',')}`);
+  const scoreBeforeServe = st.score;
+  await tapHit(serveBtnHit.id);
+  await sleep(220);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.servesCompleted >= 1, `Expected servesCompleted >= 1 after dedicated 【上菜】 button, got ${st.servesCompleted}`);
+  assert(st.score > scoreBeforeServe, 'Expected dedicated 【上菜】 button to award score');
+  assert(st.skillEnergy >= 30, `Expected serve to charge skillEnergy >= 30, got ${st.skillEnergy}`);
   assert(st.serveCascadeTimer > 0, `Expected Serve Cascade Avalanche window active, got ${st.serveCascadeTimer}`);
-  assert(!st.entities.some((e) => e.id === starterT3.id), 'Served treat must be physically removed from jar');
+
+  // Long-Press-to-Serve (>= 0.32s) directly on a servable treat in jar serves without shooting
+  const lpTier = st.orders.find((o) => !o.completed).slots.find((s) => !s.done).tier;
+  const lpId = await evalJS(`window.__HOSHI_DEBUG__.spawnTestEntity(${lpTier}, 142, 444)`);
+  await sleep(120);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const lpEnt = st.entities.find((e) => e.id === lpId);
+  assert(lpEnt && lpEnt.isServable, 'Expected spawned treat to be servable for Long-Press test');
+  const dropsBeforeLp = st.dropsMadeThisRun;
+  const servesBeforeLp = st.servesCompleted;
+  await longPressAt(Math.round(jb.x + lpEnt.x * jb.scale), Math.round(jb.y + lpEnt.y * jb.scale), 390);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.servesCompleted === servesBeforeLp + 1 && st.dropsMadeThisRun === dropsBeforeLp && !st.entities.some((e) => e.id === lpId),
+    `Expected Long-Press-to-Serve to serve treat without firing a shot: serves=${st.servesCompleted}/${servesBeforeLp}, drops=${st.dropsMadeThisRun}/${dropsBeforeLp}`
+  );
 
   // 3B. Fixed-Center Angle Aiming & Bank-Shot (dropX stays locked at 220 while aiming left!)
   const slingStartX = Math.round(jb.x + jb.w * 0.5);
@@ -1051,33 +1129,35 @@ async function run() {
     await tapHit('cancel_tool');
   }
 
-  // Trigger Chime Event -> Queue Blessing -> Open Blessing 3-Choice Modal
-  await evalJS(`window.__HOSHI_DEBUG__.triggerEvent('chime')`);
+  // Consolidated Organic Event ('meteor') + Non-Blocking Milestone Supply in Chef (no blocking blessing modal or bottom-jar button!)
+  await evalJS(`window.__HOSHI_DEBUG__.triggerEvent()`);
   await sleep(160);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.activeEvent && st.activeEvent.kind === 'chime', 'Expected active chime event');
-  if (st.pendingBlessings <= 0) {
-    await evalJS(`window.__HOSHI_DEBUG__.queueBlessing('测试祝福奖励')`);
-    await sleep(180);
-  }
-  await tapHit('open_blessing_btn');
-  await sleep(260);
+  assert(st.activeEvent && st.activeEvent.kind === 'meteor', `Expected consolidated organic event 'meteor', got ${JSON.stringify(st.activeEvent)}`);
+  const coinsBeforeGrant = st.coins;
+  const dustBeforeGrant = st.stardust;
+  await evalJS(`window.__HOSHI_DEBUG__.queueBlessing('测试里程碑补给')`);
+  await sleep(180);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.activeModal === 'blessing', `Expected blessing modal, got ${st.activeModal}`);
-  await screenshot('10_blessing_375.png');
-  for (let bGuard = 0; bGuard < 5 && st.activeModal === 'blessing'; bGuard++) {
-    const pickHit = st.hits.find((h) => h.id.startsWith('blessing_pick_'));
-    assert(pickHit, 'Expected blessing pick button');
-    await tapHit(pickHit.id);
-    await sleep(240);
-    st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  }
-  assert(st.activeModal === null, 'Blessing modal closed after selection');
+  assert(
+    st.coins > coinsBeforeGrant &&
+      st.stardust > dustBeforeGrant &&
+      st.activeModal === null &&
+      !st.hits.some((h) => h.id === 'open_blessing_btn'),
+    `Expected non-blocking Chef milestone supply (+coins/+stardust) without open_blessing_btn occlusion: coins=${st.coins}/${coinsBeforeGrant}, modal=${st.activeModal}`
+  );
+  await screenshot('10_relic_milestone_375.png');
 
-  // 3F. Phase 2 — 5-Shift Early Close, Mobile Prep Shop (Reroll/Buy/Sell/Mod), Shift 2 Carry-Over & Relics
-  await evalJS(`window.__HOSHI_DEBUG__.addShiftRevenue(1300)`);
+  // 3F. Phase 2 — 5-Shift Early Close, Mobile Prep Shop (Reroll/Buy/Sell/Mod), Persistent Shift 2 Carry-Over & Relics
+  await evalJS(`
+    window.__HOSHI_DEBUG__.spawnTestEntity(3, 118, 448);
+    window.__HOSHI_DEBUG__.spawnTestEntity(4, 318, 444);
+    window.__HOSHI_DEBUG__.addShiftRevenue(1300);
+  `);
   await sleep(220);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const settledBeforeClose = st.entities.filter((e) => !e.isYarnBall).length;
+  assert(settledBeforeClose >= 4, `Expected >= 4 settled treats before closing Shift 1, got ${settledBeforeClose}`);
   assert(st.shiftClearedFlag === true, `Expected shiftClearedFlag=true after meeting target, got ${st.shiftClearedFlag}`);
   assert(st.hits.some((h) => h.id === 'btn_close_shift_early'), 'Expected btn_close_shift_early CTA in mobile HUD');
   await checkCapsuleAndViewportBounds('iPhone SE Chef Early Close 375x667', 375, 667, 0);
@@ -1155,7 +1235,7 @@ async function run() {
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(st.prepShop.modOffers.some((m) => m.bought), 'Expected Deck Mod offer marked bought');
 
-  // Launch Shift 2 & verify First-Time Glaze Ring Spotlight Tip + Hot-Oven Carry-Over + Glaze Ring hazard
+  // Launch Shift 2 & verify First-Time Glaze Ring Spotlight Tip + Persistent Hot-Oven Carry-Over (>= 4 treats!) + Glaze Ring hazard
   await tapHit('prep_next_shift');
   await sleep(340);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
@@ -1175,7 +1255,10 @@ async function run() {
   );
   assert(st.shift === 2 && st.shiftTarget === 2600, `Expected Shift 2 target ¥2600, got shift=${st.shift}, target=${st.shiftTarget}`);
   assert(st.stepsLeft >= 16, `Expected >= 16 steps in Shift 2, got ${st.stepsLeft}`);
-  assert(st.entities.length >= 2, `Expected Hot-Oven Carry-Over treats in Shift 2 jar, got ${st.entities.length}`);
+  assert(
+    st.entities.length >= 4 && st.entities.length >= Math.min(12, settledBeforeClose) - 2,
+    `Expected persistent Hot-Oven Carry-Over (>= 4 treats, not wiped to 2) in Shift 2 jar, got ${st.entities.length} (from ${settledBeforeClose})`
+  );
 
   // Verify Relics Mechanics: rel_bumpers (2 Butter Bumpers) + Shift 2 glaze_ring, rel_aged (agedStacks++), rel_antigrav (4th drop flips gravity!)
   await evalJS(`
@@ -1498,15 +1581,21 @@ async function run() {
   assert(st.mode === 'rush' && st.activeModal === null && st.rushTimer > 80, `Expected rush mode active & timer > 80, got ${st.rushTimer}`);
   await checkCapsuleAndViewportBounds('iPhone 14 Rush HUD 390x844', 390, 844, 34);
 
-  // Tap-to-Serve starter T3 in Rush mode -> must add +3.0s!
+  // Dedicated rush_serve_btn serves starter T3 in Rush mode -> must add +3.0s, then mobile_relics_bar appears!
   const rushServable = st.entities.find((e) => e.isServable);
   assert(rushServable, 'Expected servable starter treat in Rush mode');
-  const rjb = st.jarBox;
   const beforeServeRushT = st.rushTimer;
-  await tapAt(Math.round(rjb.x + rushServable.x * rjb.scale), Math.round(rjb.y + rushServable.y * rjb.scale));
+  await tapHit('rush_serve_btn');
   await sleep(220);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.rushTimer > beforeServeRushT + 2.0, `Expected Rush tap-to-serve to add +3.0s (before=${beforeServeRushT}, after=${st.rushTimer})`);
+  assert(st.rushTimer > beforeServeRushT + 2.0, `Expected Rush rush_serve_btn to add +3.0s (before=${beforeServeRushT}, after=${st.rushTimer})`);
+  await evalJS(`window.__HOSHI_DEBUG__.queueBlessing('极速里程碑秘方')`);
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.relics.length >= 1 && st.hits.some((h) => h.id === 'mobile_relics_bar'),
+    `Expected Rush mode to equip unified Relic and display mobile_relics_bar, got relics=${JSON.stringify(st.relics)}`
+  );
 
   const beforeGustTimer = st.rushTimer;
   const beforeGustCount = st.entities.length;
@@ -1525,26 +1614,28 @@ async function run() {
     if (st.over && st.activeModal === 'gameover') break;
   }
   assert(st.over === true && st.rushFinished === true && st.activeModal === 'gameover', 'Rush timer expiration opens settlement');
+  assert(st.hits.some((h) => h.id === 'go_open_shop'), 'Expected go_open_shop button on Game Over modal');
+  await checkCapsuleAndViewportBounds('iPhone 14 Rush GameOver 390x844', 390, 844, 34);
   await screenshot('12_rush_gameover_390.png');
 
-  // 4B. Phase 2 — Mikan +8🪙 Starting Coins, Organic Shift 3 Ice-Only + Frozen Spotlight Tip, Shift 5 Victory & Endless Overtime
+  // 4B. Phase 2 — Mikan +12🪙 Starting Coins, Organic Shift 3 Bumpers + 2 Frozen + Frozen Spotlight Tip, Shift 5 Victory & Endless Overtime
   await evalJS(`window.__HOSHI_DEBUG__.selectPatron('mikan'); window.__HOSHI_DEBUG__.startMode('chef');`);
   await sleep(300);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
-  assert(st.mode === 'chef' && st.coins >= 8, `Expected Mikan starting coins >= 8, got ${st.coins}`);
+  assert(st.mode === 'chef' && st.coins >= 12, `Expected Mikan starting coins >= 12, got ${st.coins}`);
 
-  // Verify Item 8 & Item 1: Organic Shift 3 is pure ice-thawing (0 stage hazards, target ¥4400) + triggers first-time tip_frozen spotlight!
+  // Verify Organic Shift 3 Mini-Boss: target ¥4400 + stage 'bumpers' + 2 frozen treats + first-time tip_frozen spotlight!
   await evalJS(`window.__HOSHI_DEBUG__.setShift(3, null, { allowTips: true })`);
   await sleep(260);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(
     st.shift === 3 &&
       st.shiftTarget === 4400 &&
-      st.shiftHazards.length === 0 &&
+      st.shiftHazards.includes('bumpers') &&
       st.entities.filter((e) => e.frozenHp > 0).length === 2 &&
       st.activeModal === 'mode_guide' &&
       st.guideMode === 'tip_frozen',
-    `Expected organic Shift 3 target=4400, 0 stage hazards, 2 frozen & tip_frozen modal, got shift=${st.shift}, target=${st.shiftTarget}, hazards=${JSON.stringify(st.shiftHazards)}, modal=${st.activeModal}/${st.guideMode}`
+    `Expected organic Shift 3 target=4400, stage 'bumpers', 2 frozen & tip_frozen modal, got shift=${st.shift}, target=${st.shiftTarget}, hazards=${JSON.stringify(st.shiftHazards)}, modal=${st.activeModal}/${st.guideMode}`
   );
   await checkCapsuleAndViewportBounds('iPhone 14 Frozen Tip 390x844', 390, 844, 34);
   await screenshot('23_tip_frozen_390.png');
@@ -1739,18 +1830,18 @@ async function run() {
   console.log(`[Phase 3K OK] fast_fresh verified: fresh=¥${freshPayout} (T${ffTier}, ${freshNorm.toFixed(2)}x) vs stale=¥${stalePayout} (T${staleVip.slots[0].tier}, ${staleNorm.toFixed(2)}x)`);
 
   // ==========================================================
-  // 3L (Mobile 390x844). Phase 3 — Act 4 (8200 + Stage Obstacles), Act 5 Boss + Step-6 Judge Rush & Build Details Modal
+  // 3L (Mobile 390x844). Phase 3 — Act 4 (7600 + Stage Obstacles), Act 5 Boss + Step-6 Judge Rush & Build Details Modal
   // ==========================================================
   await evalJS(`window.__HOSHI_DEBUG__.setShift(4)`);
   await sleep(220);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
   assert(
     st.shift === 4 &&
-      st.shiftTarget === 8200 &&
+      st.shiftTarget === 7600 &&
       st.entities.some((e) => e.isYarnBall) &&
       st.shiftHazards.length === 1 &&
       ['divider', 'bumpers', 'fast_fresh'].includes(st.shiftHazards[0]),
-    `Expected Act 4 target=8200 + Yarn Ball + divider/bumpers/fast_fresh, got target=${st.shiftTarget}, hazards=${JSON.stringify(st.shiftHazards)}`
+    `Expected Act 4 target=7600 + Yarn Ball + divider/bumpers/fast_fresh, got target=${st.shiftTarget}, hazards=${JSON.stringify(st.shiftHazards)}`
   );
 
   // Act 5 Boss: 2 frozen high-tier + divider + organic step-6 Judge Rush (must start with FULL 4 steps!)
@@ -1826,8 +1917,14 @@ async function run() {
   await tapHit('mode_chef');
   await sleep(120);
   await tapHit('btn_start');
-  await sleep(300);
+  await sleep(220);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  if (st.activeModal === 'confirm') {
+    await checkCapsuleAndViewportBounds('Desktop Lobby Overwrite Confirm 1280x760', 1280, 760, 0);
+    await tapHit('confirm_accept');
+    await sleep(260);
+    st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  }
   assert(st.mode === 'chef' && st.running === true && st.shift === 1 && st.activeModal === null, 'Chef mode running on desktop without repeating seen guide');
   assert(st.hits.some((h) => h.id === 'wide_relics_bar'), 'Expected wide_relics_bar hit on desktop Chef HUD');
   assert(st.hits.some((h) => h.id === 'wide_hazards_bar'), 'Expected wide_hazards_bar hit on desktop Chef HUD');
@@ -2171,14 +2268,15 @@ async function run() {
   await tapHit('modal_close');
   await sleep(140);
 
-  // 7B: Silent OpenID Cloud Pull & Lossless Monotonic Merge (Cloud score + Local unlock + Stardust accounting)
+  // 7B: Silent OpenID Cloud Pull & Lossless Multi-Device Stardust Delta Merge (`lastSyncedEarnedStardust`)
   await evalJS(`(() => {
     const localSave = {
       bestChef: 4200,
       bestRush: 6350,
       bestZen: 1800,
-      bankStardust: 60,
-      totalEarnedStardust: 120,
+      bankStardust: 90,
+      totalEarnedStardust: 150,
+      lastSyncedEarnedStardust: 100,
       selectedPatron: 'luna',
       unlockedPatrons: ['mikan', 'luna'],
       equippedTheme: 'amber',
@@ -2191,6 +2289,7 @@ async function run() {
     };
     localStorage.setItem('wx_hoshi_kissa_bakery_save_v1', JSON.stringify(localSave));
     localStorage.removeItem('wx_hoshi_kissa_active_run_v1');
+    localStorage.removeItem('wx_hoshi_kissa_saved_runs_v2');
 
     const remoteCloudDoc = {
       openidSuffix: '88A6',
@@ -2204,7 +2303,8 @@ async function run() {
         bestRush: 3100,
         bestZen: 5200,
         bankStardust: 240,
-        totalEarnedStardust: 240,
+        totalEarnedStardust: 280,
+        lastSyncedEarnedStardust: 280,
         selectedPatron: 'mikan',
         unlockedPatrons: ['mikan'],
         equippedTheme: 'amber',
@@ -2216,6 +2316,7 @@ async function run() {
         updatedAt: Date.now() - 5000
       },
       activeRun: null,
+      savedRuns: { chef: null, rush: null, zen: null },
       revision: 3
     };
     localStorage.setItem('wx_cloud_kissa_doc_v1', JSON.stringify(remoteCloudDoc));
@@ -2230,8 +2331,8 @@ async function run() {
     cloudEnvUsed === 'dev-d0ggz3zx89d349af3',
     `Expected wx.cloud.init to connect to 'dev-d0ggz3zx89d349af3', got '${cloudEnvUsed}'`
   );
-  // Spent stardust: luna (60) + up_tools Lv.1 (40) = 100; totalEarned = max(120, 240+40=280) -> wait: remote had bank=240 + up_tools(40) = 280!
-  // So bankStardust = 280 - 100 = 180! Let's verify exact monotonic formula:
+  // Multi-device delta check: baseSynced=100, local offline +50 (150), remote +180 (280) => merged totalEarned = 100 + 50 + 180 = 330!
+  // Spent stardust: luna (60) + up_tools Lv.1 (40) = 100 => bankStardust = 330 - 100 = 230!
   assert(
     st.cloudState.status === 'synced' &&
       mergedSave.bestChef === 19800 &&
@@ -2239,8 +2340,9 @@ async function run() {
       mergedSave.bestZen === 5200 &&
       mergedSave.unlockedPatrons.includes('luna') &&
       mergedSave.shopUpgrades.up_tools === 1 &&
-      mergedSave.bankStardust === mergedSave.totalEarnedStardust - 100,
-    `Expected lossless monotonic cloud merge, got cloud=${JSON.stringify(st.cloudState)}, save=${JSON.stringify(mergedSave)}`
+      mergedSave.totalEarnedStardust === 330 &&
+      mergedSave.bankStardust === 230,
+    `Expected lossless multi-device stardust delta merge (earned=330, bank=230), got cloud=${JSON.stringify(st.cloudState)}, save=${JSON.stringify(mergedSave)}`
   );
 
   // 7C: Mid-Run Breakpoint Save & Lobby Split Resume CTA
@@ -2264,6 +2366,7 @@ async function run() {
   assert(
     st.lobbyOpen === true &&
       st.hasSavedRun === true &&
+      st.savedRuns.chef === true &&
       st.savedRun &&
       st.savedRun.shift === 2 &&
       st.hits.some((h) => h.id === 'btn_resume_run') &&
@@ -2290,7 +2393,7 @@ async function run() {
     `Expected exact Shift 2 state, relics & golden T5 restored after reload + resume, got shift=${st.shift}, rev=${st.shiftRevenue}, relics=${JSON.stringify(st.relics)}`
   );
 
-  // 7D: Compliance-Safe Chef ID Card (`wx.createUserInfoButton`) & Global Leaderboard
+  // 7D: Compliance-Safe Chef ID Card (`wx.createUserInfoButton`) & Global Leaderboard (`isNpc` badge check)
   await evalJS(`window.__HOSHI_DEBUG__.returnToLobby()`);
   await sleep(180);
   await tapHit('btn_career');
@@ -2325,8 +2428,9 @@ async function run() {
       st.leaderboardState.isLocalFallback === false &&
       st.leaderboardState.myRank === 2 &&
       st.leaderboardState.myScore === 19800 &&
-      st.leaderboardState.top3.some((r) => r.isMe && r.nickName === '微信店长·星野'),
-    `Expected Global Chef Leaderboard with '微信店长·星野' at Rank #2 (¥19800), got ${JSON.stringify(st.leaderboardState)}`
+      st.leaderboardState.top3.some((r) => r.isMe && r.isNpc === false && r.nickName === '微信店长·星野') &&
+      st.leaderboardState.top3.some((r) => !r.isMe && r.isNpc === true),
+    `Expected Global Chef Leaderboard with '微信店长·星野' at Rank #2 (¥19800) & NPC rows flagged isNpc=true, got ${JSON.stringify(st.leaderboardState)}`
   );
   await checkCapsuleAndViewportBounds('iPhone 14 Career Global Leaderboard 390x844', 390, 844, 34);
   await screenshot('30_career_leaderboard_390.png');
@@ -2347,10 +2451,372 @@ async function run() {
   await sleep(180);
   const domOverlayAfterClose = await evalJS(`!!document.getElementById('wx-mock-userinfo-btn')`);
   assert(domOverlayAfterClose === false, 'Expected wx.createUserInfoButton overlay to be destroyed on modal close');
-  console.log('[Section 7 OK] CloudBase sync, monotonic merge, mid-run resume, native UserInfoButton auth & Global Leaderboard verified!');
+  console.log('[Section 7 OK] CloudBase sync, multi-device stardust delta merge, mid-run resume, native UserInfoButton auth & Global Leaderboard verified!');
+
+  // ==========================================================
+  // 8. v4.1 Design Overhaul Deep Verification (Items 1–5)
+  // ==========================================================
+  console.log('\n--- Section 8: v4.1 Design Overhaul Deep Verification (Items 1–5) ---');
+
+  // 8A (Item 1): True Bank-Shot Physics (pastry-first ricochet vs direct wall rebound) + T9 Soufflé Tribute Pill
+  await evalJS(`
+    window.__HOSHI_DEBUG__.selectPatron('mikan');
+    window.__HOSHI_DEBUG__.startMode('chef');
+    window.__HOSHI_DEBUG__.clearEntities();
+  `);
+  await sleep(200);
+  // Case 1: Pastry-first ricochet into left wall -> must NOT count as wallBounce!
+  const ricochetId = await evalJS(`(() => {
+    window.__HOSHI_DEBUG__.clearEntities();
+    window.__HOSHI_DEBUG__.spawnTestEntity(4, 110, 355);
+    return window.__HOSHI_DEBUG__.spawnTestEntity(2, 128, 320, { vx: -420, vy: 280, preSettled: false, isBankLaunched: true });
+  })()`);
+  await sleep(360);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const ricEnt = st.entities.find((e) => e.id === ricochetId);
+  assert(
+    ricEnt && ricEnt.wallBounces === 0,
+    `Expected pastry-first ricochet into wall to have wallBounces === 0, got ${JSON.stringify(ricEnt)}`
+  );
+  // Case 2: Direct side-wall rebound before touching any pastry -> MUST count as wallBounces >= 1!
+  const trueBankId = await evalJS(`(() => {
+    window.__HOSHI_DEBUG__.clearEntities();
+    return window.__HOSHI_DEBUG__.spawnTestEntity(2, 68, 300, { vx: -480, vy: 240, preSettled: false, isBankLaunched: true });
+  })()`);
+  await sleep(300);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const trueBankEnt = st.entities.find((e) => e.id === trueBankId);
+  assert(
+    trueBankEnt && trueBankEnt.wallBounces >= 1,
+    `Expected direct side-wall rebound before any body to have wallBounces >= 1, got ${JSON.stringify(trueBankEnt)}`
+  );
+
+  // T9 Soufflé Tribute Pill (`serve_souffle_btn`)
+  const souffleId = await evalJS(`(() => {
+    window.__HOSHI_DEBUG__.clearEntities();
+    return window.__HOSHI_DEBUG__.spawnTestEntity(9, 220, 420);
+  })()`);
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.hits.some((h) => h.id === 'serve_souffle_btn'), 'Expected serve_souffle_btn pill when T9 Soufflé is in jar');
+  await checkCapsuleAndViewportBounds('iPhone 14 T9 Soufflé Tribute Pill 390x844', 390, 844, 34);
+  const revBeforeSouffle = st.shiftRevenue;
+  await tapHit('serve_souffle_btn');
+  await sleep(200);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    !st.entities.some((e) => e.id === souffleId) && st.shiftRevenue >= revBeforeSouffle + 3200,
+    `Expected serve_souffle_btn to tribute T9 Soufflé for >= ¥3200, got revDelta=${st.shiftRevenue - revBeforeSouffle}`
+  );
+  console.log('[8A OK] True Bank-Shot physics & T9 Soufflé tribute pill verified');
+
+  // 8B (Item 2): Fresh Order = 0 Steps vs Stale Order = 1 Step + Serve Cascade +1 Step Refund
+  await evalJS(`
+    window.__HOSHI_DEBUG__.startMode('chef');
+    window.__HOSHI_DEBUG__.clearEntities();
+  `);
+  await sleep(180);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  // Mikan First-Serve +25% Energy check AND Fresh Order 0-step cost check!
+  const freshOrd8b = st.orders[0];
+  const freshTier8b = freshOrd8b.slots[0].tier;
+  const stepsBeforeFresh = st.stepsLeft;
+  const fId8b = await evalJS(`window.__HOSHI_DEBUG__.spawnTestEntity(${freshTier8b}, 220, 445)`);
+  await sleep(100);
+  await evalJS(`window.__HOSHI_DEBUG__.serveById(${fId8b})`);
+  await sleep(140);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.stepsLeft === stepsBeforeFresh && st.skillEnergy >= 55,
+    `Expected Fresh serve to cost 0 steps (${st.stepsLeft}/${stepsBeforeFresh}) & Mikan 1st serve to grant >=55 energy (${st.skillEnergy})`
+  );
+
+  // Decay orders to stale (freshSteps === 0) via fast_fresh 5 drops, then serve stale (-1 step) & cascade merge (+1 step refund!)
+  await evalJS(`window.__HOSHI_DEBUG__.setShift(3, { forceHazard: 'fast_fresh' }); window.__HOSHI_DEBUG__.clearEntities();`);
+  await sleep(140);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const jb8b = st.jarBox;
+  const d0_8b = st.dropsMadeThisRun;
+  for (let d = 0; d < 8; d++) {
+    await tapAt(Math.round(jb8b.x + jb8b.w * (0.30 + (d % 3) * 0.18)), Math.round(jb8b.y + jb8b.h * 0.24));
+    await sleep(230);
+    st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+    if (st.dropsMadeThisRun - d0_8b >= 5) break;
+  }
+  await evalJS(`window.__HOSHI_DEBUG__.clearEntities()`);
+  await sleep(100);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const staleOrd8b = st.orders.find((o) => !o.completed && o.freshSteps === 0);
+  assert(staleOrd8b, `Expected stale order (freshSteps=0), got ${JSON.stringify(st.orders)}`);
+  // Complete ALL slots of staleOrd8b so the order completes while stale (costing 1 step), then spawn a merge pair to trigger +1 step refund!
+  const stepsBeforeStale = st.stepsLeft;
+  for (let si = 0; si < staleOrd8b.slots.length; si++) {
+    const sl = staleOrd8b.slots[si];
+    if (sl.done) continue;
+    const eid = await evalJS(`window.__HOSHI_DEBUG__.spawnTestEntity(${sl.tier}, 220, 445)`);
+    await sleep(60);
+    await evalJS(`window.__HOSHI_DEBUG__.serveById(${eid})`);
+    await sleep(80);
+  }
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.stepsLeft === stepsBeforeStale - 1 && st.serveCascadeTimer > 0,
+    `Expected Stale order completion to cost 1 step (${st.stepsLeft} vs ${stepsBeforeStale - 1}) and open cascade window (${st.serveCascadeTimer})`
+  );
+  // Trigger a merge inside the active Serve Cascade window -> must refund +1 step!
+  await evalJS(`(() => {
+    window.__HOSHI_DEBUG__.spawnTestEntity(2, 190, 448);
+    window.__HOSHI_DEBUG__.spawnTestEntity(2, 206, 448);
+  })()`);
+  await sleep(320);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.stepsLeft === stepsBeforeStale,
+    `Expected Serve Cascade merge after stale serve to refund +1 step (expected ${stepsBeforeStale}, got ${st.stepsLeft})`
+  );
+  console.log('[8B OK] Fresh 0-step vs Stale 1-step + Serve Cascade +1 step refund & Mikan 1st-serve energy verified');
+
+  // 8C (Item 3): Additive Multiplier Cap (<= 8.0×), Mikan Scoop Queue Preservation & Half-Done VIP Judge Rush Protection
+  await evalJS(`(() => {
+    window.__HOSHI_DEBUG__.startMode('chef');
+    window.__HOSHI_DEBUG__.clearEntities();
+    window.__HOSHI_DEBUG__.equipRelic('rel_bouncy');
+    window.__HOSHI_DEBUG__.equipRelic('rel_prism');
+    window.__HOSHI_DEBUG__.equipRelic('rel_bumpers');
+    window.__HOSHI_DEBUG__.equipRelic('rel_avalanche');
+    window.__HOSHI_DEBUG__.triggerFever();
+  })()`);
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const scoreBeforeCapMerge = st.score;
+  // Spawn two Golden + Bank-bounced + Bumper-crit T5s right next to each other during Fever -> results in T6 (base pts = 260)
+  await evalJS(`(() => {
+    const a = window.__HOSHI_DEBUG__.spawnTestEntity(5, 196, 445, { golden: true });
+    const b = window.__HOSHI_DEBUG__.spawnTestEntity(5, 224, 445, { golden: true });
+  })()`);
+  await sleep(360);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const capMergeDelta = st.score - scoreBeforeCapMerge;
+  // T6 base pts = 260; total mult cap is strictly 8.0× => max single merge pts = 2080 (plus at most small synergy flat bonus if any)
+  assert(
+    capMergeDelta > 260 && capMergeDelta <= 2200,
+    `Expected stacked T5->T6 merge to respect 8.0x cap (<= 2200), got delta=${capMergeDelta}`
+  );
+
+  // Mikan Scoop when holdTier !== null MUST preserve old curTier into nextTier!
+  await evalJS(`(() => {
+    window.__HOSHI_DEBUG__.selectPatron('mikan');
+    window.__HOSHI_DEBUG__.startMode('chef');
+    window.__HOSHI_DEBUG__.clearEntities();
+  })()`);
+  await sleep(160);
+  await tapHit('mobile_hold_swap'); // populates holdTier
+  await sleep(140);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.holdTier !== null, 'Expected holdTier occupied before Mikan scoop');
+  const prevCurTier = st.curTier;
+  const scoopPieceId = await evalJS(`window.__HOSHI_DEBUG__.spawnTestEntity(4, 220, 440, { golden: true })`);
+  await evalJS(`window.__HOSHI_DEBUG__.chargeSkill()`);
+  await sleep(120);
+  await tapHit('chef_skill_btn');
+  await sleep(120);
+  const jb8c = st.jarBox;
+  await tapAt(Math.round(jb8c.x + 220 * jb8c.scale), Math.round(jb8c.y + 440 * jb8c.scale));
+  await sleep(180);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.curTier === 4 && st.curMeta.golden === true && st.nextTier === prevCurTier && !st.entities.some((e) => e.id === scoopPieceId),
+    `Expected Mikan scoop with occupied holdTier to load gilded T4 onto turret and preserve prevCurTier (${prevCurTier}) into nextTier (${st.nextTier})`
+  );
+
+  // Half-done VIP order protection against Judge Rush overwrite
+  await evalJS(`(() => {
+    window.__HOSHI_DEBUG__.setShift(5, { forceHazard: 'divider' });
+    window.__HOSHI_DEBUG__.clearEntities();
+  })()`);
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  // Ensure VIP order (orders[1]) has >= 2 slots; serve its 1st slot so it is half-done, then call triggerJudgeRush()!
+  let vipOrd8c = st.orders[1];
+  if (vipOrd8c && vipOrd8c.slots.length >= 2) {
+    const firstSlotTier = vipOrd8c.slots[0].tier;
+    const partialId = await evalJS(`window.__HOSHI_DEBUG__.spawnTestEntity(${firstSlotTier}, 122, 442)`);
+    await sleep(80);
+    await evalJS(`window.__HOSHI_DEBUG__.serveById(${partialId})`);
+    await sleep(100);
+    st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+    const vipUidBeforeRush = st.orders[1].uid;
+    assert(st.orders[1].slots.some((s) => s.done) && !st.orders[1].completed, 'VIP order should be partially completed');
+    await evalJS(`window.__HOSHI_DEBUG__.triggerJudgeRush()`);
+    await sleep(120);
+    st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+    assert(
+      st.orders[1].uid === vipUidBeforeRush && st.orders[0].isJudgeRush === true,
+      `Expected half-done VIP order (orders[1]) preserved and Judge Rush placed in orders[0], got orders=${JSON.stringify(st.orders)}`
+    );
+  }
+  console.log('[8C OK] 8.0x multiplier cap, Mikan scoop queue preservation & half-done VIP Judge Rush protection verified');
+
+  // 8D (Item 4): Auto-Pause (`onHide` & Modals), Pause Modal, Restart & New-Run Confirmations, Per-Mode `savedRuns`, Anti-Suicide Stardust & `go_open_shop`
+  await evalJS(`window.__HOSHI_DEBUG__.startMode('chef')`);
+  await sleep(200);
+  await evalJS(`window.__HOSHI_DEBUG__.triggerHide()`);
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.paused === true && st.activeModal === 'pause',
+    `Expected triggerHide() mid-run to pause & open pause modal, got paused=${st.paused}, modal=${st.activeModal}`
+  );
+  await checkCapsuleAndViewportBounds('iPhone 14 Pause Modal 390x844', 390, 844, 34);
+  await screenshot('31_pause_modal_390.png');
+  await tapHit('pause_resume');
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.paused === false && st.activeModal === null, 'Expected pause_resume to unpause cleanly');
+
+  // Opening Compendium mid-run MUST pause gameplay
+  await tapHit('play_comp');
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === 'compendium' && st.paused === true, `Expected play_comp to pause gameplay, got modal=${st.activeModal}, paused=${st.paused}`);
+  await tapHit('modal_close');
+  await sleep(140);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === null && st.paused === false, 'Expected closing compendium to resume gameplay');
+
+  // Restart Confirmation Modal (`play_restart` -> `confirm_cancel` aborts, `confirm_accept` restarts)
+  await evalJS(`window.__HOSHI_DEBUG__.addShiftRevenue(650)`);
+  await sleep(100);
+  await tapHit('play_restart');
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === 'confirm' && st.paused === true, `Expected play_restart to open confirm modal, got ${st.activeModal}`);
+  await checkCapsuleAndViewportBounds('iPhone 14 Confirm Restart Modal 390x844', 390, 844, 34);
+  await tapHit('confirm_cancel');
+  await sleep(140);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === null && st.shiftRevenue >= 650, 'Expected confirm_cancel to abort restart and preserve run progress');
+  await tapHit('play_restart');
+  await sleep(140);
+  await tapHit('confirm_accept');
+  await sleep(220);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === null && st.shiftRevenue === 0 && st.shift === 1, 'Expected confirm_accept to restart run cleanly');
+
+  // Per-Mode `savedRuns` Isolation: save Chef Shift 2, start Rush, verify Chef checkpoint is STILL intact, and Lobby `btn_start` asks confirmation!
+  await evalJS(`(() => {
+    window.__HOSHI_DEBUG__.setShift(2, { forceHazard: 'glaze_ring' });
+    window.__HOSHI_DEBUG__.addShiftRevenue(920);
+    window.__HOSHI_DEBUG__.saveCheckpoint(false);
+  })()`);
+  await sleep(160);
+  await evalJS(`window.__HOSHI_DEBUG__.returnToLobby()`);
+  await sleep(160);
+  await tapHit('mode_rush');
+  await sleep(120);
+  await tapHit('btn_start');
+  await sleep(220);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.mode === 'rush' && st.running === true && st.savedRuns.chef === true,
+    `Expected starting Rush run to preserve savedRuns.chef === true, got ${JSON.stringify(st.savedRuns)}`
+  );
+  const rjb8d = st.jarBox;
+  await tapAt(Math.round(rjb8d.x + rjb8d.w * 0.5), Math.round(rjb8d.y + rjb8d.h * 0.25));
+  await sleep(180);
+  await evalJS(`window.__HOSHI_DEBUG__.returnToLobby()`);
+  await sleep(160);
+  await tapHit('mode_chef');
+  await sleep(120);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.hasSavedRun === true && st.savedRuns.chef === true && st.savedRuns.rush === true, 'Expected both Chef and Rush saved runs preserved');
+  // Tapping `btn_start` ('新开') when a saved run exists for Chef MUST open `confirm` modal instead of silently wiping!
+  await tapHit('btn_start');
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.lobbyOpen === true && st.activeModal === 'confirm', `Expected btn_start over saved Chef run to open confirm dialog, got ${st.activeModal}`);
+  await tapHit('confirm_cancel');
+  await sleep(140);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.savedRuns.chef === true, 'Expected confirm_cancel in Lobby to preserve saved Chef run');
+
+  // Score-Tied Anti-Suicide Stardust Settlement (< ¥600 after 5 drops -> 0 permanent stardust!) + Game Over `go_open_shop` -> Shop Modal
+  await evalJS(`window.__HOSHI_DEBUG__.startMode('chef')`);
+  await sleep(180);
+  const bankBeforeSuicide = (await evalJS(`window.__HOSHI_DEBUG__.getSaveData()`)).bankStardust;
+  // Force 5 drops with tiny score (< 300) and exhaust steps to trigger shift_failed Game Over
+  await evalJS(`(() => {
+    window.__HOSHI_DEBUG__.clearEntities();
+    window.__HOSHI_DEBUG__.addBankStardust(0);
+  })()`);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const jb8d = st.jarBox;
+  for (let i = 0; i < 5; i++) {
+    await tapAt(Math.round(jb8d.x + jb8d.w * (0.22 + i * 0.14)), Math.round(jb8d.y + jb8d.h * 0.24));
+    await sleep(230);
+  }
+  // Drain remaining steps via stale order or force shift failure by exhausting steps: let's check desktop/mobile top-bar pause on 375x667 too!
+  await setViewport(375, 667, true, 2);
+  await sleep(220);
+  await checkCapsuleAndViewportBounds('iPhone SE Top-Bar Pause HUD 375x667', 375, 667, 0);
+  await tapHit('play_pause');
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(st.activeModal === 'pause', 'Expected play_pause on 375x667 to open pause modal');
+  await checkCapsuleAndViewportBounds('iPhone SE Pause Modal 375x667', 375, 667, 0);
+  await tapHit('pause_resume');
+  await sleep(140);
+
+  // Trigger rapid Rush end with 0 score to verify 0 permanent stardust on 0-score run & click `go_open_shop`!
+  await evalJS(`window.__HOSHI_DEBUG__.startMode('rush')`);
+  await sleep(160);
+  const bankBeforeZeroRush = (await evalJS(`window.__HOSHI_DEBUG__.getSaveData()`)).bankStardust;
+  await evalJS(`window.__HOSHI_DEBUG__.setRushTimer(0.05)`);
+  for (let w = 0; w < 30; w++) {
+    await sleep(80);
+    st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+    if (st.over && st.activeModal === 'gameover') break;
+  }
+  const bankAfterZeroRush = (await evalJS(`window.__HOSHI_DEBUG__.getSaveData()`)).bankStardust;
+  assert(
+    st.activeModal === 'gameover' && bankAfterZeroRush === bankBeforeZeroRush,
+    `Expected 0-score suicide run to award 0 permanent stardust (before=${bankBeforeZeroRush}, after=${bankAfterZeroRush})`
+  );
+  await checkCapsuleAndViewportBounds('iPhone SE GameOver 3-Button Row 375x667', 375, 667, 0);
+  await tapHit('go_open_shop');
+  await sleep(200);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.lobbyOpen === true && st.activeModal === 'shop',
+    `Expected go_open_shop from Game Over to return to Lobby and open Shop modal, got lobby=${st.lobbyOpen}, modal=${st.activeModal}`
+  );
+  await tapHit('modal_close');
+  await sleep(140);
+  console.log('[8D OK] Auto-pause, pause modal, confirmations, per-mode savedRuns, anti-suicide stardust & go_open_shop verified');
+
+  // 8E (Item 5): Transient Cloud Failure -> `retry_pending` Backoff (NOT permanent `local_only`) & Recovery
+  await evalJS(`(() => {
+    window.__WX_HARNESS__.failNextPushCount = 1;
+    window.__HOSHI_DEBUG__.addBankStardust(25);
+    return window.__HOSHI_DEBUG__.flushCloud();
+  })()`);
+  await sleep(160);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.cloudState.status === 'retry_pending',
+    `Expected transient cloud push error to enter 'retry_pending' (not permanent 'local_only'), got ${JSON.stringify(st.cloudState)}`
+  );
+  await evalJS(`window.__HOSHI_DEBUG__.flushCloud()`);
+  await sleep(220);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  assert(
+    st.cloudState.status === 'synced',
+    `Expected subsequent cloud retry to recover cleanly to 'synced', got ${JSON.stringify(st.cloudState)}`
+  );
+  console.log('[8E OK] Cloud retry_pending exponential backoff & recovery verified');
 
   assert(errors.length === 0, `Runtime/Console errors detected: ${errors.join(' | ')}`);
-  console.log('\n✅ ALL WECHAT MINI GAME E2E CHECKS PASSED WITH ZERO ERRORS!');
+  console.log('\n✅ ALL WECHAT MINI GAME E2E CHECKS (INCLUDING v4.1 OVERHAUL ITEMS 1–5) PASSED WITH ZERO ERRORS!');
   } finally {
     try { if (ws) ws.close(); } catch (_) {}
     try { server.close(); } catch (_) {}

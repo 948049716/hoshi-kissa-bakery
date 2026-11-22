@@ -1239,7 +1239,7 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
       icon: 'icon_ufo',
       sprites,
       iconSize: 15,
-      text: `反重力 ×2.2 · ${gameState.antigravTimer.toFixed(1)}s`,
+      text: `反重力 +80% · ${gameState.antigravTimer.toFixed(1)}s`,
       fontSize: 9.8,
       borderColor: '#dfb8ff',
       topCol: 'rgba(62, 26, 108, 0.92)',
@@ -1272,8 +1272,8 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
   }
   ctx.restore();
 
-  // 3. Danger Overflow Line
-  const dangerRatio = Math.min(1, gameState.dangerDuration / 2.65);
+  // 3. Danger Overflow Line (countdown banner itself renders at topmost HUD layer so nothing occludes it!)
+  const dangerRatio = Math.min(1, gameState.dangerDuration / 3.2);
   ctx.save();
   ctx.beginPath();
   ctx.setLineDash([7, 6]);
@@ -1289,23 +1289,6 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
   }
   ctx.stroke();
   ctx.setLineDash([]);
-
-  if (dangerRatio > 0.08) {
-    const rem = Math.max(0, 2.65 - gameState.dangerDuration).toFixed(1);
-    const isRush = gameState.mode === 'rush';
-    UI.drawNoticeBanner(ctx, 162, JAR.dangerY - 23, 116, 21, {
-      icon: isRush ? 'icon_wind' : 'icon_warn',
-      sprites,
-      iconSize: 15,
-      text: isRush ? `星风 ${rem}s` : `溢出 ${rem}s`,
-      fontSize: 10.5,
-      tone: 'warn',
-      topCol: isRush ? 'rgba(208, 102, 30, 0.95)' : undefined,
-      botCol: isRush ? 'rgba(154, 68, 16, 0.96)' : undefined,
-      borderColor: isRush ? '#ffe09c' : '#ffb8a6',
-      rightReserve: 8
-    });
-  }
   ctx.restore();
 
   // 3.4 Pre-compute aim trajectory once so glaze_ring back/front layers & aim line stay in sync
@@ -1718,7 +1701,14 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
 
       // Unified Storybook Callout Badge for Bank-Shot, Glaze Ring, or Lock-on (concise!)
       if (lockedTarget || hasBounce || willGlaze) {
-        const multLabel = bPoints.length >= 2 && hasBouncy ? '×2.8' : hasPrism ? '×2.0' : '×1.5';
+        const multLabel =
+          bPoints.length >= 2 && hasBouncy
+            ? hasPrism
+              ? '×2.3'
+              : '×1.9'
+            : hasPrism
+            ? '×1.9'
+            : '×1.5';
         let tagText;
         let tagIcon = '';
         if (lockedTarget) {
@@ -2071,6 +2061,25 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
         const drewIcon = UI.drawUiIcon(ctx, sprites, badgeIcon, px0 + 10.5, pillY, 13);
         const tx = drewIcon ? px0 + 18 + (pillW - 22) * 0.5 : e.x;
         UI.drawFitText(ctx, pillTxt, tx, pillY + 0.5, pillW - (drewIcon ? 22 : 8), 9.2, 7.8, 900, '#fff6db', 'center');
+      }
+
+      // Golden radial progress arc when holding finger on servable treat (Long-Press-to-Serve)
+      if (gameState.longPressServe && gameState.longPressServe.entityId === e.id && gameState.longPressServe.progress > 0.02) {
+        const prog = Math.max(0, Math.min(1, gameState.longPressServe.progress));
+        ctx.save();
+        ctx.strokeStyle = 'rgba(42, 22, 10, 0.55)';
+        ctx.lineWidth = 4.6;
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, e.r + 8, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.strokeStyle = isSouffle ? '#ffe566' : '#ffea85';
+        ctx.lineWidth = 3.8;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, e.r + 8, -Math.PI * 0.5, -Math.PI * 0.5 + Math.PI * 2 * prog);
+        ctx.stroke();
+        ctx.restore();
       }
       ctx.restore();
     } else if (isNearOrderSub && !isTargetingMode && e.age > 0.35) {

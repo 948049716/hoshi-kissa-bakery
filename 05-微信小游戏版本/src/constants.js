@@ -1,6 +1,6 @@
 /**
  * Game Constants, Progression Catalogs, Themes, Patrons & Chamber Metrics
- * for Hoshi Kissa: Starlight Patisserie 3.0 Plan B (WeChat Mini Game Edition).
+ * for Hoshi Kissa: Starlight Patisserie 4.1 (WeChat Mini Game Edition).
  */
 'use strict';
 
@@ -247,89 +247,8 @@ const UI_ATLAS_3_RECTS = {
   icon_close: { x: 384, y: 384, w: 128, h: 128 }
 };
 
-const BLESSINGS = [
-  {
-    id: 'magnet',
-    icon: 'icon_magnet',
-    name: '甜蜜星磁',
-    tag: '连锁',
-    maxLv: 3,
-    repeatable: false,
-    desc: (lv) => `同阶磁吸 +${lv * 12}px，隔缝自动相吸连合`
-  },
-  {
-    id: 'critJump',
-    icon: 'icon_bolt',
-    name: '奇迹跳阶',
-    tag: '暴击',
-    maxLv: 3,
-    repeatable: false,
-    desc: (lv) => `合成 ${lv * 14}% 概率直跳 +2 阶并双倍得分`
-  },
-  {
-    id: 'rainbow',
-    icon: 'icon_rainbow',
-    name: '彩虹眷顾',
-    tag: '万能',
-    maxLv: 3,
-    repeatable: false,
-    desc: (lv) => `彩虹保底降至 ${Math.max(5, 12 - lv * 2)} 步，立送 1 颗`
-  },
-  {
-    id: 'shockwave',
-    icon: 'icon_wave',
-    name: '星爆冲击波',
-    tag: '物理',
-    maxLv: 3,
-    repeatable: false,
-    desc: (lv) => `合成气浪 +${lv * 40}%，震动滚出多米诺连合`
-  },
-  {
-    id: 'fever',
-    icon: 'icon_flame',
-    name: '狂热超载',
-    tag: '狂热',
-    maxLv: 3,
-    repeatable: false,
-    desc: (lv) => `狂热 +${(lv * 3.5).toFixed(1)}s、充能 +${lv * 28}%，立充 45%`
-  },
-  {
-    id: 'golden',
-    icon: 'icon_stardust',
-    name: '镀金秘方',
-    tag: '财富',
-    maxLv: 3,
-    repeatable: false,
-    desc: (lv) => `镀金率 ${9 + lv * 10}%，黄金合成额外 +${lv * 10} 星尘`
-  },
-  {
-    id: 'combo',
-    icon: 'icon_bgm',
-    name: '连击大师',
-    tag: '高分',
-    maxLv: 3,
-    repeatable: false,
-    desc: (lv) => `连击窗 +${(lv * 0.6).toFixed(1)}s，每段连击 +${lv * 22}% 分`
-  },
-  {
-    id: 'toolbox',
-    icon: 'icon_gift',
-    name: '魔法补给箱',
-    tag: '补给',
-    maxLv: 99,
-    repeatable: true,
-    desc: () => '摇罐+1 · 升阶勺+1 · 招牌技满能 · +25 星尘'
-  },
-  {
-    id: 'cleanse',
-    icon: 'icon_wind',
-    name: '轻盈星风',
-    tag: '救场',
-    maxLv: 99,
-    repeatable: true,
-    desc: () => '吹散最多 4 颗 1~2 阶并化为双倍星尘与积分'
-  }
-];
+// Legacy 3.0 Blessings merged into unified 4.1 Relics (`RELICS`) & Prep/Milestone system
+const BLESSINGS = [];
 
 const PATRONS = [
   {
@@ -345,17 +264,17 @@ const PATRONS = [
       icon: 'tool_spoon',
       name: '金勺捞底',
       shortLabel: '捞底',
-      desc: '捞出 1~5 阶甜品回罐口，触发抽底雪崩'
+      desc: '捞出 1~5 阶甜品回罐口（不吞手牌），触发抽底雪崩'
     },
-    passiveDesc: '招牌技捞底 · VIP赏+15% · 开局+8币',
-    shortPassive: 'VIP+15% · 开局+8币',
-    greet: '亮铃甜品直接点它就能上菜哦！',
+    passiveDesc: '捞底不吞牌 · 全单+20% · 开局+12币 · 每幕首出+25%技',
+    shortPassive: '全单+20% · +12币',
+    greet: '点订单【上菜】或长按亮铃甜品就能出餐腾空间哦！',
     thanks: '抽底上菜一气呵成，香气满满～',
     idleLines: [
-      '亮铃甜品直接点它就能上菜哦！',
-      '拖动调角撞壁弹射，合成更稳～',
+      '点订单台【上菜】或长按罐内亮铃甜品出餐！',
+      '每幕不清罐，趁鲜度热单免步上菜腾空间～',
       '金勺捞底可把底层甜品捞回重发',
-      '柠檬塔合成时会自动清掉周边蓝莓'
+      '先撞侧壁再合成才触发真弹壁加成哦'
     ]
   },
   {
@@ -373,14 +292,14 @@ const PATRONS = [
       shortLabel: '移形',
       desc: '互换两颗甜品位置并释放柔磁共鸣'
     },
-    passiveDesc: '招牌技移形 · 星磁 · 首刷免单 · 虹合+5币',
-    shortPassive: '星磁 · 首刷免单',
+    passiveDesc: '移形 · 柔磁Lv.1 · 虹保底-2步 · 首刷免单 · 虹合+5币',
+    shortPassive: '柔磁 · 虹-2 · 免刷',
     greet: '今晚月色真好，整备首刷我请客～',
     thanks: '吃到幸福的味道了，谢谢主厨！',
     idleLines: [
       '整备间每幕首次刷新我帮你免单～',
       '星月移形可对调任意两颗甜品',
-      '带我营业自带柔磁，同阶更好合',
+      '带我营业自带柔磁且彩虹保底 -2 步',
       '彩虹合成还能额外掉 +5 秘方币'
     ]
   },
@@ -399,12 +318,12 @@ const PATRONS = [
       shortLabel: '重锤',
       desc: '下发撞击首颗直接升阶并震碎周边冰霜'
     },
-    passiveDesc: '重锤破冰 · 弹壁+40%分/+3币 · 开局摇+1',
-    shortPassive: '弹壁+3币 · 摇+1',
-    greet: '汪呜！弹壁合成额外赚 +3 秘方币！',
+    passiveDesc: '重锤破冰 · 真弹壁+35%分/+3币 · 开局摇+1',
+    shortPassive: '真弹壁+3币 · 摇+1',
+    greet: '汪呜！先撞玻璃侧壁反弹合成赚 +3 秘方币！',
     thanks: '太满足啦！下次还要再来！',
     idleLines: [
-      '撞壁弹射合成额外赚 +3 秘方币！',
+      '先撞侧壁反弹直合额外赚 +3 秘方币！',
       '元气重锤撞谁就帮谁升阶并破冰',
       '3 连击以上能大幅回复招牌技',
       '蒙布朗超重，落下直接压碎小糖'
@@ -412,7 +331,7 @@ const PATRONS = [
   }
 ];
 
-const CASCADE_MULTIPLIERS = [1.0, 1.4, 1.9, 2.5, 3.2];
+const CASCADE_MULTIPLIERS = [1.0, 1.4, 1.85, 2.35, 2.9];
 
 const SHOP_UPGRADES = [
   {
@@ -473,13 +392,13 @@ const SHOP_UPGRADES = [
       const coins = [0, 5, 10, 15];
       if (lv === 0) return '下级：星尘+15% · 开局+5币';
       if (lv < 3) return `当前 +${pcts[lv]}%/+${coins[lv]}币 · 下级 +${pcts[lv + 1]}%/+${coins[lv + 1]}币`;
-      return '满级：星尘 +50% · 闯关开局 +15币';
+      return '满级：结算星尘 +50% · 闯关开局 +15币';
     }
   }
 ];
 
 // =========================================================================
-// 4.0 Phase 2: 5-Shift Night Bakery Roguelike, 16 Relics & 6 Deck Mods
+// 4.1 Overhaul: Persistent-Jar 5-Shift Roguelike, Unified 18 Relics & 6 Mods
 // =========================================================================
 const SHIFTS = [
   {
@@ -490,7 +409,7 @@ const SHIFTS = [
     baseCoins: 35,
     badge: '第1幕·试营',
     modifier: null,
-    desc: '纯净开场：预置 4 颗甜品，点击亮铃体验抽底雪崩'
+    desc: '预置 4 颗甜品，点【上菜】或长按亮铃甜品体验抽底雪崩'
   },
   {
     shift: 2,
@@ -500,7 +419,7 @@ const SHIFTS = [
     baseCoins: 45,
     badge: '第2幕·星环',
     modifier: 'golden_breeze',
-    desc: '热炉传承高阶甜品 + 焦糖星环穿环镀金'
+    desc: '全罐原位续战 + 焦糖星环穿环镀金'
   },
   {
     shift: 3,
@@ -511,14 +430,14 @@ const SHIFTS = [
     isMiniBoss: true,
     badge: '小Boss·破冰',
     modifier: 'mini_boss',
-    desc: '开局 2 颗冰封甜品，周边合成/重锤/摇罐破冰 +¥120'
+    desc: '黄油弹柱机关 + 2 颗冰封甜品，周边合成/重锤破冰 +¥120'
   },
   {
     shift: 4,
     name: '午夜猫猫派对',
     steps: 17,
-    target: 8200,
-    baseCoins: 75,
+    target: 7600,
+    baseCoins: 80,
     badge: '第4幕·机关',
     modifier: 'party_events',
     desc: '随机场地机关 + 捣蛋毛线球（震碎 +¥750 / +10币）'
@@ -527,7 +446,7 @@ const SHIFTS = [
     shift: 5,
     name: '星冠大赏',
     steps: 18,
-    target: 15000,
+    target: 12800,
     baseCoins: 100,
     isFinalBoss: true,
     badge: '终极Boss',
@@ -544,7 +463,7 @@ const SHIFT_HAZARDS = {
     badge: '焦糖环',
     color: '#b87618',
     bg: '#fff5d9',
-    desc: '穿过巡游星环即刻镀金（合成 ×2.5 / 出餐 ×1.8）'
+    desc: '穿过巡游星环即刻镀金（合成 ×2.0 / 出餐 ×1.6）'
   },
   divider: {
     id: 'divider',
@@ -562,7 +481,7 @@ const SHIFT_HAZARDS = {
     badge: '弹柱',
     color: '#b56e10',
     bg: '#fff3d4',
-    desc: '双侧高弹星柱，撞柱高回弹并爆 +¥40 弹射小费'
+    desc: '双侧高弹星柱，撞柱高回弹并爆 +¥40 弹射小费（每颗限3次）'
   },
   fast_fresh: {
     id: 'fast_fresh',
@@ -579,17 +498,17 @@ function getShiftConfig(shiftNum) {
   const n = Math.max(1, Math.floor(Number(shiftNum) || 1));
   if (n <= SHIFTS.length) return SHIFTS[n - 1];
   const extra = n - 5;
-  const target = Math.round((15000 * Math.pow(1.65, extra)) / 100) * 100;
+  const target = Math.round((12800 * Math.pow(1.45, extra)) / 100) * 100;
   return {
     shift: n,
     name: `无尽加时 #${extra}`,
     steps: 18,
     target,
-    baseCoins: 85 + extra * 10,
+    baseCoins: 110 + (extra - 1) * 15,
     isEndless: true,
     badge: `加时·第${n}幕`,
     modifier: 'grand_prix',
-    desc: '双机关轮换 + 冰封残局 + 评委急单，目标指数攀升'
+    desc: '全罐续战 + 双机关轮换 + 冰封残局 + 评委急单'
   };
 }
 
@@ -607,38 +526,38 @@ const ARCHETYPE_SYNERGIES = {
     id: 'cascade',
     tag: '#雪崩',
     short2: '雪崩窗+0.8s · 出餐+10%技',
-    short3: '雪崩连合再 ×1.35',
+    short3: '雪崩连合加成 +50%',
     tier2Desc: '2件：雪崩窗 +0.8s，出餐额外 +10% 招牌技',
-    tier3Desc: '3件：雪崩连合营业额叠乘 ×1.35'
+    tier3Desc: '3件：雪崩连合倍率加成再 +50%'
   },
   bank: {
     id: 'bank',
     tag: '#弹壁',
-    short2: '弹壁+0.35× · 回+8%狂热',
-    short3: '弹壁合成必镀金',
-    tier2Desc: '2件：弹壁倍率 +0.35×，回 +8% 狂热能',
-    tier3Desc: '3件：弹壁合成甜品 100% 自动镀金'
+    short2: '真弹壁+30% · 回+8%狂热',
+    short3: '真弹壁合成必镀金',
+    tier2Desc: '2件：真弹壁加成 +30%，回 +8% 狂热能',
+    tier3Desc: '3件：真弹壁合成甜品 100% 自动镀金'
   },
   trait: {
     id: 'trait',
     tag: '#异能',
     short2: '异能范围+22% · +¥60',
-    short3: '异能回+15%技 · +4星尘',
+    short3: '异能回+15%技 · +6星露',
     tier2Desc: '2件：异能范围 +22%，触发额外 +¥60',
-    tier3Desc: '3件：异能触发回 +15% 招牌技并 +4 星尘'
+    tier3Desc: '3件：异能触发回 +15% 招牌技并 +6 星露'
   },
   greed: {
     id: 'greed',
     tag: '#贪婪',
     short2: '基薪+12币 · VIP赏+20%',
-    short3: '全局营业额 ×1.30',
+    short3: '全局营业额 +25%',
     tier2Desc: '2件：过关基薪 +12币，VIP 赏金 +20%',
-    tier3Desc: '3件：全局合成与出餐叠乘 ×1.30'
+    tier3Desc: '3件：全局合成与出餐额外 +25%'
   }
 };
 
 const RELICS = [
-  // Archetype 1: Cascade / Serve Build
+  // Archetype 1: Cascade / Serve Build (includes merged Shockwave blessing!)
   {
     id: 'rel_aftershock',
     archetype: 'cascade',
@@ -657,7 +576,7 @@ const RELICS = [
     icon: 'serve_bell',
     name: '多米诺餐铃',
     price: 45,
-    desc: '雪崩窗延至 4.2s，连合倍率额外 +0.5×'
+    desc: '雪崩窗延至 4.2s，每段连合额外 +35% 分'
   },
   {
     id: 'rel_tradeup',
@@ -677,7 +596,17 @@ const RELICS = [
     icon: 'icon_infinity',
     name: '翻台永动机',
     price: 70,
-    desc: '雪崩 2 连返步无上限，并追加鲜度加倍订单'
+    desc: '雪崩 2 连返步上限升至 6 步，空闲桌刷双倍鲜度单'
+  },
+  {
+    id: 'rel_shockwave',
+    archetype: 'cascade',
+    rarity: 'common',
+    rarityLabel: '普通',
+    icon: 'icon_wind',
+    name: '星爆扩音鼓',
+    price: 32,
+    desc: '合成气浪范围与推力 +65%，滚落促成多米诺连合'
   },
   // Archetype 2: Bank-Shot / Pinball Build
   {
@@ -688,7 +617,7 @@ const RELICS = [
     icon: 'icon_prism',
     name: '玻璃折光糖',
     price: 30,
-    desc: '弹壁首合升至 ×2.0，且下颗手牌必镀金'
+    desc: '真弹壁首合加成升至 +90%，且下颗手牌必镀金'
   },
   {
     id: 'rel_bouncy',
@@ -698,7 +627,7 @@ const RELICS = [
     icon: 'icon_billiard',
     name: '高弹舒芙蕾壁',
     price: 35,
-    desc: '撞墙弹性/初速提升，解锁二段弹壁 ×2.8'
+    desc: '撞墙弹性/初速提升，解锁二段真弹壁 +130%'
   },
   {
     id: 'rel_bumpers',
@@ -718,9 +647,9 @@ const RELICS = [
     icon: 'icon_arrow',
     name: '神枪跳阶箭',
     price: 75,
-    desc: '弹壁直合 45% 跳升 +2 阶并回 35% 招牌技'
+    desc: '真弹壁直合 45% 跳升 +2 阶并回 35% 招牌技'
   },
-  // Archetype 3: Trait / Alchemy Build
+  // Archetype 3: Trait / Alchemy Build (includes merged CritJump blessing!)
   {
     id: 'rel_echo',
     archetype: 'trait',
@@ -729,7 +658,7 @@ const RELICS = [
     icon: 'icon_alchemy',
     name: '双重异能炉',
     price: 50,
-    desc: '4~8 阶甜品在点击出餐瞬间再发动一次异能'
+    desc: '4~8 阶甜品在出餐瞬间再发动一次异能'
   },
   {
     id: 'rel_lemonade',
@@ -749,7 +678,7 @@ const RELICS = [
     icon: 'icon_ufo',
     name: '月光反重力箱',
     price: 70,
-    desc: '每 4 步倒置重力 1.3s，期间合成 ×2.2'
+    desc: '每 4 步倒置重力 1.3s，倒置期间合成 +80%'
   },
   {
     id: 'rel_resonance',
@@ -761,7 +690,17 @@ const RELICS = [
     price: 30,
     desc: '甜品发动异能时，全罐同阶柔磁牵引 2.5s'
   },
-  // Archetype 4: High-Roller / Greed Build
+  {
+    id: 'rel_crit_star',
+    archetype: 'trait',
+    rarity: 'rare',
+    rarityLabel: '稀有',
+    icon: 'icon_bolt',
+    name: '奇迹跳阶石',
+    price: 48,
+    desc: '任意合成 18% 概率直跳 +2 阶并额外 +75% 得分'
+  },
+  // Archetype 4: High-Roller / Greed Build (rebalanced!)
   {
     id: 'rel_aged',
     archetype: 'greed',
@@ -770,7 +709,7 @@ const RELICS = [
     icon: 'icon_ledger',
     name: '陈酿焦糖账本',
     price: 45,
-    desc: '罐内可出餐甜品每多留 1 步 +30% 价（上限 ×2.5）'
+    desc: '罐内可出餐甜品每多留 1 步 +30% 价（上限 +150%）'
   },
   {
     id: 'rel_crown_aura',
@@ -780,17 +719,17 @@ const RELICS = [
     icon: 'icon_crown',
     name: '星冠威压',
     price: 75,
-    desc: '罐内每有 1 颗 ≥6 阶，全局营业额叠乘 ×1.35'
+    desc: '每有 1 颗 ≥6 阶甜品，全局营业额 +25%（上限 +75%）'
   },
   {
     id: 'rel_double_vip',
     archetype: 'greed',
-    rarity: 'common',
-    rarityLabel: '普通',
+    rarity: 'rare',
+    rarityLabel: '稀有',
     icon: 'icon_ribbon',
     name: '双席 VIP 厅',
-    price: 35,
-    desc: '快餐桌升为第二 VIP 桌，VIP 赏金 +40%'
+    price: 55,
+    desc: '快餐桌升为第二 VIP 桌，VIP 赏金 +20%'
   },
   {
     id: 'rel_interest',
@@ -798,9 +737,9 @@ const RELICS = [
     rarity: 'common',
     rarityLabel: '普通',
     icon: 'icon_scale',
-    name: '金库复利秤',
-    price: 30,
-    desc: '每持有 10 币，全局营业额 +7%（上限 +105%）'
+    name: '聚宝盆账本',
+    price: 35,
+    desc: '每件秘方 +8% 营业额，每 10 币再 +5%（上限 +65%）'
   }
 ];
 
@@ -827,7 +766,7 @@ const DECK_MODS = [
     name: '镀金烤盘',
     price: 30,
     maxBuy: 2,
-    desc: '手牌镀金概率 +18%（合成×2.5/出餐×1.8）'
+    desc: '手牌镀金概率 +18%（合成×2.0/出餐×1.6）'
   },
   {
     id: 'mod_rainbow',
@@ -1000,13 +939,13 @@ const MODE_GUIDES = {
     mode: 'chef',
     icon: 'mode_chef',
     title: '主厨闯关指引',
-    subtitle: '5 幕闯关 · 订单出餐 · 秘方构筑',
+    subtitle: '5 幕续炉 · 订单腾位 · 秘方构筑',
     steps: [
       {
         focus: 'launcher',
         icon: 'icon_launcher',
         tag: '1 / 3 · 定角弹射',
-        title: '拖动调角发射，撞壁合成 ×1.5',
+        title: '中央调角发射，先撞壁再合享真弹壁加成',
         lines: [
           '中央恒速发射，拖动调角预览落点与异能范围',
           '上滑移出罐口松手可取消发射'
@@ -1015,21 +954,21 @@ const MODE_GUIDES = {
       {
         focus: 'serve',
         icon: 'serve_bell',
-        tag: '2 / 3 · 亮铃上菜',
-        title: '点亮铃甜品上菜，触发抽底雪崩',
+        tag: '2 / 3 · 上菜腾位',
+        title: '点订单【上菜】或长按亮铃甜品出餐',
         lines: [
-          '点罐内亮铃甜品上菜；点订单桌可单独换单',
-          '抽走甜品引发塌落连合，享雪崩高倍与返步'
+          '跨幕不清罐！趁热单免步上菜腾空间（冷单耗1步，雪崩返还）',
+          '抽走底层甜品引发塌落连合，享雪崩加成与返步'
         ]
       },
       {
         focus: 'hud_skill',
         icon: 'icon_coin',
-        tag: '3 / 3 · 过关构筑',
-        title: '限步达标营业额，凑流派共鸣',
+        tag: '3 / 3 · 秘方共鸣',
+        title: '限步达标营业额，幕间整备凑共鸣',
         lines: [
-          '达标可提前打烊赚利息币，过关进整备间选购秘方',
-          '同标签 2/3 件触发共鸣，上菜蓄满可放招牌技'
+          '达标可提前打烊赚利息币，进整备间选购秘方',
+          '同标签 2/3 件激活共鸣，上菜蓄满释放伙伴招牌技'
         ]
       }
     ]
@@ -1038,26 +977,26 @@ const MODE_GUIDES = {
     mode: 'rush',
     icon: 'mode_rush',
     title: '90秒狂欢指引',
-    subtitle: '极速连发 · 连出延时',
+    subtitle: '极速连发 · 连出延时 · 自动秘方',
     steps: [
       {
         focus: 'launcher',
         icon: 'icon_launcher',
         tag: '1 / 3 · 极速连发',
-        title: '无步数限制，冲刺 5× 星光狂热',
+        title: '无步数限制，冲刺星光狂热',
         lines: [
           '拖动调角快速连发，合成充能触发星光狂热',
-          '狂热期间连击最高享 5× 积分爆发'
+          '达成分数里程碑自动装备随机秘方不打断节奏'
         ]
       },
       {
         focus: 'serve',
         icon: 'serve_bell',
         tag: '2 / 3 · 连出续命',
-        title: '连续上菜最高 +4.5s 与 ×2.5',
+        title: '点【上菜】或长按亮铃甜品连出延时',
         lines: [
-          '开局即送闪电单，点亮铃甜品立得延时',
-          '12 秒内连出叠倍率与时间加成'
+          '开局即送闪电单，出餐立得 +3.0s~+4.5s 延时',
+          '12 秒内连出叠加上菜倍率与延时'
         ]
       },
       {
@@ -1066,7 +1005,7 @@ const MODE_GUIDES = {
         tag: '3 / 3 · 星风救急',
         title: '溢罐自动吹散不秒死',
         lines: [
-          '溢罐触发星风清顶（仅扣 5s），善用道具续命'
+          '溢罐触发星风清顶（扣 5s），善用摇罐与招牌技控场'
         ]
       }
     ]
@@ -1075,7 +1014,7 @@ const MODE_GUIDES = {
     mode: 'zen',
     icon: 'mode_zen',
     title: '悠闲经典指引',
-    subtitle: '无压合成 · 探索 9 阶传说',
+    subtitle: '无压合成 · 自动秘方 · 探索 9 阶',
     steps: [
       {
         focus: 'launcher',
@@ -1084,16 +1023,16 @@ const MODE_GUIDES = {
         title: '零步数与计时压力，尽享弹射',
         lines: [
           '瞄准可合成目标时自动预览各阶甜品异能范围',
-          '撞壁弹射合成享 ×1.5 加成'
+          '先撞玻璃侧壁反弹合成享真弹壁加成'
         ]
       },
       {
         focus: 'hold_milestone',
         icon: 'icon_gift',
-        tag: '2 / 2 · 暂存与祝福',
-        title: '暂存调牌 · 达分三选一祝福',
+        tag: '2 / 2 · 暂存与秘方',
+        title: '暂存调牌 · 达分自动获赠秘方',
         lines: [
-          '点右上「存」槽随时换牌，向 9 阶猫神舒芙蕾冲刺'
+          '点右上「存」槽换牌，向 9 阶猫神舒芙蕾冲刺'
         ]
       }
     ]
@@ -1111,7 +1050,7 @@ const MODE_GUIDES = {
         tag: '机关指南',
         title: '甜品穿过巡游星环即刻镀金',
         lines: [
-          '镀金甜品合成 ×2.5、出餐 ×1.8，瞄准穿环会亮星芒提示'
+          '镀金甜品合成 ×2.0、出餐 ×1.6，瞄准穿环会亮星芒提示'
         ]
       }
     ]

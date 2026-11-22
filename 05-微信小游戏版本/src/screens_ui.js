@@ -199,37 +199,31 @@ const LOBBY_MODES = [
     id: 'chef',
     icon: 'mode_chef',
     shortTitle: '主厨闯关',
-    fullTitle: '星夜主厨 · 5幕闯关',
-    tag: '5幕肉鸽',
+    tag: '5幕',
     tagTone: 'berry',
-    summary: '限定步数达标营业额，点选亮铃甜品上菜，过关逛整备间构筑秘方流派',
     bestKey: 'bestChef'
   },
   {
     id: 'rush',
     icon: 'mode_rush',
     shortTitle: '90秒狂欢',
-    fullTitle: '90秒弹射狂欢',
-    tag: '上菜+3s',
+    tag: '限时',
     tagTone: 'amber',
-    summary: '无步数限制极速定角连发，点击上菜直接 +3.0 秒续命，溢罐吹散不秒死',
     bestKey: 'bestRush'
   },
   {
     id: 'zen',
     icon: 'mode_zen',
     shortTitle: '悠闲经典',
-    fullTitle: '悠闲经典合合乐',
-    tag: '无压畅玩',
+    tag: '无压',
     tagTone: 'sage',
-    summary: '零步数与时间压力，随心定角弹射体验 9 阶甜品异能与星夜祝福',
     bestKey: 'bestZen'
   }
 ];
 
 function renderLobbyScreen(ctx, metrics, app, hits, nowSec) {
   const { width, height, safeBottom } = metrics;
-  const { gameState, saveData, sprites, hasAffordable } = app;
+  const { gameState, saveData, sprites } = app;
   const { topY, headerH, maxRight } = computeTopHeaderGeometry(metrics);
   const isWide = width >= 760;
 
@@ -277,32 +271,39 @@ function renderLobbyScreen(ctx, metrics, app, hits, nowSec) {
   });
   hits.add('lobby_bank', padX, topY, bankW, btnS, () => app.openShop('upgrades'));
 
-  // Cloud Sync & Chef Profile Pill (clear of both Bank Chip and Right Utility / Capsule Buttons)
+  // Cloud Sync & Chef Profile Pill (illustrated icon + compact status, zero emoji)
   const cloudX = padX + bankW + 6;
   const availCloudW = rx - 6 - cloudX;
-  if (availCloudW >= 66) {
+  if (availCloudW >= 62) {
     const cs = app.cloudState || { status: 'idle', syncing: false };
     const isAuth = !!(saveData.playerProfile && saveData.playerProfile.authorized);
-    let shortCloudTxt = '💾本地档';
-    let fullCloudTxt = `💾 本地存档 · ${app.getPlayerDisplayName()}`;
+    let cloudIcon = 'icon_local_save';
+    let shortCloudTxt = '本地';
+    let fullCloudTxt = app.getPlayerDisplayName();
     let pillStyle = 'dark';
     if (cs.syncing) {
-      shortCloudTxt = '☁️同步中';
-      fullCloudTxt = '☁️ 微信云同步中…';
+      cloudIcon = 'icon_cloud';
+      shortCloudTxt = '同步中';
+      fullCloudTxt = '云同步中';
     } else if (cs.status === 'synced') {
-      shortCloudTxt = isAuth ? '🪪已授权' : '☁️已云存';
-      fullCloudTxt = `☁️ 已云同步 · ${app.getPlayerDisplayName()}`;
+      cloudIcon = isAuth ? 'icon_id_card' : 'icon_cloud';
+      shortCloudTxt = isAuth ? '名片' : '已云存';
+      fullCloudTxt = app.getPlayerDisplayName();
       pillStyle = isAuth ? 'equipped' : 'dark';
     } else if (isAuth) {
-      shortCloudTxt = '🪪店长卡';
-      fullCloudTxt = `🪪 ${app.getPlayerDisplayName()}`;
+      cloudIcon = 'icon_id_card';
+      shortCloudTxt = '名片';
+      fullCloudTxt = app.getPlayerDisplayName();
     }
-    const useWideLabel = availCloudW >= 165;
-    const pillW = useWideLabel ? Math.min(236, availCloudW) : Math.min(82, availCloudW);
+    const useWideLabel = availCloudW >= 150;
+    const pillW = useWideLabel ? Math.min(184, availCloudW) : Math.min(76, availCloudW);
     UI.drawPillButton(ctx, cloudX, topY, pillW, btnS, {
       style: pillStyle,
+      icon: cloudIcon,
+      sprites,
+      iconSize: 16,
       text: useWideLabel ? fullCloudTxt : shortCloudTxt,
-      fontSize: useWideLabel ? 11.5 : 10.2,
+      fontSize: useWideLabel ? 11.2 : 10.2,
       radius: Math.round(btnS * 0.5)
     });
     hits.add('lobby_cloud_status', cloudX, topY, pillW, btnS, () => app.openCareer('stats'));
@@ -319,7 +320,7 @@ function renderLobbyScreen(ctx, metrics, app, hits, nowSec) {
 }
 
 function renderMobileLobbyLayout(ctx, width, height, padX, contentTop, footerPadB, app, hits, nowSec) {
-  const { gameState, saveData, sprites, activePatron, hasAffordable, lobbyBounceT, lobbySpeechIndex } = app;
+  const { sprites, activePatron, hasAffordable, lobbyBounceT, lobbySpeechIndex } = app;
   const innerW = width - padX * 2;
 
   // Bottom 3-Button Meta Dock (Shop / Compendium / Career)
@@ -328,9 +329,9 @@ function renderMobileLobbyLayout(ctx, width, height, padX, contentTop, footerPad
   const dockGap = 8;
   const dockColW = (innerW - dockGap * 2) / 3;
   const dockItems = [
-    { id: 'btn_shop', icon: 'icon_shop', text: '吃茶小铺', dot: hasAffordable, fn: () => app.openShop('upgrades') },
-    { id: 'btn_comp', icon: 'icon_book', text: '甜品图鉴', dot: false, fn: () => app.openModal('compendium') },
-    { id: 'btn_career', icon: 'icon_trophy', text: '营业履历', dot: false, fn: () => app.openCareer('stats') }
+    { id: 'btn_shop', icon: 'icon_shop', text: '小铺', dot: hasAffordable, fn: () => app.openShop('upgrades') },
+    { id: 'btn_comp', icon: 'icon_book', text: '图鉴', dot: false, fn: () => app.openModal('compendium') },
+    { id: 'btn_career', icon: 'icon_trophy', text: '履历', dot: false, fn: () => app.openCareer('stats') }
   ];
   for (let i = 0; i < dockItems.length; i++) {
     const d = dockItems[i];
@@ -340,7 +341,7 @@ function renderMobileLobbyLayout(ctx, width, height, padX, contentTop, footerPad
       icon: d.icon,
       sprites,
       text: d.text,
-      fontSize: 12.5,
+      fontSize: 12.8,
       radius: 12
     });
     if (d.dot) drawRedDot(ctx, bx + dockColW - 6, dockY + 4);
@@ -350,29 +351,29 @@ function renderMobileLobbyLayout(ctx, width, height, padX, contentTop, footerPad
   const availH = dockY - contentTop - 10;
   const compact = availH < 520;
 
-  // 1. Top Hanging Signboard Plaque
+  // 1. Top Hanging Signboard Plaque (clean rank subtitle only)
   const plaqueMaxH = compact ? 92 : Math.min(132, Math.round(availH * 0.22));
   const plaqueMaxW = Math.min(innerW - 12, compact ? 248 : 308);
-  const rankTitle = `喵呜甜品合合乐 · ${getChefRank(app.getCareerTopScore())}`;
+  const rankTitle = getChefRank(app.getCareerTopScore());
   const plaqueH = drawTitlePlaqueBanner(ctx, width * 0.5, contentTop - 4, plaqueMaxW, plaqueMaxH, sprites, rankTitle);
 
-  // 2. Open Mascot Stage + Speech Balloon + Compact Partner Chips
+  // 2. Open Mascot Stage + Concise Speech Balloon + Compact Partner Chips
   const stageTop = contentTop + plaqueH + (compact ? 2 : 6);
-  const menuCardH = compact ? 228 : 254;
+  const menuCardH = compact ? 196 : 220;
   const menuCardY = dockY - 10 - menuCardH;
-  const stageAvailH = Math.max(118, menuCardY - stageTop - 8);
+  const stageAvailH = Math.max(114, menuCardY - stageTop - 8);
 
   const chipH = compact ? 32 : 36;
   const chipY = stageTop + stageAvailH - chipH;
   const actorAreaH = Math.max(76, chipY - stageTop - 6);
 
-  // Mascot standing on velvet stage cushion on the left
+  // Mascot standing on velvet stage cushion on the left (clean, no redundant tap badge)
   const stageW = compact ? 96 : 112;
   const stageCx = padX + stageW * 0.5 + 2;
   const stageBotY = stageTop + actorAreaH;
 
   if (sprites.patronStage) {
-    UI.drawContainImage(ctx, sprites.patronStage, stageCx, stageBotY - 17, stageW * 0.92, 42);
+    UI.drawContainImage(ctx, sprites.patronStage, stageCx, stageBotY - 14, stageW * 0.92, 42);
   } else {
     ctx.save();
     ctx.fillStyle = 'rgba(42, 20, 10, 0.36)';
@@ -383,8 +384,8 @@ function renderMobileLobbyLayout(ctx, width, height, padX, contentTop, footerPad
 
   const bounceScale = lobbyBounceT > 0 ? 1 + Math.sin(lobbyBounceT * Math.PI * 2) * 0.13 : 1;
   const bobY = Math.sin(nowSec * 2.3) * 2.5;
-  const mascotSize = Math.min(stageW * 0.84, actorAreaH - 12);
-  const mascotCy = stageBotY - 22 - mascotSize * 0.36 + bobY;
+  const mascotSize = Math.min(stageW * 0.86, actorAreaH - 8);
+  const mascotCy = stageBotY - 18 - mascotSize * 0.36 + bobY;
   const pImg = sprites.patrons[activePatron.id];
   if (pImg) {
     ctx.save();
@@ -393,52 +394,61 @@ function renderMobileLobbyLayout(ctx, width, height, padX, contentTop, footerPad
     UI.drawContainImage(ctx, pImg, 0, 0, mascotSize, mascotSize);
     ctx.restore();
   }
-  UI.drawTagBadge(ctx, stageCx - 25, stageBotY - 15, 50, 15, '点我互动', 'cocoa', 8.5);
   hits.add('lobby_patron_poke', padX, stageTop, stageW + 6, actorAreaH, () => app.pokeLobbyPatron());
 
-  // Clean Floating Speech Balloon on the right
+  // Clean Floating Speech Balloon on the right (minimalist 2-line hierarchy)
   const balX = padX + stageW + 10;
   const balW = padX + innerW - balX;
-  const balH = Math.min(actorAreaH - 4, compact ? 76 : 88);
+  const balH = Math.min(actorAreaH - 6, compact ? 68 : 76);
   const balY = stageTop + (actorAreaH - balH) * 0.5;
-  drawSpeechBalloon(ctx, balX, balY, balW, balH, balX - 8, Math.min(balY + balH - 18, mascotCy + 4));
+  drawSpeechBalloon(ctx, balX, balY, balW, balH, balX - 8, Math.min(balY + balH - 16, mascotCy + 4));
 
   const skillTagW = 58;
   UI.drawFitText(
     ctx,
-    activePatron.name,
+    activePatron.shortName,
     balX + 10,
     balY + 15,
     balW - skillTagW - 22,
-    12,
-    9.5,
+    12.5,
+    10,
     900,
     '#4A2C2A'
   );
-  UI.drawTagBadge(ctx, balX + balW - skillTagW - 8, balY + 7, skillTagW, 16, activePatron.skillName, 'amber', 9);
+  UI.drawTagBadge(
+    ctx,
+    balX + balW - skillTagW - 8,
+    balY + 7,
+    skillTagW,
+    16,
+    activePatron.activeSkill.shortLabel,
+    'amber',
+    9,
+    activePatron.activeSkill.icon,
+    sprites
+  );
 
   const lines = activePatron.idleLines || [activePatron.greet];
   const speechText = lines[lobbySpeechIndex % lines.length];
-  UI.drawWrappedText(
+  UI.drawFitText(
     ctx,
     speechText,
     balX + 10,
-    balY + 27,
+    balY + (compact ? 37 : 41),
     balW - 18,
-    compact ? 13.5 : 14.5,
-    UI.fontStr(compact ? 10.2 : 10.8, 600),
-    '#5e3a31',
-    'left',
-    2
+    compact ? 10.6 : 11.2,
+    8.8,
+    700,
+    '#5e3a31'
   );
   UI.drawFitText(
     ctx,
-    `天赋：${activePatron.shortPassive}`,
+    activePatron.shortPassive,
     balX + 10,
-    balY + balH - 10,
+    balY + balH - 11,
     balW - 18,
-    9.5,
-    8.2,
+    9.2,
+    8.0,
     800,
     '#94521c'
   );
@@ -468,9 +478,9 @@ function renderWideLobbyLayout(ctx, width, height, padX, contentTop, footerPadB,
   UI.drawParchmentSheet(ctx, ix, contentTop + pad, iw, availH - pad * 2, 11);
 
   const inPad = 11;
-  const chipH = 42;
+  const chipH = 40;
   const chipY = contentTop + availH - pad - inPad - chipH;
-  const stageH = 104;
+  const stageH = 92;
   const stageY = chipY - 8 - stageH;
   const heroY = contentTop + pad + inPad;
   const heroH = Math.max(120, stageY - heroY - 10);
@@ -489,45 +499,44 @@ function renderWideLobbyLayout(ctx, width, height, padX, contentTop, footerPadB,
     ctx.restore();
   }
 
-  // Mascot + Speech Balloon inside Left Showcase
-  const stageW = 104;
+  // Mascot + Concise Speech Balloon inside Left Showcase
+  const stageW = 98;
   const stageCx = ix + inPad + stageW * 0.5;
   const stageBotY = stageY + stageH;
   if (sprites.patronStage) {
-    UI.drawContainImage(ctx, sprites.patronStage, stageCx, stageBotY - 16, 94, 38);
+    UI.drawContainImage(ctx, sprites.patronStage, stageCx, stageBotY - 12, 90, 36);
   }
   const bounceScale = lobbyBounceT > 0 ? 1 + Math.sin(lobbyBounceT * Math.PI * 2) * 0.13 : 1;
   const bobY = Math.sin(nowSec * 2.3) * 2.5;
   const pImg = sprites.patrons[activePatron.id];
   if (pImg) {
     ctx.save();
-    ctx.translate(stageCx, stageBotY - 52 + bobY);
+    ctx.translate(stageCx, stageBotY - 46 + bobY);
     ctx.scale(bounceScale, 2 - bounceScale);
     UI.drawContainImage(ctx, pImg, 0, 0, 74, 74);
     ctx.restore();
   }
-  UI.drawTagBadge(ctx, stageCx - 25, stageBotY - 15, 50, 15, '点我互动', 'cocoa', 8.5);
   hits.add('lobby_patron_poke', ix + inPad, stageY, stageW, stageH, () => app.pokeLobbyPatron());
 
   const balX = ix + inPad + stageW + 8;
   const balW = ix + iw - inPad - balX;
-  drawSpeechBalloon(ctx, balX, stageY + 4, balW, stageH - 8, balX - 7, stageY + 48);
-  UI.drawFitText(ctx, activePatron.name, balX + 10, stageY + 20, balW - 78, 12.5, 10, 900, '#4A2C2A');
-  UI.drawTagBadge(ctx, balX + balW - 66, stageY + 12, 58, 16, activePatron.skillName, 'amber', 9);
-  const lines = activePatron.idleLines || [activePatron.greet];
-  UI.drawWrappedText(
+  drawSpeechBalloon(ctx, balX, stageY + 6, balW, stageH - 12, balX - 7, stageY + 46);
+  UI.drawFitText(ctx, activePatron.shortName, balX + 10, stageY + 22, balW - 76, 13, 10, 900, '#4A2C2A');
+  UI.drawTagBadge(
     ctx,
-    lines[lobbySpeechIndex % lines.length],
-    balX + 10,
-    stageY + 34,
-    balW - 20,
-    15,
-    UI.fontStr(11, 600),
-    '#5e3a31',
-    'left',
-    2
+    balX + balW - 64,
+    stageY + 14,
+    56,
+    16,
+    activePatron.activeSkill.shortLabel,
+    'amber',
+    9,
+    activePatron.activeSkill.icon,
+    sprites
   );
-  UI.drawFitText(ctx, activePatron.passiveDesc, balX + 10, stageY + stageH - 16, balW - 20, 9.8, 8.2, 800, '#94521c');
+  const lines = activePatron.idleLines || [activePatron.greet];
+  UI.drawFitText(ctx, lines[lobbySpeechIndex % lines.length], balX + 10, stageY + 45, balW - 20, 11.2, 9, 700, '#5e3a31');
+  UI.drawFitText(ctx, activePatron.shortPassive, balX + 10, stageY + stageH - 18, balW - 20, 9.6, 8.2, 800, '#94521c');
 
   renderPatronSwitcherRow(ctx, ix + inPad, chipY, iw - inPad * 2, chipH, app, hits, true);
 
@@ -539,7 +548,7 @@ function renderWideLobbyLayout(ctx, width, height, padX, contentTop, footerPadB,
     Math.min(rightW - 20, 340),
     126,
     sprites,
-    '喵呜甜品合合乐 · 定角弹射肉鸽'
+    getChefRank(app.getCareerTopScore())
   );
 
   const dockH = 44;
@@ -547,9 +556,9 @@ function renderWideLobbyLayout(ctx, width, height, padX, contentTop, footerPadB,
   const dockGap = 10;
   const dockColW = (rightW - dockGap * 2) / 3;
   const dockItems = [
-    { id: 'btn_shop', icon: 'icon_shop', text: '吃茶小铺', dot: hasAffordable, fn: () => app.openShop('upgrades') },
-    { id: 'btn_comp', icon: 'icon_book', text: '甜品图鉴', dot: false, fn: () => app.openModal('compendium') },
-    { id: 'btn_career', icon: 'icon_trophy', text: '营业履历', dot: false, fn: () => app.openCareer('stats') }
+    { id: 'btn_shop', icon: 'icon_shop', text: '小铺', dot: hasAffordable, fn: () => app.openShop('upgrades') },
+    { id: 'btn_comp', icon: 'icon_book', text: '图鉴', dot: false, fn: () => app.openModal('compendium') },
+    { id: 'btn_career', icon: 'icon_trophy', text: '履历', dot: false, fn: () => app.openCareer('stats') }
   ];
   for (let i = 0; i < dockItems.length; i++) {
     const d = dockItems[i];
@@ -606,8 +615,12 @@ function renderPatronSwitcherRow(ctx, x, y, w, h, app, hits, isWide) {
     const tx = avCx + avS * 0.5 + 4;
     const tw = cx + chipW - tx - 4;
     UI.drawFitText(ctx, p.shortName, tx, y + h * 0.34, tw, isWide ? 11.2 : 10, 8.2, 900, '#4A2C2A');
-    const subTxt = unlocked ? (selected ? '✦ 出战中' : '点此切换') : `解锁 ${p.cost}`;
-    UI.drawFitText(ctx, subTxt, tx, y + h * 0.72, tw, isWide ? 9.8 : 8.8, 7.5, 800, selected ? '#8f4714' : '#856046');
+    if (unlocked) {
+      UI.drawFitText(ctx, selected ? '出战中' : '切换', tx, y + h * 0.72, tw, isWide ? 9.6 : 8.6, 7.5, 800, selected ? '#8f4714' : '#856046');
+    } else {
+      UI.drawUiIcon(ctx, sprites, 'icon_stardust', tx + 5, y + h * 0.72, 11);
+      UI.drawFitText(ctx, String(p.cost), tx + 13, y + h * 0.72, tw - 13, isWide ? 9.6 : 8.8, 7.5, 800, '#856046');
+    }
 
     hits.add(`lobby_patron_chip_${p.id}`, cx, y, chipW, h, () => app.selectOrUnlockPatron(p.id));
   }
@@ -627,14 +640,32 @@ function renderUnifiedModeCard(ctx, x, y, w, h, app, hits, isWide, compact) {
   const innerX = ix + inPad;
   const innerW = iw - inPad * 2;
 
-  // Primary Start CTA anchored at bottom of card (with Mid-Run Breakpoint Resume Split Row!)
-  const ctaH = compact ? 42 : isWide ? 48 : 45;
-  const ctaY = iy + ih - inPad - ctaH;
+  // Compact Mode Header Row with Guide Pill (replaces bulky prose summary strip!)
+  const hdrY = iy + inPad - 2;
+  const hdrH = 20;
   const selModeDef = LOBBY_MODES.find((m) => m.id === gameState.mode) || LOBBY_MODES[0];
+  UI.drawFitText(ctx, '选择营业模式', innerX + 2, hdrY + hdrH * 0.5, innerW - 72, 11.2, 9.5, 900, '#6e4532');
+  const guideBtnW = 58;
+  UI.drawPillButton(ctx, innerX + innerW - guideBtnW, hdrY, guideBtnW, hdrH, {
+    style: 'wood',
+    icon: 'icon_help',
+    sprites,
+    iconSize: 13,
+    text: '指引',
+    fontSize: 9.8,
+    radius: 10
+  });
+  hits.add('lobby_mode_guide', innerX + innerW - guideBtnW, hdrY, guideBtnW, hdrH, () =>
+    app.openModeGuide(selModeDef.id, 0)
+  );
+
+  // Primary Start CTA anchored at bottom of card (with Mid-Run Breakpoint Resume Split Row!)
+  const ctaH = compact ? 42 : isWide ? 48 : 44;
+  const ctaY = iy + ih - inPad - ctaH;
 
   if (app.hasResumableRun && app.hasResumableRun(gameState.mode) && app.savedRun) {
     const sr = app.savedRun;
-    let resumeLabel = `继续第${sr.shift || 1}幕营业`;
+    let resumeLabel = `继续第${sr.shift || 1}幕`;
     if (sr.mode === 'chef') {
       if (sr.resumeModal === 'prep_shop' && sr.prepShop) {
         resumeLabel = `继续第${sr.prepShop.nextShiftNum || sr.shift + 1}幕整备`;
@@ -646,11 +677,11 @@ function renderUnifiedModeCard(ctx, x, y, w, h, app, hits, isWide, compact) {
     } else if (sr.mode === 'rush') {
       resumeLabel = `继续狂欢 · ${Math.ceil(sr.rushTimer || 30)}s`;
     } else {
-      resumeLabel = `继续本局 · ${sr.score || 0}分`;
+      resumeLabel = `继续 · ${sr.score || 0}`;
     }
 
     const gap = 8;
-    const newW = Math.round(Math.max(88, innerW * 0.34));
+    const newW = Math.round(Math.max(82, innerW * 0.32));
     const resW = innerW - newW - gap;
 
     UI.drawPillButton(ctx, innerX, ctaY, resW, ctaH, {
@@ -667,8 +698,8 @@ function renderUnifiedModeCard(ctx, x, y, w, h, app, hits, isWide, compact) {
 
     UI.drawPillButton(ctx, innerX + resW + gap, ctaY, newW, ctaH, {
       style: 'wood',
-      text: '新开一局',
-      fontSize: isWide ? 13.2 : 12.0,
+      text: '新开',
+      fontSize: isWide ? 13.5 : 12.2,
       fontWeight: 900,
       radius: 13
     });
@@ -679,60 +710,17 @@ function renderUnifiedModeCard(ctx, x, y, w, h, app, hits, isWide, compact) {
       icon: selModeDef.icon,
       sprites,
       iconSize: ctaH - 14,
-      text: `开门营业 · ${selModeDef.shortTitle}`,
-      fontSize: isWide ? 16.5 : 15.5,
+      text: `开门营业`,
+      fontSize: isWide ? 17 : 16,
       fontWeight: 900,
       radius: 13
     });
     hits.add('btn_start', innerX, ctaY, innerW, ctaH, () => app.startNewRun());
   }
 
-  // Selected Mode Summary & Guide Strip right above CTA
-  const infoH = compact ? 44 : 50;
-  const infoY = ctaY - 7 - infoH;
-  UI.drawKissaCard(ctx, innerX, infoY, innerW, infoH, { tone: 'soft', radius: 10 });
-
-  const bestVal = saveData[selModeDef.bestKey] || 0;
-  const guideBtnW = 68;
-  UI.drawFitText(
-    ctx,
-    `${selModeDef.fullTitle}  ·  最高纪录 ${bestVal}`,
-    innerX + 9,
-    infoY + 14,
-    innerW - guideBtnW - 22,
-    isWide ? 11.5 : 10.5,
-    8.8,
-    900,
-    '#4A2C2A'
-  );
-  UI.drawPillButton(ctx, innerX + innerW - guideBtnW - 6, infoY + 5, guideBtnW, 20, {
-    style: 'wood',
-    icon: 'icon_help',
-    sprites,
-    iconSize: 13,
-    text: '指引',
-    fontSize: 9.8,
-    radius: 10
-  });
-  hits.add('lobby_mode_guide', innerX + innerW - guideBtnW - 6, infoY + 5, guideBtnW, 20, () =>
-    app.openModeGuide(selModeDef.id, 0)
-  );
-
-  UI.drawFitText(
-    ctx,
-    selModeDef.summary,
-    innerX + 9,
-    infoY + infoH - 13,
-    innerW - 18,
-    isWide ? 10.8 : 9.8,
-    8.2,
-    600,
-    '#6d453b'
-  );
-
-  // 3 Side-by-Side Illustrated Mode Cards at top
-  const cardsY = iy + inPad;
-  const cardsH = Math.max(76, infoY - cardsY - 7);
+  // 3 Side-by-Side Illustrated Mode Cards (generous room, zero prose walls!)
+  const cardsY = hdrY + hdrH + 7;
+  const cardsH = Math.max(82, ctaY - cardsY - 8);
   const gap = isWide ? 10 : 7;
   const cardW = (innerW - gap * 2) / 3;
 
@@ -740,75 +728,71 @@ function renderUnifiedModeCard(ctx, x, y, w, h, app, hits, isWide, compact) {
     const m = LOBBY_MODES[i];
     const cx = innerX + i * (cardW + gap);
     const selected = gameState.mode === m.id;
+    const mBest = saveData[m.bestKey] || 0;
 
     UI.drawPillButton(ctx, cx, cardsY, cardW, cardsH, {
       style: selected ? 'cardSelected' : 'card',
       radius: 12
     });
 
-    if (cardsH >= 165) {
-      const icSize = Math.min(cardW * 0.68, 92, cardsH - 96);
-      const blockH = icSize + 64;
+    if (cardsH >= 150) {
+      const icSize = Math.min(cardW * 0.66, 86, cardsH - 76);
+      const blockH = icSize + 58;
       const blockTop = cardsY + (cardsH - blockH) * 0.5;
       UI.drawUiIcon(ctx, sprites, m.icon, cx + cardW * 0.5, blockTop + icSize * 0.5, icSize);
 
       const titleY = blockTop + icSize + 15;
-      UI.drawFitText(ctx, m.shortTitle, cx + cardW * 0.5, titleY, cardW - 12, 15, 11, 900, '#4A2C2A', 'center');
+      UI.drawFitText(ctx, m.shortTitle, cx + cardW * 0.5, titleY, cardW - 12, 14.5, 11, 900, '#4A2C2A', 'center');
 
-      const tagW = Math.min(cardW - 18, 68);
+      const tagW = Math.min(cardW - 22, 54);
       UI.drawTagBadge(
         ctx,
         cx + (cardW - tagW) * 0.5,
-        titleY + 12,
+        titleY + 11,
         tagW,
         16,
-        selected ? '✦ 当前模式' : m.tag,
+        selected ? '当前' : m.tag,
         selected ? 'cocoa' : m.tagTone,
-        9
+        8.8
       );
 
-      const mBest = saveData[m.bestKey] || 0;
-      UI.drawFitText(
-        ctx,
-        `最高纪录 ${mBest}`,
-        cx + cardW * 0.5,
-        titleY + 39,
-        cardW - 14,
-        10.5,
-        8.5,
-        700,
-        selected ? '#7a3e10' : '#856046',
-        'center'
-      );
+      // Clean Trophy Icon + Best Number
+      const bY = titleY + 38;
+      const bestStr = String(mBest);
+      ctx.font = UI.fontStr(10.5, 800);
+      const bw = ctx.measureText(bestStr).width;
+      const startBx = cx + cardW * 0.5 - (14 + bw) * 0.5;
+      UI.drawUiIcon(ctx, sprites, 'icon_trophy', startBx + 6, bY, 13);
+      UI.drawFitText(ctx, bestStr, startBx + 15, bY + 0.5, cardW - 24, 10.5, 8.5, 800, selected ? '#7a3e10' : '#856046');
     } else {
-      const icSize = Math.min(cardW * 0.56, Math.max(30, cardsH - 44));
+      const icSize = Math.min(cardW * 0.54, Math.max(32, cardsH - 52));
       const icCy = cardsY + 8 + icSize * 0.5;
       UI.drawUiIcon(ctx, sprites, m.icon, cx + cardW * 0.5, icCy, icSize);
 
-      const titleY = cardsY + cardsH - 27;
+      const titleY = cardsY + cardsH - 36;
       UI.drawFitText(
         ctx,
         m.shortTitle,
         cx + cardW * 0.5,
         titleY,
         cardW - 10,
-        isWide ? 13.5 : 12,
-        9.8,
+        isWide ? 13 : 11.8,
+        9.6,
         900,
         '#4A2C2A',
         'center'
       );
 
-      const tagW = Math.min(cardW - 14, 58);
+      const tagW = Math.min(cardW - 16, 48);
       UI.drawTagBadge(
         ctx,
         cx + (cardW - tagW) * 0.5,
-        cardsY + cardsH - 18,
+        cardsY + cardsH - 22,
         tagW,
-        14,
-        selected ? '✦ 当前模式' : m.tag,
+        15,
+        selected ? '当前' : m.tag,
         selected ? 'cocoa' : m.tagTone,
-        8.5
+        8.4
       );
     }
 
@@ -915,7 +899,7 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
   const shiftTxtWide =
     gameState.shift <= 5
       ? `第${gameState.shift}/5幕 · ${gameState.shiftName || '暮色试营业'}`
-      : `无尽加时 · 第${gameState.shift}幕`;
+      : `无尽加时 #${gameState.shift - 5}`;
   const hasShiftAffix =
     gameState.mode === 'chef' &&
     ((Array.isArray(gameState.shiftHazards) && gameState.shiftHazards.length > 0) ||
@@ -923,15 +907,13 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
       gameState.shift >= 5);
   const modeLabel =
     gameState.mode === 'rush'
-      ? (modeMaxW < 82 ? '90秒狂欢' : '90秒弹射狂欢')
+      ? '90秒狂欢'
       : gameState.mode === 'zen'
-      ? (modeMaxW < 82 ? '悠闲经典' : '悠闲经典模式')
+      ? '悠闲经典'
       : isWide
-      ? (hasShiftAffix ? `${shiftTxtWide} ✦` : shiftTxtWide)
-      : hasShiftAffix
-      ? `${shiftTxtShort}✦`
+      ? shiftTxtWide
       : shiftTxtShort;
-  const modeW = Math.min(isWide ? 210 : 88, modeMaxW);
+  const modeW = Math.min(isWide ? 196 : 82, modeMaxW);
   UI.drawPillButton(ctx, modeX, btnY, modeW, btnS, {
     style: 'dark',
     icon: isWide ? (gameState.mode === 'rush' ? 'mode_rush' : gameState.mode === 'zen' ? 'mode_zen' : 'mode_chef') : '',
@@ -1036,83 +1018,92 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
     }));
   }
 
-  // 4. Unified Floating In-Jar Overlays
+  // 4. Unified Floating In-Jar Overlays (compact & unobtrusive)
   if (isWide && gameState.mode === 'rush' && gameState.running && !gameState.over) {
     const urgent = gameState.rushTimer <= 15.0;
-    UI.drawNoticeBanner(ctx, jarBox.x + 8, jarBox.y + 6, 102, 26, {
+    UI.drawNoticeBanner(ctx, jarBox.x + 8, jarBox.y + 6, 98, 26, {
       icon: 'mode_rush',
       sprites,
       text: `${Math.max(0, gameState.rushTimer).toFixed(1)}s`,
       fontSize: 12.5,
-      borderColor: urgent ? '#ff8b78' : '#ffd56b',
-      topCol: urgent ? 'rgba(164, 34, 24, 0.94)' : undefined,
-      botCol: urgent ? 'rgba(116, 20, 14, 0.96)' : undefined
+      tone: urgent ? 'warn' : 'event',
+      borderColor: urgent ? '#ff8b78' : '#ffd56b'
     });
   }
 
-  // Unified Shop Event Banner (auto-fades while actively aiming so trajectory stays clear)
+  // Compact Shop Event Banner (auto-fades while aiming)
   if (gameState.activeEvent && gameState.running && !gameState.over) {
     const ev = gameState.activeEvent;
     let iconKey = 'serve_bell';
-    let label = '黄金烘焙钟 · 得分+45% 连击延长';
+    let label = '黄金烘焙钟 +45%';
     let meta = `${Math.max(0, ev.timer).toFixed(1)}s`;
     let bBorder = '#ffe169';
     if (ev.kind === 'meteor') {
       iconKey = 'icon_stardust';
-      label = '流星许愿夜 · 镀金 & 充能+30%';
+      label = '流星镀金夜';
       bBorder = '#ffd66b';
     } else if (ev.kind === 'yarn') {
       const yb = gameState.entities.find((e) => e.isYarnBall && !e.merged);
       iconKey = 'yarn_ball';
-      label = '猫咪捣蛋 · 附近合成震碎领大奖';
-      meta = `脆度×${yb ? yb.yarnHp : 0}`;
+      label = '捣蛋毛线球';
+      meta = `×${yb ? yb.yarnHp : 0}`;
       bBorder = '#ffb0c8';
     }
-    const bw = Math.min(width - 24, isWide ? 316 : 278);
+    const bw = Math.min(width - 36, 198);
     const bx = jarBox.x + jarBox.w * 0.5 - bw * 0.5;
     const by = jarBox.y + 82 * jarBox.scale;
     ctx.save();
     if (gameState.aim && gameState.aim.active) {
-      ctx.globalAlpha = 0.32;
+      ctx.globalAlpha = 0.28;
     }
-    UI.drawNoticeBanner(ctx, bx, by, bw, 25, {
+    UI.drawNoticeBanner(ctx, bx, by, bw, 24, {
       icon: iconKey,
       sprites,
+      iconSize: 16,
       text: label,
-      fontSize: 10.8,
+      fontSize: 10.6,
+      tone: 'event',
       borderColor: bBorder,
-      rightReserve: 56
+      rightReserve: 50
     });
-    UI.drawTagBadge(ctx, bx + bw - 50, by + 4.5, 44, 16, meta, 'amber', 9.5);
+    UI.drawTagBadge(ctx, bx + bw - 46, by + 4, 41, 16, meta, 'amber', 9.2);
     ctx.restore();
   }
 
-  // Unified Tool & Active Chef Skill Targeting Banner
+  // Concise Tool & Active Chef Skill Targeting Banner
   if ((gameState.activeToolMode || gameState.activeSkillMode) && gameState.running && !gameState.over) {
-    let msg = '点击罐内任意甜品(1~8阶)升阶';
+    let msg = '点选甜品升阶 (1~8阶)';
+    let tIcon = 'tool_spoon';
     if (gameState.activeSkillMode === 'scoop') {
-      msg = '金勺捞底：点击罐内 1~5 阶甜品捞回罐口！';
+      msg = '点选 1~5 阶甜品捞底';
+      tIcon = 'tool_spoon';
     } else if (gameState.activeSkillMode === 'swap_1') {
-      msg = '星月移形：请点击第 1 颗甜品 (1/2)';
+      msg = '点选第 1 颗互换 (1/2)';
+      tIcon = 'icon_moon';
     } else if (gameState.activeSkillMode === 'swap_2') {
-      msg = '星月移形：再点击第 2 颗互换位置 (2/2)';
+      msg = '点选第 2 颗互换 (2/2)';
+      tIcon = 'icon_moon';
     }
-    const bw = Math.min(width - 20, 316);
+    const bw = Math.min(width - 24, 242);
     const bx = jarBox.x + jarBox.w * 0.5 - bw * 0.5;
     const by = jarBox.y + 8;
-    UI.drawNoticeBanner(ctx, bx, by, bw, 28, {
+    UI.drawNoticeBanner(ctx, bx, by, bw, 27, {
+      icon: tIcon,
+      sprites,
+      iconSize: 17,
       text: msg,
       fontSize: 10.8,
+      tone: 'event',
       borderColor: '#ffd56b',
-      rightReserve: 54,
+      rightReserve: 52,
       align: 'left'
     });
-    const cbx = bx + bw - 48;
-    UI.drawPillButton(ctx, cbx, by + 4, 42, 20, { style: 'danger', text: '取消', fontSize: 10.2 });
-    hits.add('cancel_tool', cbx, by + 4, 42, 20, () => app.cancelToolMode());
+    const cbx = bx + bw - 46;
+    UI.drawPillButton(ctx, cbx, by + 3.5, 40, 20, { style: 'danger', text: '取消', fontSize: 10 });
+    hits.add('cancel_tool', cbx, by + 3.5, 40, 20, () => app.cancelToolMode());
   }
 
-  // Pending Roguelike Blessing Floating Button (with `icon_gift` sprite!)
+  // Pending Roguelike Blessing Floating Button
   if (
     gameState.pendingBlessings > 0 &&
     !gameState.activeToolMode &&
@@ -1121,7 +1112,7 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
     !gameState.over &&
     !app.activeModal
   ) {
-    const bw = 172;
+    const bw = 148;
     const bx = jarBox.x + jarBox.w * 0.5 - bw * 0.5;
     const by = toolsDockY - 36;
     const pulse = 1 + Math.sin(nowSec * 6) * 0.03;
@@ -1132,7 +1123,7 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
       style: 'cta',
       icon: 'icon_gift',
       sprites,
-      text: `领取星夜祝福 ×${gameState.pendingBlessings}`,
+      text: `星夜祝福 ×${gameState.pendingBlessings}`,
       fontSize: 12,
       fontWeight: 900
     });
@@ -1140,7 +1131,7 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
     hits.add('open_blessing_btn', bx, by, bw, 30, () => app.openBlessingModal());
   }
 
-  // 5. Bottom Chef Action Dock: [1·摇一摇] — [★ 角色招牌主动技] — [3·升阶勺]
+  // 5. Bottom Chef Action Dock: [摇罐] — [角色招牌技] — [升阶]
   const activePatron = app.activePatron;
   const activeSk = activePatron.activeSkill;
   const toolSize = isWide ? 50 : 46;
@@ -1183,20 +1174,31 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
     }
 
     const badgeStr = cnt > 0 ? String(cnt) : `${cost}`;
-    const bw = cnt > 0 ? 20 : 32;
+    const bw = cnt > 0 ? 20 : 34;
     const bbx = tx + toolSize - bw * 0.65;
     const bby = ty - 3;
-    UI.drawTagBadge(ctx, bbx, bby, bw, 17, badgeStr, cnt > 0 ? 'cocoa' : 'amber', 9.5);
+    UI.drawTagBadge(
+      ctx,
+      bbx,
+      bby,
+      bw,
+      17,
+      badgeStr,
+      cnt > 0 ? 'cocoa' : 'amber',
+      9.2,
+      cnt > 0 ? '' : 'icon_stardust',
+      sprites
+    );
 
-    const capW = toolSize + 18;
+    const capW = toolSize + 8;
     UI.drawTagBadge(ctx, cx - capW * 0.5, ty + toolSize + 1, capW, 15, tl.label, 'cocoa', 9);
     ctx.restore();
 
     hits.add(`tool_${tl.key}`, tx - 4, ty - 4, toolSize + 8, toolSize + 18, () => app.armOrUseTool(tl.key));
   };
 
-  drawSideTool({ key: 'shake', label: '摇一摇', img: sprites.tools.shake }, centerX - heroSize * 0.5 - dockGap - toolSize * 0.5, sideY);
-  drawSideTool({ key: 'spoon', label: '升阶勺', img: sprites.tools.spoon }, centerX + heroSize * 0.5 + dockGap + toolSize * 0.5, sideY);
+  drawSideTool({ key: 'shake', label: '摇罐', img: sprites.tools.shake }, centerX - heroSize * 0.5 - dockGap - toolSize * 0.5, sideY);
+  drawSideTool({ key: 'spoon', label: '升阶', img: sprites.tools.spoon }, centerX + heroSize * 0.5 + dockGap + toolSize * 0.5, sideY);
 
   // Center Hero Signature Chef Skill Medallion
   {
@@ -1265,14 +1267,25 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
     }
     ctx.restore();
 
-    const pillTxt = gameState.nextShotMeteor ? '已装填' : isReady ? '就绪' : `${Math.floor(gameState.skillEnergy)}%`;
-    const pbw = isReady ? 42 : 34;
+    const pillTxt = gameState.nextShotMeteor ? '装填' : isReady ? '就绪' : `${Math.floor(gameState.skillEnergy)}%`;
+    const pbw = isReady ? 34 : 34;
     const pbx = hcx + hr - pbw * 0.55;
     const pby = heroY - 4;
-    UI.drawTagBadge(ctx, pbx, pby, pbw, 17, pillTxt, isReady ? 'amber' : 'cocoa', 9);
+    UI.drawTagBadge(ctx, pbx, pby, pbw, 16, pillTxt, isReady ? 'amber' : 'cocoa', 8.8);
 
-    const capW = heroSize + 28;
-    UI.drawTagBadge(ctx, hcx - capW * 0.5, heroY + heroSize - 1, capW, 16, activeSk.name, isReady ? 'amber' : 'cocoa', 9.2);
+    const capW = heroSize + 14;
+    UI.drawTagBadge(
+      ctx,
+      hcx - capW * 0.5,
+      heroY + heroSize - 1,
+      capW,
+      16,
+      activeSk.shortLabel,
+      isReady ? 'amber' : 'cocoa',
+      9.2,
+      activeSk.icon,
+      sprites
+    );
 
     const skillRect = { x: hcx - hr - 8, y: heroY - 5, w: heroSize + 16, h: heroSize + 22 };
     guideTargets.skill = skillRect;
@@ -1288,7 +1301,7 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
   app.lastGuideTargets = guideTargets;
 }
 
-function drawMiniRelicStrip(ctx, x, y, w, h, relics, hits, hitId, onClick, isLightBg = false) {
+function drawMiniRelicStrip(ctx, x, y, w, h, relics, hits, hitId, onClick, isLightBg = false, sprites = null) {
   const gap = 4;
   const slotW = (w - gap * (MAX_RELIC_SLOTS - 1)) / MAX_RELIC_SLOTS;
   for (let i = 0; i < MAX_RELIC_SLOTS; i++) {
@@ -1310,19 +1323,39 @@ function drawMiniRelicStrip(ctx, x, y, w, h, relics, hits, hitId, onClick, isLig
         ? '#bfa278'
         : 'rgba(232, 198, 138, 0.45)';
     ctx.stroke();
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    if (def) {
-      ctx.font = UI.fontStr(Math.min(14, h - 4), 700);
-      ctx.fillStyle = '#4A2C2A';
-      ctx.fillText(def.icon, sx + slotW * 0.5, y + h * 0.5 + 0.5);
-    } else {
-      ctx.font = UI.fontStr(isLightBg ? 11 : 9, 700);
-      ctx.fillStyle = isLightBg ? '#a0825a' : 'rgba(255, 232, 186, 0.52)';
-      ctx.fillText('✦', sx + slotW * 0.5, y + h * 0.5 + 0.5);
+
+    const cx = sx + slotW * 0.5;
+    const cy = y + h * 0.5;
+    if (def && sprites) {
+      UI.drawUiIcon(ctx, sprites, def.icon, cx, cy, Math.min(slotW - 4, h - 3));
+    } else if (!def) {
+      ctx.save();
+      ctx.fillStyle = isLightBg ? 'rgba(160, 130, 90, 0.45)' : 'rgba(255, 232, 186, 0.38)';
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.max(2, Math.min(3.5, h * 0.14)), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     }
   }
   hits.add(hitId, x, y, w, h, onClick);
+}
+
+function drawCheckDot(ctx, cx, cy, r = 5) {
+  ctx.save();
+  ctx.fillStyle = '#3f9663';
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 1.5;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(cx - r * 0.46, cy + r * 0.05);
+  ctx.lineTo(cx - r * 0.1, cy + r * 0.42);
+  ctx.lineTo(cx + r * 0.5, cy - r * 0.36);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function renderMobileTopHud(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
@@ -1336,7 +1369,7 @@ function renderMobileTopHud(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
 
   if (gameState.mode === 'chef') {
     const revStr = `¥${gameState.displayShiftRevenue}`;
-    const tgtStr = `/¥${gameState.shiftTarget}`;
+    const tgtStr = `/${gameState.shiftTarget}`;
     const lowSteps = gameState.stepsLeft <= 3;
 
     // Recipe Coins Chip with `icon_coin`
@@ -1348,15 +1381,15 @@ function renderMobileTopHud(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
       fontSize: 10
     });
 
-    const stepStr = `步 ${gameState.stepsLeft}/${gameState.stepsMax}`;
-    const stepW = 56;
+    const stepStr = `${gameState.stepsLeft}步`;
+    const stepW = 42;
     const stepX = coinX - stepW - 4;
     UI.drawTagBadge(ctx, stepX, y + 6, stepW, 19, stepStr, lowSteps ? 'berry' : 'soft', 9.6);
 
     const revMaxW = Math.max(58, stepX - (x + 8) - 4);
-    UI.drawFitText(ctx, `${revStr}${tgtStr}`, x + 8, y + 15.5, revMaxW, 14.5, 10, 900, '#4A2C2A');
+    UI.drawFitText(ctx, `${revStr}${tgtStr}`, x + 8, y + 15.5, revMaxW, 15, 10, 900, '#4A2C2A');
 
-    // Middle Row: Revenue Progress Bar OR Golden Early-Close CTA Button
+    // Middle Row: Clean Revenue Bar OR Golden Early-Close CTA Button
     const barX = x + 8;
     const barW = statsW - 16;
     const barY = y + 29;
@@ -1368,7 +1401,7 @@ function renderMobileTopHud(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
         icon: 'serve_bell',
         sprites,
         iconSize: 14,
-        text: interestCoins > 0 ? `立即打烊 (+${interestCoins}币息)` : '达标！点击立即打烊',
+        text: interestCoins > 0 ? `提前打烊 +${interestCoins}币` : '达标 · 打烊',
         fontSize: 10.5,
         fontWeight: 900,
         radius: 10
@@ -1395,25 +1428,30 @@ function renderMobileTopHud(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
       ctx.font = UI.fontStr(9, 900);
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(`营业进度 ${Math.min(100, Math.floor(revFrac * 100))}%`, barX + barW * 0.5, barY + 9.8);
+      ctx.fillText(`${Math.min(100, Math.floor(revFrac * 100))}%`, barX + barW * 0.5, barY + 9.8);
     }
 
-    // Bottom Micro Row: Fever + Rainbow Pity + Run Stardust
+    // Bottom Icon-First Micro Row: Fever + Rainbow Pity + Run Stardust
     const isFever = gameState.feverTimer > 0;
     const multVal = app.getFeverMultiplier();
     const multStr = Number.isInteger(multVal) ? `${multVal}×` : `${multVal.toFixed(1)}×`;
-    const fTxt = isFever ? `狂热 ${multStr} (${gameState.feverTimer.toFixed(1)}s)` : `星光 ${Math.round(gameState.feverEnergy)}%`;
+    const fTxt = isFever ? `${multStr} ${gameState.feverTimer.toFixed(1)}s` : `${Math.round(gameState.feverEnergy)}%`;
     const rReady = !!(gameState.curMeta.wildcard || gameState.nextMeta.wildcard);
-    const rTxt = rReady ? '彩虹就绪!' : `彩虹 ${gameState.dropsUntilRainbow}步`;
+    const rTxt = rReady ? '就绪' : `${gameState.dropsUntilRainbow}`;
     const botY = y + 61;
-    UI.drawFitText(ctx, fTxt, x + 8, botY, statsW * 0.44, 9.5, 8, 800, isFever ? '#c43c12' : '#6c4424');
-    UI.drawFitText(ctx, rTxt, x + statsW * 0.57, botY, 58, 9.2, 8, 800, rReady ? '#b42b62' : '#5e3c24', 'center');
+
+    UI.drawUiIcon(ctx, sprites, 'icon_flame', x + 14, botY, 13);
+    UI.drawFitText(ctx, fTxt, x + 23, botY, statsW * 0.36, 9.6, 8, 800, isFever ? '#c43c12' : '#6c4424');
+
+    const rCenter = x + statsW * 0.56;
+    UI.drawUiIcon(ctx, sprites, 'icon_rainbow', rCenter - 14, botY, 14);
+    UI.drawFitText(ctx, rTxt, rCenter - 4, botY, 34, 9.4, 8, 800, rReady ? '#b42b62' : '#5e3c24');
 
     const dustStr = String(gameState.stardust);
     UI.drawUiIcon(ctx, sprites, 'icon_stardust', x + statsW - 28, botY, 13);
     UI.drawFitText(ctx, dustStr, x + statsW - 7, botY, 24, 9.8, 8.2, 800, '#7e4b10', 'right');
 
-    // Right Wooden Preview Card: NEXT + HOLD + 4 Mini Relic Slots
+    // Right Wooden Preview Card: NEXT + HOLD + 4 Illustrated Mini Relic Slots
     const px = x + statsW + gap;
     UI.drawWoodBoard(ctx, px, y, previewCardW, h, 11, false);
     const boxS = 35;
@@ -1425,8 +1463,8 @@ function renderMobileTopHud(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
     ctx.font = UI.fontStr(8.5, 900);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('下一颗', nx + boxS * 0.5, y + 8);
-    ctx.fillText('暂存', hx + boxS * 0.5, y + 8);
+    ctx.fillText('下', nx + boxS * 0.5, y + 8);
+    ctx.fillText('存', hx + boxS * 0.5, y + 8);
 
     drawMiniPreviewBox(ctx, nx, by, boxS, gameState.nextTier, gameState.nextMeta, sprites, nowSec, false);
     drawMiniPreviewBox(ctx, hx, by, boxS, gameState.holdTier, gameState.holdMeta, sprites, nowSec, true);
@@ -1434,37 +1472,32 @@ function renderMobileTopHud(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
     hits.add('mobile_hold_swap', hx - 3, y, boxS + 6, 51, () => app.swapHoldPocket());
 
     drawMiniRelicStrip(ctx, px + 7, y + 52, previewCardW - 14, 17, gameState.relics, hits, 'mobile_relics_bar', () =>
-      app.openRelicsModal()
+      app.openRelicsModal(), false, sprites
     );
     return;
   }
 
   // Rush & Zen Mode Top HUD
-  ctx.fillStyle = '#724640';
-  ctx.font = UI.fontStr(10.5, 800);
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('得分', x + 8, y + 16);
-
   const scoreStr = String(gameState.displayScore);
-  UI.drawFitText(ctx, scoreStr, x + 34, y + 16, Math.max(46, statsW - 144), 19, 13, 900, '#4A2C2A');
+  UI.drawFitText(ctx, scoreStr, x + 9, y + 16, Math.max(56, statsW - 122), 20, 13, 900, '#4A2C2A');
 
   const dustVal = String(gameState.stardust);
-  const dustW = Math.max(48, 26 + dustVal.length * 7.5);
+  const dustW = Math.max(46, 24 + dustVal.length * 7.5);
   UI.drawCurrencyChip(ctx, x + statsW - dustW - 7, y + 6, dustW, 19, sprites, 'icon_stardust', dustVal, {
     style: 'wood',
     fontSize: 10
   });
 
+  UI.drawUiIcon(ctx, sprites, 'icon_trophy', x + statsW - dustW - 56, y + 15.5, 13);
   UI.drawFitText(
     ctx,
-    `最高 ${app.getBestScore()}`,
+    String(app.getBestScore()),
     x + statsW - dustW - 12,
-    y + 16.5,
-    62,
+    y + 16,
+    40,
     10,
     8.5,
-    700,
+    800,
     '#724640',
     'right'
   );
@@ -1472,22 +1505,22 @@ function renderMobileTopHud(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
   const isFever = gameState.feverTimer > 0;
   const multVal = app.getFeverMultiplier();
   const multStr = Number.isInteger(multVal) ? `${multVal}×` : `${multVal.toFixed(1)}×`;
-  const fLabel = isFever ? `狂热 ${multStr}` : '星光能量';
-  const fPct = isFever ? `${gameState.feverTimer.toFixed(1)}s` : `${Math.round(gameState.feverEnergy)}%`;
+  const fLabel = isFever ? `狂热 ${multStr}` : `${Math.round(gameState.feverEnergy)}%`;
+  const fPct = isFever ? `${gameState.feverTimer.toFixed(1)}s` : '';
 
-  ctx.fillStyle = '#4A2C2A';
-  ctx.font = UI.fontStr(10, 800);
-  ctx.textAlign = 'left';
-  ctx.fillText(fLabel, x + 8, y + 36);
+  UI.drawUiIcon(ctx, sprites, 'icon_flame', x + 14, y + 35, 13);
+  UI.drawFitText(ctx, fLabel, x + 23, y + 35.5, 62, 10, 8.2, 800, isFever ? '#c43c12' : '#4A2C2A');
 
   const rReady = !!(gameState.curMeta.wildcard || gameState.nextMeta.wildcard);
-  const rTxt = rReady ? '彩虹就绪!' : `彩虹 ${gameState.dropsUntilRainbow}步`;
-  UI.drawTagBadge(ctx, x + statsW * 0.5 - 28, y + 29, 56, 14, rTxt, rReady ? 'amber' : 'plum', 8.8);
+  const rTxt = rReady ? '就绪' : `${gameState.dropsUntilRainbow}`;
+  UI.drawTagBadge(ctx, x + statsW * 0.5 - 24, y + 28, 48, 15, rTxt, rReady ? 'amber' : 'plum', 8.8, 'icon_rainbow', sprites);
 
-  ctx.textAlign = 'right';
-  ctx.fillStyle = '#4A2C2A';
-  ctx.font = UI.fontStr(10, 800);
-  ctx.fillText(fPct, x + statsW - 8, y + 36);
+  if (fPct) {
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#c43c12';
+    ctx.font = UI.fontStr(10, 800);
+    ctx.fillText(fPct, x + statsW - 8, y + 36);
+  }
 
   const tx = x + 8;
   const tw = statsW - 16;
@@ -1531,8 +1564,8 @@ function renderMobileTopHud(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
   ctx.fillStyle = '#ffe8b8';
   ctx.font = UI.fontStr(9, 900);
   ctx.textAlign = 'center';
-  ctx.fillText('下一颗', nx + boxS * 0.5, y + 9);
-  ctx.fillText('暂存', hx + boxS * 0.5, y + 9);
+  ctx.fillText('下', nx + boxS * 0.5, y + 9);
+  ctx.fillText('存', hx + boxS * 0.5, y + 9);
 
   drawMiniPreviewBox(ctx, nx, by, boxS, gameState.nextTier, gameState.nextMeta, sprites, nowSec, false);
   drawMiniPreviewBox(ctx, hx, by, boxS, gameState.holdTier, gameState.holdMeta, sprites, nowSec, true);
@@ -1552,11 +1585,11 @@ function drawMiniPreviewBox(ctx, x, y, size, tier, meta, sprites, nowSec, isHold
 
   if (!tier) {
     if (isHold) {
-      ctx.fillStyle = '#8a6544';
-      ctx.font = UI.fontStr(10.5, 800);
+      ctx.fillStyle = '#9c7856';
+      ctx.font = UI.fontStr(15, 800);
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('点换', x + size * 0.5, y + size * 0.5 + 0.5);
+      ctx.fillText('+', x + size * 0.5, y + size * 0.5 + 0.5);
     }
     return;
   }
@@ -1583,9 +1616,9 @@ function isTierOneMergeAway(gameState, tier) {
 function formatSkipBtnLabel(gameState, compact) {
   if (gameState.skipCooldown > 0) return `${Math.ceil(gameState.skipCooldown)}s`;
   if (gameState.mode === 'chef') {
-    if ((gameState.freeSkipsLeft || 0) > 0) return compact ? '免费换' : '免费换单';
-    if ((gameState.coins || 0) >= 3) return compact ? '换3币' : '换单3币';
-    return compact ? '折鲜换' : '折鲜换单';
+    if ((gameState.freeSkipsLeft || 0) > 0) return compact ? '免换' : '免费换';
+    if ((gameState.coins || 0) >= 3) return '3币';
+    return '换单';
   }
   return '换单';
 }
@@ -1605,16 +1638,14 @@ function renderMobileSubBar(ctx, x, y, w, h, app, hits, guideTargets) {
     ctx.fillText(`${Math.max(0, gameState.rushTimer).toFixed(1)}s`, x + 28, y + h * 0.5 + 0.5);
 
     const orders = gameState.orders || [];
-    let sx = x + 82;
+    let sx = x + 80;
     const streak = gameState.rushServeStreak || 0;
     if (streak >= 2 && (gameState.rushStreakTimer || 0) > 0) {
-      UI.drawTagBadge(ctx, sx, y + 8, 48, 18, `连出×${streak}`, 'amber', 9);
-      sx += 52;
+      UI.drawTagBadge(ctx, sx, y + 8, 46, 18, `×${streak}`, 'amber', 9.2, 'icon_bolt', sprites);
+      sx += 50;
     } else {
-      ctx.fillStyle = '#7e4b10';
-      ctx.font = UI.fontStr(9.5, 800);
-      ctx.fillText('上菜延时:', sx, y + h * 0.5 + 0.5);
-      sx += 46;
+      UI.drawUiIcon(ctx, sprites, 'serve_bell', sx + 9, y + h * 0.5, 17);
+      sx += 22;
     }
     const shownTiers = [];
     for (let oi = 0; oi < orders.length; oi++) {
@@ -1640,30 +1671,33 @@ function renderMobileSubBar(ctx, x, y, w, h, app, hits, guideTargets) {
       sx += 27;
     }
 
-    UI.drawUiIcon(ctx, sprites, 'icon_gift', x + w - 58, y + h * 0.5, 15);
-    UI.drawFitText(ctx, `${gameState.rushNextMilestone}分`, x + w - 8, y + h * 0.5, 44, 9.8, 8, 800, '#724640', 'right');
+    UI.drawUiIcon(ctx, sprites, 'icon_gift', x + w - 54, y + h * 0.5, 15);
+    UI.drawFitText(ctx, `${gameState.rushNextMilestone}`, x + w - 8, y + h * 0.5, 40, 10, 8.2, 800, '#724640', 'right');
     return;
   }
 
   if (gameState.mode === 'zen') {
     UI.drawUiIcon(ctx, sprites, 'mode_zen', x + 17, y + h * 0.5, 19);
-    UI.drawFitText(ctx, '中央定角恒速弹射 · 探索 9 阶甜品异能', x + 30, y + h * 0.5, w - 118, 10.5, 8.8, 800, '#4A2C2A');
+    UI.drawFitText(ctx, '悠闲经典', x + 31, y + h * 0.5, w - 110, 11.2, 9.2, 800, '#4A2C2A');
 
-    UI.drawUiIcon(ctx, sprites, 'icon_gift', x + w - 62, y + h * 0.5, 15);
-    UI.drawFitText(ctx, `${gameState.zenNextMilestone}分`, x + w - 8, y + h * 0.5, 46, 10, 8.5, 800, '#8f4e1b', 'right');
+    UI.drawUiIcon(ctx, sprites, 'icon_gift', x + w - 58, y + h * 0.5, 15);
+    UI.drawFitText(ctx, `${gameState.zenNextMilestone}`, x + w - 8, y + h * 0.5, 42, 10.2, 8.5, 800, '#8f4e1b', 'right');
     return;
   }
 
-  // Chef Mode: Compact Dual-Table Order Strip (tap table chip or skip btn for single-table reroll)
+  // Chef Mode: Clean Dual-Table Order Strip (illustrated table icons, zero clutter)
   const orders = gameState.orders || [];
   const skipCooling = gameState.skipCooldown > 0;
   const skipTxt = formatSkipBtnLabel(gameState, true);
-  const skW = 44;
+  const skW = 46;
   const skX = x + w - skW - 5;
   UI.drawPillButton(ctx, skX, y + 6, skW, 22, {
     style: !skipCooling && (gameState.freeSkipsLeft || 0) > 0 ? 'active' : 'wood',
+    icon: 'icon_restart',
+    sprites,
+    iconSize: 12,
     text: skipTxt,
-    fontSize: 9.0,
+    fontSize: 8.8,
     disabled: skipCooling
   });
   hits.add('m_skip_order', skX, y + 4, skW, 26, () => app.skipOrder());
@@ -1678,8 +1712,8 @@ function renderMobileSubBar(ctx, x, y, w, h, app, hits, guideTargets) {
     const anyReady = !ord.completed && ord.slots.some((s) => !s.done && hasTierReadyInJar(gameState, s.tier));
     const anyNear = !anyReady && !ord.completed && ord.slots.some((s) => !s.done && isTierOneMergeAway(gameState, s.tier));
     const slotCnt = ord.slots.length;
-    const chipW = Math.min(maxRightX - cx, 40 + slotCnt * 25 + 26);
-    if (chipW < 52) break;
+    const chipW = Math.min(maxRightX - cx, 26 + slotCnt * 25 + 24);
+    if (chipW < 48) break;
 
     UI.roundRectPath(ctx, cx, y + 3, chipW, h - 6, 7);
     ctx.fillStyle = isJudge
@@ -1704,13 +1738,11 @@ function renderMobileSubBar(ctx, x, y, w, h, app, hits, guideTargets) {
       : '#c7a46e';
     ctx.stroke();
 
-    ctx.fillStyle = isJudge ? '#b4320c' : isVip ? '#8c3818' : '#7a4512';
-    ctx.font = UI.fontStr(9.5, 900);
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(isJudge ? '急单' : isVip ? 'VIP' : '快餐', cx + 5, y + h * 0.5 + 0.5);
+    // Illustrated table badge icon (Judge / VIP Crown / Serve Bell)
+    const tableIcon = isJudge ? 'icon_judge' : isVip ? 'icon_crown' : 'serve_bell';
+    UI.drawUiIcon(ctx, sprites, tableIcon, cx + 12, y + h * 0.5, 16);
 
-    let sx = cx + (isVip ? 27 : 29);
+    let sx = cx + 23;
     for (let si = 0; si < slotCnt; si++) {
       const sl = ord.slots[si];
       const slotReady = !sl.done && hasTierReadyInJar(gameState, sl.tier);
@@ -1725,31 +1757,21 @@ function renderMobileSubBar(ctx, x, y, w, h, app, hits, guideTargets) {
         UI.drawContainImage(ctx, sprites.base[sl.tier], sx + 11.5, y + 16.5, 18, 18);
       }
       if (sl.done) {
-        ctx.fillStyle = '#3f9663';
-        ctx.beginPath();
-        ctx.arc(sx + 20, y + 7, 5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#fff';
-        ctx.font = UI.fontStr(7.5, 900);
-        ctx.textAlign = 'center';
-        ctx.fillText('✓', sx + 20, y + 7.5);
+        drawCheckDot(ctx, sx + 20, y + 7, 4.8);
       } else if (slotNear) {
         ctx.fillStyle = '#2c8a52';
         ctx.beginPath();
-        ctx.arc(sx + 20, y + 7, 4.8, 0, Math.PI * 2);
+        ctx.arc(sx + 20, y + 7, 4.4, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = '#fff';
-        ctx.font = UI.fontStr(6.8, 900);
-        ctx.textAlign = 'center';
-        ctx.fillText('合', sx + 20, y + 7.5);
       }
       sx += 24;
     }
 
-    if (cx + chipW - sx >= 19) {
+    if (cx + chipW - sx >= 18) {
       ctx.fillStyle = ord.freshSteps > 0 ? '#b44810' : '#9c836a';
       ctx.font = UI.fontStr(8.5, 800);
       ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
       ctx.fillText(ord.freshSteps > 0 ? `${ord.freshSteps}步` : '常', cx + chipW - 4, y + h * 0.5 + 0.5);
     }
 
@@ -1790,7 +1812,7 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
       900,
       '#4A2C2A'
     );
-    UI.drawTagBadge(ctx, ix + iw - 68, y + 35, 60, 18, `步 ${gameState.stepsLeft}/${gameState.stepsMax}`, lowSteps ? 'berry' : 'soft', 9.5);
+    UI.drawTagBadge(ctx, ix + iw - 62, y + 35, 54, 18, `${gameState.stepsLeft}/${gameState.stepsMax}步`, lowSteps ? 'berry' : 'soft', 9.5);
 
     const revFrac = Math.max(0, Math.min(1, gameState.shiftRevenue / Math.max(1, gameState.shiftTarget)));
     UI.roundRectPath(ctx, ix + 9, y + 59, iw - 18, 11, 5.5);
@@ -1816,7 +1838,7 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
         style: 'cta',
         icon: 'serve_bell',
         sprites,
-        text: remCoins > 0 ? `立即打烊 (+${remCoins}币息)` : '达标 · 立即打烊',
+        text: remCoins > 0 ? `提前打烊 +${remCoins}币` : '达标 · 打烊',
         fontSize: 11,
         fontWeight: 900,
         radius: 10
@@ -1825,7 +1847,7 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
     } else {
       UI.drawFitText(
         ctx,
-        `累计 ¥${gameState.displayScore} · 最高 ${app.getBestScore()}`,
+        `总计 ¥${gameState.displayScore}`,
         ix + 9,
         y + 84,
         iw - 68,
@@ -1845,11 +1867,11 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
     const isFever = gameState.feverTimer > 0;
     const multVal = app.getFeverMultiplier();
     const multStr = Number.isInteger(multVal) ? `${multVal}×` : `${multVal.toFixed(1)}×`;
-    ctx.fillStyle = '#4A2C2A';
-    ctx.font = UI.fontStr(11, 800);
-    ctx.textAlign = 'left';
-    ctx.fillText(isFever ? `磁吸狂热 ${multStr}` : '星光能量槽', ix + 10, sy + 14);
+    UI.drawUiIcon(ctx, sprites, 'icon_flame', ix + 16, sy + 14, 14);
+    UI.drawFitText(ctx, isFever ? `狂热 ${multStr}` : '星光能量', ix + 26, sy + 14, iw - 86, 11, 9, 800, '#4A2C2A');
     ctx.textAlign = 'right';
+    ctx.fillStyle = '#4A2C2A';
+    ctx.font = UI.fontStr(10.5, 800);
     ctx.fillText(isFever ? `${gameState.feverTimer.toFixed(1)}s` : `${Math.round(gameState.feverEnergy)}%`, ix + iw - 10, sy + 14);
 
     UI.roundRectPath(ctx, ix + 10, sy + 23, iw - 20, 10, 5);
@@ -1867,13 +1889,14 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
 
     const rReady = !!(gameState.curMeta.wildcard || gameState.nextMeta.wildcard);
     const multInfo = app.getGlobalRevenueMult();
-    const multBadge = multInfo > 1.05 ? ` · 全局×${multInfo.toFixed(2)}` : '';
+    const multBadge = multInfo > 1.05 ? ` · ×${multInfo.toFixed(2)}` : '';
+    UI.drawUiIcon(ctx, sprites, 'icon_rainbow', ix + 17, sy + 44, 15);
     UI.drawFitText(
       ctx,
-      `${rReady ? '彩虹万能糖就绪!' : `彩虹保底: ${gameState.dropsUntilRainbow}步`}${multBadge}`,
-      ix + 10,
+      `${rReady ? '彩虹就绪' : `${gameState.dropsUntilRainbow}步出彩虹`}${multBadge}`,
+      ix + 28,
       sy + 44,
-      iw - 20,
+      iw - 38,
       10.5,
       8.5,
       800,
@@ -1883,42 +1906,45 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
     const py = sy + 56;
     ctx.fillStyle = '#ecd5a8';
     ctx.beginPath();
-    ctx.arc(ix + 31, py + 24, 22, 0, Math.PI * 2);
+    ctx.arc(ix + 29, py + 24, 21, 0, Math.PI * 2);
     ctx.fill();
     ctx.lineWidth = 2;
     ctx.strokeStyle = '#4A2C2A';
     ctx.stroke();
     const speechPatron = gameState.speechPatron || activePatron;
     if (sprites.patrons[speechPatron.id]) {
-      UI.drawContainImage(ctx, sprites.patrons[speechPatron.id], ix + 31, py + 24, 38, 38);
+      UI.drawContainImage(ctx, sprites.patrons[speechPatron.id], ix + 29, py + 24, 36, 36);
     }
-    UI.drawKissaCard(ctx, ix + 58, py, iw - 68, 62, { radius: 9 });
-    UI.drawFitText(ctx, speechPatron.name, ix + 65, py + 11, iw - 82, 10.5, 8.5, 800, '#8f4e1b');
+    UI.drawKissaCard(ctx, ix + 56, py, iw - 66, 52, { radius: 9 });
+    UI.drawFitText(ctx, speechPatron.shortName, ix + 63, py + 12, iw - 80, 10.5, 8.5, 800, '#8f4e1b');
     UI.drawWrappedText(
       ctx,
       gameState.speechText || speechPatron.greet,
-      ix + 65,
-      py + 20,
-      iw - 82,
+      ix + 63,
+      py + 21,
+      iw - 80,
       13,
       UI.fontStr(10, 600),
       '#4A2C2A',
       'left',
-      3
+      2
     );
 
-    // Dual-Table Order Panel
-    const oy = py + 70;
+    // Clean Dual-Table Order Panel
+    const oy = py + 60;
     const oh = sy + sh - 8 - oy;
     UI.drawKissaCard(ctx, ix + 8, oy, iw - 16, oh, { tone: 'soft', radius: 9 });
     guideTargets.orderBar = { x: ix + 8, y: oy, w: iw - 16, h: oh };
     UI.drawUiIcon(ctx, sprites, 'serve_bell', ix + 21, oy + 14, 15);
-    UI.drawFitText(ctx, '双桌点单 · 点单桌可换', ix + 31, oy + 14, iw - 108, 10.8, 8.8, 900, '#4A2C2A');
+    UI.drawFitText(ctx, '点单台', ix + 32, oy + 14, iw - 108, 11, 9, 900, '#4A2C2A');
     const cooling = gameState.skipCooldown > 0;
     UI.drawPillButton(ctx, ix + iw - 70, oy + 4, 54, 20, {
       style: !cooling && (gameState.freeSkipsLeft || 0) > 0 ? 'active' : 'wood',
+      icon: 'icon_restart',
+      sprites,
+      iconSize: 12,
       text: formatSkipBtnLabel(gameState, false),
-      fontSize: 9.2,
+      fontSize: 9.0,
       disabled: cooling
     });
     hits.add('wide_skip_order', ix + iw - 70, oy + 4, 54, 20, () => app.skipOrder());
@@ -1938,12 +1964,14 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
         radius: 8
       });
 
+      const tableIcon = isJudge ? 'icon_judge' : isVip ? 'icon_crown' : 'serve_bell';
+      UI.drawUiIcon(ctx, sprites, tableIcon, ix + 27, ry + 13, 14);
       UI.drawFitText(
         ctx,
-        isJudge ? '评委急单 · +2步!' : isVip ? 'VIP套餐 · +8币' : '快餐桌 · 抽底',
-        ix + 21,
-        ry + 12,
-        iw - 96,
+        isJudge ? '评委急单' : isVip ? 'VIP桌' : '快餐桌',
+        ix + 37,
+        ry + 13,
+        iw - 110,
         10.2,
         8.5,
         900,
@@ -1951,11 +1979,11 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
       );
       UI.drawFitText(
         ctx,
-        ord.freshSteps > 0 ? `鲜度 ${ord.freshSteps}步` : ord.staleMult < 1 ? '冷盘×0.75' : '常规价',
+        ord.freshSteps > 0 ? `${ord.freshSteps}步` : ord.staleMult < 1 ? '×0.75' : '常',
         ix + iw - 20,
-        ry + 12,
-        58,
-        9,
+        ry + 13,
+        46,
+        9.2,
         7.8,
         800,
         ord.freshSteps > 0 ? '#b44810' : '#8a725a',
@@ -1967,66 +1995,39 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
         const sl = ord.slots[si];
         const slotReady = !sl.done && hasTierReadyInJar(gameState, sl.tier);
         const slotNear = !sl.done && !slotReady && isTierOneMergeAway(gameState, sl.tier);
-        UI.roundRectPath(ctx, sx, ry + 21, 26, 26, 7);
+        UI.roundRectPath(ctx, sx, ry + 23, 27, 27, 7);
         ctx.fillStyle = sl.done ? '#e3f7e8' : slotReady ? '#ffe88c' : slotNear ? '#ebfaef' : '#fffdf6';
         ctx.fill();
         ctx.lineWidth = slotReady || slotNear ? 1.8 : 1.2;
         ctx.strokeStyle = sl.done ? '#3f9663' : slotReady ? '#d47c12' : slotNear ? '#3ca365' : '#bfa06f';
         ctx.stroke();
         if (sprites.base[sl.tier]) {
-          UI.drawContainImage(ctx, sprites.base[sl.tier], sx + 13, ry + 34, 21, 21);
+          UI.drawContainImage(ctx, sprites.base[sl.tier], sx + 13.5, ry + 36.5, 22, 22);
         }
         if (sl.done) {
-          ctx.fillStyle = '#3f9663';
-          ctx.beginPath();
-          ctx.arc(sx + 23, ry + 24, 5, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = '#fff';
-          ctx.font = UI.fontStr(7.5, 900);
-          ctx.textAlign = 'center';
-          ctx.fillText('✓', sx + 23, ry + 24.5);
+          drawCheckDot(ctx, sx + 23.5, ry + 26, 4.8);
         } else if (slotNear) {
           ctx.fillStyle = '#2c8a52';
           ctx.beginPath();
-          ctx.arc(sx + 23, ry + 24, 5, 0, Math.PI * 2);
+          ctx.arc(sx + 23.5, ry + 26, 4.5, 0, Math.PI * 2);
           ctx.fill();
-          ctx.fillStyle = '#fff';
-          ctx.font = UI.fontStr(7, 900);
-          ctx.textAlign = 'center';
-          ctx.fillText('合', sx + 23, ry + 24.5);
         }
-        sx += 30;
+        sx += 31;
       }
 
       const infoX = ix + iw - 20;
       UI.drawFitText(
         ctx,
-        anyReady ? '点罐内上菜!' : anyNear ? '差1合出菜!' : `完单 +¥${ord.bonusScore}`,
+        anyReady ? '可上菜' : `+¥${ord.bonusScore}`,
         infoX,
-        ry + 34,
+        ry + 36,
         iw - 28 - (sx - ix),
-        9.6,
-        8,
-        800,
+        10.5,
+        8.5,
+        900,
         anyReady ? '#b4320c' : anyNear ? '#2c8a52' : '#724640',
         'right'
       );
-
-      if (rowH >= 66) {
-        const namesStr = ord.slots.map((sl) => TIERS[sl.tier - 1].name).join(' + ');
-        UI.drawFitText(ctx, namesStr, ix + 21, ry + rowH - 21, iw - 42, 9.2, 8, 700, '#5c3824');
-        UI.drawFitText(
-          ctx,
-          `赏金 +¥${ord.bonusScore} · +${ord.rewardDust}星尘${isVip ? ' · 送祝福' : ''}`,
-          ix + 21,
-          ry + rowH - 9,
-          iw - 42,
-          9,
-          7.8,
-          800,
-          isVip ? '#8c3818' : '#8a5018'
-        );
-      }
 
       if (!isJudge) {
         hits.add(`wide_skip_table_${oi}`, ix + 14, ry, iw - 28, rowH, () => app.skipOrder(oi));
@@ -2042,11 +2043,12 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
   ctx.font = UI.fontStr(11, 800);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(app.hasSouffleAura() ? '猫神光环 ×2 · 烘焙积分' : '烘焙积分', ix + iw * 0.5, y + 22);
+  ctx.fillText(app.hasSouffleAura() ? '猫神光环 ×2' : '得分', ix + iw * 0.5, y + 22);
   ctx.fillStyle = '#4A2C2A';
   ctx.font = UI.fontStr(24, 900);
   ctx.fillText(String(gameState.displayScore), ix + iw * 0.5, y + 44);
-  UI.drawFitText(ctx, `最高: ${app.getBestScore()}`, ix + 10, y + 70, iw * 0.52, 11.5, 9, 700, '#724640');
+  UI.drawUiIcon(ctx, sprites, 'icon_trophy', ix + 16, y + 70, 14);
+  UI.drawFitText(ctx, String(app.getBestScore()), ix + 26, y + 70, iw * 0.45, 11.5, 9, 800, '#724640');
   UI.drawUiIcon(ctx, sprites, 'icon_stardust', ix + iw - 46, y + 70, 15);
   UI.drawFitText(ctx, String(gameState.stardust), ix + iw - 10, y + 70, 32, 11.5, 9, 800, '#7e4b10', 'right');
 
@@ -2057,11 +2059,11 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
   const isFever = gameState.feverTimer > 0;
   const multVal = app.getFeverMultiplier();
   const multStr = Number.isInteger(multVal) ? `${multVal}×` : `${multVal.toFixed(1)}×`;
-  ctx.fillStyle = '#4A2C2A';
-  ctx.font = UI.fontStr(11.5, 800);
-  ctx.textAlign = 'left';
-  ctx.fillText(isFever ? `磁吸狂热 ${multStr}` : '星光能量槽', ix + 10, sy + 16);
+  UI.drawUiIcon(ctx, sprites, 'icon_flame', ix + 16, sy + 16, 14);
+  UI.drawFitText(ctx, isFever ? `狂热 ${multStr}` : '星光能量', ix + 26, sy + 16, iw - 86, 11.5, 9, 800, '#4A2C2A');
   ctx.textAlign = 'right';
+  ctx.fillStyle = '#4A2C2A';
+  ctx.font = UI.fontStr(11, 800);
   ctx.fillText(isFever ? `${gameState.feverTimer.toFixed(1)}s` : `${Math.round(gameState.feverEnergy)}%`, ix + iw - 10, sy + 16);
 
   UI.roundRectPath(ctx, ix + 10, sy + 26, iw - 20, 12, 6);
@@ -2078,12 +2080,13 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
   }
 
   const rReady = !!(gameState.curMeta.wildcard || gameState.nextMeta.wildcard);
+  UI.drawUiIcon(ctx, sprites, 'icon_rainbow', ix + 17, sy + 50, 15);
   UI.drawFitText(
     ctx,
-    rReady ? '彩虹万能糖准备就绪!' : `彩虹保底: ${gameState.dropsUntilRainbow} 步`,
-    ix + 10,
+    rReady ? '彩虹就绪' : `${gameState.dropsUntilRainbow}步出彩虹`,
+    ix + 28,
     sy + 50,
-    iw - 20,
+    iw - 38,
     11,
     9,
     800,
@@ -2093,50 +2096,51 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
   const py = sy + 64;
   ctx.fillStyle = '#ecd5a8';
   ctx.beginPath();
-  ctx.arc(ix + 34, py + 28, 24, 0, Math.PI * 2);
+  ctx.arc(ix + 32, py + 26, 22, 0, Math.PI * 2);
   ctx.fill();
   ctx.lineWidth = 2;
   ctx.strokeStyle = '#4A2C2A';
   ctx.stroke();
   const speechPatron = gameState.speechPatron || activePatron;
   if (sprites.patrons[speechPatron.id]) {
-    UI.drawContainImage(ctx, sprites.patrons[speechPatron.id], ix + 34, py + 28, 42, 42);
+    UI.drawContainImage(ctx, sprites.patrons[speechPatron.id], ix + 32, py + 26, 38, 38);
   }
-  UI.drawKissaCard(ctx, ix + 64, py, iw - 74, 72, { radius: 9 });
-  UI.drawFitText(ctx, speechPatron.name, ix + 71, py + 11, iw - 88, 11, 9, 800, '#8f4e1b');
+  UI.drawKissaCard(ctx, ix + 60, py, iw - 70, 58, { radius: 9 });
+  UI.drawFitText(ctx, speechPatron.shortName, ix + 67, py + 12, iw - 84, 11, 9, 800, '#8f4e1b');
   UI.drawWrappedText(
     ctx,
     gameState.speechText || speechPatron.greet,
-    ix + 71,
-    py + 21,
-    iw - 88,
-    14,
-    UI.fontStr(10.5, 600),
+    ix + 67,
+    py + 22,
+    iw - 84,
+    13.5,
+    UI.fontStr(10.2, 600),
     '#4A2C2A',
     'left',
-    3
+    2
   );
 
-  const oy = py + 82;
+  const oy = py + 68;
   const oh = sy + sh - 10 - oy;
   UI.drawKissaCard(ctx, ix + 8, oy, iw - 16, oh, { tone: 'soft', radius: 9 });
   guideTargets.orderBar = { x: ix + 8, y: oy, w: iw - 16, h: oh };
   if (gameState.mode === 'rush') {
     const streak = gameState.rushServeStreak || 0;
-    const rushHdr =
-      streak >= 2 && (gameState.rushStreakTimer || 0) > 0
-        ? `⚡ 连出 ×${streak} (${gameState.rushStreakTimer.toFixed(1)}s)`
-        : '弹射狂欢 · 连出倍率叠升';
+    const activeStreak = streak >= 2 && (gameState.rushStreakTimer || 0) > 0;
+    UI.drawUiIcon(ctx, sprites, activeStreak ? 'icon_bolt' : 'mode_rush', ix + 24, oy + 16, 15);
+    const rushHdr = activeStreak
+      ? `连出 ×${streak} · ${gameState.rushStreakTimer.toFixed(1)}s`
+      : '90秒狂欢';
     UI.drawFitText(
       ctx,
       rushHdr,
-      ix + 16,
+      ix + 35,
       oy + 16,
-      iw - 32,
+      iw - 52,
       11.5,
       9.5,
       900,
-      streak >= 2 ? '#b43d08' : '#4A2C2A'
+      activeStreak ? '#b43d08' : '#4A2C2A'
     );
     ctx.fillStyle = gameState.rushTimer <= 15 ? '#d93025' : '#a63d0c';
     ctx.font = UI.fontStr(24, 900);
@@ -2152,40 +2156,25 @@ function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
         if (sl.done) continue;
         const ready = hasTierReadyInJar(gameState, sl.tier);
         const near = !ready && isTierOneMergeAway(gameState, sl.tier);
-        UI.roundRectPath(ctx, rx, oy + 64, 34, 34, 8);
+        UI.roundRectPath(ctx, rx, oy + 66, 34, 34, 8);
         ctx.fillStyle = ready ? '#ffe88c' : near ? '#ebfaef' : '#fff9eb';
         ctx.fill();
         ctx.lineWidth = ready || near ? 2 : 1.3;
         ctx.strokeStyle = ready ? '#d47c12' : near ? '#3ca365' : '#bfa06f';
         ctx.stroke();
         if (sprites.base[sl.tier]) {
-          UI.drawContainImage(ctx, sprites.base[sl.tier], rx + 17, oy + 81, 26, 26);
+          UI.drawContainImage(ctx, sprites.base[sl.tier], rx + 17, oy + 83, 26, 26);
         }
         rx += 40;
       }
     }
-    UI.drawWrappedText(
-      ctx,
-      `下次祝福：${gameState.rushNextMilestone} 分\n12秒内连出上菜叠至 ×2.5 · 延时 +4.5s`,
-      ix + 16,
-      oy + 106,
-      iw - 32,
-      15,
-      UI.fontStr(10.2, 700),
-      '#724640'
-    );
+    UI.drawUiIcon(ctx, sprites, 'icon_gift', ix + 24, oy + 118, 16);
+    UI.drawFitText(ctx, `祝福 ${gameState.rushNextMilestone} 分`, ix + 36, oy + 118, iw - 52, 10.5, 9, 800, '#724640');
   } else {
-    UI.drawFitText(ctx, '悠闲经典模式', ix + 18, oy + 18, iw - 36, 12.5, 10, 900, '#4A2C2A');
-    UI.drawWrappedText(
-      ctx,
-      `下次祝福：${gameState.zenNextMilestone} 分\n\n罐口中央定角恒速瞄准，撞玻璃壁弹射享 ×1.5 加成！`,
-      ix + 18,
-      oy + 38,
-      iw - 36,
-      16.5,
-      UI.fontStr(11, 700),
-      '#724640'
-    );
+    UI.drawUiIcon(ctx, sprites, 'mode_zen', ix + 25, oy + 20, 18);
+    UI.drawFitText(ctx, '悠闲经典', ix + 39, oy + 20, iw - 56, 12.5, 10, 900, '#4A2C2A');
+    UI.drawUiIcon(ctx, sprites, 'icon_gift', ix + 25, oy + 48, 16);
+    UI.drawFitText(ctx, `祝福里程碑 ${gameState.zenNextMilestone} 分`, ix + 39, oy + 48, iw - 56, 11, 9, 800, '#724640');
   }
 }
 
@@ -2203,7 +2192,7 @@ function renderWideRightBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) 
   ctx.font = UI.fontStr(10.5, 800);
   ctx.textAlign = 'center';
   ctx.fillText('下一颗', ix + 10 + boxW * 0.5, iy + 18);
-  ctx.fillText('暂存换牌', ix + iw - 10 - boxW * 0.5, iy + 18);
+  ctx.fillText('暂存', ix + iw - 10 - boxW * 0.5, iy + 18);
 
   const boxS = Math.min(78, boxW - 12);
   drawMiniPreviewBox(ctx, ix + 16, iy + 28, boxS, gameState.nextTier, gameState.nextMeta, sprites, nowSec, false);
@@ -2226,16 +2215,16 @@ function renderWideRightBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) 
     });
     UI.drawFitText(
       ctx,
-      `秘方 (${(gameState.relics || []).length}/${MAX_RELIC_SLOTS})${synShort}`,
+      `秘方 ${(gameState.relics || []).length}/${MAX_RELIC_SLOTS}${synShort}`,
       ix + 17,
       nextSectionY + 13,
-      iw - 82,
+      iw - 76,
       10.2,
       8.2,
       900,
       '#4A2C2A'
     );
-    UI.drawFitText(ctx, '点看详情 ›', ix + iw - 17, nextSectionY + 13, 56, 9.5, 8, 800, '#8f4716', 'right');
+    UI.drawFitText(ctx, '详情 ›', ix + iw - 17, nextSectionY + 13, 42, 9.5, 8, 800, '#8f4716', 'right');
     drawMiniRelicStrip(
       ctx,
       ix + 16,
@@ -2246,11 +2235,12 @@ function renderWideRightBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) 
       hits,
       'wide_relics_bar',
       () => app.openRelicsModal(),
-      true
+      true,
+      sprites
     );
     nextSectionY += relBoxH + 8;
 
-    const hazBarH = 32;
+    const hazBarH = 30;
     const hazIds = Array.isArray(gameState.shiftHazards) ? gameState.shiftHazards : [];
     const hazTags = hazIds.map((id) => (SHIFT_HAZARDS[id] ? SHIFT_HAZARDS[id].badge : id));
     const frozenCnt = (gameState.entities || []).filter((e) => e && !e.merged && e.frozenHp > 0).length;
@@ -2261,16 +2251,20 @@ function renderWideRightBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) 
       tone: hasAffix ? 'amber' : 'soft',
       radius: 8
     });
-    const hazLine = hasAffix ? hazTags.join(' · ') : '本幕无特殊机关';
-    UI.drawFitText(ctx, hazLine, ix + 18, nextSectionY + hazBarH * 0.5 + 0.5, iw - 72, 10, 8.2, 800, hasAffix ? '#6b380a' : '#7b5a3c');
+    const firstHazIcon = hazIds[0] && SHIFT_HAZARDS[hazIds[0]] ? SHIFT_HAZARDS[hazIds[0]].icon : frozenCnt > 0 ? 'icon_frost' : 'icon_judge';
+    if (hasAffix) {
+      UI.drawUiIcon(ctx, sprites, firstHazIcon, ix + 24, nextSectionY + hazBarH * 0.5, 15);
+    }
+    const hazLine = hasAffix ? hazTags.join(' · ') : '无特殊机关';
+    UI.drawFitText(ctx, hazLine, ix + (hasAffix ? 35 : 18), nextSectionY + hazBarH * 0.5 + 0.5, iw - 86, 10, 8.2, 800, hasAffix ? '#6b380a' : '#7b5a3c');
     UI.drawFitText(ctx, '详情 ›', ix + iw - 16, nextSectionY + hazBarH * 0.5 + 0.5, 38, 9.2, 7.8, 800, '#8f4716', 'right');
     hits.add('wide_hazards_bar', ix + 10, nextSectionY, iw - 20, hazBarH, () => app.openRelicsModal());
     nextSectionY += hazBarH + 10;
   }
 
-  // Evolution Ring 1..9
+  // Evolution Ring 1..9 (minimalist numeric center!)
   const ry = nextSectionY;
-  UI.drawFitText(ctx, `甜品进化链 ${gameState.seenThisRun.size}/9`, ix + iw * 0.5, ry, iw - 20, 11.5, 9.5, 800, '#4A2C2A', 'center');
+  UI.drawFitText(ctx, '进化链', ix + iw * 0.5, ry, iw - 20, 11.2, 9.5, 800, '#4A2C2A', 'center');
 
   const rcx = ix + iw * 0.5;
   const ringAvailH = iy + ih - (ry + 10);
@@ -2280,10 +2274,10 @@ function renderWideRightBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) 
 
   ctx.save();
   ctx.fillStyle = '#724640';
-  ctx.font = UI.fontStr(10, 800);
+  ctx.font = UI.fontStr(13, 900);
   ctx.textAlign = 'center';
-  ctx.fillText('同阶相碰', rcx, rcy - 6);
-  ctx.fillText('星光合成', rcx, rcy + 8);
+  ctx.textBaseline = 'middle';
+  ctx.fillText(`${gameState.seenThisRun.size}/9`, rcx, rcy);
   ctx.restore();
 
   for (let i = 0; i < TIERS.length; i++) {
@@ -2315,15 +2309,15 @@ function renderToast(ctx, width, headerBottom, app) {
   const minor = app.minorToast && app.minorToast.timer > 0 ? app.minorToast : null;
   if (!cur && !minor && (!app.toastText || app.toastTimer <= 0)) return;
 
+  const { sprites } = app;
   const metrics = app.metrics ? app.metrics() : { width, height: 667, safeBottom: 0 };
   const gs = app.gameState || {};
   const isInPlay = !app.isLobbyOpen && !app.activeModal;
   const isWide = width >= 820;
-  const aimDim = isInPlay && gs.aim && gs.aim.active ? 0.34 : 1.0;
+  const aimDim = isInPlay && gs.aim && gs.aim.active ? 0.30 : 1.0;
 
   let baseY = headerBottom + 6;
   if (isInPlay) {
-    // Anchor gameplay toasts near bottom rim above tool dock so Top HUD (¥0/¥1200) and turret aim line are NEVER occluded!
     const toolsDockY =
       metrics.height -
       Math.max(isWide ? 10 : 8, (metrics.safeBottom || 0) + (isWide ? 8 : 6)) -
@@ -2334,58 +2328,65 @@ function renderToast(ctx, width, headerBottom, app) {
       !gs.activeSkillMode &&
       gs.running &&
       !gs.over;
-    baseY = hasBlessBtn ? toolsDockY - 66 : toolsDockY - 33;
+    baseY = hasBlessBtn ? toolsDockY - 68 : toolsDockY - 35;
   } else if (app.activeModal) {
-    // Anchor modal toasts above bottom modal footer so modal headers/titles/pinned rank bars stay 100% clear!
     const botBound = metrics.height - Math.max(12, (metrics.safeBottom || 0) + 10);
     baseY = botBound - 114;
   }
 
-  const primary = cur || minor || { text: app.toastText, timer: app.toastTimer, level: 'minor' };
+  const primary = cur || minor || { text: app.toastText, timer: app.toastTimer, maxTimer: 1.8, level: 'minor' };
   const isMajor = primary.level === 'major';
   const queueLen = app.toastQueue ? app.toastQueue.length : 0;
+  const elapsed = Math.max(0, (primary.maxTimer || 2.0) - primary.timer);
+  const slideOffset = elapsed < 0.14 ? (1 - elapsed / 0.14) * 6 : 0;
 
   ctx.save();
-  ctx.globalAlpha = Math.min(1, primary.timer * 3.2) * aimDim;
+  ctx.globalAlpha = Math.min(1, primary.timer * 3.4) * aimDim;
   const fontSz = isMajor ? 11.4 : 10.6;
   ctx.font = UI.fontStr(fontSz, 800);
-  const maxW = Math.min(isMajor ? 450 : 390, width - 22);
+  const hasIcon = !!(primary.icon && sprites);
+  const iconPad = hasIcon ? 22 : 0;
+  const maxW = Math.min(isMajor ? 360 : 310, width - 26);
   const extraReserve = isMajor && queueLen > 0 ? 34 : 12;
-  const tw = Math.min(maxW, Math.max(isMajor ? 156 : 124, ctx.measureText(primary.text).width + 26 + extraReserve));
-  const th = isMajor ? 27 : 23;
+  const tw = Math.min(maxW, Math.max(isMajor ? 136 : 108, ctx.measureText(primary.text).width + 26 + iconPad + extraReserve));
+  const th = isMajor ? 28 : 24;
   const tx = (width - tw) * 0.5;
+  const ty = baseY + slideOffset;
 
-  UI.drawNoticeBanner(ctx, tx, baseY, tw, th, {
+  UI.drawNoticeBanner(ctx, tx, ty, tw, th, {
+    icon: primary.icon || '',
+    sprites,
+    iconSize: isMajor ? 18 : 16,
     text: primary.text,
     fontSize: fontSz,
-    align: 'center',
-    borderColor: isMajor ? '#ffe070' : '#d2a668',
-    topCol: isMajor ? 'rgba(84, 42, 24, 0.95)' : 'rgba(66, 38, 28, 0.88)',
-    botCol: isMajor ? 'rgba(54, 26, 16, 0.97)' : 'rgba(46, 25, 19, 0.91)',
+    align: hasIcon ? 'left' : 'center',
+    tone: primary.tone || (isMajor ? 'event' : 'info'),
     rightReserve: extraReserve
   });
   if (isMajor && queueLen > 0) {
-    UI.drawTagBadge(ctx, tx + tw - 30, baseY + 5, 24, 17, `+${queueLen}`, 'amber', 8.8);
+    UI.drawTagBadge(ctx, tx + tw - 30, ty + 5.5, 24, 17, `+${queueLen}`, 'amber', 8.8);
   }
   ctx.restore();
 
   // Secondary non-competing minor pill when a major banner is simultaneously active
   if (cur && cur.level === 'major' && minor && minor.text !== cur.text) {
     ctx.save();
-    ctx.globalAlpha = Math.min(1, minor.timer * 3.2) * aimDim * 0.94;
+    ctx.globalAlpha = Math.min(1, minor.timer * 3.4) * aimDim * 0.94;
     ctx.font = UI.fontStr(10, 800);
-    const mMaxW = Math.min(350, width - 34);
-    const mw = Math.min(mMaxW, Math.max(110, ctx.measureText(minor.text).width + 24));
-    const mh = 21;
+    const mHasIcon = !!(minor.icon && sprites);
+    const mMaxW = Math.min(290, width - 38);
+    const mw = Math.min(mMaxW, Math.max(96, ctx.measureText(minor.text).width + 24 + (mHasIcon ? 18 : 0)));
+    const mh = 22;
     const mx = (width - mw) * 0.5;
-    const my = isInPlay ? baseY - mh - 4 : baseY + th + 4;
+    const my = isInPlay ? baseY - mh - 5 : baseY + th + 5;
     UI.drawNoticeBanner(ctx, mx, my, mw, mh, {
+      icon: minor.icon || '',
+      sprites,
+      iconSize: 14,
       text: minor.text,
       fontSize: 9.8,
-      align: 'center',
-      borderColor: '#cfa56e',
-      topCol: 'rgba(62, 36, 26, 0.86)',
-      botCol: 'rgba(44, 24, 18, 0.90)',
+      align: mHasIcon ? 'left' : 'center',
+      tone: minor.tone || 'info',
       rightReserve: 10
     });
     ctx.restore();

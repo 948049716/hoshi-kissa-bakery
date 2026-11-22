@@ -234,6 +234,8 @@ function createApp() {
     shopSign: null,
     yarnBall: null,
     uiAtlas: null,
+    uiAtlas2: null,
+    uiAtlas3: null,
     titlePlaque: null,
     patronStage: null,
     serveBell: null,
@@ -262,6 +264,8 @@ function createApp() {
     track(platform.loadImage(ASSET_PATHS.shopSign).then((img) => (sprites.shopSign = img)));
     track(platform.loadImage(ASSET_PATHS.yarnBall).then((img) => (sprites.yarnBall = img)));
     track(platform.loadImage(ASSET_PATHS.uiAtlas).then((img) => (sprites.uiAtlas = img)));
+    track(platform.loadImage(ASSET_PATHS.uiAtlas2).then((img) => (sprites.uiAtlas2 = img)));
+    track(platform.loadImage(ASSET_PATHS.uiAtlas3).then((img) => (sprites.uiAtlas3 = img)));
     track(platform.loadImage(ASSET_PATHS.titlePlaque).then((img) => (sprites.titlePlaque = img)));
     track(platform.loadImage(ASSET_PATHS.patronStage).then((img) => (sprites.patronStage = img)));
     track(platform.loadImage(ASSET_PATHS.serveBell).then((img) => (sprites.serveBell = img)));
@@ -446,16 +450,57 @@ function createApp() {
     if (explicitLevel === 'major' || explicitLevel === 'minor') return explicitLevel;
     const s = String(msg || '');
     if (
-      /^(🎉|🌟|🔥|🏅|🌠|🧶|👑|🌪️|🏪|🚀|🎁)/.test(s) ||
       s.includes('突发事件') ||
-      s.includes('已达标') ||
+      s.includes('达标') ||
       s.includes('欢迎新搭档') ||
-      s.includes('已解锁') ||
-      s.includes('新甜品解锁')
+      s.includes('解锁') ||
+      s.includes('狂热') ||
+      s.includes('急单') ||
+      s.includes('共鸣') ||
+      s.includes('升级成功') ||
+      s.includes('名片已同步') ||
+      s.includes('猫神') ||
+      s.includes('主菜') ||
+      s.includes('充能完毕')
     ) {
       return 'major';
     }
     return 'minor';
+  }
+
+  function inferToastTone(msg, level, explicitTone) {
+    if (explicitTone === 'info' || explicitTone === 'success' || explicitTone === 'warn' || explicitTone === 'event') {
+      return explicitTone;
+    }
+    const s = String(msg || '');
+    if (
+      s.includes('不足') ||
+      s.includes('已满') ||
+      s.includes('上限') ||
+      s.includes('无法') ||
+      s.includes('不可') ||
+      s.includes('至少') ||
+      s.includes('无需') ||
+      s.includes('请')
+    ) {
+      return 'warn';
+    }
+    if (
+      s.includes('成功') ||
+      s.includes('解锁') ||
+      s.includes('达标') ||
+      s.includes('过关') ||
+      s.includes('完成') ||
+      s.includes('获得') ||
+      s.includes('同步') ||
+      s.includes('恢复') ||
+      s.includes('装备') ||
+      s.includes('共鸣') ||
+      s.includes('欢迎')
+    ) {
+      return 'success';
+    }
+    return level === 'major' ? 'event' : 'info';
   }
 
   // Application View & Modal Coordinator
@@ -548,12 +593,18 @@ function createApp() {
 
     showToast(msg, opts = null) {
       if (!msg) return;
-      const explicitLv = opts && typeof opts === 'object' ? opts.level : null;
+      const optObj = opts && typeof opts === 'object' ? opts : {};
+      const explicitLv = optObj.level || null;
       const level = classifyToastLevel(msg, explicitLv);
+      const tone = inferToastTone(msg, level, optObj.tone);
+      const icon = optObj.icon || '';
       const dur = level === 'major' ? 2.25 : 1.65;
+      const entry = { text: msg, level, tone, icon, timer: dur, maxTimer: dur };
 
       if (this.toastCurrent && this.toastCurrent.text === msg) {
         this.toastCurrent.timer = Math.max(this.toastCurrent.timer, dur * 0.75);
+        if (icon) this.toastCurrent.icon = icon;
+        this.toastCurrent.tone = tone;
         this.syncToastLegacyFields();
         return;
       }
@@ -564,19 +615,19 @@ function createApp() {
           if (this.toastCurrent && this.toastCurrent.level === 'minor' && this.toastCurrent.timer > 0.25) {
             this.minorToast = { ...this.toastCurrent, timer: Math.min(this.toastCurrent.timer, 1.35) };
           }
-          this.toastCurrent = { text: msg, level: 'major', timer: dur, maxTimer: dur };
+          this.toastCurrent = entry;
         } else if (this.toastQueue.length < 2) {
-          this.toastQueue.push({ text: msg, level: 'major', timer: dur, maxTimer: dur });
+          this.toastQueue.push(entry);
           this.toastCurrent.timer = Math.min(this.toastCurrent.timer, 1.45);
         }
       } else {
         if (!this.toastCurrent || this.toastCurrent.timer <= 0) {
-          this.toastCurrent = { text: msg, level: 'minor', timer: dur, maxTimer: dur };
+          this.toastCurrent = entry;
         } else if (this.toastCurrent.level === 'minor') {
-          this.toastCurrent = { text: msg, level: 'minor', timer: dur, maxTimer: dur };
+          this.toastCurrent = entry;
         } else {
-          // Major event banner is active: show minor hint on non-competing compact secondary pill!
-          this.minorToast = { text: msg, level: 'minor', timer: 1.55, maxTimer: 1.55 };
+          // Major event banner is active: show minor hint on non-competing compact secondary pill
+          this.minorToast = { ...entry, timer: 1.55, maxTimer: 1.55 };
         }
       }
       this.syncToastLegacyFields();
@@ -593,7 +644,7 @@ function createApp() {
       audio.setSfxEnabled(next);
       saveData.sfxEnabled = next;
       persistSaveData();
-      this.showToast(next ? '🔊 游戏音效已开启' : '🔇 游戏音效已关闭');
+      this.showToast(next ? '音效已开启' : '音效已静音', { icon: next ? 'icon_sfx_on' : 'icon_sfx_off', tone: 'info' });
     },
 
     cycleBgm() {
@@ -602,14 +653,14 @@ function createApp() {
       saveData.bgmTrack = audio.bgmTrack;
       persistSaveData();
       const info = audio.getTrackInfo();
-      this.showToast(info.id === 'off' ? '🔇 背景音乐已关闭' : `🎵 当前背景音乐：${info.title}`);
+      this.showToast(info.id === 'off' ? '音乐已关闭' : `音乐：${info.title}`, { icon: 'icon_music', tone: 'info' });
     },
 
     toggleDebugPhysics(forceVal) {
       if (this.activeModal === 'blessing') this.closeModal();
       gameState.debugPhysics = typeof forceVal === 'boolean' ? forceVal : !gameState.debugPhysics;
       if (typeof forceVal !== 'boolean') {
-        this.showToast(gameState.debugPhysics ? '📐 已开启物理多边形轮廓视图' : '📐 已关闭物理轮廓视图');
+        this.showToast(gameState.debugPhysics ? '已开启物理轮廓' : '已关闭物理轮廓', { icon: 'icon_toolbox', tone: 'info' });
       }
     },
 
@@ -637,7 +688,7 @@ function createApp() {
           persistSaveData();
           audio.playPatronSelect();
           this.lobbyBounceT = 0.001;
-          this.showToast(`${p.badge} 已切换助阵搭档：${p.name}`);
+          this.showToast(`搭档：${p.name}`, { icon: p.badge, tone: 'info' });
         } else {
           this.pokeLobbyPatron();
         }
@@ -746,7 +797,7 @@ function createApp() {
       if (lv >= up.maxLv) return;
       const cost = up.costs[lv];
       if ((saveData.bankStardust || 0) < cost) {
-        this.showToast(`⭐ 永久星尘不足（需要 ${cost} ⭐）`);
+        this.showToast(`星尘不足（需 ${cost}）`, { icon: 'icon_stardust', tone: 'warn' });
         return;
       }
       audio.ensureCtx();
@@ -755,7 +806,7 @@ function createApp() {
       persistSaveData();
       audio.playShopBuy();
       platform.vibrateShort('light');
-      this.showToast(`🏪 升级成功！【${up.name}】升至 Lv.${lv + 1}！`);
+      this.showToast(`升级成功 · ${up.name} Lv.${lv + 1}`, { level: 'major', icon: up.icon || 'icon_shop', tone: 'success' });
     },
 
     buyOrEquipTheme(id) {
@@ -765,7 +816,7 @@ function createApp() {
       const owned = saveData.unlockedThemes.includes(id);
       if (!owned) {
         if ((saveData.bankStardust || 0) < th.cost) {
-          this.showToast(`⭐ 永久星尘不足（需要 ${th.cost} ⭐）`);
+          this.showToast(`星尘不足（需 ${th.cost}）`, { icon: 'icon_stardust', tone: 'warn' });
           return;
         }
         saveData.bankStardust -= th.cost;
@@ -774,12 +825,12 @@ function createApp() {
         persistSaveData();
         audio.playShopBuy();
         platform.vibrateShort('light');
-        this.showToast(`✨ 已解锁并换上【${th.name}】！`);
+        this.showToast(`解锁主题：${th.name}`, { level: 'major', icon: th.icon || 'icon_stardust', tone: 'success' });
       } else {
         saveData.equippedTheme = id;
         persistSaveData();
         audio.playPatronSelect();
-        this.showToast(`${th.icon} 已切换玻璃罐主题：${th.name}`);
+        this.showToast(`主题：${th.name}`, { icon: th.icon || 'icon_stardust', tone: 'info' });
       }
     },
 
@@ -790,7 +841,7 @@ function createApp() {
       const owned = saveData.unlockedPatrons.includes(id);
       if (!owned) {
         if ((saveData.bankStardust || 0) < p.cost) {
-          this.showToast(`⭐ 永久星尘不足（需要 ${p.cost} ⭐）`);
+          this.showToast(`星尘不足（需 ${p.cost}）`, { icon: 'icon_stardust', tone: 'warn' });
           return;
         }
         saveData.bankStardust -= p.cost;
@@ -800,13 +851,13 @@ function createApp() {
         persistSaveData();
         audio.playShopBuy();
         platform.vibrateShort('light');
-        this.showToast(`${p.badge} 欢迎新搭档【${p.name}】加入！`);
+        this.showToast(`欢迎新搭档 · ${p.name}`, { level: 'major', icon: p.badge, tone: 'success' });
       } else {
         saveData.selectedPatron = id;
         this.lobbySpeechIndex = 0;
         persistSaveData();
         audio.playPatronSelect();
-        this.showToast(`${p.badge} 已切换助阵搭档：${p.name}`);
+        this.showToast(`搭档：${p.name}`, { icon: p.badge, tone: 'info' });
       }
     },
 
@@ -862,7 +913,7 @@ function createApp() {
       saveData.playerProfile.updatedAt = Date.now();
       persistSaveData();
       const p = PATRONS.find((it) => it.id === next);
-      this.showToast(`🐾 已切换名片头像：${p ? p.name : next}`);
+      this.showToast(`头像：${p ? p.name : next}`, { icon: 'icon_paw_guide', tone: 'info' });
     },
 
     async applyPlayerProfileAuth({ nickName, avatarUrl = '', avatarPreset = null, authorized = true } = {}) {
@@ -889,7 +940,7 @@ function createApp() {
         });
       }
       this.fetchLeaderboard(true);
-      this.showToast(`🪪 店长名片已同步：${this.getPlayerDisplayName()}！`, { level: 'major' });
+      this.showToast(`名片已同步：${this.getPlayerDisplayName()}`, { level: 'major', icon: 'icon_id_card', tone: 'success' });
     },
 
     onTapCareerAuthFallback() {
@@ -1039,7 +1090,7 @@ function createApp() {
         audio.playStartCafe();
         this.isLobbyOpen = false;
         this.syncAudioMood();
-        this.showToast(`▶️ 已恢复第 ${gameState.shift} 幕营业进度！`, { level: 'major' });
+        this.showToast(`已恢复第 ${gameState.shift} 幕`, { level: 'major', icon: 'mode_chef', tone: 'success' });
       }
       return ok;
     },
@@ -1074,15 +1125,15 @@ function createApp() {
     restartRun() {
       startNewRunFn(gameState.mode);
       audio.playStartCafe();
-      this.showToast('已重新开启新一轮营业！');
+      this.showToast('已重新开业', { icon: 'icon_restart', tone: 'info' });
     },
 
     shareResult() {
       const ok = platform.triggerShare({
-        title: `🌙 我在星夜吃茶闯到第 ${gameState.shift} 幕拿下 ¥${gameState.score} 营业额（${getChefRank(gameState.score)}），快来构筑甜品流派！`
+        title: `我在星夜吃茶闯到第 ${gameState.shift} 幕拿下 ¥${gameState.score}（${getChefRank(gameState.score)}），快来合甜品！`
       });
       if (!ok) {
-        this.showToast('📤 请在微信小游戏右上角或真机中点击分享给好友～');
+        this.showToast('请点右上角分享给好友', { icon: 'icon_gift', tone: 'info' });
       }
     },
 
@@ -1215,7 +1266,7 @@ function createApp() {
     if (prev < 100 && gameState.skillEnergy >= 100) {
       const sk = app.activePatron.activeSkill;
       audio.playBlessingReady();
-      app.showToast(`🌟 招牌技【${sk.icon} ${sk.name}】已充能完毕！点底部中央发动！`);
+      app.showToast(`${sk.name} 已就绪`, { level: 'major', icon: sk.icon, tone: 'event' });
       spawnSparkleBurst(JAR.canvasW / 2, JAR.floorY - 12, '#ffe47a', 18);
     }
     return delta;
@@ -1306,12 +1357,12 @@ function createApp() {
       gameState.nextTier = 2;
       gameState.nextMeta = { wildcard: true, golden: false };
       gameState.dropsUntilRainbow = getRainbowPityBase();
-      if (reason) app.showToast(`🌈 ${reason}！下一颗变身【彩虹万能糖】！`);
+      if (reason) app.showToast(`${reason} · 下颗彩虹糖`, { icon: 'icon_rainbow', tone: 'event' });
     } else if (!gameState.curMeta || !gameState.curMeta.wildcard) {
       gameState.curTier = 2;
       gameState.curMeta = { wildcard: true, golden: false };
       gameState.dropsUntilRainbow = getRainbowPityBase();
-      if (reason) app.showToast(`🌈 ${reason}！当前手牌变身【彩虹万能糖】！`);
+      if (reason) app.showToast(`${reason} · 当前彩虹糖`, { icon: 'icon_rainbow', tone: 'event' });
     }
   }
 
@@ -1344,8 +1395,8 @@ function createApp() {
     const reason = gameState.blessingLastReason || '心愿达成';
     gameState.blessingSubText =
       gameState.pendingBlessings > 1
-        ? `${reason}！当前已积攒 ${gameState.pendingBlessings} 次祝福，可连续挑选！`
-        : `${reason}！任选 1 张星夜秘方，永久强化本局烘焙！`;
+        ? `${reason} · 可连选 ${gameState.pendingBlessings} 次`
+        : `${reason} · 任选 1 项强化本局`;
     gameState.paused = true;
     gameState.blessingLockUntil = Date.now() + 140;
     app.openModal('blessing');
@@ -1377,7 +1428,7 @@ function createApp() {
       gameState.tools.spoon++;
       addSkillEnergy(100, true);
       const gained = addRunStardust(25);
-      spawnPopup(JAR.canvasW / 2, 220, `🎁 摇+1·勺+1·招牌技满能 · +${gained}⭐!`, '#ffe57e', 17);
+      spawnPopup(JAR.canvasW / 2, 220, `摇+1 勺+1 满能 +${gained}星尘`, '#ffe57e', 16.5);
     } else if (id === 'cleanse') {
       const smalls = gameState.entities
         .filter((e) => !e.isWildcard && !e.isYarnBall && !(e.frozenHp > 0) && e.tier <= 2)
@@ -1396,22 +1447,22 @@ function createApp() {
         gameState.entities = gameState.entities.filter((e) => !removeIds.has(e.id));
         addScore(gainedPts);
         addRunStardust(gainedDustBase);
-        spawnPopup(JAR.canvasW / 2, 210, `🫧 吹散${removeIds.size}颗! +${gainedPts}分`, '#b6f4ff', 18);
+        spawnPopup(JAR.canvasW / 2, 210, `吹散 ${removeIds.size} 颗 +${gainedPts}`, '#b6f4ff', 17.5);
       } else {
         const gained = addRunStardust(20);
-        spawnPopup(JAR.canvasW / 2, 210, `🫧 罐内很清爽！赠送 +${gained}⭐`, '#b6f4ff', 17);
+        spawnPopup(JAR.canvasW / 2, 210, `罐内清爽 +${gained}星尘`, '#b6f4ff', 16.5);
       }
     }
 
     const lvTag = def.repeatable ? '' : ` Lv.${app.getPerkLevel(id)}`;
-    const pickedSummary = `${def.icon} ${def.name}${lvTag}`;
+    const pickedSummary = `${def.name}${lvTag}`;
     gameState.pendingBlessings = Math.max(0, gameState.pendingBlessings - 1);
     gameState.blessingChoices = [];
 
     if (gameState.pendingBlessings > 0 && app.activeModal === 'blessing') {
       gameState.blessingLockUntil = Date.now() + 180;
       gameState.blessingChoices = rollBlessingChoices();
-      gameState.blessingSubText = `✅ 已获得【${pickedSummary}】！继续任选 1 张星夜秘方（还剩 ${gameState.pendingBlessings} 次）`;
+      gameState.blessingSubText = `已得 ${pickedSummary} · 还剩 ${gameState.pendingBlessings} 次`;
       spawnSparkleBurst(JAR.canvasW / 2, 240, '#ffe27a', 18);
       return;
     }
@@ -1419,7 +1470,7 @@ function createApp() {
     app.activeModal = null;
     gameState.paused = false;
     app.syncAudioMood();
-    app.showToast(`🎁 获得祝福【${pickedSummary}】！`);
+    app.showToast(`获得祝福 · ${pickedSummary}`, { level: 'major', icon: def.icon || 'icon_gift', tone: 'success' });
     spawnSparkleBurst(JAR.canvasW / 2, 240, '#ffe27a', 26);
     spawnShockwave(JAR.canvasW / 2, 250, 150, '#ffe47a', 3.5);
     gameState.jarFlash = 0.55;
@@ -1432,7 +1483,7 @@ function createApp() {
       saveData.unlockedTiers.push(tier);
       saveData.unlockedTiers.sort((a, b) => a - b);
       persistSaveData();
-      app.showToast(`✨ 新甜品解锁：${TIERS[tier - 1].name}！`);
+      app.showToast(`解锁新品：${TIERS[tier - 1].name}`, { level: 'major', icon: `tier_${tier}`, tone: 'success' });
     }
   }
 
@@ -1620,7 +1671,7 @@ function createApp() {
     }
     if (pulled > 0) {
       spawnShockwave(cx, cy, 135, '#8ee8ff', 3.4);
-      spawnPopup(cx, cy - 30, '🌊 热盘余震聚拢!', '#9cf4ff', 13.5);
+      spawnPopup(cx, cy - 30, '余震聚拢', '#9cf4ff', 13.5);
     }
   }
 
@@ -1644,7 +1695,7 @@ function createApp() {
     unlockTier(nextTier);
     spawnSparkleBurst(pick.x, pick.y, '#ffb366', 18);
     spawnShockwave(pick.x, pick.y, pick.r * 1.9, '#ffb366', 3.2);
-    spawnPopup(pick.x, pick.y - pick.r - 12, `🔥 以小换大→${nextTier}阶!`, '#ffd480', 14);
+    spawnPopup(pick.x, pick.y - pick.r - 12, `以小换大 ${nextTier}阶`, '#ffd480', 14);
     notifyTreatSynthesized(nextTier, pick);
   }
 
@@ -1723,9 +1774,8 @@ function createApp() {
       if (gameState.mode === 'rush') {
         gameState.rushTimer += 6.0;
       }
-      spawnPopup(ent.x, ent.y - 20, `👑 主菜献礼! +¥${pts}`, '#ffe570', 22);
-      showComboBanner('👑 星冠猫神主菜大满贯!', `+¥${pts} · +${dust}⭐ · 净化${cleansed}颗小糖`, '#ffe570');
-      app.showToast(`👑 献上星冠猫神舒芙蕾！+¥${pts} · 招牌技满能！`, { level: 'major' });
+      spawnPopup(ent.x, ent.y - 20, `主菜献礼 +¥${pts}`, '#ffe570', 21);
+      showComboBanner('星冠猫神献礼', `+¥${pts} · +${dust}星尘 · 净化${cleansed}颗`, '#ffe570', 'icon_crown');
       saveActiveRunCheckpoint();
       return true;
     }
@@ -1779,18 +1829,18 @@ function createApp() {
       gameState.rushTimer += rushAddSec;
       const streakLabel =
         gameState.rushServeStreak >= 2
-          ? `⚡${gameState.rushServeStreak}连上菜 ×${rushStreakMult}! +${rushAddSec}s`
+          ? `${gameState.rushServeStreak}连上菜 ×${rushStreakMult} +${rushAddSec}s`
           : ord.isStarterBlitz
-          ? `⚡闪电迎宾! +${rushAddSec}s`
-          : `⏱️ 出餐续命 +${rushAddSec}s!`;
+          ? `闪电迎宾 +${rushAddSec}s`
+          : `出餐 +${rushAddSec}s`;
       spawnPopup(ent.x, ent.y - 44, streakLabel, '#9cf4ff', 15);
     }
 
     ord.slots[match.slotIdx].done = true;
-    const agedTag = agedMult > 1 ? `📜陈酿×${agedMult.toFixed(1)} ` : '';
-    const freshTag = isFresh ? '🔥热腾腾 ' : '';
+    const agedTag = agedMult > 1 ? `陈酿×${agedMult.toFixed(1)} ` : '';
+    const freshTag = isFresh ? '热腾腾 ' : '';
     const currSym = gameState.mode === 'chef' ? '¥' : '';
-    spawnPopup(ent.x, ent.y - 16, `🔔 ${agedTag}${freshTag}+${currSym}${servePts}`, '#ffe67e', 18);
+    spawnPopup(ent.x, ent.y - 16, `${agedTag}${freshTag}+${currSym}${servePts}`, '#ffe67e', 18);
 
     // Check if the entire table order is complete
     if (ord.slots.every((s) => s.done)) {
@@ -1803,42 +1853,40 @@ function createApp() {
       if (ord.kind === 'vip') addSkillEnergy(25);
       audio.playOrderComplete();
 
-      // VIP Freshness Coin Bonus (+8🪙 in Chef 5-Shift mode)
+      // VIP Freshness Coin Bonus (+8 coins in Chef 5-Shift mode)
       let coinNote = '';
       if (gameState.mode === 'chef' && ord.kind === 'vip' && isFresh) {
         addCoins(8);
-        coinNote = ' · +8🪙';
+        coinNote = ' · +8币';
       }
       // Shift 5 Judge Rush Order step reward (+2 steps + cancel end-of-steps settle!)
       let stepNote = '';
       if (gameState.mode === 'chef' && ord.bonusSteps > 0 && isFresh) {
         gameState.stepsLeft += ord.bonusSteps;
         gameState.shiftResolveDelay = 0;
-        stepNote = ` · +${ord.bonusSteps}步!`;
-        spawnPopup(JAR.canvasW * 0.5, 130, `🏅 评委赞赏! 步数 +${ord.bonusSteps}`, '#ffe570', 18);
+        stepNote = ` · +${ord.bonusSteps}步`;
+        spawnPopup(JAR.canvasW * 0.5, 130, `评委赞赏 +${ord.bonusSteps}步`, '#ffe570', 18);
       }
 
       const activePatron = app.activePatron;
       setPatronSpeech(
         activePatron,
-        ord.kind === 'vip' ? `${activePatron.thanks} VIP 大单完成！` : activePatron.thanks,
+        ord.kind === 'vip' ? `${activePatron.thanks} VIP大单完成！` : activePatron.thanks,
         3.6
       );
 
       if (ord.kind === 'vip') {
         if (isFresh) grantNextRainbow('VIP极速上菜');
-        queueBlessing(isFresh ? '👑 VIP 鲜度大单达成' : '🎉 VIP 心愿单达成');
+        queueBlessing(isFresh ? 'VIP 鲜度大单达成' : 'VIP 心愿单达成');
         showComboBanner(
-          ord.isJudgeRush ? '🏅 评委急单大胜!' : '👑 VIP 套餐上齐!',
-          `赏金 +${currSym}${bonusPts} · +${dust}⭐${coinNote}${stepNote}`,
-          '#ffe378'
+          ord.isJudgeRush ? '评委急单大胜' : 'VIP 套餐上齐',
+          `+${currSym}${servePts + bonusPts} · +${dust}星尘${coinNote}${stepNote}`,
+          '#ffe378',
+          ord.isJudgeRush ? 'icon_judge' : 'icon_crown'
         );
-        app.showToast(`👑 VIP 订单完成！+${currSym}${servePts + bonusPts}${coinNote}${stepNote} · 获得祝福!`, {
-          level: 'major'
-        });
       } else {
         if (gameState.ordersCompleted % 2 === 0) {
-          queueBlessing('🔔 连续出餐达标');
+          queueBlessing('连续出餐达标');
           if (!gameState.activeEvent && gameState.mode === 'chef' && gameState.shiftModifier !== 'party_events') {
             setTimeout(() => {
               if (gameState.running && !gameState.over && !gameState.activeEvent) {
@@ -1847,8 +1895,10 @@ function createApp() {
             }, 900);
           }
         }
-        app.showToast(`🔔 快餐出单！+${currSym}${servePts + bonusPts} · +${dust}⭐（趁机抽底雪崩！）`, {
-          level: 'minor'
+        app.showToast(`快餐出单 +${currSym}${servePts + bonusPts} · +${dust}星尘`, {
+          level: 'minor',
+          icon: 'serve_bell',
+          tone: 'success'
         });
       }
 
@@ -1863,7 +1913,11 @@ function createApp() {
         }
       }, 520);
     } else {
-      app.showToast(`🔔 已端上【${def.name}】+${currSym}${servePts}！还差 1 份完成 VIP 套餐～`, { level: 'minor' });
+      app.showToast(`上菜 ${def.name} +${currSym}${servePts} · 差1份`, {
+        level: 'minor',
+        icon: 'serve_bell',
+        tone: 'info'
+      });
     }
 
     saveActiveRunCheckpoint();
@@ -1875,7 +1929,7 @@ function createApp() {
     const match = findServableMatch(entity);
     if (match && match.kind !== 'souffle') {
       audio.playOrderStamp();
-      spawnPopup(entity.x, entity.y - entity.r - 12, '🔔 可点击上菜!', '#fff099', 13);
+      spawnPopup(entity.x, entity.y - entity.r - 12, '可上菜', '#fff099', 13);
     }
   }
 
@@ -1894,7 +1948,7 @@ function createApp() {
 
     let idx = typeof targetIdx === 'number' && targetIdx >= 0 && targetIdx < gameState.orders.length ? targetIdx : -1;
     if (idx !== -1 && gameState.orders[idx] && gameState.orders[idx].isJudgeRush) {
-      app.showToast('🏅 评委突击急单不可更换哦！请点另一桌换单～', { level: 'minor' });
+      app.showToast('评委急单不可更换', { level: 'minor', icon: 'icon_judge', tone: 'warn' });
       return;
     }
 
@@ -1924,15 +1978,15 @@ function createApp() {
     if (gameState.mode === 'chef') {
       if (gameState.freeSkipsLeft > 0) {
         gameState.freeSkipsLeft--;
-        costNote = '（本幕首次免费）';
+        costNote = '（首免）';
       } else if (gameState.coins >= 3) {
         gameState.coins -= 3;
         audio.ensureCtx();
         audio.playCoinSpend();
-        costNote = '（-3🪙）';
+        costNote = '（-3币）';
       } else {
         freshPenalty = 3;
-        costNote = '（无币折损3步鲜度）';
+        costNote = '（折3步鲜度）';
       }
     }
 
@@ -1945,7 +1999,7 @@ function createApp() {
     gameState.orders[idx] = replacement;
     gameState.order = gameState.orders[1] || gameState.orders[0] || null;
     const tableLabel = idx === 0 ? '快餐桌' : 'VIP桌';
-    app.showToast(`📋 已更换【${tableLabel}】点单${costNote}！`, { level: 'minor' });
+    app.showToast(`已换${tableLabel}点单${costNote}`, { level: 'minor', icon: 'icon_restart', tone: 'info' });
   }
 
   function addCoins(amt) {
@@ -1972,13 +2026,11 @@ function createApp() {
         platform.vibrateShort('medium');
         const remInterest = gameState.stepsLeft * 4;
         showComboBanner(
-          `🎉 第 ${gameState.shift} 幕营业额达标!`,
-          remInterest > 0 ? `点【🔔立即打烊】换 +${remInterest}🪙，或继续加班贪高阶！` : '本幕圆满达标！',
-          '#ffe570'
+          `第 ${gameState.shift} 幕达标`,
+          remInterest > 0 ? `可点打烊换 +${remInterest}币，或继续刷分` : '本幕圆满达标',
+          '#ffe570',
+          'icon_trophy'
         );
-        app.showToast(`🎉 第 ${gameState.shift} 幕目标 ¥${gameState.shiftTarget} 已达标！可随时点【🔔打烊】进整备间！`, {
-          level: 'major'
-        });
       }
     }
 
@@ -1986,7 +2038,7 @@ function createApp() {
       while (gameState.score >= gameState.zenNextMilestone) {
         const hit = gameState.zenNextMilestone;
         gameState.zenNextMilestone = hit < 1400 ? 1400 : hit < 2800 ? 2800 : hit < 4800 ? 4800 : hit + 3000;
-        queueBlessing(`🍵 达成 ${hit} 分里程碑`);
+        queueBlessing(`达成 ${hit} 分里程碑`);
       }
     }
 
@@ -1994,7 +2046,7 @@ function createApp() {
       while (gameState.score >= gameState.rushNextMilestone) {
         const hit = gameState.rushNextMilestone;
         gameState.rushNextMilestone = hit < 2800 ? 2800 : hit < 5000 ? 5000 : hit + 3200;
-        queueBlessing(`⚡ 狂欢突破 ${hit} 分`);
+        queueBlessing(`突破 ${hit} 分`);
       }
     }
   }
@@ -2033,7 +2085,7 @@ function createApp() {
     const n = Math.max(1, Math.floor(Number(shiftNum) || 1));
     if (n === 1) return [];
     if (n === 2) return ['glaze_ring'];
-    // Shift 3 focuses purely on teaching ❄️ Frozen Treats without stacking a stage obstacle!
+    // Shift 3 focuses purely on teaching Frozen Treats without stacking a stage obstacle!
     if (n === 3) return [];
     // Shift 4 introduces random stage obstacles (divider / bumpers / fast_fresh) + Midnight Party!
     if (n === 4) {
@@ -2250,11 +2302,11 @@ function createApp() {
     const def = RELICS.find((r) => r.id === relicId);
     if (!offer || !def) return;
     if (gameState.relics.length >= MAX_RELIC_SLOTS) {
-      app.showToast(`⚠️ 秘方栏已满 (${MAX_RELIC_SLOTS}/${MAX_RELIC_SLOTS})！点击上方已装备秘方可半价卖出换流派`);
+      app.showToast(`秘方栏已满 (${MAX_RELIC_SLOTS}/${MAX_RELIC_SLOTS})，点槽位可卖出`, { icon: 'icon_warn', tone: 'warn' });
       return;
     }
     if (gameState.coins < def.price) {
-      app.showToast(`🪙 秘方币不足（需要 ${def.price} 🪙）`);
+      app.showToast(`秘方币不足（需 ${def.price}）`, { icon: 'icon_coin', tone: 'warn' });
       return;
     }
     audio.ensureCtx();
@@ -2270,11 +2322,11 @@ function createApp() {
     if (synDef && (archCnt === 2 || archCnt === 3)) {
       audio.playBlessingReady();
       app.showToast(
-        `🌟 凑齐 ${archCnt} 件${synDef.tag}共鸣！${archCnt === 3 ? synDef.short3 : synDef.short2}！`,
-        { level: 'major' }
+        `${synDef.tag} ${archCnt}件共鸣 · ${archCnt === 3 ? synDef.short3 : synDef.short2}`,
+        { level: 'major', icon: def.icon, tone: 'success' }
       );
     } else {
-      app.showToast(`${def.icon} 已装备秘方【${def.name}】！`);
+      app.showToast(`已装备 · ${def.name}`, { icon: def.icon, tone: 'success' });
     }
     saveActiveRunCheckpoint();
   }
@@ -2290,7 +2342,7 @@ function createApp() {
     gameState.relics.splice(idx, 1);
     gameState.coins += refund;
     if (relicId === 'rel_bumpers') syncObstaclesForShift();
-    app.showToast(`🪙 已卖出【${def.name}】，返还 +${refund} 🪙`);
+    app.showToast(`卖出 ${def.name} · +${refund}币`, { icon: 'icon_coin', tone: 'info' });
     saveActiveRunCheckpoint();
   }
 
@@ -2301,11 +2353,11 @@ function createApp() {
     const def = DECK_MODS.find((m) => m.id === modId);
     if (!offer || !def) return;
     if (app.getDeckModCount(modId) >= def.maxBuy) {
-      app.showToast(`已达本局购买上限！`);
+      app.showToast('已达购买上限', { icon: 'icon_warn', tone: 'warn' });
       return;
     }
     if (gameState.coins < def.price) {
-      app.showToast(`🪙 秘方币不足（需要 ${def.price} 🪙）`);
+      app.showToast(`秘方币不足（需 ${def.price}）`, { icon: 'icon_coin', tone: 'warn' });
       return;
     }
     audio.ensureCtx();
@@ -2324,7 +2376,7 @@ function createApp() {
       gameState.tools.shake += 1;
       gameState.tools.spoon += 1;
     }
-    app.showToast(`${def.icon} 原料改造成功：【${def.name}】！`);
+    app.showToast(`改造成功 · ${def.name}`, { icon: def.icon, tone: 'success' });
     saveActiveRunCheckpoint();
   }
 
@@ -2333,7 +2385,7 @@ function createApp() {
     if (!shop) return;
     const cost = shop.rerollCost;
     if (gameState.coins < cost) {
-      app.showToast(`🪙 秘方币不足（刷新需 ${cost} 🪙）`);
+      app.showToast(`秘方币不足（刷新需 ${cost}）`, { icon: 'icon_coin', tone: 'warn' });
       return;
     }
     audio.ensureCtx();
@@ -2343,7 +2395,10 @@ function createApp() {
     const { relicOffers, modOffers } = rollPrepShopOffers();
     shop.relicOffers = relicOffers;
     shop.modOffers = modOffers;
-    app.showToast(cost === 0 ? '🌙 眠眠星兔免单刷新货架！' : '🔄 已刷新整备间货架！');
+    app.showToast(cost === 0 ? '眠眠星兔免单刷新' : '货架已刷新', {
+      icon: cost === 0 ? 'icon_moon' : 'icon_restart',
+      tone: 'info'
+    });
     saveActiveRunCheckpoint();
   }
 
@@ -2461,7 +2516,7 @@ function createApp() {
         }
       }
 
-      // Shift 4 Midnight Cat Party: starts with a mischievous Yarn Ball (+¥750 & +10🪙)!
+      // Shift 4 Midnight Cat Party: starts with a mischievous Yarn Ball (+¥750 & +10 coins)
       if (cfg.modifier === 'party_events') {
         const yarnX = hasDivider ? 156 : 220;
         createYarnBallEntity(yarnX, JAR.neckY + 56);
@@ -2480,24 +2535,29 @@ function createApp() {
     if (cfg.shift > 1) {
       const hazDefs = app.getShiftHazardDefs();
       const hazBadges = hazDefs.map((h) => h.badge);
-      if (frozenSeeded > 0) hazBadges.push(`❄️冰封×${frozenSeeded}`);
-      if (cfg.modifier === 'grand_prix') hazBadges.push('🏅评委急单');
+      if (frozenSeeded > 0) hazBadges.push(`冰封×${frozenSeeded}`);
+      if (cfg.modifier === 'grand_prix') hazBadges.push('评委急单');
       const hazSummary = hazBadges.length > 0 ? ` · ${hazBadges.join(' · ')}` : '';
+      const shiftIcon =
+        hazDefs.length > 0
+          ? hazDefs[0].icon
+          : cfg.modifier === 'grand_prix'
+          ? 'icon_judge'
+          : cfg.modifier === 'party_events'
+          ? 'yarn_ball'
+          : frozenSeeded > 0
+          ? 'icon_frost'
+          : 'icon_moon';
       showComboBanner(
-        `🌙 第 ${cfg.shift} 幕 · ${cfg.name}`,
-        `目标 ¥${cfg.target} · 步数 ${gameState.stepsMax}${hazSummary}`,
-        '#ffe570'
+        `第 ${cfg.shift} 幕 · ${cfg.name}`,
+        `目标 ¥${cfg.target} · ${gameState.stepsMax}步${hazSummary}`,
+        '#ffe570',
+        shiftIcon
       );
       const speechNote = hazDefs.length > 0
-        ? `本幕机关【${hazDefs.map((h) => h.icon + h.name).join(' + ')}】！${cfg.desc}`
+        ? `本幕机关：${hazDefs.map((h) => h.name).join(' + ')}！${cfg.desc}`
         : cfg.desc;
       setPatronSpeech(activePatron, speechNote, 5.2);
-      app.showToast(
-        hazBadges.length > 0
-          ? `🚀 第${cfg.shift}幕【${cfg.name}】开业！${hazBadges.join(' · ')}`
-          : `🚀 第${cfg.shift}幕【${cfg.name}】开业！目标 ¥${cfg.target}`,
-        { level: 'major' }
-      );
     }
 
     // Contextual first-time mechanic spotlight tips (Glaze Ring & Frozen Treats)!
@@ -2529,7 +2589,7 @@ function createApp() {
     if (!offer) return;
     gameState.victoryOffer = null;
     openPrepShop(offer.shiftSummary);
-    app.showToast('🔥 欢迎进入无尽午夜加时！先在整备间强化构筑吧！');
+    app.showToast('无尽午夜加时开启', { level: 'major', icon: 'mode_rush', tone: 'event' });
   }
 
   function finishVictoryRunFn() {
@@ -2556,14 +2616,13 @@ function createApp() {
       audio.playFeverStart();
       audio.setFeverMode(true);
       platform.vibrateShort('medium');
-      app.showToast(`🔥 星光磁吸狂热启动！${dur.toFixed(0)}秒连击最高 5× 积分！`);
-      setPatronSpeech(app.activePatron, '哇啊——星光磁吸狂热开启啦！连击最高5倍冲呀！！', 4.8);
+      setPatronSpeech(app.activePatron, '星光狂热开启！连击最高 5 倍冲呀！', 4.8);
       spawnSparkleBurst(JAR.canvasW / 2, 240, '#ffdf6b', 36);
       spawnShockwave(JAR.canvasW / 2, 260, 190, '#ffd85d', 4.5);
-      showComboBanner('🔥 星光磁吸狂热!', '极速投放 · 最高 5× 积分', '#ffe36e');
+      showComboBanner('星光磁吸狂热', `${dur.toFixed(0)}秒极速连击 · 最高 5×`, '#ffe36e', 'icon_flame');
 
       if (gameState.mode === 'rush') {
-        queueBlessing('🔥 狂热充能达成');
+        queueBlessing('狂热充能达成');
       }
     }
   }
@@ -2645,24 +2704,21 @@ function createApp() {
         { x: JAR.right - 20, y: JAR.neckY + 26, vx: -360, vy: 135, life: 0.95, maxLife: 0.95 },
         { x: JAR.right - 70, y: JAR.neckY + 58, vx: -320, vy: 125, life: 1.15, maxLife: 1.15 }
       );
-      showComboBanner('🌠 流星许愿夜!', '接下来的甜点75%镀金 · 狂热充能 +30%', '#ffe888');
-      app.showToast('🌠 突发事件：流星许愿夜！黄金甜点雨与 +30% 狂热充能！');
-      setPatronSpeech(activePatron, '快许愿呀！流星把面糊都镀上亮晶晶的金糖霜啦～', 4.4);
+      showComboBanner('流星许愿夜', '75% 镀金 · 狂热充能 +30%', '#ffe888', 'icon_stardust');
+      setPatronSpeech(activePatron, '流星把面糊镀上金糖霜啦，快许愿！', 4.4);
     } else if (kind === 'yarn') {
       gameState.activeEvent = { kind: 'yarn', timer: 0, maxTimer: 0 };
       const sx = 120 + Math.random() * 200;
       createYarnBallEntity(sx, JAR.neckY + 24);
       spawnSparkleBurst(sx, JAR.neckY + 28, '#ff9cb8', 18);
-      showComboBanner('🧶 猫咪捣蛋时间!', '附近合成2次或摇罐震碎爆 +180分 · +18⭐', '#ffa8c4');
-      app.showToast('🧶 突发事件：毛线球滚进罐里啦！附近合成2次即可震碎！');
-      setPatronSpeech(activePatron, '呀！毛线球滚进去了！在它旁边合两次就能砰地炸出星尘！', 4.6);
+      showComboBanner('猫咪捣蛋时间', '附近合成2次或摇罐震碎爆赏', '#ffa8c4', 'yarn_ball');
+      setPatronSpeech(activePatron, '毛线球滚进去啦！在旁边合两次震碎它！', 4.6);
     } else {
       gameState.activeEvent = { kind: 'chime', timer: 14.0, maxTimer: 14.0 };
       gameState.jarFlash = Math.max(gameState.jarFlash, 0.5);
       spawnSparkleBurst(JAR.canvasW / 2, JAR.neckY + 30, '#ffe072', 24);
-      showComboBanner('🔔 黄金烘焙钟!', '14秒内全合成 +45% 得分 · 连击窗口 +0.5s', '#ffe26a');
-      app.showToast('🔔 突发事件：黄金烘焙钟敲响！14 秒暴击得分 +45%！');
-      setPatronSpeech(activePatron, '叮当～壁炉黄金钟响了！趁这 14 秒疯狂连锁清罐吧！', 4.4);
+      showComboBanner('黄金烘焙钟', '14秒全合成 +45% · 连击 +0.5s', '#ffe26a', 'serve_bell');
+      setPatronSpeech(activePatron, '壁炉黄金钟响了！趁 14 秒疯狂连锁！', 4.4);
     }
     return kind;
   }
@@ -2687,7 +2743,7 @@ function createApp() {
 
       if (yb.yarnHp > 0) {
         audio.playYarnHit();
-        spawnPopup(yb.x, yb.y - 24, `🧶 脆度 ${yb.yarnHp}/2`, '#ffb6d0', 14);
+        spawnPopup(yb.x, yb.y - 24, `脆度 ${yb.yarnHp}/2`, '#ffb6d0', 14);
       } else {
         removedIds.add(yb.id);
         brokenCount++;
@@ -2711,9 +2767,9 @@ function createApp() {
         spawnShockwave(yb.x, yb.y, 76, '#ffe47a', 2.8);
         gameState.screenShake = Math.max(gameState.screenShake, 5.2);
         gameState.jarFlash = Math.max(gameState.jarFlash, 0.5);
-        const coinTxt = coinBonus > 0 ? ` +${coinBonus}🪙` : '';
-        spawnPopup(yb.x, yb.y - 18, `🧶 爆裂! +${pts}${coinTxt}`, '#ffe57e', 18);
-        showComboBanner('🧶 毛线球大爆裂!', `+${pts} · +${dust}⭐${coinTxt} · +25% 狂热`, '#ffb3d6');
+        const coinTxt = coinBonus > 0 ? ` +${coinBonus}币` : '';
+        spawnPopup(yb.x, yb.y - 18, `爆裂 +${pts}${coinTxt}`, '#ffe57e', 18);
+        showComboBanner('毛线球爆裂', `+${pts} · +${dust}星尘${coinTxt} · +25%狂热`, '#ffb3d6', 'yarn_ball');
       }
     }
 
@@ -2770,7 +2826,7 @@ function createApp() {
         addScore(pts);
         spawnIceShatterParticles(e.x, e.y, e.r);
         spawnShockwave(e.x, e.y, e.r * 2.2 + 24, '#a8ecff', 3.6);
-        spawnPopup(e.x, e.y - e.r * 0.55, `❄️ 破冰赏! +¥${pts}`, '#aef2ff', 16.5);
+        spawnPopup(e.x, e.y - e.r * 0.55, `破冰 +¥${pts}`, '#aef2ff', 16.5);
         notifyTreatSynthesized(e.tier, e);
       }
     }
@@ -2803,8 +2859,7 @@ function createApp() {
 
     audio.playWindGust();
     platform.vibrateShort('medium');
-    showComboBanner('🌪️ 星风紧急吹散!', `清掉顶部 ${clearCount} 颗 · 扣除 5.0s`, '#ff9b82');
-    app.showToast(`🌪️ 星风吹散！清除顶部 ${clearCount} 颗甜品并扣除 5.0 秒`);
+    showComboBanner('星风吹散', `清顶 ${clearCount} 颗 · -5.0s`, '#ff9b82', 'icon_wind');
   }
 
   // Tool & Chef Signature Skill Actions
@@ -2826,12 +2881,12 @@ function createApp() {
     if (gameState.tools[key] <= 0) {
       const cost = gameState.toolCosts[key];
       if (gameState.stardust < cost) {
-        app.showToast(`⭐ 星尘币不足（需要 ${cost} ⭐）`);
+        app.showToast(`星尘不足（需 ${cost}）`, { icon: 'icon_stardust', tone: 'warn' });
         return;
       }
       gameState.stardust -= cost;
       gameState.tools[key] = 1;
-      app.showToast(`⭐ 消耗 ${cost} 星尘补充了 1 次道具！`);
+      app.showToast(`-${cost} 星尘补充道具`, { icon: 'icon_stardust', tone: 'info' });
     }
 
     if (key === 'shake') {
@@ -2848,9 +2903,8 @@ function createApp() {
       damageNearbyYarnBalls(JAR.canvasW / 2, JAR.canvasH / 2, 0, true);
       const thawed = thawNearbyFrozenEntities(JAR.canvasW / 2, JAR.canvasH / 2, 0, true);
       app.showToast(
-        thawed > 0
-          ? `❄️ 摇一摇震碎了 ${thawed} 颗冰霜！破冰赏已到账！`
-          : '🔔 叮铃！玻璃罐轻轻摇晃起来了！'
+        thawed > 0 ? `震碎 ${thawed} 颗冰霜` : '玻璃罐摇晃起来了',
+        { icon: thawed > 0 ? 'icon_frost' : 'tool_shake', tone: thawed > 0 ? 'success' : 'info' }
       );
       return;
     }
@@ -2871,26 +2925,29 @@ function createApp() {
     const patron = app.activePatron;
     const sk = patron.activeSkill;
     if (gameState.skillEnergy < 100) {
-      app.showToast(`${sk.icon} 【${sk.name}】充能中 (${Math.floor(gameState.skillEnergy)}%)，点击金铃出餐可极速充能！`);
+      app.showToast(`${sk.name} 充能 ${Math.floor(gameState.skillEnergy)}% · 出餐加速`, {
+        icon: sk.icon,
+        tone: 'info'
+      });
       return;
     }
 
     gameState.activeToolMode = null;
     if (sk.id === 'scoop') {
       gameState.activeSkillMode = 'scoop';
-      app.showToast('🥄 点击罐内任意 1~5 阶甜品，捞回罐口并引发抽底雪崩！');
+      app.showToast('点 1~5 阶甜品捞回罐口', { icon: sk.icon, tone: 'info' });
     } else if (sk.id === 'swap') {
       const swappable = gameState.entities.filter((e) => !e.merged && !e.isYarnBall && !(e.frozenHp > 0));
       if (swappable.length < 2) {
-        app.showToast('🌙 罐内至少需要 2 颗未冰封甜品才能发动【星月移形】哦～');
+        app.showToast('需至少 2 颗未冰封甜品', { icon: sk.icon, tone: 'warn' });
         return;
       }
       gameState.activeSkillMode = 'swap_1';
       gameState.swapFirstEntityId = null;
-      app.showToast('🌙 请依次点击罐内两颗甜品，瞬间互换它们的位置！');
+      app.showToast('依次点 2 颗甜品互换', { icon: sk.icon, tone: 'info' });
     } else if (sk.id === 'meteor_shot') {
       if (gameState.nextShotMeteor) {
-        app.showToast('🔥 【元气重锤】已经装填完毕，发射即可撞击升阶！');
+        app.showToast('重锤已装填，发射撞击升阶', { icon: sk.icon, tone: 'info' });
         return;
       }
       gameState.skillEnergy = 0;
@@ -2898,8 +2955,7 @@ function createApp() {
       audio.playChefSkill('mugi');
       platform.vibrateShort('medium');
       spawnSparkleBurst(gameState.dropX, JAR.dropY + 12, '#ff8e52', 24);
-      showComboBanner('🔥 元气重锤装填!', '下次发射撞击首颗甜品直接升阶 + 爆破气浪', '#ff9e66');
-      app.showToast('🔥 元气重锤已就绪！拉弓发射撞向目标甜品吧！');
+      showComboBanner('元气重锤装填', '撞击首颗甜品直接升阶 + 震波', '#ff9e66', 'icon_flame');
     }
   }
 
@@ -2914,7 +2970,7 @@ function createApp() {
     if (!gameState.running || gameState.over || gameState.activeToolMode || gameState.activeSkillMode) return;
     if (app.activeModal === 'blessing') app.closeModal();
     if (!gameState.canHoldThisTurn) {
-      app.showToast('放下一颗甜品后才能再次交换暂存哦～');
+      app.showToast('发射后再交换暂存', { icon: 'icon_restart', tone: 'warn' });
       return;
     }
     audio.ensureCtx();
@@ -3129,8 +3185,7 @@ function createApp() {
         else gameState.orders.push(rushOrd);
         gameState.order = rushOrd;
         audio.playOrderStamp();
-        showComboBanner('🏅 美食评委突击加单!', '4 步内完成即享 ×2.5 营业额 + 2 步!', '#ffe570');
-        app.showToast('🏅 评委突击加单抵达 VIP 桌！4 步内上菜赏 ×2.5 并 +2 步！');
+        showComboBanner('评委突击急单', '4步内出餐 ×2.5 · 返 +2步', '#ffe570', 'icon_judge');
       }
     }
 
@@ -3156,7 +3211,7 @@ function createApp() {
           if (!e.merged) e.vy -= 95 + Math.random() * 55;
         }
         spawnSparkleBurst(JAR.canvasW * 0.5, 290, '#d6b2ff', 24);
-        showComboBanner('🛸 月光反重力洗牌!', '1.3 秒重力倒置 · 期间全合成 ×2.2!', '#dfc2ff');
+        showComboBanner('月光反重力洗牌', '1.3秒重力倒置 · 合成 ×2.2', '#dfc2ff', 'icon_ufo');
       }
     }
 
@@ -3180,7 +3235,7 @@ function createApp() {
     gameState.nextMeta = bundle.meta;
 
     if (triggerPity) {
-      app.showToast('🌈 星露蓄满！下一颗必出【彩虹万能糖】！');
+      app.showToast('星露蓄满 · 下颗彩虹糖', { icon: 'icon_rainbow', tone: 'event' });
     }
 
     if (gameState.mode !== 'rush' && !gameState.activeEvent && gameState.shiftModifier !== 'party_events') {
@@ -3269,8 +3324,8 @@ function createApp() {
     gameState.shockwaves.push({ x, y, r: 8, maxR, color, lineWidth, life: 0.38, maxLife: 0.38 });
   }
 
-  function showComboBanner(text, sub = '', color = '#ffe56b') {
-    gameState.comboBanner = { text, sub, color, life: 1.35, maxLife: 1.35 };
+  function showComboBanner(text, sub = '', color = '#ffe56b', icon = '') {
+    gameState.comboBanner = { text, sub, color, icon, life: 1.35, maxLife: 1.35 };
   }
 
   function applyMergeShockwaveImpulse(mx, my, bornR, nextTier, excludeId) {
@@ -3324,7 +3379,7 @@ function createApp() {
     addRunStardust(victims.length * 5);
     addSkillEnergy(victims.length * 10);
     audio.playTraitTrigger(8);
-    spawnPopup(mb.x, mb.y + mb.r * 0.4, `🌰 ${isEcho ? '回响' : ''}重锤压碎×${victims.length}! +${pts}`, '#ffd699', 16);
+    spawnPopup(mb.x, mb.y + mb.r * 0.4, `${isEcho ? '回响' : ''}压碎×${victims.length} +${pts}`, '#ffd699', 16);
     return victims.length;
   }
 
@@ -3334,7 +3389,7 @@ function createApp() {
     const traitCnt = app.getArchetypeCount('trait');
     const rMult = traitCnt >= 2 ? 1.22 : 1.0;
 
-    // Archetype Synergy: #异能 2-piece (+¥60) & 3-piece (+15% skill & +4⭐)
+    // Archetype Synergy: #异能 2-piece (+¥60) & 3-piece (+15% skill & +4 stardust)
     if (tier >= 3 && traitCnt >= 2) {
       const synPts = Math.round(60 * app.getFeverMultiplier() * app.getGlobalRevenueMult());
       addScore(synPts);
@@ -3354,7 +3409,7 @@ function createApp() {
       // T3 Matcha Kitty: 1.8s gentle same-tier resonance field
       born.resonanceTimer = traitCnt >= 2 ? 2.2 : 1.8;
       spawnShockwave(mx, my, Math.round(105 * rMult), '#a8e67e', 2.4);
-      spawnPopup(mx, my - born.r - 12, '🍵 猫耳共鸣!', '#c9f598', 12.5);
+      spawnPopup(mx, my - born.r - 12, '猫耳共鸣', '#c9f598', 12.5);
     } else if (tier === 4) {
       // T4 Lemon Honey Tart (upgraded by rel_lemonade & #异能 synergy!)
       const hasLem = app.hasRelic('rel_lemonade');
@@ -3382,8 +3437,8 @@ function createApp() {
         const coinGain = hasLem && gameState.mode === 'chef' ? addCoins(targets.length * 3) : 0;
         audio.playTraitTrigger(4);
         wakeNeighborsAfterRemoval(mx, my, born.r);
-        const cTag = coinGain > 0 ? ` +${coinGain}🪙` : '';
-        spawnPopup(mx, my - born.r - 16, `🍋 ${isEcho ? '回响' : '气泡'}清杂×${targets.length}! +${gainPts}${cTag}`, '#fff08a', 15);
+        const cTag = coinGain > 0 ? ` +${coinGain}币` : '';
+        spawnPopup(mx, my - born.r - 16, `${isEcho ? '回响' : '气泡'}清杂×${targets.length} +${gainPts}${cTag}`, '#fff08a', 15);
       }
     } else if (tier === 5) {
       // T5 Strawberry Daifuku: soft inward mochi vortex pulls neighbors gently together
@@ -3405,7 +3460,7 @@ function createApp() {
       if (pulled > 0) {
         audio.playTraitTrigger(5);
         spawnShockwave(mx, my, Math.round(135 * rMult), '#ff9ec2', 3.0);
-        spawnPopup(mx, my - born.r - 16, isEcho ? '⚗️ 大福回响聚拢!' : '🍓 软糯聚拢!', '#ffb8d6', 14);
+        spawnPopup(mx, my - born.r - 16, isEcho ? '回响聚拢' : '软糯聚拢', '#ffb8d6', 14);
       }
     } else if (tier === 6) {
       // T6 Caramel Star Donut: 1.4s spinning mixer loosens wedged clusters
@@ -3429,7 +3484,7 @@ function createApp() {
       }
       audio.playTraitTrigger(6);
       spawnShockwave(mx, my, born.r * 1.9, '#eab074', 3.2);
-      spawnPopup(mx, my - born.r - 16, isEcho ? '⚗️ 焦糖回响旋搅!' : '🍩 焦糖陀螺!', '#ffd499', 14.5);
+      spawnPopup(mx, my - born.r - 16, isEcho ? '回响旋搅' : '焦糖陀螺', '#ffd499', 14.5);
     } else if (tier === 7) {
       // T7 Cosmic Macaron: low-gravity buoyant lift
       if (!isEcho) {
@@ -3444,7 +3499,7 @@ function createApp() {
         }
       }
       spawnSparkleBurst(mx, my, '#d8c2ff', 16);
-      spawnPopup(mx, my - born.r - 16, isEcho ? '⚗️ 云端回响浮升!' : '☁️ 云端微浮!', '#e5d4ff', 14.5);
+      spawnPopup(mx, my - born.r - 16, isEcho ? '回响浮升' : '云端微浮', '#e5d4ff', 14.5);
     } else if (tier === 8) {
       // T8 Royal Mont Blanc: heavy hammer crush
       triggerMontBlancCrush(born, isEcho);
@@ -3486,7 +3541,7 @@ function createApp() {
         platform.vibrateShort('light');
         spawnSparkleBurst(gh.x, gh.y, '#ffe47a', 18);
         spawnShockwave(gh.x, gh.y, 58, '#ffe066', 3.2);
-        spawnPopup(gh.x, gh.y - 16, '✨ 星环镀金!', '#ffe878', 15);
+        spawnPopup(gh.x, gh.y - 16, '星环镀金', '#ffe878', 15);
       }
     }
 
@@ -3508,7 +3563,7 @@ function createApp() {
         addScore(tip);
         spawnSparkleBurst(bh.x, bh.y, '#ffe47a', 10);
         spawnShockwave(bh.x, bh.y, 40, '#ffd86b', 2.6);
-        const popTxt = grantsCrit ? `🧈 +¥${tip} 暴击蓄能!` : `🧈 +¥${tip} 弹柱小费!`;
+        const popTxt = grantsCrit ? `+¥${tip} 暴击蓄能` : `+¥${tip} 弹柱`;
         spawnPopup(bh.x, bh.y - 16, popTxt, '#ffe588', 13);
       }
     }
@@ -3520,9 +3575,9 @@ function createApp() {
         spawnSparkleBurst(wb.x, wb.y, '#9cf4ff', 10);
         spawnShockwave(wb.x, wb.y, 44, '#9cf4ff', 2.6);
         if (wb.count === 1) {
-          spawnPopup(wb.x + wb.nx * 24, wb.y - 10, '🎱 弹壁!', '#b4f6ff', 13);
+          spawnPopup(wb.x + wb.nx * 24, wb.y - 10, '弹壁', '#b4f6ff', 13);
         } else if (wb.count === 2 && app.hasRelic('rel_bouncy')) {
-          spawnPopup(wb.x + wb.nx * 24, wb.y - 10, '🍮 二段弹壁 ×2.8!', '#9cf4ff', 14.5);
+          spawnPopup(wb.x + wb.nx * 24, wb.y - 10, '二段弹壁 ×2.8', '#9cf4ff', 14.5);
         }
       }
     }
@@ -3556,8 +3611,8 @@ function createApp() {
           unlockTier(nextTier);
           triggerDessertTrait(tgt, tgt.x, tgt.y);
           notifyTreatSynthesized(nextTier, tgt);
-          spawnPopup(tgt.x, tgt.y - tgt.r * 0.6, `🔥 重锤升阶! +${pts}`, '#ffba78', 18);
-          showComboBanner('🔥 元气重锤命中!', `${def.name} 强行升阶 +${pts}`, '#ffaa66');
+          spawnPopup(tgt.x, tgt.y - tgt.r * 0.6, `重锤升阶 +${pts}`, '#ffba78', 18);
+          showComboBanner('元气重锤命中', `${def.name} 升阶 +${pts}`, '#ffaa66', 'icon_flame');
         }
       }
     }
@@ -3649,11 +3704,11 @@ function createApp() {
         // Base skill recharge from merging
         addSkillEnergy(5);
 
-        // Luna Rainbow Wildcard Merge Bounty (+5🪙 in Chef & +6⭐)
+        // Luna Rainbow Wildcard Merge Bounty (+5 coins in Chef & +6 stardust)
         if ((isWildMerge || isTwinWild) && saveData.selectedPatron === 'luna') {
           const lunaDust = addRunStardust(6);
           const lunaCoin = gameState.mode === 'chef' ? addCoins(5) : 0;
-          spawnPopup(mx, my - 46, `🌙 星兔虹赏${lunaCoin > 0 ? ` +${lunaCoin}🪙` : ''} +${lunaDust}⭐`, '#e5caff', 13);
+          spawnPopup(mx, my - 46, `星兔虹赏${lunaCoin > 0 ? ` +${lunaCoin}币` : ''} +${lunaDust}星尘`, '#e5caff', 13);
         }
 
         // Serve Cascade Avalanche detection!
@@ -3682,15 +3737,15 @@ function createApp() {
             if (gameState.mode === 'chef' && (hasPerpetual || gameState.shiftStepRefunds < 3)) {
               gameState.stepsLeft++;
               gameState.shiftStepRefunds++;
-              stepStr = ' · 步数+1!';
+              stepStr = ' · +1步';
               if (hasPerpetual && gameState.orders && gameState.orders.length > 0) {
                 gameState.orders[0] = generateTableOrder(gameState.orders[0].slotOrigin || 'quick', false, {
                   doubleFresh: true
                 });
-                spawnPopup(JAR.canvasW / 2, 120, '♾️ 翻台永动! 鲜度加倍新单!', '#ffe588', 15);
+                spawnPopup(JAR.canvasW / 2, 120, '翻台永动 · 鲜度翻倍', '#ffe588', 15);
               }
             }
-            spawnPopup(JAR.canvasW / 2, 148, `🏔️ 抽底雪崩连爆!${stepStr} +20%技 · +${avDust}⭐`, '#9cf4ff', 17);
+            spawnPopup(JAR.canvasW / 2, 148, `抽底雪崩连爆${stepStr} +20%技 +${avDust}星尘`, '#9cf4ff', 16.5);
           }
         }
 
@@ -3712,16 +3767,16 @@ function createApp() {
           addSkillEnergy(10);
           if (bankArchCnt >= 2) addFeverEnergy(8);
 
-          // Mugi Patron Bank-Shot Coin Bounty (+3🪙 up to 5 times per shift!)
+          // Mugi Patron Bank-Shot Coin Bounty (+3 coins up to 5 times per shift)
           if (saveData.selectedPatron === 'mugi' && gameState.mode === 'chef' && gameState.mugiBankCoinHits < 5) {
             gameState.mugiBankCoinHits++;
             addCoins(3);
-            spawnPopup(mx - 24, my - 38, '🍯 弹壁赏 +3🪙!', '#ffd880', 13);
+            spawnPopup(mx - 24, my - 38, '弹壁赏 +3币', '#ffd880', 13);
           }
 
           if (app.hasRelic('rel_prism') && gameState.nextMeta && !gameState.nextMeta.wildcard) {
             gameState.nextMeta.golden = true;
-            spawnPopup(mx, my - 42, '💎 折光镀金!', '#ffe888', 13.5);
+            spawnPopup(mx, my - 42, '折光镀金', '#ffe888', 13.5);
           }
           if (app.hasRelic('rel_ricochet')) {
             addSkillEnergy(35);
@@ -3734,10 +3789,10 @@ function createApp() {
           addSkillEnergy(20);
           if (gameState.mode === 'rush') {
             addScore(80);
-            spawnPopup(mx + 26, my - 26, '🍯 +80分 · +20%技!', '#ffd27a', 13);
+            spawnPopup(mx + 26, my - 26, '+80 · +20%技', '#ffd27a', 13);
           } else {
             const mugiDust = addRunStardust(4);
-            spawnPopup(mx + 26, my - 26, `🍯 +${mugiDust}⭐ · +20%技`, '#ffd27a', 13);
+            spawnPopup(mx + 26, my - 26, `+${mugiDust}星尘 · +20%技`, '#ffd27a', 13);
           }
         }
 
@@ -3751,13 +3806,13 @@ function createApp() {
           gameState.feverMaxDuration = Math.max(gameState.feverMaxDuration, gameState.feverTimer);
           gameState.feverBonusUsed += ext;
           audio.playFeverExtend();
-          spawnPopup(JAR.canvasW / 2, 118, '🔥 狂热延时 +0.8s!', '#ffdf6b', 15);
+          spawnPopup(JAR.canvasW / 2, 118, '狂热 +0.8s', '#ffdf6b', 15);
         }
 
         const rainbowComboReq = rainbowLv > 0 ? 3 : 4;
         if (gameState.comboCount >= rainbowComboReq && !gameState.comboRainbowGranted) {
           gameState.comboRainbowGranted = true;
-          grantNextRainbow(`${gameState.comboCount}连合奖励`);
+          grantNextRainbow(`${gameState.comboCount}连合`);
         }
 
         damageNearbyYarnBalls(mx, my, isMeteorMerge ? 135 : 95, false);
@@ -3780,8 +3835,8 @@ function createApp() {
           gameState.hitstopTimer = Math.max(gameState.hitstopTimer, 0.048);
           gameState.screenShake = Math.max(gameState.screenShake, 5.5);
           gameState.jarFlash = Math.max(gameState.jarFlash, 0.65);
-          showComboBanner('🌈 双彩虹奇迹!', `黄金草莓大福诞生 +${pts}`, '#ff9fd2');
-          spawnPopup(mx, my - 30, `🌈 双虹奇迹! +${pts}`, '#ffe57e', 20);
+          showComboBanner('双彩虹奇迹', `黄金大福诞生 +${pts}`, '#ff9fd2', 'icon_rainbow');
+          spawnPopup(mx, my - 30, `双虹奇迹 +${pts}`, '#ffe57e', 20);
           notifyTreatSynthesized(5, born);
           continue;
         }
@@ -3858,54 +3913,55 @@ function createApp() {
           }
 
           const sym = gameState.mode === 'chef' ? '¥' : '';
-          let label = isChimeEvent ? `🔔 +${sym}${pts}` : `+${sym}${pts}`;
+          let label = `+${sym}${pts}`;
           let popColor = isChimeEvent ? '#ffe778' : '#ffffff';
           let popSize = 15;
           if (cascadeHitNum >= 1) {
-            label = `🏔️ 雪崩×${cascadeMult.toFixed(1)}! +${sym}${pts}`;
+            label = `雪崩×${cascadeMult.toFixed(1)} +${sym}${pts}`;
             popColor = '#9cf4ff';
             popSize = 18 + Math.min(4, cascadeHitNum);
-            showComboBanner(`🏔️ 抽底雪崩 ${cascadeHitNum} 连!!`, `雪崩倍率 ×${cascadeMult.toFixed(1)} · +${sym}${pts}`, '#9cf4ff');
+            showComboBanner(`抽底雪崩 ${cascadeHitNum} 连`, `倍率 ×${cascadeMult.toFixed(1)} · +${sym}${pts}`, '#9cf4ff', 'icon_wave');
           } else if (antiGravMult > 1) {
-            label = `🛸 反重力×2.2! +${sym}${pts}`;
+            label = `反重力×2.2 +${sym}${pts}`;
             popColor = '#dfc2ff';
             popSize = 18;
           } else if (isBankShot) {
             label = ricochetLeap
-              ? `🏹 神枪跳阶+2! +${sym}${pts}`
-              : `🎱 弹壁×${bankMult.toFixed(1)}! +${sym}${pts}`;
+              ? `神枪跳阶+2 +${sym}${pts}`
+              : `弹壁×${bankMult.toFixed(1)} +${sym}${pts}`;
             popColor = '#9cf4ff';
             popSize = 18;
             showComboBanner(
-              ricochetLeap ? '🏹 神枪跳阶箭!' : '🎱 弹壁神球!',
+              ricochetLeap ? '神枪跳阶箭' : '弹壁神球',
               `${def.name} ×${bankMult.toFixed(1)} · +${sym}${pts}`,
-              '#9cf4ff'
+              '#9cf4ff',
+              ricochetLeap ? 'icon_arrow' : 'icon_billiard'
             );
           } else if (isCrit) {
-            label = `⚡ 奇迹跳阶+2! +${sym}${pts}`;
+            label = `奇迹跳阶+2 +${sym}${pts}`;
             popColor = '#ffe46b';
             popSize = 19;
-            showComboBanner(`⚡ 奇迹跳阶 · ${def.name}!`, `双倍暴击 +${sym}${pts}`, '#ffe46b');
+            showComboBanner(`奇迹跳阶 · ${def.name}`, `双倍暴击 +${sym}${pts}`, '#ffe46b', 'icon_bolt');
           } else if (isGoldenMerge) {
-            label = `✨ 黄金×2.5! +${sym}${pts}`;
+            label = `黄金×2.5 +${sym}${pts}`;
             popColor = '#ffe678';
             popSize = 18;
-            showComboBanner(`✨ 黄金暴击 ×2.5!`, `+${sym}${pts} · +${dustGain}⭐`, '#ffe272');
+            showComboBanner('黄金暴击 ×2.5', `+${sym}${pts} · +${dustGain}星尘`, '#ffe272', 'icon_stardust');
           } else if (isWildMerge) {
-            label = `🌈 彩虹升阶! +${sym}${pts}`;
+            label = `彩虹升阶 +${sym}${pts}`;
             popColor = '#ffb7e2';
             popSize = 18;
-            showComboBanner(`🌈 彩虹万能升阶!`, `${def.name} +${sym}${pts}`, '#ffb7e2');
+            showComboBanner('彩虹升阶', `${def.name} +${sym}${pts}`, '#ffb7e2', 'icon_rainbow');
           } else if (gameState.comboCount >= 2) {
-            label = `${gameState.comboCount}连合! +${sym}${pts}`;
+            label = `${gameState.comboCount}连合 +${sym}${pts}`;
             popColor = '#ffe46b';
             popSize = 17 + Math.min(4, gameState.comboCount - 2);
             const subTxt = gameState.feverTimer > 0
-              ? `狂热 ${feverMult.toFixed(1).replace('.0', '')}× 倍率爆发中!`
+              ? `狂热 ${feverMult.toFixed(1).replace('.0', '')}× 倍率`
               : gameState.comboCount >= 3
-              ? '多米诺大连锁!'
-              : '丝滑连击!';
-            showComboBanner(`${gameState.comboCount} 连合!!`, subTxt, gameState.comboCount >= 4 ? '#ff9fd2' : '#ffe46b');
+              ? '多米诺连锁'
+              : '丝滑连击';
+            showComboBanner(`${gameState.comboCount} 连合`, subTxt, gameState.comboCount >= 4 ? '#ff9fd2' : '#ffe46b', 'icon_bolt');
           }
           spawnPopup(mx, my - def.radius * 0.6, label, popColor, popSize);
 
@@ -3913,9 +3969,8 @@ function createApp() {
             gameState.soufflesMadeThisRun++;
             saveData.lifetimeStats.soufflesMade = (saveData.lifetimeStats.soufflesMade || 0) + 1;
             persistSaveData();
-            app.showToast('👑 传说诞生！留罐全场 ×2.0，点击它即可主菜献礼 +¥3200！');
-            setPatronSpeech(app.activePatron, '哇！！星冠猫神舒芙蕾诞生了！留着翻倍还是直接献礼？', 5.0);
-            showComboBanner('👑 星冠猫神诞生!', '留罐全局 ×2.0 · 点击随时献礼!', '#ffe46b');
+            setPatronSpeech(app.activePatron, '星冠猫神诞生！留罐翻倍或点击献礼！', 5.0);
+            showComboBanner('星冠猫神诞生', '留罐全场 ×2.0 · 点击献礼 +¥3200', '#ffe46b', 'icon_crown');
           }
           notifyTreatSynthesized(nextTier, born);
         } else {
@@ -3934,9 +3989,8 @@ function createApp() {
           gameState.hitstopTimer = Math.max(gameState.hitstopTimer, 0.06);
           gameState.screenShake = Math.max(gameState.screenShake, 7.5);
           gameState.jarFlash = Math.max(gameState.jarFlash, 0.85);
-          spawnPopup(mx, my, `👑 星冠超新星! +${pts}`, '#ffe570', 22);
-          showComboBanner('👑 星冠超新星!!', `+${pts} · 净化罐内小甜点`, '#ffe570');
-          app.showToast('🌟 传说奇景！星冠猫神引发了甜品超新星！');
+          spawnPopup(mx, my, `星冠超新星 +${pts}`, '#ffe570', 22);
+          showComboBanner('星冠超新星', `+${pts} · 净化小甜品`, '#ffe570', 'icon_crown');
           gameState.entities = gameState.entities.filter((e) => {
             if (!e.isWildcard && !e.isYarnBall && !(e.frozenHp > 0) && e.tier <= 2 && Math.hypot(e.x - mx, e.y - my) < 190) {
               spawnSparkleBurst(e.x, e.y, '#9be0ff', 8);
@@ -4206,7 +4260,7 @@ function createApp() {
       reason,
       isNewBest,
       finalEarned,
-      detailText: `${calc.parts.join(' · ')} → 已存入银行（余额：${saveData.bankStardust} ⭐）`,
+      detailText: `${calc.parts.join(' · ')} → 余额 ${saveData.bankStardust} 星尘`,
       hasAffordable: hasAffordableShopItem()
     };
     app.openModal('gameover');
@@ -4414,9 +4468,9 @@ function createApp() {
     if (mode === 'chef') {
       setPatronSpeech(activePatron, activePatron.greet, 5.0);
     } else if (mode === 'rush') {
-      setPatronSpeech(activePatron, `⚡ 90秒弹射狂欢！开局闪电单就绪，连续点击上菜最高 +4.5s & ×2.5！`, 5.0);
+      setPatronSpeech(activePatron, '90秒弹射狂欢！连续上菜最高 +4.5s & ×2.5！', 5.0);
     } else {
-      setPatronSpeech(activePatron, `🍵 悠闲经典开启！拖动瞄准可预览甜品异能范围与弹壁折射哦～`, 5.0);
+      setPatronSpeech(activePatron, '悠闲经典开启！拖动瞄准预览折射与异能范围～', 5.0);
     }
   }
 
@@ -4512,7 +4566,7 @@ function createApp() {
         isJudgeRush: !!o.isJudgeRush,
         isStarterBlitz: !!o.isStarterBlitz,
         bonusSteps: o.bonusSteps || 0,
-        label: o.label || (o.kind === 'vip' ? '👑 VIP桌' : '⚡ 快餐桌'),
+        label: o.label || (o.kind === 'vip' ? 'VIP桌' : '快餐桌'),
         patron: PATRONS.find((p) => p.id === o.patronId) || PATRONS[0],
         slots: (o.slots || []).map((s) => ({ tier: s.tier || 3, done: !!s.done })),
         bonusScore: o.bonusScore || 100,
@@ -4545,7 +4599,7 @@ function createApp() {
       app.syncAudioMood();
     }
 
-    setPatronSpeech(app.activePatron, `欢迎回来呀店长！第 ${gameState.shift} 幕热炉已保温就绪～`, 4.5);
+    setPatronSpeech(app.activePatron, `欢迎回来！第 ${gameState.shift} 幕热炉已就绪～`, 4.5);
     return true;
   }
 
@@ -4579,21 +4633,21 @@ function createApp() {
   function handleSkillCanvasClick(lx, ly) {
     const target = findEntityAt(lx, ly, 10);
     if (!target) {
-      app.showToast('请点击罐内的甜品目标哦～');
+      app.showToast('请点罐内甜品目标', { icon: 'icon_warn', tone: 'warn' });
       return;
     }
     if (target.isYarnBall) {
-      app.showToast('🧶 毛线球无法被厨艺技选中，请在附近合成 2 次或摇一摇震碎！');
+      app.showToast('毛线球需周边合成2次或摇罐震碎', { icon: 'yarn_ball', tone: 'warn' });
       return;
     }
     if (target.frozenHp > 0) {
-      app.showToast('❄️ 冰封甜品无法被厨艺技选中，请先在周边合成、用元气重锤或摇一摇破冰！');
+      app.showToast('冰封甜品需先破冰', { icon: 'icon_frost', tone: 'warn' });
       return;
     }
 
     if (gameState.activeSkillMode === 'scoop') {
       if (target.isWildcard || target.tier > 5) {
-        app.showToast('🥄 【金勺捞底】只能捞出 1~5 阶甜品哦！');
+        app.showToast('金勺捞底限选 1~5 阶甜品', { icon: 'tool_spoon', tone: 'warn' });
         return;
       }
       gameState.skillEnergy = 0;
@@ -4614,8 +4668,8 @@ function createApp() {
       platform.vibrateShort('medium');
       spawnSparkleBurst(target.x, target.y, '#ffe47a', 24);
       spawnShockwave(target.x, target.y, target.r * 2.2 + 30, '#ffe47a', 3.6);
-      spawnPopup(target.x, target.y - 14, `🥄 金勺捞底!`, '#ffe680', 18);
-      showComboBanner('🥄 金勺捞底发动!', '原位触发抽底雪崩 · 甜品已捞回罐口', '#ffe47a');
+      spawnPopup(target.x, target.y - 14, '金勺捞底', '#ffe680', 18);
+      showComboBanner('金勺捞底发动', '触发抽底雪崩 · 甜品已捞回', '#ffe47a', 'tool_spoon');
       cancelToolMode();
       return;
     }
@@ -4625,7 +4679,10 @@ function createApp() {
       gameState.activeSkillMode = 'swap_2';
       audio.playTilt();
       spawnShockwave(target.x, target.y, target.r + 20, '#d8b4ff', 2.8);
-      app.showToast(`🌙 已选中【${target.isWildcard ? '彩虹糖' : TIERS[target.tier - 1].name}】，请点击第 2 颗甜品互换位置！`);
+      app.showToast(`已选${target.isWildcard ? '彩虹糖' : TIERS[target.tier - 1].name} · 再点第2颗`, {
+        icon: 'icon_moon',
+        tone: 'info'
+      });
       return;
     }
 
@@ -4637,7 +4694,7 @@ function createApp() {
         return;
       }
       if (target.id === first.id) {
-        app.showToast('请选择另一颗不同的甜品进行位置互换哦～');
+        app.showToast('请点另一颗甜品互换', { icon: 'icon_moon', tone: 'warn' });
         return;
       }
 
@@ -4662,8 +4719,8 @@ function createApp() {
       spawnSparkleBurst(target.x, target.y, '#ffe47a', 20);
       spawnShockwave(first.x, first.y, first.r + 36, '#d8b4ff', 3.4);
       spawnShockwave(target.x, target.y, target.r + 36, '#ffe47a', 3.4);
-      spawnPopup((first.x + target.x) * 0.5, Math.min(first.y, target.y) - 16, '🌙 星月移形·柔磁共鸣!', '#e5caff', 18);
-      showComboBanner('🌙 星月移形!', '空间对调 + 2.0s 全罐柔磁共鸣!', '#d8b4ff');
+      spawnPopup((first.x + target.x) * 0.5, Math.min(first.y, target.y) - 16, '星月移形', '#e5caff', 18);
+      showComboBanner('星月移形', '位置对调 · 2秒全罐柔磁', '#d8b4ff', 'icon_moon');
       cancelToolMode();
     }
   }
@@ -4671,25 +4728,25 @@ function createApp() {
   function handleToolCanvasClick(lx, ly) {
     const target = findEntityAt(lx, ly);
     if (!target) {
-      app.showToast('请点击罐内的甜品哦～');
+      app.showToast('请点罐内甜品', { icon: 'icon_warn', tone: 'warn' });
       return;
     }
     if (target.isYarnBall) {
-      app.showToast('🧶 毛线球请在附近合成 2 次或使用【摇一摇】震碎！');
+      app.showToast('毛线球需周边合成2次或摇罐震碎', { icon: 'yarn_ball', tone: 'warn' });
       return;
     }
     if (target.frozenHp > 0) {
-      app.showToast('❄️ 冰封甜品无法使用升阶勺，请先在周边合成、用元气重锤或摇一摇破冰！');
+      app.showToast('冰封甜品需先破冰', { icon: 'icon_frost', tone: 'warn' });
       return;
     }
 
     if (gameState.activeToolMode === 'spoon') {
       if (target.isWildcard) {
-        app.showToast('🌈 彩虹万能糖碰到任意甜品就会自动升阶，无需升阶勺！');
+        app.showToast('彩虹糖碰触即升阶，无需升阶勺', { icon: 'icon_rainbow', tone: 'warn' });
         return;
       }
       if (target.tier >= 9) {
-        app.showToast('👑 已经是最高阶星冠猫神舒芙蕾啦！点击它即可直接献礼！');
+        app.showToast('已达最高阶，点击即可献礼', { icon: 'icon_crown', tone: 'info' });
         return;
       }
       if (gameState.tools.spoon <= 0) return;
@@ -4715,7 +4772,7 @@ function createApp() {
       audio.playTool('spoon');
       spawnSparkleBurst(target.x, target.y, '#ffe16e', 22);
       spawnShockwave(target.x, target.y, target.r * 2.0, '#ffe16e', 3.4);
-      spawnPopup(target.x, target.y - target.r * 0.5, `✨ 升阶! +${pts}`, '#ffe470', 17);
+      spawnPopup(target.x, target.y - target.r * 0.5, `升阶 +${pts}`, '#ffe470', 17);
       triggerDessertTrait(target, target.x, target.y);
       notifyTreatSynthesized(nextTier, target);
       cancelToolMode();
@@ -5120,7 +5177,7 @@ function createApp() {
           gameState.feverEnergy = 0;
           gameState.feverBonusUsed = 0;
           audio.setFeverMode(false);
-          app.showToast('🌙 星光磁吸狂热结束，继续连合积攒能量吧！');
+          app.showToast('星光狂热结束', { icon: 'icon_moon', tone: 'info' });
         }
       }
 
@@ -5132,7 +5189,7 @@ function createApp() {
           if (gameState.activeEvent.timer <= 0) {
             const endedKind = gameState.activeEvent.kind;
             gameState.activeEvent = null;
-            if (endedKind === 'chime') app.showToast('🔔 黄金烘焙钟余韵渐散，继续加油！');
+            if (endedKind === 'chime') app.showToast('黄金烘焙钟结束', { icon: 'serve_bell', tone: 'info' });
           }
         }
       } else if (gameState.mode === 'rush') {
@@ -5269,7 +5326,7 @@ function createApp() {
             authorized: true
           });
         } else if (res && res.cancelled) {
-          app.showToast('🐾 未授权也没关系，可使用猫咪店长名片继续游玩～');
+          app.showToast('可继续使用猫咪名片游玩', { icon: 'icon_paw_guide', tone: 'info' });
         }
       }
     );
@@ -5306,8 +5363,8 @@ function createApp() {
   );
   platform.setupShare(() => ({
     title: gameState.score > 0
-      ? `🌙 我在星夜吃茶闯到第 ${gameState.shift} 幕拿下了 ¥${gameState.score}！快来体验 16 种秘方流派构筑～`
-      : '🌙 星夜吃茶 · 喵呜甜品合合乐｜手绘弹射物理肉鸽合成小游戏'
+      ? `我在星夜吃茶闯到第 ${gameState.shift} 幕拿下了 ¥${gameState.score}！快来体验 16 种秘方流派构筑`
+      : '星夜吃茶 · 喵呜甜品合合乐｜手绘弹射物理肉鸽合成小游戏'
   }));
 
   // Expose Debug Inspection Hooks for Automated E2E Testing
@@ -5559,8 +5616,7 @@ function createApp() {
       else gameState.orders.push(rushOrd);
       gameState.order = rushOrd;
       audio.playOrderStamp();
-      showComboBanner('🏅 美食评委突击加单!', '4 步内完成即享 ×2.5 营业额 + 2 步!', '#ffe570');
-      app.showToast('🏅 评委突击加单抵达 VIP 桌！4 步内上菜赏 ×2.5 并 +2 步！');
+      showComboBanner('评委突击急单', '4步内出餐 ×2.5 · 返 +2步', '#ffe570', 'icon_judge');
       return rushOrd.uid;
     },
     clearEntities: () => {

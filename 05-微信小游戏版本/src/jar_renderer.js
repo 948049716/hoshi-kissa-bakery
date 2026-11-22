@@ -159,7 +159,7 @@ function computeDessertAnimPose(tier, anim) {
   }
 }
 
-function drawDessertActionFX(ctx, x, y, r, tier, anim) {
+function drawDessertActionFX(ctx, x, y, r, tier, anim, sprites = null) {
   if (!anim) return;
   const p = Math.max(0, Math.min(1, anim.t / anim.dur));
   const env = Math.sin(p * Math.PI);
@@ -181,35 +181,61 @@ function drawDessertActionFX(ctx, x, y, r, tier, anim) {
       UI.drawHeartIcon(ctx, cx, floatY, 13 + 3 * env, '#ff6f9c');
       UI.drawHeartIcon(ctx, cx + 10, floatY - 7, 8 + 2 * env, '#ffa3c2');
     } else if (anim.style === 'boop') {
-      UI.drawStar(ctx, cx - 7, floatY, 5.5 * env, p * 5);
       ctx.fillStyle = '#ffe169';
+      UI.drawStar(ctx, cx - 7, floatY, 5.5 * env, p * 5);
       UI.drawStar(ctx, cx + 8, floatY - 4, 4.5 * env, -p * 5);
     } else {
-      ctx.font = UI.fontStr(13, 900);
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = '#3c2118';
-      const note = p < 0.5 ? '♪' : '♫';
-      ctx.strokeText(note, cx + Math.sin(p * 10) * 5, floatY);
-      ctx.fillStyle = '#ffe47a';
-      ctx.fillText(note, cx + Math.sin(p * 10) * 5, floatY);
+      if (!UI.drawUiIcon(ctx, sprites, 'icon_bgm', cx + Math.sin(p * 10) * 5, floatY, 13 + 2 * env)) {
+        ctx.fillStyle = '#ffe47a';
+        UI.drawStar(ctx, cx + Math.sin(p * 10) * 5, floatY, 5.5 * env, p * 4);
+      }
     }
     ctx.restore();
     return;
   }
 
-  const label = tier === 7 && p < 0.35 ? 'Zzz' : SOLO_EMOTES[(tier - 1) % SOLO_EMOTES.length];
   const ex = x + r * 0.55;
   const ey = y - r * 0.72 - p * 10;
-  ctx.font = UI.fontStr(11.5, 800);
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.lineWidth = 2.8;
-  ctx.strokeStyle = '#3c2118';
-  ctx.strokeText(label, ex, ey);
-  ctx.fillStyle = '#fff3b8';
-  ctx.fillText(label, ex, ey);
+  if (tier === 7 && p < 0.35) {
+    ctx.font = UI.fontStr(10.5, 800);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 2.6;
+    ctx.strokeStyle = '#3c2118';
+    ctx.strokeText('Zzz', ex, ey);
+    ctx.fillStyle = '#fff3b8';
+    ctx.fillText('Zzz', ex, ey);
+    ctx.restore();
+    return;
+  }
+
+  const kind = SOLO_EMOTES[(tier - 1) % SOLO_EMOTES.length];
+  if (kind === 'heart') {
+    UI.drawHeartIcon(ctx, ex, ey, 10 + 2 * env, '#ff8cb4');
+  } else if (kind === 'crown') {
+    if (!UI.drawUiIcon(ctx, sprites, 'icon_crown', ex, ey, 14 + 2 * env)) {
+      ctx.fillStyle = '#ffe270';
+      UI.drawStar(ctx, ex, ey, 5.5 * env, p * 4);
+    }
+  } else if (kind === 'note') {
+    if (!UI.drawUiIcon(ctx, sprites, 'icon_bgm', ex, ey, 13 + 2 * env)) {
+      ctx.fillStyle = '#ffe47a';
+      UI.drawStar(ctx, ex, ey, 5 * env, p * 4);
+    }
+  } else if (kind === 'star') {
+    ctx.fillStyle = '#ffe88a';
+    UI.drawStar(ctx, ex, ey, 5.5 * env, p * 5);
+  } else {
+    const lbl = kind === 'meow' ? '喵' : '!';
+    ctx.font = UI.fontStr(11, 800);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 2.6;
+    ctx.strokeStyle = '#3c2118';
+    ctx.strokeText(lbl, ex, ey);
+    ctx.fillStyle = '#fff3b8';
+    ctx.fillText(lbl, ex, ey);
+  }
   ctx.restore();
 }
 
@@ -328,20 +354,29 @@ function drawYarnBallEntity(ctx, yarnBallImg, e, nowSec) {
   }
   ctx.restore();
 
-  // HP corner badge
+  // HP corner badge (mini yarn sprite + count, zero emoji)
   const bx = e.r * 0.52;
   const by = -e.r * 0.72;
   ctx.fillStyle = e.yarnHp === 1 ? 'rgba(214, 52, 68, 0.94)' : 'rgba(64, 32, 24, 0.92)';
   ctx.strokeStyle = e.yarnHp === 1 ? '#ffe388' : '#ffb8d0';
   ctx.lineWidth = 1.5;
-  UI.roundRectPath(ctx, bx - 19, by - 9, 38, 18, 9);
+  UI.roundRectPath(ctx, bx - 18, by - 9, 36, 18, 9);
   ctx.fill();
   ctx.stroke();
-  ctx.fillStyle = '#fff8ec';
-  ctx.font = UI.fontStr(10.5, 900);
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(`🧶×${e.yarnHp}`, bx, by + 0.5);
+  if (yarnBallImg && yarnBallImg.width > 0) {
+    UI.drawContainImage(ctx, yarnBallImg, bx - 8, by, 12, 12);
+    ctx.fillStyle = '#fff8ec';
+    ctx.font = UI.fontStr(10.5, 900);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`×${e.yarnHp}`, bx - 1, by + 0.5);
+  } else {
+    ctx.fillStyle = '#fff8ec';
+    ctx.font = UI.fontStr(10.5, 900);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`×${e.yarnHp}`, bx, by + 0.5);
+  }
   ctx.restore();
 }
 
@@ -830,7 +865,7 @@ function drawFrozenShell(ctx, e, nowSec) {
   ctx.restore();
 }
 
-function drawInJarHazardBadges(ctx, gameState, nowSec) {
+function drawInJarHazardBadges(ctx, gameState, sprites, nowSec) {
   if (gameState.mode !== 'chef') return;
   const hazards = Array.isArray(gameState.shiftHazards) ? gameState.shiftHazards : [];
   let frozenAlive = 0;
@@ -841,9 +876,9 @@ function drawInJarHazardBadges(ctx, gameState, nowSec) {
   const isGrandPrix = gameState.shiftModifier === 'grand_prix';
   if (hazards.length === 0 && frozenAlive === 0 && !isGrandPrix) return;
 
-  const baseY = JAR.dangerY + 5; // y = 117..135 (strictly below dangerY=112, 36px above glaze_ring)
+  const baseY = JAR.dangerY + 5;
   const pillH = 18;
-  const drawPill = (x, y, w, bg, border, text, textCol) => {
+  const drawPill = (x, y, w, bg, border, iconKey, text, textCol) => {
     ctx.save();
     UI.roundRectPath(ctx, x, y, w, pillH, 9);
     ctx.fillStyle = bg;
@@ -851,11 +886,16 @@ function drawInJarHazardBadges(ctx, gameState, nowSec) {
     ctx.lineWidth = 1.3;
     ctx.strokeStyle = border;
     ctx.stroke();
-    UI.drawFitText(ctx, text, x + w * 0.5, y + pillH * 0.5 + 0.5, w - 10, 9.5, 7.8, 800, textCol, 'center');
+    let tx = x + w * 0.5;
+    let availW = w - 8;
+    if (iconKey && sprites && UI.drawUiIcon(ctx, sprites, iconKey, x + 10, y + pillH * 0.5, 13)) {
+      tx = x + 18 + (w - 22) * 0.5;
+      availW = w - 22;
+    }
+    UI.drawFitText(ctx, text, tx, y + pillH * 0.5 + 0.5, availW, 9.2, 7.6, 800, textCol, 'center');
     ctx.restore();
   };
 
-  // Left wall pills: active shift hazards (width 72px, leaving center 108..332 = 224px 100% open)
   let ly = baseY;
   for (let i = 0; i < hazards.length; i++) {
     const def = SHIFT_HAZARDS[hazards[i]];
@@ -866,14 +906,13 @@ function drawInJarHazardBadges(ctx, gameState, nowSec) {
         : def.id === 'divider'
         ? '#e5b078'
         : '#ffe07a';
-    drawPill(JAR.left + 6, ly, 72, 'rgba(42, 22, 12, 0.84)', borderCol, def.badge, '#fff4d4');
+    drawPill(JAR.left + 6, ly, 62, 'rgba(42, 22, 12, 0.84)', borderCol, def.icon, def.badge, '#fff4d4');
     ly += pillH + 3;
   }
 
-  // Right wall pills: live frozen count & Boss Critic Rush indicator
   let ry = baseY;
   if (frozenAlive > 0) {
-    drawPill(JAR.right - 6 - 72, ry, 72, 'rgba(18, 56, 92, 0.88)', '#9ce6ff', `❄️冰封×${frozenAlive}`, '#e6f9ff');
+    drawPill(JAR.right - 6 - 50, ry, 50, 'rgba(18, 56, 92, 0.88)', '#9ce6ff', 'icon_frost', `×${frozenAlive}`, '#e6f9ff');
     ry += pillH + 3;
   }
   if (isGrandPrix) {
@@ -884,8 +923,8 @@ function drawInJarHazardBadges(ctx, gameState, nowSec) {
     const bg = activeJudge
       ? `rgba(${Math.round(148 + pulse * 36)}, 48, 16, 0.90)`
       : 'rgba(54, 28, 14, 0.84)';
-    const label = activeJudge ? '🏅评委急单!' : `🏅${stepsToNext}步急单`;
-    drawPill(JAR.right - 6 - 72, ry, 72, bg, '#ffe078', label, '#fff6d0');
+    const label = activeJudge ? '急单' : `${stepsToNext}步`;
+    drawPill(JAR.right - 6 - 56, ry, 56, bg, '#ffe078', 'icon_judge', label, '#fff6d0');
   }
 }
 
@@ -1196,17 +1235,18 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
     const pillY = JAR.neckY + (gameState.serveCascadeTimer > 0 ? 40 : 18);
     ctx.save();
     if (isActivelyAiming) ctx.globalAlpha = 0.34;
-    UI.roundRectPath(ctx, JAR.canvasW * 0.5 - 86, pillY - 10, 172, 20, 10);
-    ctx.fillStyle = 'rgba(62, 26, 108, 0.9)';
-    ctx.fill();
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = '#dfb8ff';
-    ctx.stroke();
-    ctx.fillStyle = '#f2e0ff';
-    ctx.font = UI.fontStr(10.5, 900);
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(`🛸 月光反重力 ×2.2 (${gameState.antigravTimer.toFixed(1)}s)`, JAR.canvasW * 0.5, pillY + 0.5);
+    UI.drawNoticeBanner(ctx, JAR.canvasW * 0.5 - 74, pillY - 10, 148, 21, {
+      icon: 'icon_ufo',
+      sprites,
+      iconSize: 15,
+      text: `反重力 ×2.2 · ${gameState.antigravTimer.toFixed(1)}s`,
+      fontSize: 9.8,
+      borderColor: '#dfb8ff',
+      topCol: 'rgba(62, 26, 108, 0.92)',
+      botCol: 'rgba(42, 16, 78, 0.95)',
+      textColor: '#f2e0ff',
+      rightReserve: 8
+    });
     ctx.restore();
   }
 
@@ -1215,18 +1255,18 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
     const pillY = JAR.neckY + 18;
     const cascadeTxt =
       gameState.serveCascadeMerges > 0
-        ? `抽底雪崩 ×${gameState.serveCascadeMerges} (${gameState.serveCascadeTimer.toFixed(1)}s)`
-        : `抽底雪崩窗 ${gameState.serveCascadeTimer.toFixed(1)}s`;
+        ? `雪崩 ×${gameState.serveCascadeMerges} · ${gameState.serveCascadeTimer.toFixed(1)}s`
+        : `雪崩窗 ${gameState.serveCascadeTimer.toFixed(1)}s`;
     ctx.save();
     if (isActivelyAiming) ctx.globalAlpha = 0.34;
-    UI.drawNoticeBanner(ctx, JAR.canvasW * 0.5 - 82, pillY - 10, 164, 21, {
-      icon: 'serve_bell',
+    UI.drawNoticeBanner(ctx, JAR.canvasW * 0.5 - 66, pillY - 10, 132, 21, {
+      icon: 'icon_wave',
       sprites,
       iconSize: 15,
       text: cascadeTxt,
-      fontSize: 10,
+      fontSize: 9.8,
       borderColor: '#ffd872',
-      rightReserve: 10
+      rightReserve: 8
     });
     ctx.restore();
   }
@@ -1252,18 +1292,19 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
 
   if (dangerRatio > 0.08) {
     const rem = Math.max(0, 2.65 - gameState.dangerDuration).toFixed(1);
-    ctx.fillStyle = gameState.mode === 'rush' ? 'rgba(224, 114, 38, 0.94)' : 'rgba(224, 62, 52, 0.92)';
-    UI.roundRectPath(ctx, 148, JAR.dangerY - 22, 144, 20, 10);
-    ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.font = UI.fontStr(12, 700);
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(
-      gameState.mode === 'rush' ? `🌪️ 星风预警 ${rem}s` : `⚠️ 即将溢出 ${rem}s`,
-      220,
-      JAR.dangerY - 12
-    );
+    const isRush = gameState.mode === 'rush';
+    UI.drawNoticeBanner(ctx, 162, JAR.dangerY - 23, 116, 21, {
+      icon: isRush ? 'icon_wind' : 'icon_warn',
+      sprites,
+      iconSize: 15,
+      text: isRush ? `星风 ${rem}s` : `溢出 ${rem}s`,
+      fontSize: 10.5,
+      tone: 'warn',
+      topCol: isRush ? 'rgba(208, 102, 30, 0.95)' : undefined,
+      botCol: isRush ? 'rgba(154, 68, 16, 0.96)' : undefined,
+      borderColor: isRush ? '#ffe09c' : '#ffb8a6',
+      rightReserve: 8
+    });
   }
   ctx.restore();
 
@@ -1675,48 +1716,55 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
         ctx.restore();
       }
 
-      // Unified Storybook Callout Badge for Bank-Shot, Glaze Ring, or Lock-on
+      // Unified Storybook Callout Badge for Bank-Shot, Glaze Ring, or Lock-on (concise!)
       if (lockedTarget || hasBounce || willGlaze) {
         const multLabel = bPoints.length >= 2 && hasBouncy ? '×2.8' : hasPrism ? '×2.0' : '×1.5';
         let tagText;
+        let tagIcon = '';
         if (lockedTarget) {
           const baseT = curIsWild ? (lockedTarget.isWildcard ? 2 : lockedTarget.tier) : gameState.curTier;
           const bornT = Math.min(9, baseT + 1);
-          const traitShort =
-            bornT === 4
-              ? '·消小果'
-              : bornT === 5
-              ? '·引力聚拢'
-              : bornT === 6
-              ? '·旋风搅罐'
-              : bornT === 8
-              ? '·重锤压碎'
-              : bornT === 9
-              ? '·猫神×2'
-              : '';
-          if (hasBounce && willGlaze) tagText = '穿环弹壁合成!';
-          else if (hasBounce) tagText = `${bPoints.length >= 2 ? '二段弹壁' : '弹壁合成'} ${multLabel}!`;
-          else if (willGlaze) tagText = '穿环镀金合成!';
-          else if (curIsWild) tagText = '彩虹升阶+1!';
-          else if (curIsGold || lockedTarget.isGolden) tagText = '黄金暴击!';
-          else tagText = `合T${bornT}${traitShort}!`;
+          if (hasBounce && willGlaze) {
+            tagText = `弹壁镀金`;
+            tagIcon = 'icon_stardust';
+          } else if (hasBounce) {
+            tagText = `弹壁 ${multLabel}`;
+            tagIcon = 'icon_billiard';
+          } else if (willGlaze) {
+            tagText = `穿环镀金`;
+            tagIcon = 'icon_stardust';
+          } else if (curIsWild) {
+            tagText = `彩虹 +1`;
+            tagIcon = 'icon_rainbow';
+          } else if (curIsGold || lockedTarget.isGolden) {
+            tagText = `黄金暴击`;
+            tagIcon = 'icon_stardust';
+          } else {
+            tagText = `+T${bornT}`;
+          }
         } else if (hasBounce && willGlaze) {
-          tagText = '弹壁 + 镀金!';
+          tagText = '弹壁镀金';
+          tagIcon = 'icon_stardust';
         } else if (willGlaze) {
-          tagText = '穿环镀金!';
+          tagText = '穿环镀金';
+          tagIcon = 'icon_stardust';
         } else {
-          tagText = bPoints.length >= 2 ? '二段折射' : '弹壁折射';
+          tagText = bPoints.length >= 2 ? '二段弹壁' : '弹壁';
+          tagIcon = 'icon_billiard';
         }
-        const tagW = Math.max(76, tagText.length * 8.6 + 20);
+        const tagW = Math.max(tagIcon ? 66 : 48, tagText.length * 8.4 + (tagIcon ? 28 : 16));
         const anchorY = lockedTarget || hasBounce ? traj.endY - curR - 14 : Math.max(JAR.dangerY + 24, aimGlazeInfo.y - 22);
         const tagY = Math.max(JAR.neckY + 20, anchorY);
         const tagX = Math.max(JAR.left + tagW * 0.5 + 4, Math.min(JAR.right - tagW * 0.5 - 4, lockedTarget || hasBounce ? traj.endX : aimGlazeInfo.x));
-        UI.drawNoticeBanner(ctx, tagX - tagW * 0.5, tagY - 10, tagW, 20, {
+        UI.drawNoticeBanner(ctx, tagX - tagW * 0.5, tagY - 10, tagW, 19, {
+          icon: tagIcon,
+          sprites,
+          iconSize: 13,
           text: tagText,
-          fontSize: 10.2,
+          fontSize: 9.6,
           borderColor: hasBounce ? '#9cf4ff' : '#ffd872',
           textColor: hasBounce ? '#e4fcff' : '#fff5cf',
-          rightReserve: 8
+          rightReserve: 7
         });
       }
     }
@@ -1752,15 +1800,18 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
         if (curIsGold) UI.drawGoldenAura(ctx, launchX, launchY, curR, nowSec, coolingDrop ? 0.6 : 1);
         drawTierSprite(ctx, sprites, gameState.curTier, launchX, launchY, curR, visualAngle, 0, 0, 1, gameState.heldActionAnim);
         if (gameState.heldActionAnim && !coolingDrop) {
-          drawDessertActionFX(ctx, launchX, launchY, curR, gameState.curTier, gameState.heldActionAnim);
+          drawDessertActionFX(ctx, launchX, launchY, curR, gameState.curTier, gameState.heldActionAnim, sprites);
         }
       }
       ctx.restore();
 
       if (isAimCancelled) {
-        UI.drawNoticeBanner(ctx, launchX - 62, JAR.neckY + 12, 124, 22, {
-          text: '↑ 松手取消发射',
-          fontSize: 10.5
+        UI.drawNoticeBanner(ctx, launchX - 48, JAR.neckY + 12, 96, 21, {
+          icon: 'icon_close',
+          sprites,
+          iconSize: 13,
+          text: '松手取消',
+          fontSize: 10
         });
       }
     }
@@ -1986,33 +2037,44 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
       const bob = Math.sin(nowSec * 7.5 + e.id) * 2.5;
       const pillY = Math.max(JAR.neckY + 12, e.y - e.r - 10 + bob);
       const hasAged = !isSouffle && e.agedStacks > 0 && Array.isArray(gameState.relics) && gameState.relics.includes('rel_aged');
-      const pillTxt = isSouffle
-        ? '献礼·×2'
-        : hasAged
-        ? `+${e.agedStacks * 30}%`
-        : isVipServable
-        ? 'VIP上菜'
-        : '上菜';
-      const pillW = isSouffle || isVipServable || hasAged ? 66 : 50;
-      const px0 = e.x - pillW * 0.5;
-      const py0 = pillY - 9.5;
       ctx.save();
-      UI.roundRectPath(ctx, px0, py0, pillW, 19, 9.5);
-      ctx.fillStyle = hasAged
-        ? 'rgba(138, 56, 18, 0.95)'
-        : isVipServable
-        ? 'rgba(98, 42, 24, 0.95)'
-        : 'rgba(64, 35, 16, 0.94)';
-      ctx.fill();
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = isVipServable ? '#ffd584' : '#ffe27a';
-      ctx.stroke();
-      const drewBell = UI.drawUiIcon(ctx, sprites, 'serve_bell', px0 + 10.5, pillY, 13.5);
-      const tx = drewBell ? px0 + 18 + (pillW - 22) * 0.5 : e.x;
-      UI.drawFitText(ctx, pillTxt, tx, pillY + 0.5, pillW - (drewBell ? 22 : 8), 9.5, 8, 900, '#fff6db', 'center');
+      if (!isSouffle && !hasAged && !isVipServable) {
+        // Pure compact circular golden serve-bell emblem (zero redundant text!)
+        ctx.fillStyle = 'rgba(64, 35, 16, 0.94)';
+        ctx.beginPath();
+        ctx.arc(e.x, pillY, 10.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.lineWidth = 1.6;
+        ctx.strokeStyle = '#ffe27a';
+        ctx.stroke();
+        UI.drawUiIcon(ctx, sprites, 'serve_bell', e.x, pillY, 14.5);
+      } else {
+        const badgeIcon = isSouffle ? 'icon_crown' : isVipServable && !hasAged ? 'icon_crown' : 'serve_bell';
+        const pillTxt = isSouffle
+          ? '×2'
+          : hasAged
+          ? `+${e.agedStacks * 30}%`
+          : 'VIP';
+        const pillW = hasAged ? 54 : 44;
+        const px0 = e.x - pillW * 0.5;
+        const py0 = pillY - 9.5;
+        UI.roundRectPath(ctx, px0, py0, pillW, 19, 9.5);
+        ctx.fillStyle = hasAged
+          ? 'rgba(138, 56, 18, 0.95)'
+          : isVipServable
+          ? 'rgba(98, 42, 24, 0.95)'
+          : 'rgba(64, 35, 16, 0.94)';
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = isVipServable ? '#ffd584' : '#ffe27a';
+        ctx.stroke();
+        const drewIcon = UI.drawUiIcon(ctx, sprites, badgeIcon, px0 + 10.5, pillY, 13);
+        const tx = drewIcon ? px0 + 18 + (pillW - 22) * 0.5 : e.x;
+        UI.drawFitText(ctx, pillTxt, tx, pillY + 0.5, pillW - (drewIcon ? 22 : 8), 9.2, 7.8, 900, '#fff6db', 'center');
+      }
       ctx.restore();
     } else if (isNearOrderSub && !isTargetingMode && e.age > 0.35) {
-      // 1-Merge-Away (`差1合`) tactical hint ring + micro-pill
+      // Compact 1-Merge-Away ring + tiny `+1` badge
       const np = 0.55 + 0.45 * Math.sin(nowSec * 5.2 + e.id);
       ctx.save();
       ctx.strokeStyle = `rgba(92, 224, 146, ${0.55 + 0.32 * np})`;
@@ -2023,10 +2085,10 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
       ctx.stroke();
       ctx.setLineDash([]);
 
-      const tagW = 36;
-      const tagH = 14;
+      const tagW = 24;
+      const tagH = 13;
       const ty0 = Math.min(JAR.floorY - tagH - 1, e.y + e.r - 6);
-      UI.roundRectPath(ctx, e.x - tagW * 0.5, ty0, tagW, tagH, 7);
+      UI.roundRectPath(ctx, e.x - tagW * 0.5, ty0, tagW, tagH, 6.5);
       ctx.fillStyle = 'rgba(26, 78, 48, 0.90)';
       ctx.fill();
       ctx.lineWidth = 1.1;
@@ -2036,7 +2098,7 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
       ctx.font = UI.fontStr(8.2, 900);
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('差1合', e.x, ty0 + tagH * 0.5 + 0.3);
+      ctx.fillText('+1', e.x, ty0 + tagH * 0.5 + 0.3);
       ctx.restore();
     }
 
@@ -2103,7 +2165,7 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
 
   for (const e of gameState.entities) {
     if (e.anim && !e.isWildcard && !e.isYarnBall && !(e.frozenHp > 0)) {
-      drawDessertActionFX(ctx, e.x, e.y, e.r, e.tier, e.anim);
+      drawDessertActionFX(ctx, e.x, e.y, e.r, e.tier, e.anim, sprites);
     }
   }
 
@@ -2161,7 +2223,7 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
   }
 
   // 6.5 Non-Blocking In-Jar Active Hazard & Boss Affix Badges (visual-only, zero pointer capture)
-  drawInJarHazardBadges(ctx, gameState, nowSec);
+  drawInJarHazardBadges(ctx, gameState, sprites, nowSec);
 
   // 7. Glass Jar Specular Highlights & Themed Collar
   ctx.save();
@@ -2241,30 +2303,52 @@ function renderJarStage(ctx, box, gameState, theme, sprites, nowSec, effectiveMa
     ctx.restore();
   }
 
-  // 9. Animated Combo / Event Celebration Banner
+  // 9. Animated Storybook Ribbon Combo / Event Celebration Banner
   if (gameState.comboBanner && gameState.comboBanner.life > 0) {
     const cb = gameState.comboBanner;
     const elapsed = cb.maxLife - cb.life;
-    const popIn = elapsed < 0.16 ? 0.65 + 0.48 * Math.sin((elapsed / 0.16) * (Math.PI * 0.65)) : 1.0;
+    const popIn = elapsed < 0.16 ? 0.68 + 0.42 * Math.sin((elapsed / 0.16) * (Math.PI * 0.65)) : 1.0;
     const fadeOut = cb.life < 0.28 ? cb.life / 0.28 : 1;
+    const hasSub = !!cb.sub;
+    const hasIcon = !!(cb.icon && sprites);
+    const bh = hasSub ? 46 : 32;
     ctx.save();
     ctx.globalAlpha = Math.max(0, Math.min(1, fadeOut));
-    ctx.translate(JAR.canvasW * 0.5, 156 - elapsed * 8);
+    ctx.translate(JAR.canvasW * 0.5, 160 - elapsed * 7);
     ctx.scale(popIn, popIn);
-    ctx.font = UI.fontStr(22, 900);
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.lineWidth = 5;
-    ctx.strokeStyle = '#3c2118';
-    ctx.strokeText(cb.text, 0, 0);
-    ctx.fillStyle = cb.color;
-    ctx.fillText(cb.text, 0, 0);
-    if (cb.sub) {
-      ctx.font = UI.fontStr(12.5, 800);
-      ctx.lineWidth = 3.5;
-      ctx.strokeText(cb.sub, 0, 20);
-      ctx.fillStyle = '#fff5cf';
-      ctx.fillText(cb.sub, 0, 20);
+
+    ctx.font = UI.fontStr(16.5, 900);
+    const titleW = ctx.measureText(cb.text).width;
+    ctx.font = UI.fontStr(10.5, 800);
+    const subW = hasSub ? ctx.measureText(cb.sub).width : 0;
+    const iconSpace = hasIcon ? 32 : 0;
+    const bw = Math.min(340, Math.max(146, Math.max(titleW, subW) + 34 + iconSpace));
+
+    UI.drawNoticeBanner(ctx, -bw * 0.5, -bh * 0.5, bw, bh, {
+      tone: 'event',
+      borderColor: cb.color || '#ffe278',
+      radius: bh * 0.5
+    });
+
+    const textCx = hasIcon ? iconSpace * 0.35 : 0;
+    if (hasIcon) {
+      UI.drawUiIcon(ctx, sprites, cb.icon, -bw * 0.5 + 22, 0, hasSub ? 26 : 20);
+    }
+    const maxTextW = bw - iconSpace - 24;
+    UI.drawFitText(
+      ctx,
+      cb.text,
+      textCx,
+      hasSub ? -8 : 0.5,
+      maxTextW,
+      16.5,
+      12,
+      900,
+      cb.color || '#ffe67e',
+      'center'
+    );
+    if (hasSub) {
+      UI.drawFitText(ctx, cb.sub, textCx, 11, maxTextW, 10.5, 8.5, 800, '#fff4d4', 'center');
     }
     ctx.restore();
   }

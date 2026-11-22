@@ -313,7 +313,7 @@ function setupShare(getSharePayload) {
       wx.onShareAppMessage(() => {
         const p = getSharePayload ? getSharePayload() : {};
         return {
-          title: p.title || '🌙 星夜吃茶 · 今晚也在温柔烤制猫神舒芙蕾！',
+          title: p.title || '星夜吃茶 · 温柔烤制猫神舒芙蕾',
           imageUrl: p.imageUrl || 'assets/title_hero.jpg'
         };
       });
@@ -322,7 +322,7 @@ function setupShare(getSharePayload) {
       wx.onShareTimeline(() => {
         const p = getSharePayload ? getSharePayload() : {};
         return {
-          title: p.title || '🌙 星夜吃茶 · 喵呜甜品合合乐',
+          title: p.title || '星夜吃茶 · 喵呜甜品合合乐',
           imageUrl: p.imageUrl || 'assets/title_hero.jpg'
         };
       });
@@ -334,7 +334,7 @@ function triggerShare(payload) {
   if (hasWx && typeof wx.shareAppMessage === 'function') {
     try {
       wx.shareAppMessage({
-        title: (payload && payload.title) || '🌙 星夜吃茶 · 来试试你能合出星冠猫神舒芙蕾吗！',
+        title: (payload && payload.title) || '星夜吃茶 · 来试试合出星冠猫神舒芙蕾',
         imageUrl: (payload && payload.imageUrl) || 'assets/title_hero.jpg'
       });
       return true;

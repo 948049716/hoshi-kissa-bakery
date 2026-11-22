@@ -681,7 +681,7 @@ async function run() {
       const cap = window.__WX_HARNESS__.getMenuRect();
       return { hits: st.hits, cap, assetsLoaded: st.assetsLoaded, assetsTotal: st.assetsTotal };
     })()`);
-    assert(info.assetsLoaded === 41 && info.assetsTotal === 41, `${label}: assets ${info.assetsLoaded}/${info.assetsTotal}`);
+    assert(info.assetsLoaded === 43 && info.assetsTotal === 43, `${label}: assets ${info.assetsLoaded}/${info.assetsTotal}`);
     for (const h of info.hits) {
       if (h.id === 'modal_backdrop' || h.id === 'modal_body_guard') continue;
       assert(h.x >= -1 && h.y >= -1, `${label}: hit ${h.id} out of top-left (${h.x},${h.y})`);
@@ -2096,9 +2096,9 @@ async function run() {
 
   // Item 2: Simultaneous Major Queue + Non-Competing Minor Pill (anchored near bottom, never occluding Top HUD!)
   await evalJS(`
-    window.__HOSHI_DEBUG__.showToast('🎉 本幕目标已达标！可立即打烊赚利息', { level: 'major' });
-    window.__HOSHI_DEBUG__.showToast('🌟 第二条重要事件自动排队不顶替', { level: 'major' });
-    window.__HOSHI_DEBUG__.showToast('🔔 快餐小提示独立显示不抢占主横幅', { level: 'minor' });
+    window.__HOSHI_DEBUG__.showToast('本幕目标达标 · 可立即打烊', { level: 'major', icon: 'icon_trophy', tone: 'success' });
+    window.__HOSHI_DEBUG__.showToast('第二条事件自动排队不顶替', { level: 'major', icon: 'icon_stardust', tone: 'event' });
+    window.__HOSHI_DEBUG__.showToast('快餐小提示独立显示', { level: 'minor', icon: 'serve_bell', tone: 'info' });
   `);
   await sleep(120);
   st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);

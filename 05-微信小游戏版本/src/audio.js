@@ -166,8 +166,8 @@ class StarlightAudio {
     return {
       waltz: {
         id: 'waltz',
-        label: '🎵 圆舞曲',
-        title: '星夜圆舞曲 · Starlight Waltz',
+        label: '圆舞曲',
+        title: '星夜圆舞曲',
         stepsPerBar: 6,
         bpmNormal: 114,
         bpmFever: 132,
@@ -175,8 +175,8 @@ class StarlightAudio {
       },
       bossa: {
         id: 'bossa',
-        label: '☕ 吃茶爵士',
-        title: '午夜吃茶波萨 · Midnight Kissa Bossa',
+        label: '吃茶爵士',
+        title: '午夜吃茶波萨',
         stepsPerBar: 8,
         bpmNormal: 104,
         bpmFever: 122,
@@ -561,7 +561,7 @@ class StarlightAudio {
 
   getTrackInfo() {
     if (!this.bgmEnabled || this.bgmTrack === 'off') {
-      return { id: 'off', label: '🎵 音乐: 关', title: '已关闭' };
+      return { id: 'off', label: '音乐: 关', title: '已关闭' };
     }
     const t = this.TRACKS[this.bgmTrack] || this.TRACKS.waltz;
     return { id: t.id, label: t.label, title: t.title };

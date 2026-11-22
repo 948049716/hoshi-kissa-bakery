@@ -4,7 +4,7 @@
  */
 'use strict';
 
-const { UI_ATLAS_RECTS } = require('./constants');
+const { UI_ATLAS_RECTS, UI_ATLAS_2_RECTS, UI_ATLAS_3_RECTS } = require('./constants');
 
 const FONT_FAMILY = 'PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif';
 
@@ -117,16 +117,24 @@ function drawContainImage(ctx, img, cx, cy, maxW, maxH) {
 }
 
 /**
- * Draw a storybook illustrated icon from `sprites.uiAtlas` or standalone UI sprites.
+ * Draw a storybook illustrated icon from `sprites.uiAtlas`, `uiAtlas2`, `uiAtlas3`,
+ * or standalone UI / tool / dessert sprites.
  */
 function drawUiIcon(ctx, sprites, iconKey, cx, cy, size, alpha = 1, rot = 0) {
   if (!sprites || !iconKey || size <= 0) return false;
 
-  // Standalone decorative sprites check
+  // Standalone decorative / tool / dessert sprites check
   let standalone = null;
   if (iconKey === 'serve_bell') standalone = sprites.serveBell;
   else if (iconKey === 'shop_sign') standalone = sprites.shopSign;
   else if (iconKey === 'yarn_ball') standalone = sprites.yarnBall;
+  else if (iconKey === 'tool_shake') standalone = sprites.tools && sprites.tools.shake;
+  else if (iconKey === 'tool_spoon') standalone = sprites.tools && sprites.tools.spoon;
+  else if (iconKey === 'tool_fork') standalone = sprites.tools && sprites.tools.fork;
+  else if (typeof iconKey === 'string' && iconKey.startsWith('tier_')) {
+    const tNum = Number(iconKey.slice(5));
+    standalone = sprites.base && sprites.base[tNum];
+  }
 
   if (standalone && standalone.width > 0 && standalone.height > 0) {
     ctx.save();
@@ -138,8 +146,16 @@ function drawUiIcon(ctx, sprites, iconKey, cx, cy, size, alpha = 1, rot = 0) {
     return true;
   }
 
-  const rect = UI_ATLAS_RECTS && UI_ATLAS_RECTS[iconKey];
-  const atlas = sprites.uiAtlas;
+  let rect = UI_ATLAS_RECTS && UI_ATLAS_RECTS[iconKey];
+  let atlas = sprites.uiAtlas;
+  if (!rect && UI_ATLAS_2_RECTS && UI_ATLAS_2_RECTS[iconKey]) {
+    rect = UI_ATLAS_2_RECTS[iconKey];
+    atlas = sprites.uiAtlas2;
+  }
+  if (!rect && UI_ATLAS_3_RECTS && UI_ATLAS_3_RECTS[iconKey]) {
+    rect = UI_ATLAS_3_RECTS[iconKey];
+    atlas = sprites.uiAtlas3;
+  }
   if (!rect || !atlas || !atlas.width || !atlas.height) return false;
 
   ctx.save();
@@ -301,9 +317,9 @@ function drawKissaCard(ctx, x, y, w, h, opts = {}) {
 }
 
 /**
- * Unified Micro-Badge / Tag Pill so all status & category chips look cohesive.
+ * Unified Micro-Badge / Tag Pill with optional leading illustrated icon.
  */
-function drawTagBadge(ctx, x, y, w, h, text, tone = 'amber', fontSize = 9.5) {
+function drawTagBadge(ctx, x, y, w, h, text, tone = 'amber', fontSize = 9.5, icon = '', sprites = null) {
   const palettes = {
     amber: { top: '#ffebb0', bot: '#f5c762', border: '#a8681c', text: '#5e2e08' },
     berry: { top: '#ff9685', bot: '#eb6b58', border: '#4A2C2A', text: '#fffdf8' },
@@ -327,42 +343,91 @@ function drawTagBadge(ctx, x, y, w, h, text, tone = 'amber', fontSize = 9.5) {
   ctx.strokeStyle = pal.border;
   ctx.stroke();
 
+  if (icon && sprites) {
+    const icS = Math.min(h - 3, 13);
+    const drew = drawUiIcon(ctx, sprites, icon, x + 5 + icS * 0.5, y + h * 0.5, icS);
+    if (drew) {
+      const tx = x + 7 + icS;
+      const tw = Math.max(12, x + w - tx - 4);
+      drawFitText(ctx, text, tx + tw * 0.5, y + h * 0.5 + 0.4, tw, fontSize, 7.2, 800, pal.text, 'center', 'middle');
+      ctx.restore();
+      return;
+    }
+  }
+
   drawFitText(ctx, text, x + w * 0.5, y + h * 0.5 + 0.4, w - 8, fontSize, 7.5, 800, pal.text, 'center', 'middle');
   ctx.restore();
 }
 
 /**
- * Unified Floating Notice / Toast / Skill Prompt Banner.
+ * Unified Floating Notice / Toast / Skill Prompt Banner with semantic storybook tones.
  */
 function drawNoticeBanner(ctx, x, y, w, h, opts = {}) {
   const r = opts.radius !== undefined ? opts.radius : Math.min(h * 0.5, 15);
-  const borderCol = opts.borderColor || '#e8b65c';
+  const tonePalettes = {
+    info: {
+      top: 'rgba(62, 34, 19, 0.94)',
+      bot: 'rgba(40, 21, 11, 0.96)',
+      border: '#e5b45a',
+      sheen: 'rgba(255, 232, 180, 0.22)',
+      text: '#fff4d4'
+    },
+    success: {
+      top: 'rgba(34, 84, 54, 0.95)',
+      bot: 'rgba(22, 58, 36, 0.97)',
+      border: '#9ae09e',
+      sheen: 'rgba(214, 255, 220, 0.24)',
+      text: '#f0ffef'
+    },
+    warn: {
+      top: 'rgba(138, 42, 30, 0.95)',
+      bot: 'rgba(98, 24, 18, 0.97)',
+      border: '#ffb294',
+      sheen: 'rgba(255, 220, 206, 0.24)',
+      text: '#fff2ec'
+    },
+    event: {
+      top: 'rgba(92, 46, 18, 0.96)',
+      bot: 'rgba(58, 28, 12, 0.98)',
+      border: '#ffe278',
+      sheen: 'rgba(255, 244, 192, 0.30)',
+      text: '#fff8db'
+    }
+  };
+  const pal = tonePalettes[opts.tone] || tonePalettes.info;
+  const borderCol = opts.borderColor || pal.border;
   ctx.save();
-  ctx.shadowColor = 'rgba(18, 8, 3, 0.34)';
-  ctx.shadowBlur = 10;
-  ctx.shadowOffsetY = 3;
+  ctx.shadowColor = 'rgba(18, 8, 3, 0.38)';
+  ctx.shadowBlur = 12;
+  ctx.shadowOffsetY = 3.5;
   const g = ctx.createLinearGradient(x, y, x, y + h);
-  g.addColorStop(0, opts.topCol || 'rgba(62, 34, 19, 0.95)');
-  g.addColorStop(1, opts.botCol || 'rgba(40, 21, 11, 0.96)');
+  g.addColorStop(0, opts.topCol || pal.top);
+  g.addColorStop(1, opts.botCol || pal.bot);
   ctx.fillStyle = g;
   roundRectPath(ctx, x, y, w, h, r);
   ctx.fill();
   ctx.restore();
 
   ctx.save();
+  if (h >= 20) {
+    roundRectPath(ctx, x + 1.4, y + 1.4, w - 2.8, h - 2.8, Math.max(3, r - 1.4));
+    ctx.lineWidth = 1.0;
+    ctx.strokeStyle = pal.sheen;
+    ctx.stroke();
+  }
   roundRectPath(ctx, x, y, w, h, r);
   ctx.lineWidth = 1.9;
   ctx.strokeStyle = borderCol;
   ctx.stroke();
 
-  let textLeft = x + 12;
+  let textLeft = x + 11;
   if (opts.icon && opts.sprites) {
-    const icS = opts.iconSize || Math.min(20, h - 6);
-    if (drawUiIcon(ctx, opts.sprites, opts.icon, x + 10 + icS * 0.5, y + h * 0.5, icS)) {
-      textLeft = x + 14 + icS;
+    const icS = opts.iconSize || Math.min(20, h - 5);
+    if (drawUiIcon(ctx, opts.sprites, opts.icon, x + 9 + icS * 0.5, y + h * 0.5, icS)) {
+      textLeft = x + 13 + icS;
     }
   }
-  const rightPad = opts.rightReserve || 12;
+  const rightPad = opts.rightReserve || 11;
   if (opts.text) {
     const availW = Math.max(24, x + w - rightPad - textLeft);
     const align = opts.align || (opts.icon ? 'left' : 'center');
@@ -376,7 +441,7 @@ function drawNoticeBanner(ctx, x, y, w, h, opts = {}) {
       opts.fontSize || 11.5,
       9,
       800,
-      opts.textColor || '#fff3cf',
+      opts.textColor || pal.text,
       align,
       'middle'
     );

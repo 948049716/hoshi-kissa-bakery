@@ -568,34 +568,62 @@ function drawBumperObstacle(ctx, ob, oi, nowSec) {
   const isSynergy = source === 'synergy';
   const isRelic = source === 'relic';
   const flash = ob.hitFlash > 0 ? Math.min(1, ob.hitFlash / 0.36) : 0;
-  const sc = 1 + flash * 0.24;
+  const retract = Math.max(
+    0,
+    Math.min(1, typeof ob.retractVisual === 'number' ? ob.retractVisual : ob.submerged ? 1 : 0)
+  );
+  const sc = (1 - retract * 0.22) * (1 + flash * 0.24);
 
   ctx.save();
   ctx.translate(ob.x, ob.y);
-  ctx.scale(sc, sc);
 
-  // Outer glow ring(s)
-  if (isSynergy) {
-    const pulse = 0.5 + 0.5 * Math.sin(nowSec * 6.5 + oi);
-    ctx.fillStyle = `rgba(255, 212, 86, ${0.24 + pulse * 0.14 + flash * 0.32})`;
+  // Recessed glass-mount socket ring when bumper retracts under pile pressure
+  if (retract > 0.02) {
+    ctx.save();
+    ctx.fillStyle = `rgba(74, 44, 42, ${0.18 * retract})`;
     ctx.beginPath();
-    ctx.arc(0, 0, ob.r + 8.5, 0, Math.PI * 2);
+    ctx.arc(0, 0, ob.r + 1.8, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = `rgba(255, 240, 152, ${0.34 + flash * 0.36})`;
+    ctx.strokeStyle = `rgba(145, 98, 56, ${0.42 * retract})`;
+    ctx.lineWidth = 1.4;
+    ctx.setLineDash([3, 3]);
     ctx.beginPath();
-    ctx.arc(0, 0, ob.r + 5.0, 0, Math.PI * 2);
-    ctx.fill();
-  } else {
-    ctx.fillStyle = flash > 0.05 ? `rgba(255, 232, 120, ${0.45 + flash * 0.4})` : 'rgba(255, 216, 112, 0.24)';
-    ctx.beginPath();
-    ctx.arc(0, 0, ob.r + 5.5, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.arc(0, 0, ob.r + 1.8, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
   }
 
-  // Dashed crit ring for relic & synergy bumpers
-  if (isRelic || isSynergy) {
+  ctx.globalAlpha = 1 - retract * 0.68;
+  ctx.scale(sc, sc);
+
+  // Outer glow ring(s) (dimmed while retracted)
+  if (retract < 0.75) {
+    const glowScale = 1 - retract;
+    if (isSynergy) {
+      const pulse = 0.5 + 0.5 * Math.sin(nowSec * 6.5 + oi);
+      ctx.fillStyle = `rgba(255, 212, 86, ${(0.24 + pulse * 0.14 + flash * 0.32) * glowScale})`;
+      ctx.beginPath();
+      ctx.arc(0, 0, ob.r + 8.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = `rgba(255, 240, 152, ${(0.34 + flash * 0.36) * glowScale})`;
+      ctx.beginPath();
+      ctx.arc(0, 0, ob.r + 5.0, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      const baseAlpha = flash > 0.05 ? 0.45 + flash * 0.4 : 0.24;
+      ctx.fillStyle = `rgba(255, 224, 116, ${baseAlpha * glowScale})`;
+      ctx.beginPath();
+      ctx.arc(0, 0, ob.r + 5.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Dashed crit ring for relic & synergy bumpers (pauses spin when submerged)
+  if ((isRelic || isSynergy) && retract < 0.85) {
+    const spinTime = retract > 0.45 ? oi : nowSec * (isSynergy ? 2.4 : 1.5) * (oi % 2 === 0 ? 1 : -1);
     ctx.save();
-    ctx.rotate(nowSec * (isSynergy ? 2.4 : 1.5) * (oi % 2 === 0 ? 1 : -1));
+    ctx.rotate(spinTime);
     ctx.strokeStyle = isSynergy ? '#fff099' : 'rgba(255, 232, 110, 0.72)';
     ctx.lineWidth = isSynergy ? 2.0 : 1.5;
     ctx.setLineDash(isSynergy ? [5, 3.5] : [4, 3]);
@@ -626,11 +654,12 @@ function drawBumperObstacle(ctx, ob, oi, nowSec) {
   ctx.stroke();
 
   // Inner spinning star emblem
+  const starAngle = retract > 0.45 ? oi : nowSec * (isSynergy ? 2.4 : 1.6) + oi;
   ctx.fillStyle = isSynergy ? '#ffffff' : '#fff7d4';
-  UI.drawStar(ctx, 0, 0, ob.r * (isSynergy ? 0.52 : 0.48), nowSec * (isSynergy ? 2.4 : 1.6) + oi);
+  UI.drawStar(ctx, 0, 0, ob.r * (isSynergy ? 0.52 : 0.48), starAngle);
 
   // Orbiting micro-stars for supercharged synergy bumpers
-  if (isSynergy) {
+  if (isSynergy && retract < 0.6) {
     for (let k = 0; k < 2; k++) {
       const a = nowSec * 2.8 + oi * 1.4 + k * Math.PI;
       ctx.fillStyle = '#fff5b8';
@@ -967,8 +996,8 @@ function drawPhysicsDebugOverlay(ctx, gameState) {
       } else if (ob.type === 'bumper') {
         ctx.beginPath();
         ctx.arc(ob.x, ob.y, ob.r, 0, Math.PI * 2);
-        ctx.strokeStyle = '#ffd86b';
-        ctx.lineWidth = 1.6;
+        ctx.strokeStyle = ob.submerged ? 'rgba(180, 195, 215, 0.45)' : '#ffd86b';
+        ctx.lineWidth = ob.submerged ? 1.2 : 1.6;
         ctx.setLineDash([3, 3]);
         ctx.stroke();
         ctx.setLineDash([]);

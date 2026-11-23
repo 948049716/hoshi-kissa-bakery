@@ -2815,8 +2815,77 @@ async function run() {
   );
   console.log('[8E OK] Cloud retry_pending exponential backoff & recovery verified');
 
+  // 8F: Bumper Pile Submergence (Retract Under Pile, Zero Infinite Score Farming, Merge Reward Cap Inheritance & Excavated Pop-Out)
+  await evalJS(`(() => {
+    window.__HOSHI_DEBUG__.startMode('chef');
+    window.__HOSHI_DEBUG__.setShift(3, { forceHazard: 'bumpers' });
+    window.__HOSHI_DEBUG__.equipRelic('rel_bumpers');
+    window.__HOSHI_DEBUG__.clearEntities();
+  })()`);
+  await sleep(140);
+  const pileIds = await evalJS(`(() => {
+    const ids = [];
+    // Full-width non-merging checkerboard pile burying bumper_L (102,265), bumper_R (338,265) & bumper_C (220,224)
+    ids.push(window.__HOSHI_DEBUG__.spawnTestEntity(7, 95, 430, { preSettled: true }));
+    ids.push(window.__HOSHI_DEBUG__.spawnTestEntity(8, 225, 420, { preSettled: true }));
+    ids.push(window.__HOSHI_DEBUG__.spawnTestEntity(6, 348, 435, { preSettled: true }));
+    ids.push(window.__HOSHI_DEBUG__.spawnTestEntity(5, 78, 330, { preSettled: true }));
+    ids.push(window.__HOSHI_DEBUG__.spawnTestEntity(6, 165, 320, { preSettled: true }));
+    ids.push(window.__HOSHI_DEBUG__.spawnTestEntity(7, 285, 315, { preSettled: true }));
+    ids.push(window.__HOSHI_DEBUG__.spawnTestEntity(5, 366, 335, { preSettled: true }));
+    ids.push(window.__HOSHI_DEBUG__.spawnTestEntity(8, 98, 240, { preSettled: true }));
+    ids.push(window.__HOSHI_DEBUG__.spawnTestEntity(4, 212, 232, { preSettled: true }));
+    ids.push(window.__HOSHI_DEBUG__.spawnTestEntity(8, 338, 238, { preSettled: true }));
+    return ids;
+  })()`);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const scoreBeforePileWait = st.score;
+  await sleep(780);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const buriedBumpers = (st.obstacles || []).filter((o) => o.type === 'bumper');
+  const maxPileSpd = Math.max(
+    0,
+    ...st.entities.filter((e) => pileIds.includes(e.id)).map((e) => Math.hypot(e.vx, e.vy))
+  );
+  assert(
+    st.score === scoreBeforePileWait &&
+      buriedBumpers.length === 3 &&
+      buriedBumpers.every((b) => b.submerged === true) &&
+      maxPileSpd < 65,
+    `Expected all 3 buried bumpers to retract with ZERO passive score farming & calm pile, got scoreDelta=${st.score - scoreBeforePileWait}, bumpers=${JSON.stringify(buriedBumpers)}, maxSpd=${maxPileSpd.toFixed(1)}`
+  );
+  await screenshot('32_bumpers_submerged_pile_390.png');
+
+  // Excavate the covering treats (without resetting obstacles) -> verify all 3 bumpers pop back out after ~0.38s
+  await evalJS(`(() => {
+    const ids = ${JSON.stringify(pileIds)};
+    for (const id of ids) window.__HOSHI_DEBUG__.removeEntityById(id);
+  })()`);
+  await sleep(580);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const recoveredBumpers = (st.obstacles || []).filter((o) => o.type === 'bumper');
+  assert(
+    recoveredBumpers.length === 3 && recoveredBumpers.every((b) => b.submerged === false),
+    `Expected all 3 bumpers to pop back out once cleared, got ${JSON.stringify(recoveredBumpers)}`
+  );
+
+  // Verify merge inherits bumperRewardCount so merging near a bumper cannot reset the 3-hit cap
+  await evalJS(`(() => {
+    window.__HOSHI_DEBUG__.clearEntities();
+    window.__HOSHI_DEBUG__.spawnTestEntity(3, 208, 456, { preSettled: true, bumperRewardCount: 3 });
+    window.__HOSHI_DEBUG__.spawnTestEntity(3, 232, 456, { preSettled: true, bumperRewardCount: 1 });
+  })()`);
+  await sleep(320);
+  st = await evalJS(`window.__HOSHI_DEBUG__.getState()`);
+  const mergedT4 = st.entities.find((e) => e.tier === 4);
+  assert(
+    mergedT4 && mergedT4.bumperRewardCount === 3,
+    `Expected merged T4 to inherit max bumperRewardCount=3, got ${JSON.stringify(mergedT4)}`
+  );
+  console.log('[8F OK] Bumper pile submergence, zero passive score farming, pop-out recovery & merge cap inheritance verified');
+
   assert(errors.length === 0, `Runtime/Console errors detected: ${errors.join(' | ')}`);
-  console.log('\n✅ ALL WECHAT MINI GAME E2E CHECKS (INCLUDING v4.1 OVERHAUL ITEMS 1–5) PASSED WITH ZERO ERRORS!');
+  console.log('\n✅ ALL WECHAT MINI GAME E2E CHECKS (INCLUDING v4.1 OVERHAUL ITEMS 1–5 & 8F BUMPER FIX) PASSED WITH ZERO ERRORS!');
   } finally {
     try { if (ws) ws.close(); } catch (_) {}
     try { server.close(); } catch (_) {}

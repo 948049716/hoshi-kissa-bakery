@@ -535,6 +535,80 @@
     return body;
   }
 
+  function ensureBumperStaticBody(ob) {
+    const cx = ob.x;
+    const cy = ob.y;
+    const r = ob.r || 15;
+    const key = `${cx}|${cy}|${r}`;
+    if (ob._staticBody && ob._staticBody._key === key) {
+      return ob._staticBody;
+    }
+    const body = {
+      _key: key,
+      id: -102,
+      isStatic: true,
+      isJarWall: false,
+      isBumper: true,
+      x: cx,
+      y: cy,
+      r,
+      vx: 0,
+      vy: 0,
+      angle: 0,
+      vr: 0,
+      invMass: 0,
+      invI: 0,
+      friction: 0.16,
+      restitution: 0.15
+    };
+    ob._staticBody = body;
+    return body;
+  }
+
+  function isBodySidePinchedByBumper(body, ob, jar) {
+    const d = (body.r || 16) * 2;
+    if (ob.x < 180 && body.x <= ob.x) {
+      const gap = ob.x - (ob.r || 15) - jar.left;
+      if (d >= gap - 2) return true;
+    } else if (ob.x > 260 && body.x >= ob.x) {
+      const gap = jar.right - (ob.x + (ob.r || 15));
+      if (d >= gap - 2) return true;
+    }
+    return false;
+  }
+
+  function clampBodyOutsideBumpers(body, jar, obstacles) {
+    if (!Array.isArray(obstacles) || obstacles.length === 0) return false;
+    let moved = false;
+    for (let oi = 0; oi < obstacles.length; oi++) {
+      const ob = obstacles[oi];
+      if (!ob || ob.type !== 'bumper' || ob.submerged) continue;
+      const bdx = body.x - ob.x;
+      const bdy = body.y - ob.y;
+      const minD = (body.r || 16) + (ob.r || 15);
+      const dSq = bdx * bdx + bdy * bdy;
+      if (dSq >= minD * minD) continue;
+      // Avoid hard-clamp tug-of-war against the glass side wall when a large dessert exceeds the side gap
+      if (isBodySidePinchedByBumper(body, ob, jar)) continue;
+      const dist = Math.sqrt(dSq);
+      let nx = dist > 0.01 ? bdx / dist : body.x >= 220 ? -1 : 1;
+      let ny = dist > 0.01 ? bdy / dist : -0.3;
+      if (dist <= 0.01) {
+        const len = Math.hypot(nx, ny) || 1;
+        nx /= len;
+        ny /= len;
+      }
+      const pen = minD - dist;
+      if (pen > 0.05) {
+        body.x += nx * (pen + 0.15);
+        body.y += ny * (pen + 0.15);
+        updateBodyWorld(body);
+        moved = true;
+      }
+    }
+    return moved;
+  }
+
   function clampBodyOutsideDividers(body, obstacles) {
     if (!Array.isArray(obstacles) || obstacles.length === 0) return false;
     let moved = false;
@@ -615,18 +689,151 @@
   }
 
   function clampBodyInsideJarPositional(body, jar, obstacles = null) {
-    const hasDivider = Array.isArray(obstacles) && obstacles.some((o) => o && o.type === 'divider');
-    if (hasDivider) {
+    const hasObstacleClamp =
+      Array.isArray(obstacles) &&
+      obstacles.some((o) => o && (o.type === 'divider' || (o.type === 'bumper' && !o.submerged)));
+    if (hasObstacleClamp) {
       updateBodyWorld(body);
       for (let pass = 0; pass < 2; pass++) {
         const mDiv = clampBodyOutsideDividers(body, obstacles);
+        const mBmp = clampBodyOutsideBumpers(body, jar, obstacles);
         const mJar = clampBodyToJarOnly(body, jar);
-        if (!mDiv && !mJar) break;
+        if (!mDiv && !mBmp && !mJar) break;
       }
       updateBodyWorld(body);
       return;
     }
     clampBodyToJarOnly(body, jar);
+  }
+
+  /**
+   * Immediately mark bumpers as submerged when pre-settled / carried-over treats already cover them,
+   * preventing mid-run relic equips or shift transitions from kicking settled piles.
+   */
+  function syncInitialBumperSubmergence(bodies, jar, obstacles) {
+    if (!Array.isArray(obstacles) || !Array.isArray(bodies)) return;
+    for (let oi = 0; oi < obstacles.length; oi++) {
+      const ob = obstacles[oi];
+      if (!ob || ob.type !== 'bumper') continue;
+      let crowded = 0;
+      let deepOverlap = false;
+      for (let i = 0; i < bodies.length; i++) {
+        const b = bodies[i];
+        if (!b || b.merged || !b.hasCollided) continue;
+        const spd = Math.hypot(b.vx || 0, b.vy || 0);
+        if (spd > 130) continue;
+        const dist = Math.hypot(b.x - ob.x, b.y - ob.y);
+        const minD = (b.r || 16) + (ob.r || 15);
+        if (dist <= minD + 6) crowded++;
+        if (dist < minD - 1.5 || (dist <= minD + 3 && jar && isBodySidePinchedByBumper(b, ob, jar))) {
+          deepOverlap = true;
+        }
+      }
+      if (crowded >= 2 || deepOverlap) {
+        ob.submerged = true;
+        ob.retractVisual = 1;
+        ob.submergeTimer = 0;
+        ob.clearTimer = 0;
+      }
+    }
+  }
+
+  function updateBumperSubmergence(bodies, jar, obstacles, dt) {
+    if (!Array.isArray(obstacles) || obstacles.length === 0) return;
+    for (let oi = 0; oi < obstacles.length; oi++) {
+      const ob = obstacles[oi];
+      if (!ob || ob.type !== 'bumper') continue;
+      if (ob.hitCooldown > 0) {
+        ob.hitCooldown = Math.max(0, ob.hitCooldown - dt);
+      }
+
+      if (!ob.submerged) {
+        let crowdedSettled = 0;
+        let restingTouch = 0;
+        let longestRestOnBumper = 0;
+        let sidePinched = false;
+        let overheadCount = 0;
+        let singleTouchId = -1;
+
+        for (let i = 0; i < bodies.length; i++) {
+          const b = bodies[i];
+          if (!b || b.merged || !b.hasCollided) continue;
+          const spd = Math.hypot(b.vx || 0, b.vy || 0);
+          if (spd >= 230) continue;
+          const dist = Math.hypot(b.x - ob.x, b.y - ob.y);
+          const minD = (b.r || 16) + (ob.r || 15);
+
+          if (dist <= minD + 8) {
+            crowdedSettled++;
+            singleTouchId = b.id;
+            if (dist <= minD + 4 && isBodySidePinchedByBumper(b, ob, jar)) {
+              sidePinched = true;
+            }
+          }
+          if (dist <= minD + 3.5 && spd < 85) {
+            restingTouch++;
+            if ((b.restTime || 0) > longestRestOnBumper) {
+              longestRestOnBumper = b.restTime || 0;
+            }
+          }
+        }
+
+        if (restingTouch >= 1) {
+          for (let i = 0; i < bodies.length; i++) {
+            const c = bodies[i];
+            if (!c || c.merged || !c.hasCollided || c.id === singleTouchId) continue;
+            const cSpd = Math.hypot(c.vx || 0, c.vy || 0);
+            if (cSpd < 220 && c.y < ob.y + 18 && Math.abs(c.x - ob.x) < (ob.r || 15) + (c.r || 16) + 46) {
+              overheadCount++;
+            }
+          }
+        }
+
+        if (sidePinched) {
+          ob.submergeTimer = (ob.submergeTimer || 0) + dt * 2.6;
+        } else if (
+          crowdedSettled >= 2 ||
+          (restingTouch >= 1 && overheadCount >= 1) ||
+          (restingTouch >= 1 && longestRestOnBumper >= 0.4)
+        ) {
+          ob.submergeTimer = (ob.submergeTimer || 0) + dt;
+        } else {
+          ob.submergeTimer = Math.max(0, (ob.submergeTimer || 0) - dt * 2.0);
+        }
+
+        if ((ob.submergeTimer || 0) >= 0.36) {
+          ob.submerged = true;
+          ob.submergeTimer = 0;
+          ob.clearTimer = 0;
+        }
+      } else {
+        let anyNear = false;
+        for (let i = 0; i < bodies.length; i++) {
+          const b = bodies[i];
+          if (!b || b.merged) continue;
+          const dist = Math.hypot(b.x - ob.x, b.y - ob.y);
+          if (dist < (b.r || 16) + (ob.r || 15) + 7) {
+            anyNear = true;
+            break;
+          }
+        }
+        if (!anyNear) {
+          ob.clearTimer = (ob.clearTimer || 0) + dt;
+          if (ob.clearTimer >= 0.38) {
+            ob.submerged = false;
+            ob.clearTimer = 0;
+            ob.submergeTimer = 0;
+            ob.hitFlash = Math.max(ob.hitFlash || 0, 0.26);
+          }
+        } else {
+          ob.clearTimer = 0;
+        }
+      }
+
+      const targetVis = ob.submerged ? 1 : 0;
+      const prevVis = typeof ob.retractVisual === 'number' ? ob.retractVisual : targetVis;
+      ob.retractVisual = prevVis + (targetVis - prevVis) * Math.min(1, dt * 11);
+    }
   }
 
   function bodyTouchesJar(body, jar) {
@@ -803,6 +1010,8 @@
     let lastContacts = [];
     let lastMagnetLinks = [];
 
+    updateBumperSubmergence(bodies, jar, obstacles, dt);
+
     for (let s = 0; s < SUBSTEPS; s++) {
       // Advance patrolling Glaze Ring obstacles smoothly per substep
       for (let oi = 0; oi < obstacles.length; oi++) {
@@ -879,6 +1088,7 @@
           if (!ob) continue;
 
           if (ob.type === 'bumper') {
+            if (ob.submerged) continue;
             const bdx = a.x - ob.x;
             const bdy = a.y - ob.y;
             const minD = a.r + ob.r;
@@ -888,14 +1098,19 @@
               const nx = bdx / dist;
               const ny = bdy / dist;
               const pen = minD - dist;
-              a.x += nx * (pen + 0.4);
-              a.y += ny * (pen + 0.4);
-              updateBodyWorld(a);
+              const vn = a.vx * nx + a.vy * ny;
               a.inContact = true;
               a.hasCollided = true;
 
-              const vn = a.vx * nx + a.vy * ny;
-              if (vn < 60) {
+              // Only fire spring solenoid kick & reward on genuine high-speed incoming strike (vn < -95 px/s)
+              if (vn < -95) {
+                const safeMinX = jar.left + a.r * 0.88;
+                const safeMaxX = jar.right - a.r * 0.88;
+                const safeMaxY = jar.floorY - a.r * 0.88;
+                a.x = Math.max(safeMinX, Math.min(safeMaxX, a.x + nx * (pen + 0.35)));
+                a.y = Math.min(safeMaxY, a.y + ny * (pen + 0.35));
+                updateBodyWorld(a);
+
                 const e = ob.restitution || 1.15;
                 const bounceSpd = Math.max(210, -vn * e);
                 const tx = -ny;
@@ -909,12 +1124,15 @@
                   a.vx = (a.vx / spd) * maxSpd;
                   a.vy = (a.vy / spd) * maxSpd;
                 }
-                a.vr += (nx >= 0 ? 1 : -1) * 3.5;
+                a.vr = Math.max(-13, Math.min(13, a.vr + (nx >= 0 ? 1 : -1) * 3.5));
 
                 if (
+                  (ob.hitCooldown || 0) <= 0 &&
                   (a.bumperRewardCount || 0) < 3 &&
-                  (a.lastBumperHitAge === undefined || a.age - a.lastBumperHitAge > 0.18)
+                  (a.lastBumperHitAge === undefined || a.age - a.lastBumperHitAge > 0.2) &&
+                  ((a.restTime || 0) < 0.45 || vn < -175)
                 ) {
+                  ob.hitCooldown = 0.2;
                   a.lastBumperHitAge = a.age;
                   a.bumperRewardCount = (a.bumperRewardCount || 0) + 1;
                   bumperHits.push({
@@ -925,6 +1143,33 @@
                     nx,
                     ny
                   });
+                }
+              } else {
+                // Low-speed / resting pile contact: passive smooth PGS rigid-body support with zero energy injection
+                const bmpBody = ensureBumperStaticBody(ob);
+                contacts.push({
+                  a: bmpBody,
+                  b: a,
+                  px: ob.x + nx * ob.r,
+                  py: ob.y + ny * ob.r,
+                  nx,
+                  ny,
+                  pen,
+                  mu: Math.sqrt((a.friction || 0.2) * bmpBody.friction),
+                  restitution: bmpBody.restitution,
+                  jnAcc: 0,
+                  jtAcc: 0,
+                  bias: 0,
+                  massN: 0,
+                  massT: 0,
+                  rAx: 0,
+                  rAy: 0,
+                  rBx: 0,
+                  rBy: 0
+                });
+                // Gentle dome roll-off nudge so lone slow treats don't balance dead-center on the top pole
+                if (a.y < ob.y - ob.r * 0.45 && Math.abs(a.x - ob.x) < 4.5 && Math.abs(a.vx) < 28) {
+                  a.vx += (a.x >= ob.x ? 1 : -1) * 28;
                 }
               }
             }
@@ -1138,8 +1383,14 @@
       // 5. Gentle micro-damping only for nearly stationary pastries (keeps slopes & rolling lively!)
       for (let i = 0; i < bodies.length; i++) {
         const b = bodies[i];
-        if (b.merged || !b.inContact || b.spinBoostTimer > 0) continue;
+        if (b.merged) continue;
         const linSpdSq = b.vx * b.vx + b.vy * b.vy;
+        if (b.inContact && linSpdSq < 1600) {
+          b.restTime = (b.restTime || 0) + subDt;
+        } else if (linSpdSq > 6400 || !b.inContact) {
+          b.restTime = Math.max(0, (b.restTime || 0) - subDt * 3.0);
+        }
+        if (!b.inContact || b.spinBoostTimer > 0) continue;
         const angSpd = Math.abs(b.vr);
         if (linSpdSq < 55 && angSpd < 0.24) {
           b.vx *= 0.93;
@@ -1205,7 +1456,7 @@
         if (!ob) continue;
         if (ob.type === 'divider') {
           if (testBodiesOverlap(probe, ensureDividerStaticBody(ob))) return true;
-        } else if (ob.type === 'bumper') {
+        } else if (ob.type === 'bumper' && !ob.submerged) {
           const hitD = eqRadius * 0.94 + ob.r;
           const bdx = probe.x - ob.x;
           const bdy = probe.y - ob.y;
@@ -1412,7 +1663,7 @@
       for (let oi = 0; oi < obstacles.length; oi++) {
         const ob = obstacles[oi];
         if (!ob) continue;
-        if (ob.type === 'bumper') {
+        if (ob.type === 'bumper' && !ob.submerged) {
           const bdx = x - ob.x;
           const bdy = y - ob.y;
           const hitD = r + ob.r;
@@ -1562,6 +1813,7 @@ module.exports = {
   updateBodyWorld,
   ensureDividerStaticBody,
   clampBodyInsideJarPositional,
+  syncInitialBumperSubmergence,
   stepWorld,
   predictDropLandingY,
   predictBankShotTrajectory,

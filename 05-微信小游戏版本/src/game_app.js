@@ -441,6 +441,7 @@ function createApp() {
     maxAvalancheRun: 0,
     skillEnergy: 0,
     stepSkillGain: 0,
+    stepBumperRewards: 0,
     activeSkillMode: null, // 'scoop' | 'swap_1' | 'swap_2' | null
     swapFirstEntityId: null,
     nextShotMeteor: false,
@@ -1886,6 +1887,7 @@ function createApp() {
     const dur = baseDur + synBonus + getComboUpgradeBonus();
     gameState.serveCascadeTimer = Math.max(gameState.serveCascadeTimer, dur);
     gameState.serveCascadeMerges = 0;
+    gameState.stepBumperRewards = 0;
     gameState.cascadeStaleRefundPending = !!refundStaleStep;
     gameState.serveCascadeOrigin = { x: originX, y: originY };
   }
@@ -2360,7 +2362,28 @@ function createApp() {
   }
 
   function syncObstaclesForShift() {
-    const prevRing = (gameState.obstacles || []).find((o) => o && o.type === 'glaze_ring') || null;
+    const prevObs = gameState.obstacles || [];
+    const prevRing = prevObs.find((o) => o && o.type === 'glaze_ring') || null;
+    const prevBumpers = new Map();
+    for (let i = 0; i < prevObs.length; i++) {
+      const po = prevObs[i];
+      if (po && po.type === 'bumper' && po.id) {
+        prevBumpers.set(po.id, po);
+      }
+    }
+    const makeBumper = (spec) => {
+      const prev = prevBumpers.get(spec.id);
+      return {
+        ...spec,
+        hitFlash: prev ? prev.hitFlash || 0 : 0,
+        submerged: prev ? !!prev.submerged : false,
+        submergeTimer: prev ? prev.submergeTimer || 0 : 0,
+        clearTimer: prev ? prev.clearTimer || 0 : 0,
+        hitCooldown: prev ? prev.hitCooldown || 0 : 0,
+        retractVisual: prev ? (typeof prev.retractVisual === 'number' ? prev.retractVisual : prev.submerged ? 1 : 0) : 0
+      };
+    };
+
     const obs = [];
     const hasStageGlaze = app.hasShiftHazard('glaze_ring');
     const hasStageDivider = app.hasShiftHazard('divider');
@@ -2404,26 +2427,29 @@ function createApp() {
       const hasCenterClear = !hasStageGlaze || !hasStageDivider;
       const primaryTip = hasCenterClear ? 65 : 85;
       obs.push(
-        { id: 'bumper_L', type: 'bumper', source: 'synergy', x: 102, y: 265, r: 16, restitution: 1.24, tipBase: primaryTip, grantsCrit: true, hitFlash: 0 },
-        { id: 'bumper_R', type: 'bumper', source: 'synergy', x: 338, y: 265, r: 16, restitution: 1.24, tipBase: primaryTip, grantsCrit: true, hitFlash: 0 }
+        makeBumper({ id: 'bumper_L', type: 'bumper', source: 'synergy', x: 102, y: 265, r: 16, restitution: 1.24, tipBase: primaryTip, grantsCrit: true }),
+        makeBumper({ id: 'bumper_R', type: 'bumper', source: 'synergy', x: 338, y: 265, r: 16, restitution: 1.24, tipBase: primaryTip, grantsCrit: true })
       );
       if (!hasStageGlaze) {
-        obs.push({ id: 'bumper_C', type: 'bumper', source: 'synergy', x: 220, y: 224, r: 14, restitution: 1.22, tipBase: 65, grantsCrit: true, hitFlash: 0 });
+        obs.push(makeBumper({ id: 'bumper_C', type: 'bumper', source: 'synergy', x: 220, y: 224, r: 14, restitution: 1.22, tipBase: 65, grantsCrit: true }));
       } else if (!hasStageDivider) {
-        obs.push({ id: 'bumper_C', type: 'bumper', source: 'synergy', x: 220, y: 304, r: 14, restitution: 1.22, tipBase: 65, grantsCrit: true, hitFlash: 0 });
+        obs.push(makeBumper({ id: 'bumper_C', type: 'bumper', source: 'synergy', x: 220, y: 304, r: 14, restitution: 1.22, tipBase: 65, grantsCrit: true }));
       }
     } else if (hasStageBumpers) {
       obs.push(
-        { id: 'bumper_L', type: 'bumper', source: 'stage', x: 102, y: 265, r: 15, restitution: 1.15, tipBase: 40, grantsCrit: false, hitFlash: 0 },
-        { id: 'bumper_R', type: 'bumper', source: 'stage', x: 338, y: 265, r: 15, restitution: 1.15, tipBase: 40, grantsCrit: false, hitFlash: 0 }
+        makeBumper({ id: 'bumper_L', type: 'bumper', source: 'stage', x: 102, y: 265, r: 15, restitution: 1.15, tipBase: 40, grantsCrit: false }),
+        makeBumper({ id: 'bumper_R', type: 'bumper', source: 'stage', x: 338, y: 265, r: 15, restitution: 1.15, tipBase: 40, grantsCrit: false })
       );
     } else if (hasRelicBumpers) {
       obs.push(
-        { id: 'bumper_L', type: 'bumper', source: 'relic', x: 102, y: 265, r: 15, restitution: 1.15, tipBase: 45, grantsCrit: true, hitFlash: 0 },
-        { id: 'bumper_R', type: 'bumper', source: 'relic', x: 338, y: 265, r: 15, restitution: 1.15, tipBase: 45, grantsCrit: true, hitFlash: 0 }
+        makeBumper({ id: 'bumper_L', type: 'bumper', source: 'relic', x: 102, y: 265, r: 15, restitution: 1.15, tipBase: 45, grantsCrit: true }),
+        makeBumper({ id: 'bumper_R', type: 'bumper', source: 'relic', x: 338, y: 265, r: 15, restitution: 1.15, tipBase: 45, grantsCrit: true })
       );
     }
 
+    if (Physics.syncInitialBumperSubmergence && gameState.entities && gameState.entities.length > 0) {
+      Physics.syncInitialBumperSubmergence(gameState.entities, JAR, obs);
+    }
     gameState.obstacles = obs;
   }
 
@@ -2823,6 +2849,10 @@ function createApp() {
       }
     }
 
+    if (Physics.syncInitialBumperSubmergence) {
+      Physics.syncInitialBumperSubmergence(gameState.entities, JAR, gameState.obstacles);
+    }
+    gameState.stepBumperRewards = 0;
     initOrders();
     gameState.prepShop = null;
     gameState.victoryOffer = null;
@@ -3180,9 +3210,11 @@ function createApp() {
     if (key === 'shake') {
       gameState.tools.shake--;
       gameState.jarShakeAmp = 1.0;
+      gameState.stepBumperRewards = 0;
       audio.playTool('shake');
       platform.vibrateShort('light');
       for (const e of gameState.entities) {
+        e.restTime = 0;
         e.vy -= 175 + Math.random() * 145;
         e.vx += (Math.random() - 0.5) * 280;
         e.vr += (Math.random() - 0.5) * 8;
@@ -3363,8 +3395,9 @@ function createApp() {
       agedStacks: 0,
       bumperCrit: false,
       bumperHits: 0,
-      bumperRewardCount: 0,
+      bumperRewardCount: Math.max(0, Math.floor(meta.bumperRewardCount || 0)),
       lastBumperHitAge: -1,
+      restTime: meta.preSettled ? 1.0 : 0,
       resonanceTimer: 0,
       spinBoostTimer: 0,
       spinBoostDir: 1,
@@ -3418,8 +3451,9 @@ function createApp() {
     const isMeteor = !!gameState.nextShotMeteor;
     if (isMeteor) gameState.nextShotMeteor = false;
 
-    // Reset per-drop soft skill energy cap
+    // Reset per-drop soft skill energy & bumper tip caps
     gameState.stepSkillGain = 0;
+    gameState.stepBumperRewards = 0;
 
     let finalVx = launchVx;
     let finalVy = launchVy;
@@ -3867,13 +3901,16 @@ function createApp() {
         }
         audio.playBumperHit();
         platform.vibrateShort('light');
-        const baseTip = (bh.bumper && bh.bumper.tipBase) || 40;
-        const tip = Math.round(baseTip * app.getGlobalRevenueMult());
-        addScore(tip);
         spawnSparkleBurst(bh.x, bh.y, '#ffe47a', 10);
         spawnShockwave(bh.x, bh.y, 40, '#ffd86b', 2.6);
-        const popTxt = grantsCrit ? `+¥${tip} 暴击蓄能` : `+¥${tip} 弹柱`;
-        spawnPopup(bh.x, bh.y - 16, popTxt, '#ffe588', 13);
+        if ((gameState.stepBumperRewards || 0) < 6) {
+          gameState.stepBumperRewards = (gameState.stepBumperRewards || 0) + 1;
+          const baseTip = (bh.bumper && bh.bumper.tipBase) || 40;
+          const tip = Math.round(baseTip * app.getGlobalRevenueMult());
+          addScore(tip);
+          const popTxt = grantsCrit ? `+¥${tip} 暴击蓄能` : `+¥${tip} 弹柱`;
+          spawnPopup(bh.x, bh.y - 16, popTxt, '#ffe588', 13);
+        }
       }
     }
 
@@ -4153,8 +4190,12 @@ function createApp() {
         damageNearbyYarnBalls(mx, my, isMeteorMerge ? 135 : 95, false);
         thawNearbyFrozenEntities(mx, my, isMeteorMerge ? 120 : 110, false);
 
+        const inheritedBumperRewards = Math.max(a.bumperRewardCount || 0, b.bumperRewardCount || 0);
         if (isTwinWild) {
-          const born = createEntity(5, mx, my, mvx, mvy - 30, true, 0, 0, { golden: true });
+          const born = createEntity(5, mx, my, mvx, mvy - 30, true, 0, 0, {
+            golden: true,
+            bumperRewardCount: inheritedBumperRewards
+          });
           const twinSkillPool = Math.min(
             4.5,
             1 + comboAdd + feverAdd + bankAdd + cascadeAdd + antiGravAdd + bumperAdd + chimeAdd
@@ -4185,7 +4226,10 @@ function createApp() {
           const nextTier = Math.min(9, baseTier + (isCrit ? 2 : 1));
           const def = TIERS[nextTier - 1];
           const inheritGold = forceBankGold || (isGoldenMerge && Math.random() < 0.22 + goldenLv * 0.12);
-          const born = createEntity(nextTier, mx, my, mvx, mvy, true, mAngle, mVr, { golden: inheritGold });
+          const born = createEntity(nextTier, mx, my, mvx, mvy, true, mAngle, mVr, {
+            golden: inheritGold,
+            bumperRewardCount: inheritedBumperRewards
+          });
 
           const critAdd = isCrit ? 0.75 : 0;
           const skillPool = Math.min(
@@ -4685,6 +4729,7 @@ function createApp() {
 
     gameState.skillEnergy = startEnergy;
     gameState.stepSkillGain = 0;
+    gameState.stepBumperRewards = 0;
     gameState.activeSkillMode = null;
     gameState.swapFirstEntityId = null;
     gameState.nextShotMeteor = false;
@@ -4893,10 +4938,15 @@ function createApp() {
           wildcard: !!e.isWildcard,
           golden: !!e.isGolden,
           frozenHp: e.frozenHp || 0,
+          bumperRewardCount: e.bumperRewardCount || 0,
           preSettled: true
         });
         ent.agedStacks = e.agedStacks || 0;
+        ent.bumperCrit = !!e.bumperCrit;
       }
+    }
+    if (Physics.syncInitialBumperSubmergence) {
+      Physics.syncInitialBumperSubmergence(gameState.entities, JAR, gameState.obstacles);
     }
 
     if (snap.mode !== 'zen' && Array.isArray(snap.orders) && snap.orders.length > 0) {
@@ -5862,6 +5912,7 @@ function createApp() {
         bottomY: typeof o.bottomY === 'number' ? o.bottomY : null,
         tipBase: o.tipBase || null,
         grantsCrit: !!o.grantsCrit,
+        submerged: !!o.submerged,
         hitFlash: +(o.hitFlash || 0).toFixed(2)
       })),
       antigravTimer: +gameState.antigravTimer.toFixed(2),
@@ -5944,6 +5995,7 @@ function createApp() {
         agedStacks: e.agedStacks || 0,
         bumperCrit: !!e.bumperCrit,
         bumperHits: e.bumperHits || 0,
+        bumperRewardCount: e.bumperRewardCount || 0,
         wallBounces: e.wallBounces || 0,
         gravityScale: e.gravityScale || 1,
         yarnHp: e.isYarnBall ? e.yarnHp : 0,
@@ -5996,10 +6048,14 @@ function createApp() {
     computeTurretShot: (angle) => computeTurretShotFromAngle(angle),
     chargeSkill: () => addSkillEnergy(100, true),
     spawnTestEntity: (tier, x, y, opts = {}) => {
+      if (opts.preSettled === false) {
+        gameState.stepBumperRewards = 0;
+      }
       const ent = createEntity(tier, x, y, opts.vx || 0, opts.vy || 0, false, 0, 0, {
         preSettled: opts.preSettled !== false,
         golden: !!opts.golden,
         frozenHp: opts.frozenHp || 0,
+        bumperRewardCount: opts.bumperRewardCount || 0,
         isMeteorShot: !!opts.isMeteorShot,
         isBankLaunched: !!opts.isBankLaunched
       });
@@ -6034,6 +6090,22 @@ function createApp() {
     clearEntities: () => {
       gameState.entities = [];
       gameState.dangerDuration = 0;
+      gameState.stepBumperRewards = 0;
+      if (gameState.obstacles) {
+        for (let i = 0; i < gameState.obstacles.length; i++) {
+          const ob = gameState.obstacles[i];
+          if (ob && ob.type === 'bumper') {
+            ob.submerged = false;
+            ob.submergeTimer = 0;
+            ob.clearTimer = 0;
+            ob.hitCooldown = 0;
+            ob.retractVisual = 0;
+          }
+        }
+      }
+    },
+    removeEntityById: (id) => {
+      gameState.entities = gameState.entities.filter((e) => e.id !== id);
     },
     serveById: (id) => serveEntityById(id),
     serveTable: (idx) => app.serveOrderTable(idx),

@@ -385,7 +385,9 @@ function serializeActiveRun(gameState, activeModal) {
         isYarnBall: !!e.isYarnBall,
         yarnHp: e.isYarnBall ? e.yarnHp || 2 : 0,
         frozenHp: e.frozenHp || 0,
-        agedStacks: e.agedStacks || 0
+        agedStacks: e.agedStacks || 0,
+        bumperRewardCount: e.bumperRewardCount || 0,
+        bumperCrit: !!e.bumperCrit
       }))
   };
 }

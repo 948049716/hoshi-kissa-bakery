@@ -111,7 +111,13 @@ async function main() {
     appid,
     type: 'miniGame',
     projectPath: MINIGAME_DIR,
-    ignores: ['node_modules/**/*', '**/*.md', 'project.private.config.json']
+    ignores: [
+      'node_modules/**/*',
+      'cloudfunctions/**/*',
+      'cloudbaserc.json',
+      '**/*.md',
+      'project.private.config.json'
+    ]
   };
   if (privateKey) projectOpts.privateKey = privateKey;
   else projectOpts.privateKeyPath = privateKeyPath;

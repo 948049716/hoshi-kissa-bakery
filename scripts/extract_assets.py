@@ -742,6 +742,74 @@ def _save_png_dual(img: Image.Image, filename: str, minigame_dir: Path, quantize
     return round(master_kb, 1), round(mini_kb, 1)
 
 
+def _knockout_tile_gold_center(norm: Image.Image) -> Image.Image:
+    """
+    Punch out the enclosed white interior square hole of `tile_gold` (128x128 RGBA),
+    decontaminating any white fringe on the inner frame border and leaving a hollow
+    center with a soft warm-gold inner rim glaze (alpha <= 32, center alpha <= 12).
+    """
+    rgba = np.array(norm, dtype=np.float32)
+    h, w, _ = rgba.shape
+    rgb = rgba[:, :, :3]
+    alpha = rgba[:, :, 3]
+
+    white = np.array([255.0, 255.0, 255.0], dtype=np.float32)
+    dist_w = np.linalg.norm(rgb - white[None, None, :], axis=2)
+    luma = 0.299 * rgb[:, :, 0] + 0.587 * rgb[:, :, 1] + 0.114 * rgb[:, :, 2]
+    sat = rgb.max(axis=2) - rgb.min(axis=2)
+
+    # Match enclosed white / pale-cream hole pixels without crossing #4A2C2A inner outline or saturated gold frame
+    is_hole_cand = (alpha > 0) & ((dist_w < 38.0) | ((luma > 226.0) & (sat < 48.0)))
+
+    hole_mask = np.zeros((h, w), dtype=bool)
+    q = deque()
+    cy0, cy1 = int(h * 0.36), int(h * 0.64)
+    cx0, cx1 = int(w * 0.36), int(w * 0.64)
+    for sy in range(cy0, cy1):
+        for sx in range(cx0, cx1):
+            if is_hole_cand[sy, sx] and not hole_mask[sy, sx]:
+                hole_mask[sy, sx] = True
+                q.append((sy, sx))
+
+    while q:
+        cy, cx = q.popleft()
+        for ny, nx in ((cy - 1, cx), (cy + 1, cx), (cy, cx - 1), (cy, cx + 1)):
+            if 0 <= ny < h and 0 <= nx < w and not hole_mask[ny, nx]:
+                if is_hole_cand[ny, nx]:
+                    hole_mask[ny, nx] = True
+                    q.append((ny, nx))
+
+    if hole_mask.sum() < 64:
+        return norm
+
+    # Decontaminate 1px inner frame rim adjacent to hole_mask so zero white inner halo remains
+    padded = np.pad(hole_mask, 1, mode="constant", constant_values=False)
+    adj_hole = (
+        padded[:-2, 1:-1] | padded[2:, 1:-1] | padded[1:-1, :-2] | padded[1:-1, 2:]
+        | padded[:-2, :-2] | padded[:-2, 2:] | padded[2:, :-2] | padded[2:, 2:]
+    )
+    inner_edge = (~hole_mask) & (alpha > 0) & adj_hole
+    for y, x in zip(*np.where(inner_edge)):
+        d = dist_w[y, x]
+        if d < 112.0:
+            a = float(np.clip((d - 14.0) / (112.0 - 14.0), 0.15, 1.0))
+            alpha[y, x] = min(alpha[y, x], a * 255.0)
+            rgb[y, x] = np.clip((rgb[y, x] - (1.0 - a) * white) / max(a, 0.25), 0.0, 255.0)
+
+    # Subtle warm-gold inner rim glow (<= 32 alpha near frame, 0..8 alpha in center)
+    rim_src = ((~hole_mask) & (alpha > 64)).astype(np.uint8) * 255
+    rim_blur = np.array(
+        Image.fromarray(rim_src, mode="L").filter(ImageFilter.GaussianBlur(radius=3.2)),
+        dtype=np.float32,
+    ) / 255.0
+    for y, x in zip(*np.where(hole_mask)):
+        rgb[y, x] = np.array([255.0, 214.0, 102.0], dtype=np.float32)
+        alpha[y, x] = float(np.clip(rim_blur[y, x] * 40.0, 0.0, 32.0))
+
+    out = np.dstack([np.clip(rgb, 0, 255).astype(np.uint8), np.clip(alpha, 0, 255).astype(np.uint8)])
+    return Image.fromarray(out, mode="RGBA")
+
+
 def extract_v2_assets(verify_out: str | None = None):
     """
     Slice & normalize 《一起做猫饼》 2.0 sprite sheets and hero cover into:
@@ -817,6 +885,8 @@ def extract_v2_assets(verify_out: str | None = None):
         r, c = divmod(idx, 4)
         cell = tiles_pil.crop((xs[c], ys[r], xs[c + 1], ys[r + 1]))
         norm = _normalize_cell_rgba(cell, 128, margin_ratio=0.06, bg_dist_thresh=28.0, keep_main_only=False)
+        if idx == 0:
+            norm = _knockout_tile_gold_center(norm)
         tiles_atlas.alpha_composite(norm, (c * 128, r * 128))
         preview_thumbs.append((f"Tile_{idx+1}", norm))
     mkb, skb = _save_png_dual(tiles_atlas, "board_tiles_atlas.png", minigame_dir)

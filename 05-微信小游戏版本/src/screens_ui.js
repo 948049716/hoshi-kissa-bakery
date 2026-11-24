@@ -1,2561 +1,1761 @@
 /**
- * Canvas 2D Layout Computer & Screen Renderers (Backdrop, Streamlined Storybook Lobby & Gameplay HUD)
- * Designed for portrait WeChat Mini Game phones (with Capsule Button safe clearance)
- * AND wide desktop simulator / browser preview screens, using unified UI atlas sprites.
+ * Canvas 2D Layout Computer & Screen Renderers (Backdrop, 3-Chapter Winding Campaign Lobby & 4-Band / 3-Col Gameplay HUD)
+ * for Hoshi Kissa Bakery v2.0 (WeChat Mini Game Edition).
+ *
+ * Strictly enforces:
+ * - Zero HSL color strings (strictly hex/rgb/rgba for iOS WeChat Canvas safety)
+ * - Zero native Unicode emoji / star / dingbat characters (100% atlas & vector icons)
+ * - Strict WeChat capsule clearance (right <= menuRect.left - 8) & safeBottom clearance
+ * - Zero pairwise HitRegistry overlaps across 375x667, 390x844, and 1280x760
+ * - Pure Node.js stub-canvas (ctx === null) geometry & HitRegistry parity
  */
 'use strict';
 
 const {
-  TIERS,
+  GAME_TITLE,
   PATRONS,
-  SHOP_UPGRADES,
-  RELICS,
-  MAX_RELIC_SLOTS,
-  RELIC_ARCHETYPES,
-  SHIFT_HAZARDS,
-  JAR,
+  TOOLS,
+  BOARD_THEMES,
+  normalizePatronId,
   getChefRank
 } = require('./constants');
+const {
+  CHAPTERS,
+  getLevelById,
+  computeTotalStars,
+  isChapterUnlocked,
+  isLevelUnlocked
+} = require('./levels_data');
 const UI = require('./ui_draw');
-const JarRenderer = require('./jar_renderer');
+const BoardRenderer = require('./board_renderer');
 
-function computeJarBox(x, y, w, h) {
-  const scale = Math.max(0.4, Math.min(w / JAR.canvasW, h / JAR.canvasH));
-  const dw = JAR.canvasW * scale;
-  const dh = JAR.canvasH * scale;
+const NOOP_GRADIENT = Object.freeze({
+  addColorStop() {}
+});
+
+function estimateFontPx(fontStr) {
+  if (typeof fontStr !== 'string') return 12;
+  const m = /(\d+(?:\.\d+)?)px/.exec(fontStr);
+  return m ? Math.max(6, Number(m[1])) : 12;
+}
+
+function estimateTextWidth(text, fontStr) {
+  const s = String(text === null || text === undefined ? '' : text);
+  const px = estimateFontPx(fontStr);
+  let total = 0;
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i);
+    total += code > 255 ? px : px * 0.56;
+  }
+  return total;
+}
+
+const NOOP_CTX = {
+  font: '700 12px sans-serif',
+  fillStyle: '#000000',
+  strokeStyle: '#000000',
+  lineWidth: 1,
+  globalAlpha: 1,
+  textAlign: 'left',
+  textBaseline: 'alphabetic',
+  lineJoin: 'miter',
+  lineCap: 'butt',
+  shadowColor: 'rgba(0, 0, 0, 0)',
+  shadowBlur: 0,
+  shadowOffsetX: 0,
+  shadowOffsetY: 0,
+  save() {},
+  restore() {},
+  beginPath() {},
+  closePath() {},
+  moveTo() {},
+  lineTo() {},
+  arc() {},
+  arcTo() {},
+  ellipse() {},
+  quadraticCurveTo() {},
+  bezierCurveTo() {},
+  rect() {},
+  roundRect() {},
+  clip() {},
+  fill() {},
+  stroke() {},
+  fillRect() {},
+  strokeRect() {},
+  clearRect() {},
+  translate() {},
+  rotate() {},
+  scale() {},
+  setTransform() {},
+  setLineDash() {},
+  drawImage() {},
+  fillText() {},
+  strokeText() {},
+  measureText(txt) {
+    return { width: estimateTextWidth(txt, this.font) };
+  },
+  createLinearGradient() {
+    return NOOP_GRADIENT;
+  },
+  createRadialGradient() {
+    return NOOP_GRADIENT;
+  }
+};
+
+function isUsableCanvasCtx(ctx) {
+  try {
+    return Boolean(
+      ctx &&
+        typeof ctx === 'object' &&
+        typeof ctx.save === 'function' &&
+        typeof ctx.restore === 'function' &&
+        typeof ctx.beginPath === 'function' &&
+        typeof ctx.closePath === 'function' &&
+        typeof ctx.moveTo === 'function' &&
+        typeof ctx.lineTo === 'function' &&
+        typeof ctx.arc === 'function' &&
+        typeof ctx.fill === 'function' &&
+        typeof ctx.stroke === 'function' &&
+        typeof ctx.translate === 'function' &&
+        typeof ctx.rotate === 'function' &&
+        typeof ctx.scale === 'function'
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+function getSafeCtx(ctx) {
+  return isUsableCanvasCtx(ctx) ? ctx : NOOP_CTX;
+}
+
+function clamp(v, lo, hi) {
+  if (!Number.isFinite(v)) return lo;
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
+function formatClockMMSS(sec) {
+  const s = Math.max(0, Math.ceil(Number(sec) || 0));
+  const mm = Math.floor(s / 60);
+  const ss = s % 60;
+  return `${mm < 10 ? '0' + mm : String(mm)}:${ss < 10 ? '0' + ss : String(ss)}`;
+}
+
+function computeTopHeaderGeometry(metrics) {
+  const m = metrics && typeof metrics === 'object' ? metrics : {};
+  const width = Math.max(320, Number(m.width) || 390);
+  const height = Math.max(480, Number(m.height) || 844);
+  const safeTop = Math.max(0, Number(m.safeTop) || 0);
+  const safeBottom = Math.max(0, Number(m.safeBottom) || 0);
+  const mr =
+    m.menuRect &&
+    typeof m.menuRect === 'object' &&
+    Number.isFinite(m.menuRect.left) &&
+    m.menuRect.left > 0
+      ? m.menuRect
+      : null;
+
+  const topY = mr ? Math.max(4, Math.round(mr.top)) : Math.max(8, safeTop + 4);
+  const headerH = mr ? Math.max(30, Math.round(mr.height || 32)) : 32;
+  const headerBottom = mr
+    ? Math.max(topY + headerH, Math.round(mr.bottom || topY + headerH))
+    : topY + headerH;
+  const maxRight = mr ? Math.min(width - 8, Math.floor(mr.left - 8)) : width - 10;
+  const bottomLimit = height - Math.max(10, safeBottom + 8);
+
   return {
-    x: x + (w - dw) * 0.5,
-    y: y + (h - dh) * 0.5,
-    w: dw,
-    h: dh,
-    scale
+    width,
+    height,
+    safeTop,
+    safeBottom,
+    topY,
+    headerH,
+    headerBottom,
+    maxRight,
+    bottomLimit
   };
 }
 
+function drawRedDot(ctx, cx, cy, r = 5.2) {
+  const c = getSafeCtx(ctx);
+  c.save();
+  try {
+    c.fillStyle = '#E6483B';
+    c.beginPath();
+    c.arc(cx, cy, r, 0, Math.PI * 2);
+    c.fill();
+    c.lineWidth = 1.5;
+    c.strokeStyle = '#FFF9EC';
+    c.stroke();
+  } finally {
+    c.restore();
+  }
+}
+
+function drawLockIcon(ctx, cx, cy, size = 14, opts = {}) {
+  const c = getSafeCtx(ctx);
+  const s = Math.max(8, Number(size) || 14);
+  const bodyW = s * 0.78;
+  const bodyH = s * 0.58;
+  const bx = cx - bodyW * 0.5;
+  const by = cy - bodyH * 0.28;
+  const shackleR = bodyW * 0.30;
+
+  c.save();
+  try {
+    c.strokeStyle = (opts && opts.shackleColor) || '#5A3A28';
+    c.lineWidth = Math.max(1.5, s * 0.13);
+    c.lineCap = 'round';
+    c.beginPath();
+    c.arc(cx, by + 1, shackleR, Math.PI, 0, false);
+    c.stroke();
+
+    c.fillStyle = (opts && opts.bodyColor) || '#D59C3B';
+    c.strokeStyle = (opts && opts.borderColor) || '#4A2C2A';
+    c.lineWidth = Math.max(1.2, s * 0.10);
+    UI.roundRectPath(c, bx, by, bodyW, bodyH, Math.max(2, s * 0.16));
+    c.fill();
+    c.stroke();
+
+    c.fillStyle = '#4A2C2A';
+    c.beginPath();
+    c.arc(cx, by + bodyH * 0.45, Math.max(1.2, s * 0.09), 0, Math.PI * 2);
+    c.fill();
+  } finally {
+    c.restore();
+  }
+}
+
+function drawChevronIcon(ctx, cx, cy, size = 12, dir = 'left', color = '#4A2C2A') {
+  const c = getSafeCtx(ctx);
+  const half = Math.max(3, (Number(size) || 12) * 0.36);
+  const sign = dir === 'left' ? -1 : 1;
+  c.save();
+  try {
+    c.strokeStyle = color || '#4A2C2A';
+    c.lineWidth = Math.max(2, (Number(size) || 12) * 0.19);
+    c.lineCap = 'round';
+    c.lineJoin = 'round';
+    c.beginPath();
+    c.moveTo(cx - sign * half * 0.55, cy - half);
+    c.lineTo(cx + sign * half * 0.65, cy);
+    c.lineTo(cx - sign * half * 0.55, cy + half);
+    c.stroke();
+  } finally {
+    c.restore();
+  }
+}
+
+function drawSpeechBalloon(ctx, x, y, w, h, tailX, tailY) {
+  const c = getSafeCtx(ctx);
+  const r = 10;
+  const baseTop = clamp(tailY - 5, y + 10, Math.max(y + 10, y + h - 18));
+
+  c.save();
+  try {
+    const g = c.createLinearGradient(x, y, x, y + h);
+    g.addColorStop(0, '#FFFEFB');
+    g.addColorStop(1, '#F8EBD2');
+    c.fillStyle = g;
+    UI.roundRectPath(c, x, y, w, h, r);
+    c.fill();
+
+    c.beginPath();
+    c.moveTo(x + 2, baseTop);
+    c.lineTo(tailX, tailY);
+    c.lineTo(x + 2, baseTop + 10);
+    c.closePath();
+    c.fill();
+
+    c.lineWidth = 1.6;
+    c.strokeStyle = '#8C5E32';
+    UI.roundRectPath(c, x, y, w, h, r);
+    c.stroke();
+  } finally {
+    c.restore();
+  }
+}
+
 function renderBackdrop(ctx, w, h, dt, nowSec, gameState, theme, sprites, fireflies) {
-  if (sprites.bg) {
-    UI.drawCoverImage(ctx, sprites.bg, 0, 0, w, h, 0.5);
+  const c = getSafeCtx(ctx);
+  const width = Math.max(320, Number(w) || 390);
+  const height = Math.max(480, Number(h) || 844);
+  const safeDt = clamp(Number(dt) || 0, 0, 0.1);
+  const th = theme && typeof theme === 'object' ? theme : BOARD_THEMES.amber;
+  const sp = sprites && typeof sprites === 'object' ? sprites : {};
+
+  if (sp.bg) {
+    UI.drawCoverImage(c, sp.bg, 0, 0, width, height, 0.5);
   } else {
-    const g = ctx.createLinearGradient(0, 0, 0, h);
+    const g = c.createLinearGradient(0, 0, 0, height);
     g.addColorStop(0, '#162736');
-    g.addColorStop(1, '#2d1c12');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, w, h);
+    g.addColorStop(1, '#2D1C12');
+    c.fillStyle = g;
+    c.fillRect(0, 0, width, height);
   }
 
-  ctx.save();
-  ctx.fillStyle = theme.stageTint || 'rgba(8, 13, 19, 0.42)';
-  ctx.fillRect(0, 0, w, h);
-  ctx.restore();
+  c.save();
+  try {
+    c.fillStyle = th.stageTint || 'rgba(8, 13, 19, 0.42)';
+    c.fillRect(0, 0, width, height);
+  } finally {
+    c.restore();
+  }
 
-  const isSakura = theme.id === 'sakura';
-  for (let i = 0; i < fireflies.length; i++) {
-    const f = fireflies[i];
-    f.x += (f.vx + (isSakura ? Math.sin(nowSec * 1.1 + f.phase) * 0.01 : 0)) * dt;
-    f.y += (isSakura ? Math.abs(f.vy) * 1.35 : f.vy) * dt;
+  const isSakura = th.id === 'sakura';
+  const ambientRgb = th.ambientRgb || '255, 232, 148';
+  const list = Array.isArray(fireflies) ? fireflies : [];
+  for (let i = 0; i < list.length; i++) {
+    const f = list[i];
+    if (!f || typeof f !== 'object') continue;
+    f.x += (f.vx + (isSakura ? Math.sin(nowSec * 1.1 + f.phase) * 0.01 : 0)) * safeDt;
+    f.y += (isSakura ? Math.abs(f.vy) * 1.35 : f.vy) * safeDt;
     if (f.y < -0.05) {
       f.y = 1.05;
-      f.x = Math.random();
+      f.x = (f.x + 0.37) % 1;
     } else if (f.y > 1.05) {
       f.y = -0.05;
-      f.x = Math.random();
+      f.x = (f.x + 0.61) % 1;
     }
     if (f.x < -0.05) f.x = 1.05;
     if (f.x > 1.05) f.x = -0.05;
 
-    const glow = 0.25 + 0.45 * (0.5 + 0.5 * Math.sin(nowSec * 2.2 + f.phase));
-    const px = f.x * w;
-    const py = f.y * h;
+    const glow = clamp(0.24 + 0.44 * (0.5 + 0.5 * Math.sin(nowSec * 2.2 + f.phase)), 0.05, 0.95);
+    const px = f.x * width;
+    const py = f.y * height;
     if (isSakura) {
-      ctx.fillStyle = `rgba(${theme.ambientRgb}, ${glow * 0.85})`;
-      UI.drawSakuraPetal(ctx, px, py, f.r * 1.9, nowSec * 1.2 + f.phase);
+      c.save();
+      c.fillStyle = `rgba(${ambientRgb}, ${(glow * 0.85).toFixed(3)})`;
+      UI.drawSakuraPetal(c, px, py, f.r * 1.9, nowSec * 1.2 + f.phase);
+      c.restore();
     } else {
-      const grad = ctx.createRadialGradient(px, py, 0, px, py, f.r * 3.5);
-      grad.addColorStop(0, `rgba(${theme.ambientRgb}, ${glow})`);
-      grad.addColorStop(1, `rgba(${theme.ambientRgb}, 0)`);
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(px, py, f.r * 3.5, 0, Math.PI * 2);
-      ctx.fill();
+      c.save();
+      const grad = c.createRadialGradient(px, py, 0, px, py, f.r * 3.4);
+      grad.addColorStop(0, `rgba(${ambientRgb}, ${glow.toFixed(3)})`);
+      grad.addColorStop(1, `rgba(${ambientRgb}, 0)`);
+      c.fillStyle = grad;
+      c.beginPath();
+      c.arc(px, py, f.r * 3.4, 0, Math.PI * 2);
+      c.fill();
+      c.restore();
     }
   }
 
-  if (gameState.running && gameState.feverTimer > 0) {
-    const pulse = 0.55 + 0.45 * Math.sin(nowSec * 5);
-    ctx.save();
-    ctx.strokeStyle = `rgba(255, 212, 92, ${0.28 + pulse * 0.16})`;
-    ctx.lineWidth = 10;
-    ctx.strokeRect(5, 5, w - 10, h - 10);
-    ctx.restore();
-  }
-}
-
-function computeTopHeaderGeometry(metrics) {
-  const { width, safeTop, menuRect } = metrics;
-  const topY = menuRect ? menuRect.top : Math.max(8, safeTop + 4);
-  const headerH = menuRect ? Math.max(30, menuRect.height) : 34;
-  const maxRight = menuRect ? Math.max(210, menuRect.left - 8) : width - 10;
-  return { topY, headerH, maxRight };
-}
-
-function drawRedDot(ctx, cx, cy) {
-  ctx.save();
-  ctx.fillStyle = '#e6483b';
-  ctx.beginPath();
-  ctx.arc(cx, cy, 5.5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.lineWidth = 1.6;
-  ctx.strokeStyle = '#fff9ec';
-  ctx.stroke();
-  ctx.restore();
-}
-
-function drawSpeechBalloon(ctx, x, y, w, h, tailX, tailY) {
-  const r = 12;
-  ctx.save();
-  ctx.shadowColor = 'rgba(28, 14, 6, 0.22)';
-  ctx.shadowBlur = 10;
-  ctx.shadowOffsetY = 3;
-
-  const g = ctx.createLinearGradient(x, y, x, y + h);
-  g.addColorStop(0, '#fffefb');
-  g.addColorStop(1, '#f8ebd2');
-  ctx.fillStyle = g;
-  UI.roundRectPath(ctx, x, y, w, h, r);
-  ctx.fill();
-
-  // Speech pointer tail pointing left toward mascot
-  const baseTop = Math.max(y + 14, Math.min(y + h - 22, tailY - 6));
-  ctx.beginPath();
-  ctx.moveTo(x + 2, baseTop);
-  ctx.lineTo(tailX, tailY);
-  ctx.lineTo(x + 2, baseTop + 12);
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
-
-  ctx.save();
-  UI.roundRectPath(ctx, x, y, w, h, r);
-  ctx.lineWidth = 1.9;
-  ctx.strokeStyle = '#4A2C2A';
-  ctx.stroke();
-
-  // Cover border seam at tail base
-  ctx.beginPath();
-  ctx.moveTo(x + 1, baseTop + 1);
-  ctx.lineTo(tailX, tailY);
-  ctx.lineTo(x + 1, baseTop + 11);
-  ctx.fillStyle = '#fdf4e3';
-  ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(x, baseTop);
-  ctx.lineTo(tailX, tailY);
-  ctx.lineTo(x, baseTop + 12);
-  ctx.strokeStyle = '#4A2C2A';
-  ctx.lineWidth = 1.9;
-  ctx.lineJoin = 'round';
-  ctx.stroke();
-  ctx.restore();
-}
-
-function drawTitlePlaqueBanner(ctx, cx, topY, maxW, maxH, sprites, subtitle) {
-  const img = sprites.titlePlaque;
-  if (img && img.width > 0 && img.height > 0) {
-    const scale = Math.min(maxW / img.width, maxH / img.height);
-    const dw = img.width * scale;
-    const dh = img.height * scale;
-    const dx = cx - dw * 0.5;
-    ctx.save();
-    ctx.shadowColor = 'rgba(18, 8, 3, 0.36)';
-    ctx.shadowBlur = 12;
-    ctx.shadowOffsetY = 4;
-    ctx.drawImage(img, dx, topY, dw, dh);
-    ctx.restore();
-
-    // Inner cream parchment area of ui_title_plaque sits around y: [0.31..0.76] of dh
-    const titleY = topY + dh * 0.48;
-    const subY = topY + dh * 0.675;
-    UI.drawFitText(ctx, '星 夜 吃 茶', cx + 4, titleY, dw * 0.64, Math.min(25, dh * 0.22), 15, 900, '#4A2C2A', 'center');
-    if (subtitle) {
-      UI.drawFitText(ctx, subtitle, cx + 4, subY, dw * 0.68, Math.min(11, dh * 0.098), 8.5, 800, '#8a5222', 'center');
+  const feverOn = Boolean(gameState && gameState.feverActive);
+  if (feverOn) {
+    const pulse = 0.55 + 0.45 * Math.sin(nowSec * 5.2);
+    c.save();
+    try {
+      c.strokeStyle = `rgba(255, 212, 92, ${(0.26 + pulse * 0.18).toFixed(3)})`;
+      c.lineWidth = 8;
+      c.strokeRect(4, 4, width - 8, height - 8);
+    } finally {
+      c.restore();
     }
-    return dh;
-  }
-
-  // Fallback wooden plaque if image still loading
-  const fw = Math.min(maxW, 280);
-  const fh = Math.min(maxH, 68);
-  UI.drawWoodBoard(ctx, cx - fw * 0.5, topY, fw, fh, 14);
-  UI.drawParchmentSheet(ctx, cx - fw * 0.5 + 7, topY + 7, fw - 14, fh - 14, 9);
-  UI.drawFitText(ctx, '星夜吃茶', cx, topY + fh * 0.42, fw - 28, 20, 14, 900, '#4A2C2A', 'center');
-  if (subtitle) {
-    UI.drawFitText(ctx, subtitle, cx, topY + fh * 0.74, fw - 28, 10, 8.5, 700, '#8a5222', 'center');
-  }
-  return fh;
-}
-
-const LOBBY_MODES = [
-  {
-    id: 'chef',
-    icon: 'mode_chef',
-    shortTitle: '主厨闯关',
-    tag: '5幕',
-    tagTone: 'berry',
-    bestKey: 'bestChef'
-  },
-  {
-    id: 'rush',
-    icon: 'mode_rush',
-    shortTitle: '90秒狂欢',
-    tag: '限时',
-    tagTone: 'amber',
-    bestKey: 'bestRush'
-  },
-  {
-    id: 'zen',
-    icon: 'mode_zen',
-    shortTitle: '悠闲经典',
-    tag: '无压',
-    tagTone: 'sage',
-    bestKey: 'bestZen'
-  }
-];
-
-function renderLobbyScreen(ctx, metrics, app, hits, nowSec) {
-  const { width, height, safeBottom } = metrics;
-  const { gameState, saveData, sprites } = app;
-  const { topY, headerH, maxRight } = computeTopHeaderGeometry(metrics);
-  const isWide = width >= 760;
-
-  const padX = isWide ? Math.max(20, (width - 980) * 0.5) : 12;
-  const effectiveRight = isWide ? Math.min(width - padX, maxRight) : maxRight;
-  const btnS = Math.min(32, headerH);
-
-  // 1. Clean Top Utility Bar (Capsule-Safe, Unified Atlas Icons!)
-  let rx = effectiveRight;
-  rx -= btnS;
-  UI.drawPillButton(ctx, rx, topY, btnS, btnS, {
-    style: 'wood',
-    icon: 'icon_help',
-    sprites,
-    fallbackText: '?'
-  });
-  hits.add('lobby_help', rx, topY, btnS, btnS, () => app.openModal('help'));
-
-  rx -= 6 + btnS;
-  UI.drawPillButton(ctx, rx, topY, btnS, btnS, {
-    style: 'wood',
-    icon: 'icon_sfx',
-    sprites,
-    mutedSlash: !app.audio.sfxEnabled,
-    fallbackText: '音'
-  });
-  hits.add('lobby_sfx', rx, topY, btnS, btnS, () => app.toggleSfx());
-
-  rx -= 6 + btnS;
-  UI.drawPillButton(ctx, rx, topY, btnS, btnS, {
-    style: app.audio.bgmEnabled ? 'active' : 'wood',
-    icon: 'icon_bgm',
-    sprites,
-    mutedSlash: !app.audio.bgmEnabled,
-    fallbackText: '乐'
-  });
-  hits.add('lobby_bgm', rx, topY, btnS, btnS, () => app.cycleBgm());
-
-  // Left: Unified Stardust Bank Chip (tappable to open Shop!)
-  const bankVal = String(saveData.bankStardust || 0);
-  const bankW = Math.min(Math.max(76, 44 + bankVal.length * 8.5), Math.max(68, rx - 8 - padX));
-  UI.drawCurrencyChip(ctx, padX, topY, bankW, btnS, sprites, 'icon_stardust', bankVal, {
-    style: 'wood',
-    fontSize: 12.5
-  });
-  hits.add('lobby_bank', padX, topY, bankW, btnS, () => app.openShop('upgrades'));
-
-  // Cloud Sync & Chef Profile Pill (illustrated icon + compact status, zero emoji)
-  const cloudX = padX + bankW + 6;
-  const availCloudW = rx - 6 - cloudX;
-  if (availCloudW >= 62) {
-    const cs = app.cloudState || { status: 'idle', syncing: false };
-    const isAuth = !!(saveData.playerProfile && saveData.playerProfile.authorized);
-    let cloudIcon = 'icon_local_save';
-    let shortCloudTxt = '本地';
-    let fullCloudTxt = app.getPlayerDisplayName();
-    let pillStyle = 'dark';
-    if (cs.syncing) {
-      cloudIcon = 'icon_cloud';
-      shortCloudTxt = '同步中';
-      fullCloudTxt = '云同步中';
-    } else if (cs.status === 'retry_pending') {
-      cloudIcon = 'icon_cloud';
-      shortCloudTxt = '待重连';
-      fullCloudTxt = '待重连同步';
-    } else if (cs.status === 'synced') {
-      cloudIcon = isAuth ? 'icon_id_card' : 'icon_cloud';
-      shortCloudTxt = isAuth ? '名片' : '已云存';
-      fullCloudTxt = app.getPlayerDisplayName();
-      pillStyle = isAuth ? 'equipped' : 'dark';
-    } else if (isAuth) {
-      cloudIcon = 'icon_id_card';
-      shortCloudTxt = '名片';
-      fullCloudTxt = app.getPlayerDisplayName();
-    }
-    const useWideLabel = availCloudW >= 150;
-    const pillW = useWideLabel ? Math.min(184, availCloudW) : Math.min(76, availCloudW);
-    UI.drawPillButton(ctx, cloudX, topY, pillW, btnS, {
-      style: pillStyle,
-      icon: cloudIcon,
-      sprites,
-      iconSize: 16,
-      text: useWideLabel ? fullCloudTxt : shortCloudTxt,
-      fontSize: useWideLabel ? 11.2 : 10.2,
-      radius: Math.round(btnS * 0.5)
-    });
-    hits.add('lobby_cloud_status', cloudX, topY, pillW, btnS, () => app.openCareer('stats'));
-  }
-
-  const contentTop = topY + headerH + 6;
-  const footerPadB = Math.max(10, safeBottom + 8);
-
-  if (isWide) {
-    renderWideLobbyLayout(ctx, width, height, padX, contentTop, footerPadB, app, hits, nowSec);
-  } else {
-    renderMobileLobbyLayout(ctx, width, height, padX, contentTop, footerPadB, app, hits, nowSec);
   }
 }
 
-function renderMobileLobbyLayout(ctx, width, height, padX, contentTop, footerPadB, app, hits, nowSec) {
-  const { sprites, activePatron, hasAffordable, lobbyBounceT, lobbySpeechIndex } = app;
-  const innerW = width - padX * 2;
+function drawTitlePlaqueBanner(ctx, x, y, w, h, sprites, subtitle, totalStars) {
+  const c = getSafeCtx(ctx);
+  const sp = sprites || {};
+  const cx = x + w * 0.5;
 
-  // Bottom 3-Button Meta Dock (Shop / Compendium / Career)
-  const dockH = 40;
-  const dockY = height - footerPadB - dockH;
-  const dockGap = 8;
-  const dockColW = (innerW - dockGap * 2) / 3;
-  const dockItems = [
-    { id: 'btn_shop', icon: 'icon_shop', text: '小铺', dot: hasAffordable, fn: () => app.openShop('upgrades') },
-    { id: 'btn_comp', icon: 'icon_book', text: '图鉴', dot: false, fn: () => app.openModal('compendium') },
-    { id: 'btn_career', icon: 'icon_trophy', text: '履历', dot: false, fn: () => app.openCareer('stats') }
-  ];
-  for (let i = 0; i < dockItems.length; i++) {
-    const d = dockItems[i];
-    const bx = padX + i * (dockColW + dockGap);
-    UI.drawPillButton(ctx, bx, dockY, dockColW, dockH, {
-      style: 'wood',
-      icon: d.icon,
-      sprites,
-      text: d.text,
-      fontSize: 12.8,
-      radius: 12
-    });
-    if (d.dot) drawRedDot(ctx, bx + dockColW - 6, dockY + 4);
-    hits.add(d.id, bx, dockY, dockColW, dockH, d.fn);
+  UI.drawWoodBoard(c, x, y, w, h, 13, true);
+  UI.drawParchmentSheet(c, x + 5, y + 4, w - 10, h - 8, 9);
+
+  if (w >= 260) {
+    UI.drawUiIcon(c, sp, 'serve_bell', x + 24, y + h * 0.5, Math.min(24, h * 0.48));
+    UI.drawStarIcon(c, x + w - 24, y + h * 0.5, Math.min(8, h * 0.16), true);
   }
 
-  const availH = dockY - contentTop - 10;
-  const compact = availH < 520;
-
-  // 1. Top Hanging Signboard Plaque (clean rank subtitle only)
-  const plaqueMaxH = compact ? 92 : Math.min(132, Math.round(availH * 0.22));
-  const plaqueMaxW = Math.min(innerW - 12, compact ? 248 : 308);
-  const rankTitle = getChefRank(app.getCareerTopScore());
-  const plaqueH = drawTitlePlaqueBanner(ctx, width * 0.5, contentTop - 4, plaqueMaxW, plaqueMaxH, sprites, rankTitle);
-
-  // 2. Open Mascot Stage + Concise Speech Balloon + Compact Partner Chips
-  const stageTop = contentTop + plaqueH + (compact ? 2 : 6);
-  const menuCardH = compact ? 196 : 220;
-  const menuCardY = dockY - 10 - menuCardH;
-  const stageAvailH = Math.max(114, menuCardY - stageTop - 8);
-
-  const chipH = compact ? 32 : 36;
-  const chipY = stageTop + stageAvailH - chipH;
-  const actorAreaH = Math.max(76, chipY - stageTop - 6);
-
-  // Mascot standing on velvet stage cushion on the left (clean, no redundant tap badge)
-  const stageW = compact ? 96 : 112;
-  const stageCx = padX + stageW * 0.5 + 2;
-  const stageBotY = stageTop + actorAreaH;
-
-  if (sprites.patronStage) {
-    UI.drawContainImage(ctx, sprites.patronStage, stageCx, stageBotY - 14, stageW * 0.92, 42);
-  } else {
-    ctx.save();
-    ctx.fillStyle = 'rgba(42, 20, 10, 0.36)';
-    UI.fillEllipse(ctx, stageCx, stageBotY - 8, stageW * 0.4, 9);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  const bounceScale = lobbyBounceT > 0 ? 1 + Math.sin(lobbyBounceT * Math.PI * 2) * 0.13 : 1;
-  const bobY = Math.sin(nowSec * 2.3) * 2.5;
-  const mascotSize = Math.min(stageW * 0.86, actorAreaH - 8);
-  const mascotCy = stageBotY - 18 - mascotSize * 0.36 + bobY;
-  const pImg = sprites.patrons[activePatron.id];
-  if (pImg) {
-    ctx.save();
-    ctx.translate(stageCx, mascotCy);
-    ctx.scale(bounceScale, 2 - bounceScale);
-    UI.drawContainImage(ctx, pImg, 0, 0, mascotSize, mascotSize);
-    ctx.restore();
-  }
-  hits.add('lobby_patron_poke', padX, stageTop, stageW + 6, actorAreaH, () => app.pokeLobbyPatron());
-
-  // Clean Floating Speech Balloon on the right (minimalist 2-line hierarchy)
-  const balX = padX + stageW + 10;
-  const balW = padX + innerW - balX;
-  const balH = Math.min(actorAreaH - 6, compact ? 68 : 76);
-  const balY = stageTop + (actorAreaH - balH) * 0.5;
-  drawSpeechBalloon(ctx, balX, balY, balW, balH, balX - 8, Math.min(balY + balH - 16, mascotCy + 4));
-
-  const skillTagW = 58;
   UI.drawFitText(
-    ctx,
-    activePatron.shortName,
-    balX + 10,
-    balY + 15,
-    balW - skillTagW - 22,
-    12.5,
-    10,
+    c,
+    '一 起 做 猫 饼',
+    cx,
+    y + h * (subtitle ? 0.38 : 0.5),
+    w - 68,
+    Math.min(20, h * 0.38),
+    13.5,
     900,
-    '#4A2C2A'
+    '#4A2C2A',
+    'center',
+    'middle'
   );
-  UI.drawTagBadge(
-    ctx,
-    balX + balW - skillTagW - 8,
-    balY + 7,
-    skillTagW,
-    16,
-    activePatron.activeSkill.shortLabel,
-    'amber',
-    9,
-    activePatron.activeSkill.icon,
-    sprites
-  );
-
-  const lines = activePatron.idleLines || [activePatron.greet];
-  const speechText = lines[lobbySpeechIndex % lines.length];
-  UI.drawFitText(
-    ctx,
-    speechText,
-    balX + 10,
-    balY + (compact ? 37 : 41),
-    balW - 18,
-    compact ? 10.6 : 11.2,
-    8.8,
-    700,
-    '#5e3a31'
-  );
-  UI.drawFitText(
-    ctx,
-    activePatron.shortPassive,
-    balX + 10,
-    balY + balH - 11,
-    balW - 18,
-    9.2,
-    8.0,
-    800,
-    '#94521c'
-  );
-
-  // 3-Partner Compact Switcher Pills
-  renderPatronSwitcherRow(ctx, padX, chipY, innerW, chipH, app, hits, false);
-
-  // 3. Single Unified Cafe Mode & Start Card
-  renderUnifiedModeCard(ctx, padX, menuCardY, innerW, menuCardH, app, hits, false, compact);
-}
-
-function renderWideLobbyLayout(ctx, width, height, padX, contentTop, footerPadB, app, hits, nowSec) {
-  const { sprites, activePatron, hasAffordable, lobbyBounceT, lobbySpeechIndex } = app;
-  const maxW = Math.min(960, width - padX * 2);
-  const leftX = (width - maxW) * 0.5;
-  const availH = height - footerPadB - contentTop;
-  const colGap = 18;
-  const leftW = Math.floor(maxW * 0.46);
-  const rightW = maxW - leftW - colGap;
-  const rightX = leftX + leftW + colGap;
-
-  // Left Showcase Card: Cafe Window Illustration + Interactive Mascot & Partner Switcher
-  UI.drawWoodBoard(ctx, leftX, contentTop, leftW, availH, 16);
-  const pad = 11;
-  const ix = leftX + pad;
-  const iw = leftW - pad * 2;
-  UI.drawParchmentSheet(ctx, ix, contentTop + pad, iw, availH - pad * 2, 11);
-
-  const inPad = 11;
-  const chipH = 40;
-  const chipY = contentTop + availH - pad - inPad - chipH;
-  const stageH = 92;
-  const stageY = chipY - 8 - stageH;
-  const heroY = contentTop + pad + inPad;
-  const heroH = Math.max(120, stageY - heroY - 10);
-
-  if (sprites.hero) {
-    ctx.save();
-    UI.roundRectPath(ctx, ix + inPad, heroY, iw - inPad * 2, heroH, 11);
-    ctx.clip();
-    UI.drawCoverImage(ctx, sprites.hero, ix + inPad, heroY, iw - inPad * 2, heroH, 0.42);
-    ctx.restore();
-    ctx.save();
-    UI.roundRectPath(ctx, ix + inPad, heroY, iw - inPad * 2, heroH, 11);
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = '#4A2C2A';
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  // Mascot + Concise Speech Balloon inside Left Showcase
-  const stageW = 98;
-  const stageCx = ix + inPad + stageW * 0.5;
-  const stageBotY = stageY + stageH;
-  if (sprites.patronStage) {
-    UI.drawContainImage(ctx, sprites.patronStage, stageCx, stageBotY - 12, 90, 36);
-  }
-  const bounceScale = lobbyBounceT > 0 ? 1 + Math.sin(lobbyBounceT * Math.PI * 2) * 0.13 : 1;
-  const bobY = Math.sin(nowSec * 2.3) * 2.5;
-  const pImg = sprites.patrons[activePatron.id];
-  if (pImg) {
-    ctx.save();
-    ctx.translate(stageCx, stageBotY - 46 + bobY);
-    ctx.scale(bounceScale, 2 - bounceScale);
-    UI.drawContainImage(ctx, pImg, 0, 0, 74, 74);
-    ctx.restore();
-  }
-  hits.add('lobby_patron_poke', ix + inPad, stageY, stageW, stageH, () => app.pokeLobbyPatron());
-
-  const balX = ix + inPad + stageW + 8;
-  const balW = ix + iw - inPad - balX;
-  drawSpeechBalloon(ctx, balX, stageY + 6, balW, stageH - 12, balX - 7, stageY + 46);
-  UI.drawFitText(ctx, activePatron.shortName, balX + 10, stageY + 22, balW - 76, 13, 10, 900, '#4A2C2A');
-  UI.drawTagBadge(
-    ctx,
-    balX + balW - 64,
-    stageY + 14,
-    56,
-    16,
-    activePatron.activeSkill.shortLabel,
-    'amber',
-    9,
-    activePatron.activeSkill.icon,
-    sprites
-  );
-  const lines = activePatron.idleLines || [activePatron.greet];
-  UI.drawFitText(ctx, lines[lobbySpeechIndex % lines.length], balX + 10, stageY + 45, balW - 20, 11.2, 9, 700, '#5e3a31');
-  UI.drawFitText(ctx, activePatron.shortPassive, balX + 10, stageY + stageH - 18, balW - 20, 9.6, 8.2, 800, '#94521c');
-
-  renderPatronSwitcherRow(ctx, ix + inPad, chipY, iw - inPad * 2, chipH, app, hits, true);
-
-  // Right Column: Signboard Plaque + Unified Mode & Start Card + 3 Meta Buttons
-  const plaqueH = drawTitlePlaqueBanner(
-    ctx,
-    rightX + rightW * 0.5,
-    contentTop - 4,
-    Math.min(rightW - 20, 340),
-    126,
-    sprites,
-    getChefRank(app.getCareerTopScore())
-  );
-
-  const dockH = 44;
-  const dockY = contentTop + availH - dockH;
-  const dockGap = 10;
-  const dockColW = (rightW - dockGap * 2) / 3;
-  const dockItems = [
-    { id: 'btn_shop', icon: 'icon_shop', text: '小铺', dot: hasAffordable, fn: () => app.openShop('upgrades') },
-    { id: 'btn_comp', icon: 'icon_book', text: '图鉴', dot: false, fn: () => app.openModal('compendium') },
-    { id: 'btn_career', icon: 'icon_trophy', text: '履历', dot: false, fn: () => app.openCareer('stats') }
-  ];
-  for (let i = 0; i < dockItems.length; i++) {
-    const d = dockItems[i];
-    const bx = rightX + i * (dockColW + dockGap);
-    UI.drawPillButton(ctx, bx, dockY, dockColW, dockH, {
-      style: 'wood',
-      icon: d.icon,
-      sprites,
-      text: d.text,
-      fontSize: 13.5,
-      radius: 12
-    });
-    if (d.dot) drawRedDot(ctx, bx + dockColW - 6, dockY + 4);
-    hits.add(d.id, bx, dockY, dockColW, dockH, d.fn);
-  }
-
-  const modeCardY = contentTop + plaqueH + 6;
-  const modeCardH = dockY - modeCardY - 12;
-  renderUnifiedModeCard(ctx, rightX, modeCardY, rightW, modeCardH, app, hits, true, false);
-}
-
-function renderPatronSwitcherRow(ctx, x, y, w, h, app, hits, isWide) {
-  const { saveData, sprites } = app;
-  const gap = 6;
-  const chipW = (w - gap * (PATRONS.length - 1)) / PATRONS.length;
-  for (let i = 0; i < PATRONS.length; i++) {
-    const p = PATRONS[i];
-    const cx = x + i * (chipW + gap);
-    const unlocked = saveData.unlockedPatrons.includes(p.id);
-    const selected = saveData.selectedPatron === p.id;
-    UI.drawPillButton(ctx, cx, y, chipW, h, {
-      style: selected ? 'cardSelected' : 'card',
-      radius: 10,
-      disabled: !unlocked
-    });
-
-    const avS = h - 8;
-    const avCx = cx + 5 + avS * 0.5;
-    const avCy = y + h * 0.5;
-    ctx.save();
-    if (!unlocked) ctx.globalAlpha = 0.6;
-    ctx.fillStyle = '#fff5dc';
-    ctx.beginPath();
-    ctx.arc(avCx, avCy, avS * 0.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.lineWidth = 1.3;
-    ctx.strokeStyle = '#9c6e3b';
-    ctx.stroke();
-    if (sprites.patrons[p.id]) {
-      UI.drawContainImage(ctx, sprites.patrons[p.id], avCx, avCy, avS * 0.86, avS * 0.86);
-    }
-    ctx.restore();
-
-    const tx = avCx + avS * 0.5 + 4;
-    const tw = cx + chipW - tx - 4;
-    UI.drawFitText(ctx, p.shortName, tx, y + h * 0.34, tw, isWide ? 11.2 : 10, 8.2, 900, '#4A2C2A');
-    if (unlocked) {
-      UI.drawFitText(ctx, selected ? '出战中' : '切换', tx, y + h * 0.72, tw, isWide ? 9.6 : 8.6, 7.5, 800, selected ? '#8f4714' : '#856046');
-    } else {
-      UI.drawUiIcon(ctx, sprites, 'icon_stardust', tx + 5, y + h * 0.72, 11);
-      UI.drawFitText(ctx, String(p.cost), tx + 13, y + h * 0.72, tw - 13, isWide ? 9.6 : 8.8, 7.5, 800, '#856046');
-    }
-
-    hits.add(`lobby_patron_chip_${p.id}`, cx, y, chipW, h, () => app.selectOrUnlockPatron(p.id));
-  }
-}
-
-function renderUnifiedModeCard(ctx, x, y, w, h, app, hits, isWide, compact) {
-  const { gameState, saveData, sprites } = app;
-  UI.drawWoodBoard(ctx, x, y, w, h, 15);
-  const pad = isWide ? 10 : 7;
-  const ix = x + pad;
-  const iy = y + pad;
-  const iw = w - pad * 2;
-  const ih = h - pad * 2;
-  UI.drawParchmentSheet(ctx, ix, iy, iw, ih, 11);
-
-  const inPad = isWide ? 12 : 8;
-  const innerX = ix + inPad;
-  const innerW = iw - inPad * 2;
-
-  // Compact Mode Header Row with Guide Pill (replaces bulky prose summary strip!)
-  const hdrY = iy + inPad - 2;
-  const hdrH = 20;
-  const selModeDef = LOBBY_MODES.find((m) => m.id === gameState.mode) || LOBBY_MODES[0];
-  UI.drawFitText(ctx, '选择营业模式', innerX + 2, hdrY + hdrH * 0.5, innerW - 72, 11.2, 9.5, 900, '#6e4532');
-  const guideBtnW = 58;
-  UI.drawPillButton(ctx, innerX + innerW - guideBtnW, hdrY, guideBtnW, hdrH, {
-    style: 'wood',
-    icon: 'icon_help',
-    sprites,
-    iconSize: 13,
-    text: '指引',
-    fontSize: 9.8,
-    radius: 10
-  });
-  hits.add('lobby_mode_guide', innerX + innerW - guideBtnW, hdrY, guideBtnW, hdrH, () =>
-    app.openModeGuide(selModeDef.id, 0)
-  );
-
-  // Primary Start CTA anchored at bottom of card (with per-mode Mid-Run Breakpoint Resume Split Row!)
-  const ctaH = compact ? 42 : isWide ? 48 : 44;
-  const ctaY = iy + ih - inPad - ctaH;
-  const sr = app.savedRuns ? app.savedRuns[gameState.mode] : app.savedRun;
-
-  if (app.hasResumableRun && app.hasResumableRun(gameState.mode) && sr) {
-    let resumeLabel = `继续第${sr.shift || 1}幕`;
-    if (sr.mode === 'chef') {
-      if (sr.resumeModal === 'prep_shop' && sr.prepShop) {
-        resumeLabel = `继续第${sr.prepShop.nextShiftNum || sr.shift + 1}幕整备`;
-      } else if (sr.resumeModal === 'shift_victory') {
-        resumeLabel = '继续第5幕凯旋';
-      } else {
-        resumeLabel = `继续第${sr.shift || 1}幕 · ¥${sr.shiftRevenue || 0}`;
-      }
-    } else if (sr.mode === 'rush') {
-      resumeLabel = `继续狂欢 · ${Math.ceil(sr.rushTimer || 30)}s`;
-    } else {
-      resumeLabel = `继续 · ${sr.score || 0}`;
-    }
-
-    const gap = 8;
-    const newW = Math.round(Math.max(82, innerW * 0.32));
-    const resW = innerW - newW - gap;
-
-    UI.drawPillButton(ctx, innerX, ctaY, resW, ctaH, {
-      style: 'cta',
-      icon: selModeDef.icon,
-      sprites,
-      iconSize: ctaH - 16,
-      text: resumeLabel,
-      fontSize: isWide ? 14.5 : 13.0,
-      fontWeight: 900,
-      radius: 13
-    });
-    hits.add('btn_resume_run', innerX, ctaY, resW, ctaH, () => app.resumeSavedRun(gameState.mode));
-
-    UI.drawPillButton(ctx, innerX + resW + gap, ctaY, newW, ctaH, {
-      style: 'wood',
-      text: '新开',
-      fontSize: isWide ? 13.5 : 12.2,
-      fontWeight: 900,
-      radius: 13
-    });
-    hits.add('btn_start', innerX + resW + gap, ctaY, newW, ctaH, () => app.requestStartNewRun());
-  } else {
-    UI.drawPillButton(ctx, innerX, ctaY, innerW, ctaH, {
-      style: 'cta',
-      icon: selModeDef.icon,
-      sprites,
-      iconSize: ctaH - 14,
-      text: `开门营业`,
-      fontSize: isWide ? 17 : 16,
-      fontWeight: 900,
-      radius: 13
-    });
-    hits.add('btn_start', innerX, ctaY, innerW, ctaH, () => app.requestStartNewRun());
-  }
-
-  // 3 Side-by-Side Illustrated Mode Cards (generous room, per-mode saved-run indicator!)
-  const cardsY = hdrY + hdrH + 7;
-  const cardsH = Math.max(82, ctaY - cardsY - 8);
-  const gap = isWide ? 10 : 7;
-  const cardW = (innerW - gap * 2) / 3;
-
-  for (let i = 0; i < LOBBY_MODES.length; i++) {
-    const m = LOBBY_MODES[i];
-    const cx = innerX + i * (cardW + gap);
-    const selected = gameState.mode === m.id;
-    const mBest = saveData[m.bestKey] || 0;
-    const modeHasSave = !!(app.hasResumableRun && app.hasResumableRun(m.id));
-
-    UI.drawPillButton(ctx, cx, cardsY, cardW, cardsH, {
-      style: selected ? 'cardSelected' : 'card',
-      radius: 12
-    });
-
-    if (modeHasSave) {
-      ctx.save();
-      ctx.fillStyle = '#2d8a52';
-      ctx.beginPath();
-      ctx.arc(cx + cardW - 9, cardsY + 9, 4.8, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.lineWidth = 1.4;
-      ctx.strokeStyle = '#fff9ec';
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    if (cardsH >= 150) {
-      const icSize = Math.min(cardW * 0.66, 86, cardsH - 76);
-      const blockH = icSize + 58;
-      const blockTop = cardsY + (cardsH - blockH) * 0.5;
-      UI.drawUiIcon(ctx, sprites, m.icon, cx + cardW * 0.5, blockTop + icSize * 0.5, icSize);
-
-      const titleY = blockTop + icSize + 15;
-      UI.drawFitText(ctx, m.shortTitle, cx + cardW * 0.5, titleY, cardW - 12, 14.5, 11, 900, '#4A2C2A', 'center');
-
-      const tagW = Math.min(cardW - 22, 54);
-      UI.drawTagBadge(
-        ctx,
-        cx + (cardW - tagW) * 0.5,
-        titleY + 11,
-        tagW,
-        16,
-        modeHasSave && !selected ? '存档' : selected ? '当前' : m.tag,
-        modeHasSave && !selected ? 'sage' : selected ? 'cocoa' : m.tagTone,
-        8.8
-      );
-
-      // Clean Trophy Icon + Best Number
-      const bY = titleY + 38;
-      const bestStr = String(mBest);
-      ctx.font = UI.fontStr(10.5, 800);
-      const bw = ctx.measureText(bestStr).width;
-      const startBx = cx + cardW * 0.5 - (14 + bw) * 0.5;
-      UI.drawUiIcon(ctx, sprites, 'icon_trophy', startBx + 6, bY, 13);
-      UI.drawFitText(ctx, bestStr, startBx + 15, bY + 0.5, cardW - 24, 10.5, 8.5, 800, selected ? '#7a3e10' : '#856046');
-    } else {
-      const icSize = Math.min(cardW * 0.54, Math.max(32, cardsH - 52));
-      const icCy = cardsY + 8 + icSize * 0.5;
-      UI.drawUiIcon(ctx, sprites, m.icon, cx + cardW * 0.5, icCy, icSize);
-
-      const titleY = cardsY + cardsH - 36;
-      UI.drawFitText(
-        ctx,
-        m.shortTitle,
-        cx + cardW * 0.5,
-        titleY,
-        cardW - 10,
-        isWide ? 13 : 11.8,
-        9.6,
-        900,
-        '#4A2C2A',
-        'center'
-      );
-
-      const tagW = Math.min(cardW - 16, 48);
-      UI.drawTagBadge(
-        ctx,
-        cx + (cardW - tagW) * 0.5,
-        cardsY + cardsH - 22,
-        tagW,
-        15,
-        modeHasSave && !selected ? '存档' : selected ? '当前' : m.tag,
-        modeHasSave && !selected ? 'sage' : selected ? 'cocoa' : m.tagTone,
-        8.4
-      );
-    }
-
-    hits.add(`mode_${m.id}`, cx, cardsY, cardW, cardsH, () => app.selectMode(m.id));
-  }
-}
-
-function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
-  const { width, height, safeBottom } = metrics;
-  const { gameState, sprites, equippedTheme, audio } = app;
-  const { topY, headerH, maxRight } = computeTopHeaderGeometry(metrics);
-  const isWide = width >= 820;
-
-  const padX = isWide ? Math.max(18, (width - 1060) * 0.5) : 8;
-  const effectiveRight = isWide ? Math.min(width - padX, maxRight) : maxRight;
-  const btnS = isWide ? Math.min(32, headerH) : Math.min(30, headerH);
-  const btnY = topY + (headerH - btnS) * 0.5;
-  const gap = isWide ? 6 : 4;
-
-  // 1. Top Navigation Bar (Capsule-Safe, with dedicated Pause button & Confirmation Restart!)
-  let rx = effectiveRight;
-
-  const pauseW = isWide ? 70 : btnS;
-  rx -= pauseW;
-  UI.drawPillButton(ctx, rx, btnY, pauseW, btnS, {
-    style: app.activeModal === 'pause' ? 'active' : 'wood',
-    icon: 'icon_pause',
-    sprites,
-    text: isWide ? '暂停' : '',
-    fontSize: 12,
-    fallbackText: '||'
-  });
-  hits.add('play_pause', rx, btnY, pauseW, btnS, () => app.togglePause());
-
-  rx -= gap + (isWide ? 70 : btnS);
-  const restartW = isWide ? 70 : btnS;
-  UI.drawPillButton(ctx, rx, btnY, restartW, btnS, {
-    style: 'wood',
-    icon: 'icon_restart',
-    sprites,
-    text: isWide ? '重开' : '',
-    fontSize: 12,
-    fallbackText: '重'
-  });
-  hits.add('play_restart', rx, btnY, restartW, btnS, () => app.requestRestartRun());
-
-  rx -= gap + (isWide ? 70 : btnS);
-  const helpW = isWide ? 70 : btnS;
-  UI.drawPillButton(ctx, rx, btnY, helpW, btnS, {
-    style: 'wood',
-    icon: 'icon_help',
-    sprites,
-    text: isWide ? '指引' : '',
-    fontSize: 12,
-    fallbackText: '?'
-  });
-  hits.add('play_help', rx, btnY, helpW, btnS, () => app.openModeGuide(gameState.mode, 0));
-
-  rx -= gap + (isWide ? 70 : btnS);
-  const compW = isWide ? 70 : btnS;
-  UI.drawPillButton(ctx, rx, btnY, compW, btnS, {
-    style: 'wood',
-    icon: 'icon_book',
-    sprites,
-    text: isWide ? '图鉴' : '',
-    fontSize: 12,
-    fallbackText: '鉴'
-  });
-  hits.add('play_comp', rx, btnY, compW, btnS, () => app.openModal('compendium'));
-
-  if (isWide) {
-    rx -= gap + btnS;
-    UI.drawPillButton(ctx, rx, btnY, btnS, btnS, {
-      style: 'wood',
-      icon: 'icon_sfx',
-      sprites,
-      mutedSlash: !audio.sfxEnabled,
-      fallbackText: '音'
-    });
-    hits.add('play_sfx', rx, btnY, btnS, btnS, () => app.toggleSfx());
-
-    rx -= gap + btnS;
-    UI.drawPillButton(ctx, rx, btnY, btnS, btnS, {
-      style: audio.bgmEnabled ? 'active' : 'wood',
-      icon: 'icon_bgm',
-      sprites,
-      mutedSlash: !audio.bgmEnabled,
-      fallbackText: '乐'
-    });
-    hits.add('play_bgm', rx, btnY, btnS, btnS, () => app.cycleBgm());
-  }
-
-  // Left: Back to Lobby + Mode/Shift Pill
-  const backW = isWide ? 70 : btnS;
-  UI.drawPillButton(ctx, padX, btnY, backW, btnS, {
-    style: 'wood',
-    icon: 'icon_home',
-    sprites,
-    text: isWide ? '大厅' : '',
-    fontSize: 12,
-    fallbackText: '回'
-  });
-  hits.add('play_back_lobby', padX, btnY, backW, btnS, () => app.returnToLobby());
-
-  const modeX = padX + backW + gap;
-  const modeMaxW = Math.max(54, rx - gap - modeX);
-  const shiftTxtShort = gameState.shift <= 5 ? `第${gameState.shift}/5幕` : `加时#${gameState.shift - 5}`;
-  const shiftTxtWide =
-    gameState.shift <= 5
-      ? `第${gameState.shift}/5幕 · ${gameState.shiftName || '暮色试营业'}`
-      : `无尽加时 #${gameState.shift - 5}`;
-  const hasShiftAffix =
-    gameState.mode === 'chef' &&
-    ((Array.isArray(gameState.shiftHazards) && gameState.shiftHazards.length > 0) ||
-      gameState.shift === 3 ||
-      gameState.shift >= 5);
-  const modeLabel =
-    gameState.mode === 'rush'
-      ? '90秒狂欢'
-      : gameState.mode === 'zen'
-      ? '悠闲经典'
-      : isWide
-      ? shiftTxtWide
-      : shiftTxtShort;
-  const modeW = Math.min(isWide ? 196 : 86, modeMaxW);
-  UI.drawPillButton(ctx, modeX, btnY, modeW, btnS, {
-    style: 'dark',
-    icon: isWide ? (gameState.mode === 'rush' ? 'mode_rush' : gameState.mode === 'zen' ? 'mode_zen' : 'mode_chef') : '',
-    sprites,
-    text: modeLabel,
-    fontSize: 11
-  });
-  if (hasShiftAffix) {
-    ctx.save();
-    UI.roundRectPath(ctx, modeX, btnY, modeW, btnS, Math.min(btnS * 0.5, 16));
-    ctx.strokeStyle = '#ffe07a';
-    ctx.lineWidth = 1.8;
-    ctx.stroke();
-    ctx.restore();
-  }
-  hits.add('play_shift_badge', modeX, btnY, modeW, btnS, () => app.openRelicsModal());
-
-  // 2. Layout Stage & HUDs
-  let jarContainer = null;
-  let toolsDockY = height - Math.max(8, safeBottom + 6) - 62;
-  const headerBottom = topY + headerH;
-  const guideTargets = {};
-
-  if (isWide) {
-    const contentTop = headerBottom + 10;
-    const totalW = Math.min(1060, width - padX * 2);
-    const startX = (width - totalW) * 0.5;
-    const sideW = 248;
-    const colGap = 16;
-    const centerW = totalW - sideW * 2 - colGap * 2;
-    const boardH = Math.min(540, height - contentTop - 18);
-
-    renderWideLeftBoard(ctx, startX, contentTop, sideW, boardH, app, hits, nowSec, guideTargets);
-    renderWideRightBoard(ctx, startX + totalW - sideW, contentTop, sideW, boardH, app, hits, nowSec, guideTargets);
-
-    toolsDockY = height - Math.max(10, safeBottom + 8) - 66;
-    const jarTop = headerBottom + 4;
-    const jarH = toolsDockY - jarTop - 4;
-    jarContainer = { x: startX + sideW + colGap, y: jarTop, w: centerW, h: jarH };
-  } else {
-    const hudTop = headerBottom + 5;
-    const innerW = width - padX * 2;
-    const hudH = gameState.mode === 'chef' ? 74 : 62;
-    renderMobileTopHud(ctx, padX, hudTop, innerW, hudH, app, hits, nowSec, guideTargets);
-
-    const subY = hudTop + hudH + 4;
-    const subH = 34;
-    renderMobileSubBar(ctx, padX, subY, innerW, subH, app, hits, guideTargets);
-
-    const jarTop = subY + subH + 3;
-    const jarH = toolsDockY - jarTop - 3;
-    jarContainer = { x: 4, y: jarTop, w: width - 8, h: jarH };
-  }
-
-  // 3. Render Glass Mixing Jar Chamber + Entities
-  const jarBox = computeJarBox(jarContainer.x, jarContainer.y, jarContainer.w, jarContainer.h);
-  app.lastJarBox = jarBox;
-  JarRenderer.renderJarStage(ctx, jarBox, gameState, equippedTheme, sprites, nowSec, app.getEffectiveMagnetLevel());
-
-  // Record exact screen spotlight rectangles for Interactive Mode Guide
-  guideTargets.launcher = {
-    x: jarBox.x + JAR.canvasW * 0.5 * jarBox.scale - 62 * jarBox.scale,
-    y: jarBox.y + 4 * jarBox.scale,
-    w: 124 * jarBox.scale,
-    h: 132 * jarBox.scale
-  };
-  guideTargets.danger = {
-    x: jarBox.x + JAR.left * jarBox.scale,
-    y: jarBox.y + (JAR.dangerY - 22) * jarBox.scale,
-    w: (JAR.right - JAR.left) * jarBox.scale,
-    h: 48 * jarBox.scale
-  };
-  const servableEnt = (gameState.entities || []).find((e) => e && !e.merged && app.isEntityServable(e));
-  if (servableEnt) {
-    guideTargets.servableTreat = {
-      x: jarBox.x + (servableEnt.x - servableEnt.r - 12) * jarBox.scale,
-      y: jarBox.y + (servableEnt.y - servableEnt.r - 22) * jarBox.scale,
-      w: (servableEnt.r * 2 + 24) * jarBox.scale,
-      h: (servableEnt.r * 2 + 30) * jarBox.scale
-    };
-  }
-  const glazeObs = (gameState.obstacles || []).find((o) => o && o.type === 'glaze_ring');
-  if (glazeObs) {
-    const rx = (glazeObs.rx || 48) + 12;
-    const ry = (glazeObs.ry || 15) + 16;
-    guideTargets.glazeRing = {
-      x: jarBox.x + (glazeObs.x - rx) * jarBox.scale,
-      y: jarBox.y + (glazeObs.y - ry) * jarBox.scale,
-      w: rx * 2 * jarBox.scale,
-      h: ry * 2 * jarBox.scale
-    };
-  }
-  const frozenEnts = (gameState.entities || []).filter((e) => e && !e.merged && e.frozenHp > 0);
-  if (frozenEnts.length > 0) {
-    guideTargets.frozenTreats = frozenEnts.map((fe) => ({
-      x: jarBox.x + (fe.x - fe.r - 12) * jarBox.scale,
-      y: jarBox.y + (fe.y - fe.r - 14) * jarBox.scale,
-      w: (fe.r * 2 + 24) * jarBox.scale,
-      h: (fe.r * 2 + 28) * jarBox.scale
-    }));
-  }
-
-  // 4. Unified Floating In-Jar Overlays (compact & unobtrusive)
-  if (isWide && gameState.mode === 'rush' && gameState.running && !gameState.over) {
-    const urgent = gameState.rushTimer <= 15.0;
-    UI.drawNoticeBanner(ctx, jarBox.x + 8, jarBox.y + 6, 98, 26, {
-      icon: 'mode_rush',
-      sprites,
-      text: `${Math.max(0, gameState.rushTimer).toFixed(1)}s`,
-      fontSize: 12.5,
-      tone: urgent ? 'warn' : 'event',
-      borderColor: urgent ? '#ff8b78' : '#ffd56b'
-    });
-  }
-
-  // Dedicated T9 Crown Cat Soufflé Tribute Pill at top-right of jar frame (never blocks aiming!)
-  if (
-    app.hasSouffleAura &&
-    app.hasSouffleAura() &&
-    !gameState.activeToolMode &&
-    !gameState.activeSkillMode &&
-    gameState.running &&
-    !gameState.over &&
-    !app.activeModal
-  ) {
-    const sbW = 104;
-    const sbH = 26;
-    const sbX = Math.min(width - sbW - 6, jarBox.x + jarBox.w - sbW - 4);
-    const sbY = Math.max(headerBottom + 4, jarBox.y + 6);
-    UI.drawPillButton(ctx, sbX, sbY, sbW, sbH, {
-      style: 'cta',
-      icon: 'icon_crown',
-      sprites,
-      iconSize: 15,
-      text: '猫神献礼',
-      fontSize: 10.6,
-      fontWeight: 900,
-      radius: 13
-    });
-    hits.add('serve_souffle_btn', sbX, sbY, sbW, sbH, () => app.serveSouffle());
-  }
-
-  // Compact Shop Event Banner (auto-hides during Overflow Danger so warning is NEVER obscured!)
-  if (gameState.activeEvent && gameState.running && !gameState.over && (gameState.dangerDuration || 0) <= 0.2) {
-    const ev = gameState.activeEvent;
-    let iconKey = 'icon_stardust';
-    let label = '流星镀金夜';
-    let meta = `${Math.max(0, ev.timer).toFixed(1)}s`;
-    let bBorder = '#ffd66b';
-    if (ev.kind === 'yarn') {
-      const yb = gameState.entities.find((e) => e.isYarnBall && !e.merged);
-      iconKey = 'yarn_ball';
-      label = '捣蛋毛线球';
-      meta = `×${yb ? yb.yarnHp : 0}`;
-      bBorder = '#ffb0c8';
-    } else if (ev.kind === 'chime') {
-      iconKey = 'serve_bell';
-      label = '黄金烘焙钟';
-      bBorder = '#ffe169';
-    }
-    const bw = Math.min(width - 36, 198);
-    const bx = jarBox.x + jarBox.w * 0.5 - bw * 0.5;
-    const by = jarBox.y + 82 * jarBox.scale;
-    ctx.save();
-    if (gameState.aim && gameState.aim.active) {
-      ctx.globalAlpha = 0.28;
-    }
-    UI.drawNoticeBanner(ctx, bx, by, bw, 24, {
-      icon: iconKey,
-      sprites,
-      iconSize: 16,
-      text: label,
-      fontSize: 10.6,
-      tone: 'event',
-      borderColor: bBorder,
-      rightReserve: 50
-    });
-    UI.drawTagBadge(ctx, bx + bw - 46, by + 4, 41, 16, meta, 'amber', 9.2);
-    ctx.restore();
-  }
-
-  // Concise Tool & Active Chef Skill Targeting Banner
-  if ((gameState.activeToolMode || gameState.activeSkillMode) && gameState.running && !gameState.over) {
-    let msg = '点选甜品升阶 (1~8阶)';
-    let tIcon = 'tool_spoon';
-    if (gameState.activeSkillMode === 'scoop') {
-      msg = '点选 1~5 阶甜品捞底';
-      tIcon = 'tool_spoon';
-    } else if (gameState.activeSkillMode === 'swap_1') {
-      msg = '点选第 1 颗互换 (1/2)';
-      tIcon = 'icon_moon';
-    } else if (gameState.activeSkillMode === 'swap_2') {
-      msg = '点选第 2 颗互换 (2/2)';
-      tIcon = 'icon_moon';
-    }
-    const bw = Math.min(width - 24, 242);
-    const bx = jarBox.x + jarBox.w * 0.5 - bw * 0.5;
-    const by = jarBox.y + 8;
-    UI.drawNoticeBanner(ctx, bx, by, bw, 27, {
-      icon: tIcon,
-      sprites,
-      iconSize: 17,
-      text: msg,
-      fontSize: 10.8,
-      tone: 'event',
-      borderColor: '#ffd56b',
-      rightReserve: 52,
-      align: 'left'
-    });
-    const cbx = bx + bw - 46;
-    UI.drawPillButton(ctx, cbx, by + 3.5, 40, 20, { style: 'danger', text: '取消', fontSize: 10 });
-    hits.add('cancel_tool', cbx, by + 3.5, 40, 20, () => app.cancelToolMode());
-  }
-
-  // 5. Bottom Chef Action Dock: [摇罐] — [角色招牌技] — [升阶]
-  const activePatron = app.activePatron;
-  const activeSk = activePatron.activeSkill;
-  const toolSize = isWide ? 50 : 46;
-  const heroSize = isWide ? 56 : 52;
-  const dockGap = isWide ? 34 : 26;
-  const centerX = width * 0.5;
-  const heroY = toolsDockY - 3;
-  const sideY = toolsDockY;
-
-  const drawSideTool = (tl, cx, ty) => {
-    const tx = cx - toolSize * 0.5;
-    const cy = ty + toolSize * 0.5;
-    const cnt = gameState.tools[tl.key];
-    const cost = gameState.toolCosts[tl.key];
-    const armed = gameState.activeToolMode === tl.key;
-
-    ctx.save();
-    if (armed) {
-      ctx.strokeStyle = '#ffea80';
-      ctx.lineWidth = 3.8;
-      ctx.beginPath();
-      ctx.arc(cx, cy, toolSize * 0.5 + 3, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    const bg = ctx.createRadialGradient(cx - 5, cy - 6, 4, cx, cy, toolSize * 0.5);
-    bg.addColorStop(0, '#fff4cf');
-    bg.addColorStop(0.65, '#dfac68');
-    bg.addColorStop(1, '#9d622d');
-    ctx.fillStyle = bg;
-    ctx.beginPath();
-    ctx.arc(cx, cy, toolSize * 0.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.lineWidth = 2.4;
-    ctx.strokeStyle = armed ? '#ffe066' : '#4A2C2A';
-    ctx.stroke();
-
-    if (tl.img) {
-      UI.drawContainImage(ctx, tl.img, cx, cy, toolSize * 0.72, toolSize * 0.72);
-    }
-
-    const badgeStr = cnt > 0 ? String(cnt) : `${cost}`;
-    const bw = cnt > 0 ? 20 : 34;
-    const bbx = tx + toolSize - bw * 0.65;
-    const bby = ty - 3;
-    UI.drawTagBadge(
-      ctx,
-      bbx,
-      bby,
-      bw,
-      17,
-      badgeStr,
-      cnt > 0 ? 'cocoa' : 'amber',
-      9.2,
-      cnt > 0 ? '' : 'icon_stardust',
-      sprites
-    );
-
-    const capW = toolSize + 8;
-    UI.drawTagBadge(ctx, cx - capW * 0.5, ty + toolSize + 1, capW, 15, tl.label, 'cocoa', 9);
-    ctx.restore();
-
-    hits.add(`tool_${tl.key}`, tx - 4, ty - 4, toolSize + 8, toolSize + 18, () => app.armOrUseTool(tl.key));
-  };
-
-  drawSideTool({ key: 'shake', label: '摇罐', img: sprites.tools.shake }, centerX - heroSize * 0.5 - dockGap - toolSize * 0.5, sideY);
-  drawSideTool({ key: 'spoon', label: '升阶', img: sprites.tools.spoon }, centerX + heroSize * 0.5 + dockGap + toolSize * 0.5, sideY);
-
-  // Center Hero Signature Chef Skill Medallion
-  {
-    const hcx = centerX;
-    const hcy = heroY + heroSize * 0.5;
-    const hr = heroSize * 0.5;
-    const pct = Math.max(0, Math.min(1, gameState.skillEnergy / 100));
-    const isReady = pct >= 1 || gameState.nextShotMeteor;
-    const isArmed = !!gameState.activeSkillMode || gameState.nextShotMeteor;
-    const pulse = isReady ? 1 + Math.sin(nowSec * 7) * 0.045 : 1;
-
-    ctx.save();
-    ctx.translate(hcx, hcy);
-    ctx.scale(pulse, pulse);
-
-    if (isReady) {
-      ctx.strokeStyle = isArmed ? 'rgba(255, 214, 128, 0.9)' : 'rgba(255, 226, 110, 0.84)';
-      ctx.lineWidth = 4.2;
-      ctx.beginPath();
-      ctx.arc(0, 0, hr + 5, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    const hbg = ctx.createRadialGradient(-4, -6, 4, 0, 0, hr);
-    if (isReady) {
-      hbg.addColorStop(0, '#fff9d6');
-      hbg.addColorStop(0.65, '#f6be42');
-      hbg.addColorStop(1, '#b56014');
-    } else {
-      hbg.addColorStop(0, '#f3e2c4');
-      hbg.addColorStop(0.7, '#ba8c56');
-      hbg.addColorStop(1, '#7a4d24');
-    }
-    ctx.fillStyle = hbg;
-    ctx.beginPath();
-    ctx.arc(0, 0, hr, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.lineWidth = 2.6;
-    ctx.strokeStyle = isArmed ? '#ffe57e' : '#4A2C2A';
-    ctx.stroke();
-
-    const pImg = sprites.patrons[activePatron.id];
-    if (pImg) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(0, 0, hr - 4, 0, Math.PI * 2);
-      ctx.clip();
-      if (!isReady) ctx.globalAlpha = 0.72;
-      UI.drawContainImage(ctx, pImg, 0, 1, heroSize * 0.84, heroSize * 0.84);
-      ctx.restore();
-    }
-
-    ctx.lineWidth = 3.6;
-    ctx.strokeStyle = 'rgba(42, 22, 10, 0.45)';
-    ctx.beginPath();
-    ctx.arc(0, 0, hr - 1.5, 0, Math.PI * 2);
-    ctx.stroke();
-
-    if (pct > 0.01) {
-      ctx.strokeStyle = isReady ? '#fff28c' : '#ffd875';
-      ctx.lineWidth = 3.6;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.arc(0, 0, hr - 1.5, -Math.PI * 0.5, -Math.PI * 0.5 + Math.PI * 2 * pct);
-      ctx.stroke();
-    }
-    ctx.restore();
-
-    const pillTxt = gameState.nextShotMeteor ? '装填' : isReady ? '就绪' : `${Math.floor(gameState.skillEnergy)}%`;
-    const pbw = 34;
-    const pbx = hcx + hr - pbw * 0.55;
-    const pby = heroY - 4;
-    UI.drawTagBadge(ctx, pbx, pby, pbw, 16, pillTxt, isReady ? 'amber' : 'cocoa', 8.8);
-
-    const capW = heroSize + 14;
-    UI.drawTagBadge(
-      ctx,
-      hcx - capW * 0.5,
-      heroY + heroSize - 1,
-      capW,
-      16,
-      activeSk.shortLabel,
-      isReady ? 'amber' : 'cocoa',
-      9.2,
-      activeSk.icon,
-      sprites
-    );
-
-    const skillRect = { x: hcx - hr - 8, y: heroY - 5, w: heroSize + 16, h: heroSize + 22 };
-    guideTargets.skill = skillRect;
-    guideTargets.dock = {
-      x: centerX - heroSize * 0.5 - dockGap - toolSize - 8,
-      y: heroY - 5,
-      w: heroSize + (dockGap + toolSize) * 2 + 16,
-      h: heroSize + 24
-    };
-    hits.add('chef_skill_btn', skillRect.x, skillRect.y, skillRect.w, skillRect.h, () => app.activateChefSkill());
-  }
-
-  // 6. Topmost Overflow Danger Countdown Banner (guaranteed never occluded by event banners or particles!)
-  if (gameState.running && !gameState.over && (gameState.dangerDuration || 0) > 0.22) {
-    const rem = Math.max(0, 3.2 - gameState.dangerDuration).toFixed(1);
-    const isRush = gameState.mode === 'rush';
-    const warnW = 142;
-    const warnH = 24;
-    const warnX = jarBox.x + jarBox.w * 0.5 - warnW * 0.5;
-    const warnY = Math.max(headerBottom + 6, jarBox.y + (JAR.dangerY - 26) * jarBox.scale);
-    const pulseScale = 1 + Math.sin(nowSec * 12) * 0.035;
-    ctx.save();
-    ctx.translate(warnX + warnW * 0.5, warnY + warnH * 0.5);
-    ctx.scale(pulseScale, pulseScale);
-    UI.drawNoticeBanner(ctx, -warnW * 0.5, -warnH * 0.5, warnW, warnH, {
-      icon: isRush ? 'icon_wind' : 'icon_warn',
-      sprites,
-      iconSize: 16,
-      text: isRush ? `星风清顶 ${rem}s` : `溢出危险 ${rem}s`,
-      fontSize: 11,
-      tone: 'warn',
-      topCol: isRush ? 'rgba(208, 102, 30, 0.96)' : 'rgba(196, 42, 32, 0.96)',
-      botCol: isRush ? 'rgba(154, 68, 16, 0.98)' : 'rgba(142, 22, 16, 0.98)',
-      borderColor: isRush ? '#ffe09c' : '#ffd2c8',
-      rightReserve: 8
-    });
-    ctx.restore();
-  }
-
-  app.lastGuideTargets = guideTargets;
-}
-
-function drawMiniRelicStrip(ctx, x, y, w, h, relics, hits, hitId, onClick, isLightBg = false, sprites = null) {
-  const gap = 4;
-  const slotW = (w - gap * (MAX_RELIC_SLOTS - 1)) / MAX_RELIC_SLOTS;
-  for (let i = 0; i < MAX_RELIC_SLOTS; i++) {
-    const sx = x + i * (slotW + gap);
-    const rid = relics && relics[i];
-    const def = rid ? RELICS.find((r) => r.id === rid) : null;
-    const arch = def ? RELIC_ARCHETYPES[def.archetype] : null;
-    UI.roundRectPath(ctx, sx, y, slotW, h, 5);
-    ctx.fillStyle = def
-      ? (arch ? arch.bg : '#fff4cf')
-      : isLightBg
-        ? '#f0e2c6'
-        : 'rgba(255, 240, 206, 0.22)';
-    ctx.fill();
-    ctx.lineWidth = def ? 1.4 : isLightBg ? 1.2 : 1.0;
-    ctx.strokeStyle = def
-      ? (arch ? arch.color : '#c48a28')
-      : isLightBg
-        ? '#bfa278'
-        : 'rgba(232, 198, 138, 0.45)';
-    ctx.stroke();
-
-    const cx = sx + slotW * 0.5;
-    const cy = y + h * 0.5;
-    if (def && sprites) {
-      UI.drawUiIcon(ctx, sprites, def.icon, cx, cy, Math.min(slotW - 4, h - 3));
-    } else if (!def) {
-      ctx.save();
-      ctx.fillStyle = isLightBg ? 'rgba(160, 130, 90, 0.45)' : 'rgba(255, 232, 186, 0.38)';
-      ctx.beginPath();
-      ctx.arc(cx, cy, Math.max(2, Math.min(3.5, h * 0.14)), 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
-  }
-  hits.add(hitId, x, y, w, h, onClick);
-}
-
-function drawCheckDot(ctx, cx, cy, r = 5) {
-  ctx.save();
-  ctx.fillStyle = '#3f9663';
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = '#fff';
-  ctx.lineWidth = 1.5;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  ctx.beginPath();
-  ctx.moveTo(cx - r * 0.46, cy + r * 0.05);
-  ctx.lineTo(cx - r * 0.1, cy + r * 0.42);
-  ctx.lineTo(cx + r * 0.5, cy - r * 0.36);
-  ctx.stroke();
-  ctx.restore();
-}
-
-function renderMobileTopHud(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
-  const { gameState, sprites } = app;
-  const previewCardW = 114;
-  const gap = 6;
-  const statsW = w - previewCardW - gap;
-
-  UI.drawParchmentSheet(ctx, x, y, statsW, h, 11);
-  guideTargets.hud = { x, y, w: statsW, h };
-
-  if (gameState.mode === 'chef') {
-    const revStr = `¥${gameState.displayShiftRevenue}`;
-    const tgtStr = `/${gameState.shiftTarget}`;
-    const lowSteps = gameState.stepsLeft <= 3;
-
-    // Recipe Coins Chip with `icon_coin`
-    const coinVal = String(gameState.coins || 0);
-    const coinW = Math.max(44, 24 + coinVal.length * 7.5);
-    const coinX = x + statsW - coinW - 6;
-    UI.drawCurrencyChip(ctx, coinX, y + 6, coinW, 19, sprites, 'icon_coin', coinVal, {
-      style: 'wood',
-      fontSize: 10
-    });
-
-    const stepStr = `${gameState.stepsLeft}步`;
-    const stepW = 42;
-    const stepX = coinX - stepW - 4;
-    UI.drawTagBadge(ctx, stepX, y + 6, stepW, 19, stepStr, lowSteps ? 'berry' : 'soft', 9.6);
-
-    const revMaxW = Math.max(58, stepX - (x + 8) - 4);
-    UI.drawFitText(ctx, `${revStr}${tgtStr}`, x + 8, y + 15.5, revMaxW, 15, 10, 900, '#4A2C2A');
-
-    // Middle Row: Clean Revenue Bar OR Golden Early-Close CTA Button
-    const barX = x + 8;
-    const barW = statsW - 16;
-    const barY = y + 29;
-    const barH = 20;
-    if (gameState.shiftClearedFlag && gameState.running && !gameState.over) {
-      const interestCoins = gameState.stepsLeft * 4;
-      UI.drawPillButton(ctx, barX, barY, barW, barH, {
-        style: 'cta',
-        icon: 'serve_bell',
-        sprites,
-        iconSize: 14,
-        text: interestCoins > 0 ? `提前打烊 +${interestCoins}币` : '达标 · 打烊',
-        fontSize: 10.5,
-        fontWeight: 900,
-        radius: 10
-      });
-      hits.add('btn_close_shift_early', barX, barY, barW, barH, () => app.closeShiftEarly());
-    } else {
-      const revFrac = Math.max(0, Math.min(1, gameState.shiftRevenue / Math.max(1, gameState.shiftTarget)));
-      UI.roundRectPath(ctx, barX, barY + 3, barW, 13, 6.5);
-      ctx.fillStyle = '#dfd0b2';
-      ctx.fill();
-      ctx.lineWidth = 1.4;
-      ctx.strokeStyle = '#4A2C2A';
-      ctx.stroke();
-      if (revFrac > 0.01) {
-        UI.roundRectPath(ctx, barX + 1, barY + 4, Math.max(8, (barW - 2) * revFrac), 11, 5.5);
-        const rg = ctx.createLinearGradient(barX, barY, barX + barW, barY);
-        rg.addColorStop(0, '#f0a63a');
-        rg.addColorStop(0.55, '#ffd75e');
-        rg.addColorStop(1, '#ff9f5a');
-        ctx.fillStyle = rg;
-        ctx.fill();
-      }
-      ctx.fillStyle = '#4A2C2A';
-      ctx.font = UI.fontStr(9, 900);
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(`${Math.min(100, Math.floor(revFrac * 100))}%`, barX + barW * 0.5, barY + 9.8);
-    }
-
-    // Bottom Icon-First Micro Row: Fever + Rainbow Pity + Run Stardust
-    const isFever = gameState.feverTimer > 0;
-    const multVal = app.getFeverMultiplier();
-    const multStr = Number.isInteger(multVal) ? `${multVal}×` : `${multVal.toFixed(1)}×`;
-    const fTxt = isFever ? `${multStr} ${gameState.feverTimer.toFixed(1)}s` : `${Math.round(gameState.feverEnergy)}%`;
-    const rReady = !!(gameState.curMeta.wildcard || gameState.nextMeta.wildcard);
-    const rTxt = rReady ? '就绪' : `${gameState.dropsUntilRainbow}`;
-    const botY = y + 61;
-
-    UI.drawUiIcon(ctx, sprites, 'icon_flame', x + 14, botY, 13);
-    UI.drawFitText(ctx, fTxt, x + 23, botY, statsW * 0.36, 9.6, 8, 800, isFever ? '#c43c12' : '#6c4424');
-
-    const rCenter = x + statsW * 0.56;
-    UI.drawUiIcon(ctx, sprites, 'icon_rainbow', rCenter - 14, botY, 14);
-    UI.drawFitText(ctx, rTxt, rCenter - 4, botY, 34, 9.4, 8, 800, rReady ? '#b42b62' : '#5e3c24');
-
-    const dustStr = String(gameState.stardust);
-    UI.drawUiIcon(ctx, sprites, 'icon_stardust', x + statsW - 28, botY, 13);
-    UI.drawFitText(ctx, dustStr, x + statsW - 7, botY, 24, 9.8, 8.2, 800, '#7e4b10', 'right');
-
-    // Right Wooden Preview Card: NEXT + HOLD + 4 Illustrated Mini Relic Slots
-    const px = x + statsW + gap;
-    UI.drawWoodBoard(ctx, px, y, previewCardW, h, 11, false);
-    const boxS = 35;
-    const nx = px + 11;
-    const hx = px + previewCardW - 11 - boxS;
-    const by = y + 14;
-
-    ctx.fillStyle = '#ffe8b8';
-    ctx.font = UI.fontStr(8.5, 900);
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('下', nx + boxS * 0.5, y + 8);
-    ctx.fillText('存', hx + boxS * 0.5, y + 8);
-
-    drawMiniPreviewBox(ctx, nx, by, boxS, gameState.nextTier, gameState.nextMeta, sprites, nowSec, false);
-    drawMiniPreviewBox(ctx, hx, by, boxS, gameState.holdTier, gameState.holdMeta, sprites, nowSec, true);
-    guideTargets.hold = { x: px, y, w: previewCardW, h: 52 };
-    hits.add('mobile_hold_swap', hx - 3, y, boxS + 6, 51, () => app.swapHoldPocket());
-
-    drawMiniRelicStrip(ctx, px + 7, y + 52, previewCardW - 14, 17, gameState.relics, hits, 'mobile_relics_bar', () =>
-      app.openRelicsModal(), false, sprites
-    );
-    return;
-  }
-
-  // Rush & Zen Mode Top HUD
-  const scoreStr = String(gameState.displayScore);
-  UI.drawFitText(ctx, scoreStr, x + 9, y + 16, Math.max(56, statsW - 122), 20, 13, 900, '#4A2C2A');
-
-  const dustVal = String(gameState.stardust);
-  const dustW = Math.max(46, 24 + dustVal.length * 7.5);
-  UI.drawCurrencyChip(ctx, x + statsW - dustW - 7, y + 6, dustW, 19, sprites, 'icon_stardust', dustVal, {
-    style: 'wood',
-    fontSize: 10
-  });
-
-  UI.drawUiIcon(ctx, sprites, 'icon_trophy', x + statsW - dustW - 56, y + 15.5, 13);
-  UI.drawFitText(
-    ctx,
-    String(app.getBestScore()),
-    x + statsW - dustW - 12,
-    y + 16,
-    40,
-    10,
-    8.5,
-    800,
-    '#724640',
-    'right'
-  );
-
-  const isFever = gameState.feverTimer > 0;
-  const multVal = app.getFeverMultiplier();
-  const multStr = Number.isInteger(multVal) ? `${multVal}×` : `${multVal.toFixed(1)}×`;
-  const fLabel = isFever ? `狂热 ${multStr}` : `${Math.round(gameState.feverEnergy)}%`;
-  const fPct = isFever ? `${gameState.feverTimer.toFixed(1)}s` : '';
-
-  UI.drawUiIcon(ctx, sprites, 'icon_flame', x + 14, y + 35, 13);
-  UI.drawFitText(ctx, fLabel, x + 23, y + 35.5, 62, 10, 8.2, 800, isFever ? '#c43c12' : '#4A2C2A');
-
-  const rReady = !!(gameState.curMeta.wildcard || gameState.nextMeta.wildcard);
-  const rTxt = rReady ? '就绪' : `${gameState.dropsUntilRainbow}`;
-  UI.drawTagBadge(ctx, x + statsW * 0.5 - 24, y + 28, 48, 15, rTxt, rReady ? 'amber' : 'plum', 8.8, 'icon_rainbow', sprites);
-
-  if (fPct) {
-    ctx.textAlign = 'right';
-    ctx.fillStyle = '#c43c12';
-    ctx.font = UI.fontStr(10, 800);
-    ctx.fillText(fPct, x + statsW - 8, y + 36);
-  }
-
-  const tx = x + 8;
-  const tw = statsW - 16;
-  const ty = y + 46;
-  UI.roundRectPath(ctx, tx, ty, tw, 9, 4.5);
-  ctx.fillStyle = '#dfd0b2';
-  ctx.fill();
-  ctx.lineWidth = 1.5;
-  ctx.strokeStyle = '#4A2C2A';
-  ctx.stroke();
-
-  const frac = isFever
-    ? Math.max(0, Math.min(1, gameState.feverTimer / Math.max(1, gameState.feverMaxDuration)))
-    : Math.max(0, Math.min(1, gameState.feverEnergy / 100));
-  if (frac > 0.01) {
-    ctx.save();
-    UI.roundRectPath(ctx, tx + 1, ty + 1, Math.max(6, (tw - 2) * frac), 7, 3.5);
-    const fg = ctx.createLinearGradient(tx, ty, tx + tw, ty);
-    if (isFever) {
-      fg.addColorStop(0, '#ff82a9');
-      fg.addColorStop(0.5, '#ffd659');
-      fg.addColorStop(1, '#7cc6fe');
-    } else {
-      fg.addColorStop(0, '#f3a642');
-      fg.addColorStop(0.5, '#ffd659');
-      fg.addColorStop(1, '#ff8f8f');
-    }
-    ctx.fillStyle = fg;
-    ctx.fill();
-    ctx.restore();
-  }
-
-  // Right NEXT & HOLD Wooden Preview Card
-  const px = x + statsW + gap;
-  UI.drawWoodBoard(ctx, px, y, previewCardW, h, 11, false);
-  const boxS = 40;
-  const nx = px + 10;
-  const hx = px + previewCardW - 10 - boxS;
-  const by = y + 16;
-
-  ctx.fillStyle = '#ffe8b8';
-  ctx.font = UI.fontStr(9, 900);
-  ctx.textAlign = 'center';
-  ctx.fillText('下', nx + boxS * 0.5, y + 9);
-  ctx.fillText('存', hx + boxS * 0.5, y + 9);
-
-  drawMiniPreviewBox(ctx, nx, by, boxS, gameState.nextTier, gameState.nextMeta, sprites, nowSec, false);
-  drawMiniPreviewBox(ctx, hx, by, boxS, gameState.holdTier, gameState.holdMeta, sprites, nowSec, true);
-  guideTargets.hold = { x: px, y, w: previewCardW, h };
-  hits.add('mobile_hold_swap', hx - 3, y, boxS + 6, h, () => app.swapHoldPocket());
-}
-
-function drawMiniPreviewBox(ctx, x, y, size, tier, meta, sprites, nowSec, isHold) {
-  const isWild = !!(meta && meta.wildcard);
-  const isGold = !isWild && !!(meta && meta.golden);
-  UI.roundRectPath(ctx, x, y, size, size, 9);
-  ctx.fillStyle = isWild ? '#ffe6f3' : isGold ? '#fff4be' : '#f5e6c4';
-  ctx.fill();
-  ctx.lineWidth = 1.8;
-  ctx.strokeStyle = isWild ? '#d64d84' : isGold ? '#d99b1e' : '#4A2C2A';
-  ctx.stroke();
-
-  if (!tier) {
-    if (isHold) {
-      ctx.fillStyle = '#9c7856';
-      ctx.font = UI.fontStr(15, 800);
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('+', x + size * 0.5, y + size * 0.5 + 0.5);
-    }
-    return;
-  }
-  if (isWild) {
-    UI.drawRainbowWildcard(ctx, x + size * 0.5, y + size * 0.5, size * 0.34, 0, nowSec, 1);
-  } else if (sprites.base[tier]) {
-    UI.drawContainImage(ctx, sprites.base[tier], x + size * 0.5, y + size * 0.5, size * 0.78, size * 0.78);
-  }
-}
-
-function hasTierReadyInJar(gameState, tier) {
-  return gameState.entities.some((e) => !e.merged && !e.isWildcard && !e.isYarnBall && !(e.frozenHp > 0) && e.tier === tier);
-}
-
-function isTierOneMergeAway(gameState, tier) {
-  return (
-    tier >= 2 &&
-    !hasTierReadyInJar(gameState, tier) &&
-    Array.isArray(gameState.nearOrderSubTiers) &&
-    gameState.nearOrderSubTiers.includes(tier - 1)
-  );
-}
-
-function formatSkipBtnLabel(gameState, compact) {
-  if (gameState.skipCooldown > 0) return `${Math.ceil(gameState.skipCooldown)}s`;
-  if (gameState.mode === 'chef') {
-    if ((gameState.freeSkipsLeft || 0) > 0) return compact ? '免换' : '免费换';
-    if ((gameState.coins || 0) >= 3) return '3币';
-    return '换单';
-  }
-  return '换单';
-}
-
-function renderMobileSubBar(ctx, x, y, w, h, app, hits, guideTargets) {
-  const { gameState, sprites } = app;
-  UI.drawParchmentSheet(ctx, x, y, w, h, 9);
-  guideTargets.orderBar = { x, y, w, h };
-
-  if (gameState.mode === 'rush') {
-    const urgent = gameState.rushTimer <= 15.0;
-    UI.drawUiIcon(ctx, sprites, 'mode_rush', x + 15, y + h * 0.5, 19);
-    ctx.fillStyle = urgent ? '#d93025' : '#a8360c';
-    ctx.font = UI.fontStr(14, 900);
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(`${Math.max(0, gameState.rushTimer).toFixed(1)}s`, x + 26, y + h * 0.5 + 0.5);
-
-    const orders = gameState.orders || [];
-    let sx = x + 76;
-    const streak = gameState.rushServeStreak || 0;
-    if (streak >= 2 && (gameState.rushStreakTimer || 0) > 0) {
-      UI.drawTagBadge(ctx, sx, y + 8, 44, 18, `×${streak}`, 'amber', 9.0, 'icon_bolt', sprites);
-      sx += 47;
-    } else {
-      UI.drawUiIcon(ctx, sprites, 'serve_bell', sx + 8, y + h * 0.5, 16);
-      sx += 19;
-    }
-    const shownTiers = [];
-    let anyRushReady = false;
-    for (let oi = 0; oi < orders.length; oi++) {
-      const o = orders[oi];
-      if (!o || o.completed) continue;
-      for (let si = 0; si < o.slots.length; si++) {
-        if (!o.slots[si].done) {
-          if (hasTierReadyInJar(gameState, o.slots[si].tier)) anyRushReady = true;
-          if (shownTiers.length < 3) shownTiers.push(o.slots[si].tier);
-        }
-      }
-    }
-    for (let i = 0; i < shownTiers.length; i++) {
-      const t = shownTiers[i];
-      const ready = hasTierReadyInJar(gameState, t);
-      const near = !ready && isTierOneMergeAway(gameState, t);
-      UI.roundRectPath(ctx, sx, y + 5, 23, 23, 6);
-      ctx.fillStyle = ready ? '#fff0a8' : near ? '#ebfaef' : '#fff9eb';
-      ctx.fill();
-      ctx.lineWidth = ready || near ? 1.8 : 1.2;
-      ctx.strokeStyle = ready ? '#d47c12' : near ? '#3ca365' : '#bfa06f';
-      ctx.stroke();
-      if (sprites.base[t]) {
-        UI.drawContainImage(ctx, sprites.base[t], sx + 11.5, y + 16.5, 18, 18);
-      }
-      sx += 25;
-    }
-
-    const relCnt = (gameState.relics || []).length;
-    const relBtnW = 48;
-    if (anyRushReady) {
-      const srvW = 56;
-      const srvX = x + w - srvW - 5;
-      const relBtnX = srvX - relBtnW - 4;
-      UI.drawPillButton(ctx, relBtnX, y + 6, relBtnW, 22, {
-        style: relCnt > 0 ? 'active' : 'wood',
-        icon: 'icon_gift',
-        sprites,
-        iconSize: 11,
-        text: `${relCnt}/${MAX_RELIC_SLOTS}`,
-        fontSize: 8.8,
-        radius: 9
-      });
-      hits.add('mobile_relics_bar', relBtnX, y + 4, relBtnW, 26, () => app.openRelicsModal());
-
-      UI.drawPillButton(ctx, srvX, y + 5, srvW, 24, {
-        style: 'cta',
-        icon: 'serve_bell',
-        sprites,
-        iconSize: 13,
-        text: '上菜',
-        fontSize: 10.2,
-        fontWeight: 900,
-        radius: 10
-      });
-      hits.add('rush_serve_btn', srvX, y + 3, srvW, 28, () => app.serveReadyOrder());
-    } else {
-      const relBtnX = x + w - relBtnW - 5;
-      UI.drawPillButton(ctx, relBtnX, y + 6, relBtnW, 22, {
-        style: relCnt > 0 ? 'active' : 'wood',
-        icon: 'icon_gift',
-        sprites,
-        iconSize: 11,
-        text: `${relCnt}/${MAX_RELIC_SLOTS}`,
-        fontSize: 8.8,
-        radius: 9
-      });
-      hits.add('mobile_relics_bar', relBtnX, y + 4, relBtnW, 26, () => app.openRelicsModal());
-    }
-    return;
-  }
-
-  if (gameState.mode === 'zen') {
-    UI.drawUiIcon(ctx, sprites, 'mode_zen', x + 16, y + h * 0.5, 18);
+  if (subtitle) {
     UI.drawFitText(
-      ctx,
-      `悠闲经典 · 里程碑 ${gameState.zenNextMilestone}`,
-      x + 30,
-      y + h * 0.5,
-      w - 134,
+      c,
+      subtitle,
+      cx,
+      y + h * 0.73,
+      w - 68,
       10.8,
-      8.8,
-      800,
-      '#4A2C2A'
-    );
-    drawMiniRelicStrip(
-      ctx,
-      x + w - 96,
-      y + 7,
-      90,
-      20,
-      gameState.relics,
-      hits,
-      'mobile_relics_bar',
-      () => app.openRelicsModal(),
-      true,
-      sprites
-    );
-    return;
-  }
-
-  // Chef Mode: Dual-Table Order Strip with Dedicated 1-Tap 【上菜】 Buttons + Separate Reroll Button!
-  const orders = gameState.orders || [];
-  const skipCooling = gameState.skipCooldown > 0;
-  const skipTxt = formatSkipBtnLabel(gameState, true);
-  const skW = 46;
-  const skX = x + w - skW - 5;
-  UI.drawPillButton(ctx, skX, y + 6, skW, 22, {
-    style: !skipCooling && (gameState.freeSkipsLeft || 0) > 0 ? 'active' : 'wood',
-    icon: 'icon_restart',
-    sprites,
-    iconSize: 12,
-    text: skipTxt,
-    fontSize: 8.8,
-    disabled: skipCooling
-  });
-  hits.add('m_skip_order', skX, y + 4, skW, 26, () => app.skipOrder());
-
-  let cx = x + 6;
-  const maxRightX = skX - 5;
-  for (let oi = 0; oi < orders.length; oi++) {
-    const ord = orders[oi];
-    if (!ord) continue;
-    const isJudge = !!ord.isJudgeRush;
-    const isVip = ord.kind === 'vip';
-    const anyReady = !ord.completed && ord.slots.some((s) => !s.done && hasTierReadyInJar(gameState, s.tier));
-    const anyNear = !anyReady && !ord.completed && ord.slots.some((s) => !s.done && isTierOneMergeAway(gameState, s.tier));
-    const slotCnt = ord.slots.length;
-    const rightTail = anyReady ? 42 : 28;
-    const chipW = Math.min(maxRightX - cx, 24 + slotCnt * 24 + rightTail);
-    if (chipW < 48) break;
-
-    UI.roundRectPath(ctx, cx, y + 3, chipW, h - 6, 7);
-    ctx.fillStyle = isJudge
-      ? '#ffe6bf'
-      : anyReady
-      ? '#fff2c2'
-      : anyNear
-      ? '#f1fbf4'
-      : isVip
-      ? '#fbf0e6'
-      : '#fff9ec';
-    ctx.fill();
-    ctx.lineWidth = anyReady || isJudge ? 1.8 : anyNear ? 1.5 : 1.2;
-    ctx.strokeStyle = isJudge
-      ? '#c95614'
-      : anyReady
-      ? '#cf8214'
-      : anyNear
-      ? '#3ca365'
-      : isVip
-      ? '#be8c68'
-      : '#c7a46e';
-    ctx.stroke();
-
-    // Illustrated table badge icon (Judge / VIP Crown / Serve Bell)
-    const tableIcon = isJudge ? 'icon_judge' : isVip ? 'icon_crown' : 'serve_bell';
-    UI.drawUiIcon(ctx, sprites, tableIcon, cx + 11.5, y + h * 0.5, 15);
-
-    let sx = cx + 22;
-    for (let si = 0; si < slotCnt; si++) {
-      const sl = ord.slots[si];
-      const slotReady = !sl.done && hasTierReadyInJar(gameState, sl.tier);
-      const slotNear = !sl.done && !slotReady && isTierOneMergeAway(gameState, sl.tier);
-      UI.roundRectPath(ctx, sx, y + 5.5, 22, 22, 6);
-      ctx.fillStyle = sl.done ? '#e3f7e8' : slotReady ? '#ffe88c' : slotNear ? '#ebfaef' : '#fffdf6';
-      ctx.fill();
-      ctx.lineWidth = slotReady || slotNear ? 1.6 : 1.1;
-      ctx.strokeStyle = sl.done ? '#3f9663' : slotReady ? '#d47c12' : slotNear ? '#3ca365' : '#bfa06f';
-      ctx.stroke();
-      if (sprites.base[sl.tier]) {
-        UI.drawContainImage(ctx, sprites.base[sl.tier], sx + 11, y + 16.5, 17.5, 17.5);
-      }
-      if (sl.done) {
-        drawCheckDot(ctx, sx + 19, y + 7.5, 4.6);
-      } else if (slotNear) {
-        ctx.fillStyle = '#2c8a52';
-        ctx.beginPath();
-        ctx.arc(sx + 19, y + 7.5, 4.2, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      sx += 23.5;
-    }
-
-    if (anyReady && cx + chipW - sx >= 34) {
-      const srvBtnW = Math.min(38, cx + chipW - sx - 2);
-      const srvBtnX = cx + chipW - srvBtnW - 3;
-      UI.drawPillButton(ctx, srvBtnX, y + 6, srvBtnW, 22, {
-        style: 'cta',
-        text: '上菜',
-        fontSize: 9.2,
-        fontWeight: 900,
-        radius: 8
-      });
-      hits.add(`m_serve_order_${oi}`, cx, y + 3, chipW, h - 6, () => app.serveOrderTable(oi));
-    } else {
-      if (cx + chipW - sx >= 18) {
-        const freshLabel = ord.freshSteps > 0 ? `${ord.freshSteps}步` : '-1步';
-        ctx.fillStyle = ord.freshSteps > 0 ? '#b44810' : '#8a6d56';
-        ctx.font = UI.fontStr(8.2, 800);
-        ctx.textAlign = 'right';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(freshLabel, cx + chipW - 4, y + h * 0.5 + 0.5);
-      }
-      if (anyReady) {
-        hits.add(`m_serve_order_${oi}`, cx, y + 3, chipW, h - 6, () => app.serveOrderTable(oi));
-      } else if (!isJudge) {
-        hits.add(`m_skip_table_${oi}`, cx, y + 3, chipW, h - 6, () => app.skipOrder(oi));
-      }
-    }
-
-    cx += chipW + 4;
-  }
-}
-
-function renderWideLeftBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
-  const { gameState, sprites, activePatron } = app;
-  UI.drawWoodBoard(ctx, x, y, w, h, 16);
-  const ix = x + 10;
-  const iw = w - 20;
-
-  if (gameState.mode === 'chef') {
-    const headH = gameState.shiftClearedFlag ? 104 : 88;
-    UI.drawParchmentSheet(ctx, ix, y + 10, iw, headH, 10);
-    guideTargets.hud = { x: ix, y: y + 10, w: iw, h: headH };
-
-    const lowSteps = gameState.stepsLeft <= 3;
-    UI.drawFitText(ctx, `第 ${gameState.shift} 幕 · ${gameState.shiftName}`, ix + 9, y + 23, iw - 78, 11.2, 9, 900, '#4A2C2A');
-    UI.drawCurrencyChip(ctx, ix + iw - 64, y + 13, 56, 20, sprites, 'icon_coin', String(gameState.coins || 0), {
-      style: 'wood',
-      fontSize: 10
-    });
-
-    UI.drawFitText(
-      ctx,
-      `¥${gameState.displayShiftRevenue} / ¥${gameState.shiftTarget}`,
-      ix + 9,
-      y + 44,
-      iw - 78,
-      17.5,
-      12,
-      900,
-      '#4A2C2A'
-    );
-    UI.drawTagBadge(ctx, ix + iw - 62, y + 35, 54, 18, `${gameState.stepsLeft}/${gameState.stepsMax}步`, lowSteps ? 'berry' : 'soft', 9.5);
-
-    const revFrac = Math.max(0, Math.min(1, gameState.shiftRevenue / Math.max(1, gameState.shiftTarget)));
-    UI.roundRectPath(ctx, ix + 9, y + 59, iw - 18, 11, 5.5);
-    ctx.fillStyle = '#dfd0b2';
-    ctx.fill();
-    ctx.lineWidth = 1.4;
-    ctx.strokeStyle = '#4A2C2A';
-    ctx.stroke();
-    if (revFrac > 0.01) {
-      UI.roundRectPath(ctx, ix + 10, y + 60, Math.max(8, (iw - 20) * revFrac), 9, 4.5);
-      const rg = ctx.createLinearGradient(ix + 10, y + 60, ix + iw - 10, y + 60);
-      rg.addColorStop(0, '#f0a63a');
-      rg.addColorStop(0.55, '#ffd75e');
-      rg.addColorStop(1, '#ff9f5a');
-      ctx.fillStyle = rg;
-      ctx.fill();
-    }
-
-    if (gameState.shiftClearedFlag && gameState.running && !gameState.over) {
-      const remCoins = gameState.stepsLeft * 4;
-      const btnY = y + 76;
-      UI.drawPillButton(ctx, ix + 9, btnY, iw - 18, 26, {
-        style: 'cta',
-        icon: 'serve_bell',
-        sprites,
-        text: remCoins > 0 ? `提前打烊 +${remCoins}币` : '达标 · 打烊',
-        fontSize: 11,
-        fontWeight: 900,
-        radius: 10
-      });
-      hits.add('btn_close_shift_early', ix + 9, btnY, iw - 18, 26, () => app.closeShiftEarly());
-    } else {
-      UI.drawFitText(
-        ctx,
-        `总计 ¥${gameState.displayScore}`,
-        ix + 9,
-        y + 84,
-        iw - 68,
-        10,
-        8.5,
-        700,
-        '#724640'
-      );
-      UI.drawUiIcon(ctx, sprites, 'icon_stardust', ix + iw - 42, y + 84, 14);
-      UI.drawFitText(ctx, String(gameState.stardust), ix + iw - 9, y + 84, 28, 10.5, 8.5, 800, '#7e4b10', 'right');
-    }
-
-    const sy = y + 10 + headH + 8;
-    const sh = h - (headH + 28);
-    UI.drawParchmentSheet(ctx, ix, sy, iw, sh, 10);
-
-    const isFever = gameState.feverTimer > 0;
-    const multVal = app.getFeverMultiplier();
-    const multStr = Number.isInteger(multVal) ? `${multVal}×` : `${multVal.toFixed(1)}×`;
-    UI.drawUiIcon(ctx, sprites, 'icon_flame', ix + 16, sy + 14, 14);
-    UI.drawFitText(ctx, isFever ? `狂热 ${multStr}` : '星光能量', ix + 26, sy + 14, iw - 86, 11, 9, 800, '#4A2C2A');
-    ctx.textAlign = 'right';
-    ctx.fillStyle = '#4A2C2A';
-    ctx.font = UI.fontStr(10.5, 800);
-    ctx.fillText(isFever ? `${gameState.feverTimer.toFixed(1)}s` : `${Math.round(gameState.feverEnergy)}%`, ix + iw - 10, sy + 14);
-
-    UI.roundRectPath(ctx, ix + 10, sy + 23, iw - 20, 10, 5);
-    ctx.fillStyle = '#dfd0b2';
-    ctx.fill();
-    ctx.lineWidth = 1.4;
-    ctx.strokeStyle = '#4A2C2A';
-    ctx.stroke();
-    const frac = isFever ? Math.min(1, gameState.feverTimer / Math.max(1, gameState.feverMaxDuration)) : Math.min(1, gameState.feverEnergy / 100);
-    if (frac > 0.01) {
-      UI.roundRectPath(ctx, ix + 11, sy + 24, Math.max(6, (iw - 22) * frac), 8, 4);
-      ctx.fillStyle = isFever ? '#ff99c8' : '#ffd659';
-      ctx.fill();
-    }
-
-    const rReady = !!(gameState.curMeta.wildcard || gameState.nextMeta.wildcard);
-    const multInfo = app.getGlobalRevenueMult();
-    const multBadge = multInfo > 1.05 ? ` · ×${multInfo.toFixed(2)}` : '';
-    UI.drawUiIcon(ctx, sprites, 'icon_rainbow', ix + 17, sy + 44, 15);
-    UI.drawFitText(
-      ctx,
-      `${rReady ? '彩虹就绪' : `${gameState.dropsUntilRainbow}步出彩虹`}${multBadge}`,
-      ix + 28,
-      sy + 44,
-      iw - 38,
-      10.5,
       8.5,
       800,
-      rReady ? '#b42b62' : '#4A2C2A'
+      '#8A5222',
+      'center',
+      'middle'
+    );
+  } else if (typeof totalStars === 'number') {
+    UI.drawStarIcon(c, cx - 24, y + h * 0.74, 5.5, true);
+    UI.drawFitText(c, `${totalStars}/90`, cx + 6, y + h * 0.74, 60, 10, 8, 800, '#8A5222', 'center', 'middle');
+  }
+}
+
+function renderLobbyTopBar(ctx, geom, app, hits) {
+  const c = getSafeCtx(ctx);
+  const { topY, headerH, maxRight } = geom;
+  const saveData = app.saveData || {};
+  const sprites = app.sprites || {};
+  const totalStars = computeTotalStars(saveData.levelStars);
+
+  const btnS = Math.min(30, headerH);
+  const btnY = topY + Math.floor((headerH - btnS) * 0.5);
+  const gap = 5;
+
+  const helpX = maxRight - btnS;
+  const sfxX = helpX - gap - btnS;
+  const bgmX = sfxX - gap - btnS;
+
+  const bgmOn = app.audio ? Boolean(app.audio.bgmEnabled && app.audio.bgmTrack !== 'off') : true;
+  const sfxOn = app.audio ? Boolean(app.audio.sfxEnabled) : true;
+
+  UI.drawPillButton(c, bgmX, btnY, btnS, btnS, {
+    style: bgmOn ? 'wood' : 'dark',
+    icon: 'icon_bgm',
+    sprites,
+    iconSize: 18,
+    radius: 9,
+    mutedSlash: !bgmOn,
+    fallbackText: '乐'
+  });
+  hits.add('lobby_bgm_btn', bgmX, btnY, btnS, btnS, () => app.cycleBgm());
+
+  UI.drawPillButton(c, sfxX, btnY, btnS, btnS, {
+    style: sfxOn ? 'wood' : 'dark',
+    icon: 'icon_sfx',
+    sprites,
+    iconSize: 18,
+    radius: 9,
+    mutedSlash: !sfxOn,
+    fallbackText: '音'
+  });
+  hits.add('lobby_sfx_btn', sfxX, btnY, btnS, btnS, () => app.toggleSfx());
+
+  UI.drawPillButton(c, helpX, btnY, btnS, btnS, {
+    style: 'wood',
+    icon: 'icon_help',
+    sprites,
+    iconSize: 18,
+    radius: 9,
+    fallbackText: '助'
+  });
+  hits.add('lobby_help_btn', helpX, btnY, btnS, btnS, () => app.openModal('help'));
+
+  // Left non-interactive status chips (strictly ending <= bgmX - 6)
+  const leftStart = 12;
+  const leftAvail = Math.max(0, bgmX - 6 - leftStart);
+  if (leftAvail >= 72) {
+    const chipH = Math.min(28, headerH);
+    const chipY = topY + Math.floor((headerH - chipH) * 0.5);
+    const dustW = Math.min(84, leftAvail);
+    UI.drawCurrencyChip(
+      c,
+      leftStart,
+      chipY,
+      dustW,
+      chipH,
+      sprites,
+      'icon_stardust',
+      String(saveData.bankStardust || 0),
+      { style: 'wood', fontSize: 11.5 }
     );
 
-    const py = sy + 56;
-    ctx.fillStyle = '#ecd5a8';
-    ctx.beginPath();
-    ctx.arc(ix + 29, py + 24, 21, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = '#4A2C2A';
-    ctx.stroke();
-    const speechPatron = gameState.speechPatron || activePatron;
-    if (sprites.patrons[speechPatron.id]) {
-      UI.drawContainImage(ctx, sprites.patrons[speechPatron.id], ix + 29, py + 24, 36, 36);
+    const starChipX = leftStart + dustW + 5;
+    const starChipW = Math.min(108, bgmX - 6 - starChipX);
+    if (starChipW >= 58) {
+      UI.drawKissaCard(c, starChipX, chipY, starChipW, chipH, {
+        tone: 'amber',
+        radius: 9
+      });
+      UI.drawStarIcon(c, starChipX + 13, chipY + chipH * 0.5, 6.2, true);
+      const cloudIcon = app.cloudStatus === 'synced' ? 'icon_cloud' : 'icon_local_save';
+      if (starChipW >= 88) {
+        UI.drawUiIcon(c, sprites, cloudIcon, starChipX + starChipW - 12, chipY + chipH * 0.5, 14);
+      }
+      const txtRight = starChipW >= 88 ? starChipW - 24 : starChipW - 6;
+      UI.drawFitText(
+        c,
+        `${totalStars}/90`,
+        starChipX + 23,
+        chipY + chipH * 0.5 + 0.5,
+        Math.max(24, txtRight - 23),
+        10.8,
+        8.5,
+        800,
+        '#4A2C2A',
+        'left',
+        'middle'
+      );
     }
-    UI.drawKissaCard(ctx, ix + 56, py, iw - 66, 52, { radius: 9 });
-    UI.drawFitText(ctx, speechPatron.shortName, ix + 63, py + 12, iw - 80, 10.5, 8.5, 800, '#8f4e1b');
-    UI.drawWrappedText(
-      ctx,
-      gameState.speechText || speechPatron.greet,
-      ix + 63,
-      py + 21,
-      iw - 80,
-      13,
-      UI.fontStr(10, 600),
+  }
+}
+
+function renderChapterBar(ctx, rect, app, hits) {
+  const c = getSafeCtx(ctx);
+  const { x, y, w, h } = rect;
+  const saveData = app.saveData || {};
+  const chapNum = clamp(Math.round(Number(app.selectedChapter) || 1), 1, 3);
+  const chap = CHAPTERS[chapNum - 1] || CHAPTERS[0];
+  const chapStatus = isChapterUnlocked(chapNum, saveData.levelStars);
+
+  let chapStars = 0;
+  for (let i = 0; i < chap.levelIds.length; i++) {
+    const lid = chap.levelIds[i];
+    const st = saveData.levelStars && saveData.levelStars[lid];
+    if (Number.isFinite(st) && st > 0) chapStars += Math.min(3, Math.floor(st));
+  }
+
+  UI.drawKissaCard(c, x, y, w, h, {
+    tone: chapStatus.unlocked ? 'selected' : 'soft',
+    radius: 11
+  });
+
+  const btnW = 34;
+  const btnH = Math.max(24, h - 6);
+  const btnY = y + Math.floor((h - btnH) * 0.5);
+  const prevX = x + 4;
+  const nextX = x + w - 4 - btnW;
+
+  UI.drawPillButton(c, prevX, btnY, btnW, btnH, {
+    style: chapNum > 1 ? 'wood' : 'card',
+    disabled: chapNum <= 1,
+    radius: 8,
+    text: ''
+  });
+  drawChevronIcon(c, prevX + btnW * 0.5, btnY + btnH * 0.5, 12, 'left', chapNum > 1 ? '#4A2C2A' : '#A48D76');
+  hits.add('chapter_prev', prevX, btnY, btnW, btnH, () => app.switchChapter(-1));
+
+  UI.drawPillButton(c, nextX, btnY, btnW, btnH, {
+    style: chapNum < 3 ? 'wood' : 'card',
+    disabled: chapNum >= 3,
+    radius: 8,
+    text: ''
+  });
+  drawChevronIcon(c, nextX + btnW * 0.5, btnY + btnH * 0.5, 12, 'right', chapNum < 3 ? '#4A2C2A' : '#A48D76');
+  hits.add('chapter_next', nextX, btnY, btnW, btnH, () => app.switchChapter(1));
+
+  const centerLeft = prevX + btnW + 6;
+  const centerW = Math.max(80, nextX - 6 - centerLeft);
+  const centerX = centerLeft + centerW * 0.5;
+
+  if (chapStatus.unlocked) {
+    const titleStr = `第${chap.chapter}章 · ${chap.name}`;
+    UI.drawFitText(
+      c,
+      titleStr,
+      centerLeft + 4,
+      y + h * 0.5,
+      centerW - 62,
+      12.5,
+      9.5,
+      900,
       '#4A2C2A',
       'left',
-      2
+      'middle'
+    );
+    const badgeW = 54;
+    const badgeX = centerLeft + centerW - badgeW;
+    UI.drawStarIcon(c, badgeX + 9, y + h * 0.5, 6.2, true);
+    UI.drawFitText(
+      c,
+      `${chapStars}/30`,
+      badgeX + 19,
+      y + h * 0.5 + 0.5,
+      badgeW - 21,
+      10.8,
+      8.5,
+      800,
+      '#7A4818',
+      'left',
+      'middle'
+    );
+  } else {
+    drawLockIcon(c, centerLeft + 10, y + h * 0.5, 13);
+    UI.drawFitText(
+      c,
+      `第${chap.chapter}章 · ${chap.name}（${chapStatus.reason}）`,
+      centerLeft + 21,
+      y + h * 0.5,
+      centerW - 24,
+      10.5,
+      8.0,
+      800,
+      '#6E4E3A',
+      'left',
+      'middle'
+    );
+  }
+}
+
+function renderCampaignMap(ctx, rect, app, hits, nowSec, includeHeroWatermark) {
+  const c = getSafeCtx(ctx);
+  const { x, y, w, h } = rect;
+  const saveData = app.saveData || {};
+  const sprites = app.sprites || {};
+  const chapNum = clamp(Math.round(Number(app.selectedChapter) || 1), 1, 3);
+  const chap = CHAPTERS[chapNum - 1] || CHAPTERS[0];
+  const chapTheme = BOARD_THEMES[chap.themeHint] || BOARD_THEMES.amber;
+
+  UI.drawWoodBoard(c, x, y, w, h, 15, true);
+  const pad = 7;
+  const px = x + pad;
+  const py = y + pad;
+  const pw = w - pad * 2;
+  const ph = h - pad * 2;
+  UI.drawParchmentSheet(c, px, py, pw, ph, 11);
+
+  if (includeHeroWatermark && sprites.hero) {
+    c.save();
+    try {
+      UI.roundRectPath(c, px + 2, py + 2, pw - 4, ph - 4, 9);
+      c.clip();
+      c.globalAlpha = 0.14;
+      UI.drawCoverImage(c, sprites.hero, px, py, pw, ph, 0.45);
+    } finally {
+      c.restore();
+    }
+  }
+
+  // Subtle chapter atmosphere header tint inside map
+  c.save();
+  try {
+    c.fillStyle =
+      chapNum === 2
+        ? 'rgba(223, 134, 165, 0.10)'
+        : chapNum === 3
+        ? 'rgba(135, 189, 219, 0.13)'
+        : 'rgba(213, 156, 59, 0.08)';
+    UI.roundRectPath(c, px + 2, py + 2, pw - 4, ph - 4, 9);
+    c.fill();
+  } finally {
+    c.restore();
+  }
+
+  const mx = px + 8;
+  const my = py + 8;
+  const mw = Math.max(200, pw - 16);
+  const mh = Math.max(180, ph - 16);
+
+  // 10-node winding S-curve layout: (3, 3, 3, 1) strictly non-overlapping on >=320px width
+  const colFracs = [
+    [0.17, 0.50, 0.83],
+    [0.83, 0.50, 0.17],
+    [0.17, 0.50, 0.83],
+    [0.50]
+  ];
+  const rowFracs = [0.125, 0.375, 0.625, 0.875];
+
+  const stdW = clamp(Math.floor(mw * 0.225), 68, 96);
+  const stdH = clamp(Math.floor(mh * 0.145), 38, 52);
+  const bossW = clamp(Math.floor(mw * 0.31), 92, 128);
+  const bossH = clamp(Math.floor(mh * 0.155), 40, 56);
+
+  const nodes = [];
+  let idx = 0;
+  for (let r = 0; r < colFracs.length; r++) {
+    const row = colFracs[r];
+    for (let k = 0; k < row.length; k++) {
+      const levelId = `${chapNum}-${idx + 1}`;
+      const isBoss = idx === 9;
+      const nw = isBoss ? bossW : stdW;
+      const nh = isBoss ? bossH : stdH;
+      const cx = Math.round(mx + mw * row[k]);
+      const cy = Math.round(my + mh * rowFracs[r]);
+      nodes.push({
+        index: idx + 1,
+        levelId,
+        isBoss,
+        cx,
+        cy,
+        x: Math.round(cx - nw * 0.5),
+        y: Math.round(cy - nh * 0.5),
+        w: nw,
+        h: nh
+      });
+      idx++;
+    }
+  }
+
+  // Draw winding bakery trail connecting 1 -> 10
+  c.save();
+  try {
+    c.strokeStyle = chapTheme.cellBorder || '#C69552';
+    c.lineWidth = 4.5;
+    c.lineCap = 'round';
+    c.lineJoin = 'round';
+    if (typeof c.setLineDash === 'function') c.setLineDash([7, 6]);
+    c.beginPath();
+    for (let i = 0; i < nodes.length; i++) {
+      if (i === 0) c.moveTo(nodes[i].cx, nodes[i].cy);
+      else c.lineTo(nodes[i].cx, nodes[i].cy);
+    }
+    c.stroke();
+    if (typeof c.setLineDash === 'function') c.setLineDash([]);
+  } finally {
+    c.restore();
+  }
+
+  const frontierId = saveData.highestUnlockedLevel || '1-1';
+
+  for (let i = 0; i < nodes.length; i++) {
+    const nd = nodes[i];
+    const lvl = getLevelById(nd.levelId);
+    const unlockInfo = isLevelUnlocked(nd.levelId, saveData.levelStars);
+    const rawStar = saveData.levelStars && saveData.levelStars[nd.levelId];
+    const stars = Number.isFinite(rawStar) && rawStar > 0 ? Math.min(3, Math.floor(rawStar)) : 0;
+    const isFrontier = unlockInfo.unlocked && nd.levelId === frontierId && stars === 0;
+
+    if (isFrontier) {
+      const pulse = 0.5 + 0.5 * Math.sin(nowSec * 4.6);
+      c.save();
+      try {
+        c.strokeStyle = `rgba(245, 178, 36, ${(0.55 + 0.35 * pulse).toFixed(3)})`;
+        c.lineWidth = 3.2;
+        UI.roundRectPath(c, nd.x - 3, nd.y - 3, nd.w + 6, nd.h + 6, 13);
+        c.stroke();
+      } finally {
+        c.restore();
+      }
+    }
+
+    UI.drawKissaCard(c, nd.x, nd.y, nd.w, nd.h, {
+      tone: !unlockInfo.unlocked
+        ? 'soft'
+        : isFrontier
+        ? 'selected'
+        : stars >= 3
+        ? 'amber'
+        : 'cream',
+      borderColor: !unlockInfo.unlocked
+        ? '#A8937C'
+        : isFrontier
+        ? '#DF921A'
+        : nd.isBoss
+        ? '#B86B1B'
+        : '#B98E58',
+      radius: 10
+    });
+
+    if (nd.isBoss) {
+      UI.drawUiIcon(c, sprites, 'icon_crown', nd.x + 12, nd.y + 12, 13, unlockInfo.unlocked ? 1 : 0.45);
+    }
+
+    const labelText = nd.isBoss && lvl ? `${nd.levelId} ${lvl.name.slice(0, 3)}` : nd.levelId;
+    UI.drawFitText(
+      c,
+      labelText,
+      nd.cx + (nd.isBoss ? 4 : 0),
+      nd.y + nd.h * 0.36,
+      nd.w - (nd.isBoss ? 22 : 10),
+      nd.isBoss ? 11.2 : 11.8,
+      8.5,
+      900,
+      unlockInfo.unlocked ? '#4A2C2A' : '#7D6A58',
+      'center',
+      'middle'
     );
 
-    // Clean Dual-Table Order Panel with separate 【换】 and 【上菜】 actions!
-    const oy = py + 60;
-    const oh = sy + sh - 8 - oy;
-    UI.drawKissaCard(ctx, ix + 8, oy, iw - 16, oh, { tone: 'soft', radius: 9 });
-    guideTargets.orderBar = { x: ix + 8, y: oy, w: iw - 16, h: oh };
-    UI.drawUiIcon(ctx, sprites, 'serve_bell', ix + 21, oy + 14, 15);
-    UI.drawFitText(ctx, '点单台', ix + 32, oy + 14, iw - 108, 11, 9, 900, '#4A2C2A');
-    const cooling = gameState.skipCooldown > 0;
-    UI.drawPillButton(ctx, ix + iw - 70, oy + 4, 54, 20, {
-      style: !cooling && (gameState.freeSkipsLeft || 0) > 0 ? 'active' : 'wood',
-      icon: 'icon_restart',
-      sprites,
-      iconSize: 12,
-      text: formatSkipBtnLabel(gameState, false),
-      fontSize: 9.0,
-      disabled: cooling
-    });
-    hits.add('wide_skip_order', ix + iw - 70, oy + 4, 54, 20, () => app.skipOrder());
-
-    const orders = gameState.orders || [];
-    const rowH = Math.max(54, Math.floor((oh - 34) / 2));
-    for (let oi = 0; oi < orders.length; oi++) {
-      const ord = orders[oi];
-      if (!ord) continue;
-      const isJudge = !!ord.isJudgeRush;
-      const isVip = ord.kind === 'vip';
-      const ry = oy + 28 + oi * (rowH + 5);
-      const anyReady = !ord.completed && ord.slots.some((s) => !s.done && hasTierReadyInJar(gameState, s.tier));
-      const anyNear = !anyReady && !ord.completed && ord.slots.some((s) => !s.done && isTierOneMergeAway(gameState, s.tier));
-      UI.drawKissaCard(ctx, ix + 14, ry, iw - 28, rowH, {
-        tone: anyReady || isJudge ? 'selected' : 'cream',
-        radius: 8
+    if (!unlockInfo.unlocked) {
+      drawLockIcon(c, nd.cx, nd.y + nd.h * 0.73, 12.5, {
+        bodyColor: '#B8A28A',
+        borderColor: '#6D5846',
+        shackleColor: '#6D5846'
       });
-
-      const tableIcon = isJudge ? 'icon_judge' : isVip ? 'icon_crown' : 'serve_bell';
-      UI.drawUiIcon(ctx, sprites, tableIcon, ix + 27, ry + 13, 14);
-      UI.drawFitText(
-        ctx,
-        isJudge ? '评委急单' : isVip ? 'VIP桌' : '快餐桌',
-        ix + 37,
-        ry + 13,
-        iw - 134,
-        10.2,
-        8.5,
-        900,
-        isJudge ? '#b4320c' : isVip ? '#8c3818' : '#7a4512'
-      );
-
-      const freshTxt = ord.freshSteps > 0 ? `热${ord.freshSteps}步` : '冷-1步';
-      const freshRightX = isJudge ? ix + iw - 20 : ix + iw - 54;
-      UI.drawFitText(
-        ctx,
-        freshTxt,
-        freshRightX,
-        ry + 13,
-        46,
-        8.8,
-        7.5,
-        800,
-        ord.freshSteps > 0 ? '#b44810' : '#8a725a',
-        'right'
-      );
-
-      if (!isJudge) {
-        const skBtnX = ix + iw - 50;
-        UI.drawPillButton(ctx, skBtnX, ry + 4, 32, 18, {
-          style: 'wood',
-          text: '换',
-          fontSize: 8.8,
-          disabled: cooling,
-          radius: 7
-        });
-        hits.add(`wide_skip_table_${oi}`, skBtnX - 2, ry + 2, 36, 22, () => app.skipOrder(oi));
+    } else {
+      const starY = nd.y + nd.h * 0.74;
+      const starSpacing = Math.min(14, nd.w * 0.21);
+      for (let s = 1; s <= 3; s++) {
+        UI.drawStarIcon(
+          c,
+          nd.cx + (s - 2) * starSpacing,
+          starY,
+          5.0,
+          s <= stars
+        );
       }
-
-      let sx = ix + 21;
-      for (let si = 0; si < ord.slots.length; si++) {
-        const sl = ord.slots[si];
-        const slotReady = !sl.done && hasTierReadyInJar(gameState, sl.tier);
-        const slotNear = !sl.done && !slotReady && isTierOneMergeAway(gameState, sl.tier);
-        UI.roundRectPath(ctx, sx, ry + 23, 27, 27, 7);
-        ctx.fillStyle = sl.done ? '#e3f7e8' : slotReady ? '#ffe88c' : slotNear ? '#ebfaef' : '#fffdf6';
-        ctx.fill();
-        ctx.lineWidth = slotReady || slotNear ? 1.8 : 1.2;
-        ctx.strokeStyle = sl.done ? '#3f9663' : slotReady ? '#d47c12' : slotNear ? '#3ca365' : '#bfa06f';
-        ctx.stroke();
-        if (sprites.base[sl.tier]) {
-          UI.drawContainImage(ctx, sprites.base[sl.tier], sx + 13.5, ry + 36.5, 22, 22);
-        }
-        if (sl.done) {
-          drawCheckDot(ctx, sx + 23.5, ry + 26, 4.8);
-        } else if (slotNear) {
-          ctx.fillStyle = '#2c8a52';
-          ctx.beginPath();
-          ctx.arc(sx + 23.5, ry + 26, 4.5, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        sx += 31;
-      }
-
-      if (anyReady) {
-        const srvW = 58;
-        const srvX = ix + iw - 18 - srvW;
-        const srvY = ry + 25;
-        UI.drawPillButton(ctx, srvX, srvY, srvW, 24, {
-          style: 'cta',
-          icon: 'serve_bell',
-          sprites,
-          iconSize: 13,
-          text: '上菜',
-          fontSize: 10.2,
-          fontWeight: 900,
-          radius: 9
-        });
-        hits.add(`wide_serve_order_${oi}`, srvX, srvY, srvW, 25, () => app.serveOrderTable(oi));
-      } else {
-        const infoX = ix + iw - 20;
-        UI.drawFitText(
-          ctx,
-          `+¥${ord.bonusScore}`,
-          infoX,
-          ry + 36,
-          iw - 28 - (sx - ix),
-          10.2,
-          8.5,
-          900,
-          anyNear ? '#2c8a52' : '#724640',
-          'right'
+      if (isFrontier) {
+        UI.drawTagBadge(
+          c,
+          nd.x + nd.w - 30,
+          nd.y - 6,
+          30,
+          14,
+          '当前',
+          'amber',
+          8.0
         );
       }
     }
+
+    const levelIdCopy = nd.levelId;
+    hits.add(`level_node_${levelIdCopy}`, nd.x, nd.y, nd.w, nd.h, () =>
+      app.onTapLevelNode(levelIdCopy)
+    );
+  }
+}
+
+function renderPatronBar(ctx, rect, app, hits, nowSec) {
+  const c = getSafeCtx(ctx);
+  const { x, y, w, h } = rect;
+  const saveData = app.saveData || {};
+  const sprites = app.sprites || {};
+  const patronId = normalizePatronId(saveData.selectedPatron);
+  const patron = PATRONS.find((p) => p.id === patronId) || PATRONS[0];
+
+  UI.drawKissaCard(c, x, y, w, h, {
+    tone: 'cream',
+    radius: 12
+  });
+
+  const avatarS = Math.min(h - 8, 50);
+  const avatarCx = x + 8 + avatarS * 0.5;
+  const bounce = app.patronPokeTimer > 0 ? Math.sin(app.patronPokeTimer * 26) * 3.5 : Math.sin(nowSec * 2.3) * 1.2;
+  const avatarCy = y + h * 0.5 + bounce;
+
+  c.save();
+  try {
+    c.fillStyle = '#F7E3BE';
+    c.strokeStyle = '#B98848';
+    c.lineWidth = 1.6;
+    c.beginPath();
+    c.arc(avatarCx, y + h * 0.5, avatarS * 0.48, 0, Math.PI * 2);
+    c.fill();
+    c.stroke();
+  } finally {
+    c.restore();
+  }
+  UI.drawUiIcon(c, sprites, patron.id, avatarCx, avatarCy, avatarS * 0.9);
+
+  const btnW = 84;
+  const btnH = Math.min(32, h - 10);
+  const btnX = x + w - 8 - btnW;
+  const btnY = Math.round(y + (h - btnH) * 0.5);
+
+  UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
+    style: 'walnut',
+    text: '切换搭档',
+    fontSize: 10.8,
+    radius: 9
+  });
+  hits.add('lobby_patron_switch', btnX, btnY, btnW, btnH, () => app.cycleOrOpenPatrons());
+
+  // Non-HitRegistry geometric poke area stored on app for tactile mascot tap
+  const textX = x + 14 + avatarS;
+  const textW = Math.max(60, btnX - 8 - textX);
+  app.lobbyPatronPokeRect = { x, y, w: Math.max(40, btnX - 4 - x), h };
+
+  UI.drawFitText(
+    c,
+    `${patron.name} · ${patron.shortPassive}`,
+    textX,
+    y + h * 0.34,
+    textW,
+    11.5,
+    9.0,
+    900,
+    '#4A2C2A',
+    'left',
+    'middle'
+  );
+
+  const speechLine = app.currentPatronLine || patron.greet;
+  UI.drawFitText(
+    c,
+    speechLine,
+    textX,
+    y + h * 0.69,
+    textW,
+    10.0,
+    8.0,
+    700,
+    '#7A5438',
+    'left',
+    'middle'
+  );
+}
+
+function renderLobbyBottomDock(ctx, rect, app, hits) {
+  const c = getSafeCtx(ctx);
+  const { x, y, w, h } = rect;
+  const sprites = app.sprites || {};
+  const gap = 6;
+  const colW = Math.floor((w - gap * 3) / 4);
+
+  const items = [
+    {
+      id: 'dock_shop',
+      label: '小铺',
+      icon: 'icon_shop',
+      redDot: typeof app.hasAffordableShopItem === 'function' ? app.hasAffordableShopItem() : false,
+      onClick: () => app.openShop('catcakes')
+    },
+    {
+      id: 'dock_compendium',
+      label: '图鉴',
+      icon: 'icon_book',
+      redDot: false,
+      onClick: () => app.openCompendium('catcakes')
+    },
+    {
+      id: 'dock_leaderboard',
+      label: '排行',
+      icon: 'icon_trophy',
+      redDot: false,
+      onClick: () => app.openLeaderboard('stars')
+    },
+    {
+      id: 'dock_themes',
+      label: '主题',
+      icon: 'icon_ribbon',
+      redDot: typeof app.hasAffordableShopTab === 'function' ? app.hasAffordableShopTab('themes') : false,
+      onClick: () => app.openShop('themes')
+    }
+  ];
+
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    const bx = x + i * (colW + gap);
+    UI.drawPillButton(c, bx, y, colW, h, {
+      style: 'wood',
+      icon: it.icon,
+      sprites,
+      iconSize: 17,
+      text: it.label,
+      fontSize: 11.2,
+      radius: 10
+    });
+    if (it.redDot) {
+      drawRedDot(c, bx + colW - 8, y + 8, 4.8);
+    }
+    hits.add(it.id, bx, y, colW, h, it.onClick);
+  }
+}
+
+function renderLobbyScreen(ctx, metrics, app, hits, nowSec) {
+  const c = getSafeCtx(ctx);
+  const geom = computeTopHeaderGeometry(metrics);
+  const { width, headerBottom, bottomLimit } = geom;
+  const saveData = app.saveData || {};
+  const sprites = app.sprites || {};
+  const totalStars = computeTotalStars(saveData.levelStars);
+  const rankTitle = getChefRank(saveData);
+  const ctaLevelId = saveData.highestUnlockedLevel || '1-1';
+  const ctaLevel = getLevelById(ctaLevelId) || getLevelById('1-1');
+  const ctaStar1 = ctaLevel && ctaLevel.stars ? ctaLevel.stars[0] : 750;
+
+  app.currentBoardLayout = null;
+  app.guideTargets = null;
+
+  renderLobbyTopBar(c, geom, app, hits);
+
+  const isWide = width >= 820;
+  const bodyTop = headerBottom + 6;
+  const availH = Math.max(360, bottomLimit - bodyTop);
+
+  if (isWide) {
+    const totalW = Math.min(1120, width - 40);
+    const startX = Math.round((width - totalW) * 0.5);
+    const leftW = Math.round(totalW * 0.43);
+    const rightX = startX + leftW + 20;
+    const rightW = totalW - leftW - 20;
+
+    // Left Column: Brand Title Plaque + v2 Hero Illustration + Active Patron Stage
+    const plaqueH = 68;
+    drawTitlePlaqueBanner(
+      c,
+      startX,
+      bodyTop,
+      leftW,
+      plaqueH,
+      sprites,
+      `${rankTitle} · 总评星 ${totalStars}/90`,
+      totalStars
+    );
+
+    const heroY = bodyTop + plaqueH + 10;
+    const patronCardH = 128;
+    const heroH = Math.max(180, bottomLimit - patronCardH - 10 - heroY);
+
+    UI.drawWoodBoard(c, startX, heroY, leftW, heroH, 15, true);
+    c.save();
+    try {
+      UI.roundRectPath(c, startX + 7, heroY + 7, leftW - 14, heroH - 14, 10);
+      c.clip();
+      if (sprites.hero) {
+        UI.drawCoverImage(c, sprites.hero, startX + 7, heroY + 7, leftW - 14, heroH - 14, 0.5);
+      } else {
+        UI.drawParchmentSheet(c, startX + 7, heroY + 7, leftW - 14, heroH - 14, 10);
+      }
+    } finally {
+      c.restore();
+    }
+
+    const patronY = heroY + heroH + 10;
+    renderPatronBar(c, { x: startX, y: patronY, w: leftW, h: patronCardH }, app, hits, nowSec);
+
+    // Right Column: Chapter Switcher + Winding 10-Node Map + Primary CTA + 4-Item Dock
+    const chapH = 38;
+    renderChapterBar(c, { x: rightX, y: bodyTop, w: rightW, h: chapH }, app, hits);
+
+    const dockH = 44;
+    const dockY = bottomLimit - dockH;
+    renderLobbyBottomDock(c, { x: rightX, y: dockY, w: rightW, h: dockH }, app, hits);
+
+    const ctaH = 48;
+    const ctaY = dockY - 8 - ctaH;
+    UI.drawPillButton(c, rightX, ctaY, rightW, ctaH, {
+      style: 'cta',
+      icon: 'serve_bell',
+      sprites,
+      iconSize: 22,
+      text: `开始营业 · 第 ${ctaLevelId} 关（目标 ${ctaStar1} 分）`,
+      fontSize: 14,
+      radius: 13
+    });
+    hits.add('lobby_start_cta', rightX, ctaY, rightW, ctaH, () => app.startLevel(ctaLevelId));
+
+    const mapY = bodyTop + chapH + 8;
+    const mapH = Math.max(220, ctaY - 8 - mapY);
+    renderCampaignMap(c, { x: rightX, y: mapY, w: rightW, h: mapH }, app, hits, nowSec, false);
     return;
   }
 
-  // Rush & Zen Wide Left Board
-  UI.drawParchmentSheet(ctx, ix, y + 10, iw, 74, 10);
-  guideTargets.hud = { x: ix, y: y + 10, w: iw, h: 74 };
-  ctx.fillStyle = '#724640';
-  ctx.font = UI.fontStr(11, 800);
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(app.hasSouffleAura() ? '猫神光环 ×2' : '得分', ix + iw * 0.5, y + 22);
-  ctx.fillStyle = '#4A2C2A';
-  ctx.font = UI.fontStr(24, 900);
-  ctx.fillText(String(gameState.displayScore), ix + iw * 0.5, y + 44);
-  UI.drawUiIcon(ctx, sprites, 'icon_trophy', ix + 16, y + 70, 14);
-  UI.drawFitText(ctx, String(app.getBestScore()), ix + 26, y + 70, iw * 0.45, 11.5, 9, 800, '#724640');
-  UI.drawUiIcon(ctx, sprites, 'icon_stardust', ix + iw - 46, y + 70, 15);
-  UI.drawFitText(ctx, String(gameState.stardust), ix + iw - 10, y + 70, 32, 11.5, 9, 800, '#7e4b10', 'right');
+  // Portrait Layout (375x667 & 390x844)
+  const compact = availH < 640;
+  const padX = 12;
+  const innerW = width - padX * 2;
 
-  const sy = y + 92;
-  const sh = h - 102;
-  UI.drawParchmentSheet(ctx, ix, sy, iw, sh, 10);
+  const plaqueH = compact ? 46 : 56;
+  drawTitlePlaqueBanner(
+    c,
+    padX,
+    bodyTop,
+    innerW,
+    plaqueH,
+    sprites,
+    `${rankTitle} · 总星 ${totalStars}/90`,
+    totalStars
+  );
 
-  const isFever = gameState.feverTimer > 0;
-  const multVal = app.getFeverMultiplier();
-  const multStr = Number.isInteger(multVal) ? `${multVal}×` : `${multVal.toFixed(1)}×`;
-  UI.drawUiIcon(ctx, sprites, 'icon_flame', ix + 16, sy + 16, 14);
-  UI.drawFitText(ctx, isFever ? `狂热 ${multStr}` : '星光能量', ix + 26, sy + 16, iw - 86, 11.5, 9, 800, '#4A2C2A');
-  ctx.textAlign = 'right';
-  ctx.fillStyle = '#4A2C2A';
-  ctx.font = UI.fontStr(11, 800);
-  ctx.fillText(isFever ? `${gameState.feverTimer.toFixed(1)}s` : `${Math.round(gameState.feverEnergy)}%`, ix + iw - 10, sy + 16);
+  const chapY = bodyTop + plaqueH + 4;
+  const chapH = compact ? 34 : 36;
+  renderChapterBar(c, { x: padX, y: chapY, w: innerW, h: chapH }, app, hits);
 
-  UI.roundRectPath(ctx, ix + 10, sy + 26, iw - 20, 12, 6);
-  ctx.fillStyle = '#dfd0b2';
-  ctx.fill();
-  ctx.lineWidth = 1.6;
-  ctx.strokeStyle = '#4A2C2A';
-  ctx.stroke();
-  const frac = isFever ? Math.min(1, gameState.feverTimer / Math.max(1, gameState.feverMaxDuration)) : Math.min(1, gameState.feverEnergy / 100);
-  if (frac > 0.01) {
-    UI.roundRectPath(ctx, ix + 11, sy + 27, Math.max(6, (iw - 22) * frac), 10, 5);
-    ctx.fillStyle = isFever ? '#ff99c8' : '#ffd659';
-    ctx.fill();
-  }
+  const dockH = compact ? 40 : 44;
+  const dockY = bottomLimit - dockH;
+  renderLobbyBottomDock(c, { x: padX, y: dockY, w: innerW, h: dockH }, app, hits);
 
-  const rReady = !!(gameState.curMeta.wildcard || gameState.nextMeta.wildcard);
-  UI.drawUiIcon(ctx, sprites, 'icon_rainbow', ix + 17, sy + 50, 15);
+  const ctaH = compact ? 42 : 46;
+  const ctaY = dockY - 6 - ctaH;
+  UI.drawPillButton(c, padX, ctaY, innerW, ctaH, {
+    style: 'cta',
+    icon: 'serve_bell',
+    sprites,
+    iconSize: 20,
+    text: `开始营业 · 第 ${ctaLevelId} 关（1星 ${ctaStar1}）`,
+    fontSize: compact ? 12.6 : 13.4,
+    radius: 12
+  });
+  hits.add('lobby_start_cta', padX, ctaY, innerW, ctaH, () => app.startLevel(ctaLevelId));
+
+  const patronH = compact ? 52 : 60;
+  const patronY = ctaY - 6 - patronH;
+  renderPatronBar(c, { x: padX, y: patronY, w: innerW, h: patronH }, app, hits, nowSec);
+
+  const mapY = chapY + chapH + 5;
+  const mapH = Math.max(200, patronY - 6 - mapY);
+  renderCampaignMap(c, { x: padX, y: mapY, w: innerW, h: mapH }, app, hits, nowSec, true);
+}
+
+function renderPlayTopBar(ctx, geom, app, hits, nowSec) {
+  const c = getSafeCtx(ctx);
+  const { width, topY, headerH, maxRight } = geom;
+  const isWide = width >= 820;
+  const sprites = app.sprites || {};
+  const orderState = app.orderState || {};
+  const lvl = getLevelById(app.currentLevelId || orderState.levelId || '1-1') || getLevelById('1-1');
+  const stars = lvl && Array.isArray(lvl.stars) ? lvl.stars : [750, 1050, 1400];
+  const score = Math.max(0, Math.floor(Number(orderState.score) || 0));
+  const timeLeft = Math.max(0, Number(orderState.timeLeft) || 0);
+
+  const padX = isWide ? 18 : 8;
+  const btnS = Math.min(30, headerH);
+  const btnY = topY + Math.floor((headerH - btnS) * 0.5);
+
+  UI.drawPillButton(c, padX, btnY, btnS, btnS, {
+    style: 'wood',
+    icon: 'icon_pause',
+    sprites,
+    iconSize: 16,
+    radius: 8,
+    fallbackText: '停'
+  });
+  hits.add('pause_btn', padX, btnY, btnS, btnS, () => app.togglePause());
+
+  const pillH = Math.min(28, headerH);
+  const pillY = topY + Math.floor((headerH - pillH) * 0.5);
+
+  const lvlX = padX + btnS + 4;
+  const lvlW = isWide ? 132 : 38;
+  UI.drawKissaCard(c, lvlX, pillY, lvlW, pillH, { tone: 'cream', radius: 8 });
   UI.drawFitText(
-    ctx,
-    rReady ? '彩虹就绪' : `${gameState.dropsUntilRainbow}步出彩虹`,
-    ix + 28,
-    sy + 50,
-    iw - 38,
-    11,
-    9,
-    800,
-    rReady ? '#b42b62' : '#4A2C2A'
-  );
-
-  const py = sy + 64;
-  ctx.fillStyle = '#ecd5a8';
-  ctx.beginPath();
-  ctx.arc(ix + 32, py + 26, 22, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = '#4A2C2A';
-  ctx.stroke();
-  const speechPatron = gameState.speechPatron || activePatron;
-  if (sprites.patrons[speechPatron.id]) {
-    UI.drawContainImage(ctx, sprites.patrons[speechPatron.id], ix + 32, py + 26, 38, 38);
-  }
-  UI.drawKissaCard(ctx, ix + 60, py, iw - 70, 58, { radius: 9 });
-  UI.drawFitText(ctx, speechPatron.shortName, ix + 67, py + 12, iw - 84, 11, 9, 800, '#8f4e1b');
-  UI.drawWrappedText(
-    ctx,
-    gameState.speechText || speechPatron.greet,
-    ix + 67,
-    py + 22,
-    iw - 84,
-    13.5,
-    UI.fontStr(10.2, 600),
+    c,
+    isWide && lvl ? `${lvl.id} · ${lvl.name}` : lvl ? lvl.id : '1-1',
+    lvlX + lvlW * 0.5,
+    pillY + pillH * 0.5 + 0.5,
+    lvlW - 8,
+    10.8,
+    8.5,
+    900,
     '#4A2C2A',
-    'left',
-    2
+    'center',
+    'middle'
   );
 
-  const oy = py + 68;
-  const oh = sy + sh - 10 - oy;
-  UI.drawKissaCard(ctx, ix + 8, oy, iw - 16, oh, { tone: 'soft', radius: 9 });
-  guideTargets.orderBar = { x: ix + 8, y: oy, w: iw - 16, h: oh };
-  if (gameState.mode === 'rush') {
-    const streak = gameState.rushServeStreak || 0;
-    const activeStreak = streak >= 2 && (gameState.rushStreakTimer || 0) > 0;
-    UI.drawUiIcon(ctx, sprites, activeStreak ? 'icon_bolt' : 'mode_rush', ix + 24, oy + 16, 15);
-    const rushHdr = activeStreak
-      ? `连出 ×${streak} · ${gameState.rushStreakTimer.toFixed(1)}s`
-      : '90秒狂欢';
-    UI.drawFitText(
-      ctx,
-      rushHdr,
-      ix + 35,
-      oy + 16,
-      iw - 52,
-      11.5,
-      9.5,
-      900,
-      activeStreak ? '#b43d08' : '#4A2C2A'
-    );
-    ctx.fillStyle = gameState.rushTimer <= 15 ? '#d93025' : '#a63d0c';
-    ctx.font = UI.fontStr(24, 900);
-    ctx.textAlign = 'center';
-    ctx.fillText(`${Math.max(0, gameState.rushTimer).toFixed(1)}s`, ix + iw * 0.5, oy + 46);
-    const rushOrders = gameState.orders || [];
-    let rx = ix + 18;
-    let anyRushReady = false;
-    for (let oi = 0; oi < rushOrders.length; oi++) {
-      const ord = rushOrders[oi];
-      if (!ord || ord.completed) continue;
-      for (let si = 0; si < ord.slots.length; si++) {
-        const sl = ord.slots[si];
-        if (sl.done) continue;
-        const ready = hasTierReadyInJar(gameState, sl.tier);
-        if (ready) anyRushReady = true;
-        const near = !ready && isTierOneMergeAway(gameState, sl.tier);
-        if (rx + 34 <= ix + iw - (anyRushReady ? 80 : 18)) {
-          UI.roundRectPath(ctx, rx, oy + 66, 32, 32, 8);
-          ctx.fillStyle = ready ? '#ffe88c' : near ? '#ebfaef' : '#fff9eb';
-          ctx.fill();
-          ctx.lineWidth = ready || near ? 2 : 1.3;
-          ctx.strokeStyle = ready ? '#d47c12' : near ? '#3ca365' : '#bfa06f';
-          ctx.stroke();
-          if (sprites.base[sl.tier]) {
-            UI.drawContainImage(ctx, sprites.base[sl.tier], rx + 16, oy + 82, 24, 24);
-          }
-          rx += 36;
-        }
-      }
+  const timerX = lvlX + lvlW + 4;
+  const timerW = isWide ? 82 : 58;
+  const isUrgentClock = timeLeft <= 15 && timeLeft > 0;
+  const pulse = isUrgentClock ? 0.5 + 0.5 * Math.sin(nowSec * 9.0) : 0;
+  UI.drawKissaCard(c, timerX, pillY, timerW, pillH, {
+    tone: isUrgentClock ? 'selected' : 'cream',
+    borderColor: isUrgentClock ? '#D94336' : '#B98E58',
+    radius: 8
+  });
+  UI.drawUiIcon(
+    c,
+    sprites,
+    'icon_hourglass',
+    timerX + 11,
+    pillY + pillH * 0.5,
+    13 + pulse * 1.5
+  );
+  UI.drawFitText(
+    c,
+    formatClockMMSS(timeLeft),
+    timerX + 19,
+    pillY + pillH * 0.5 + 0.5,
+    timerW - 22,
+    11.0,
+    8.5,
+    900,
+    isUrgentClock ? '#C2271D' : '#4A2C2A',
+    'left',
+    'middle'
+  );
+
+  // Dynamic Score & 1-3 Star Progress Bar (strictly ending <= maxRight)
+  const progX = timerX + timerW + 4;
+  const progW = Math.max(68, maxRight - progX);
+  UI.drawKissaCard(c, progX, pillY, progW, pillH, { tone: 'amber', radius: 8 });
+
+  const nextTarget =
+    score < stars[0] ? stars[0] : score < stars[1] ? stars[1] : stars[2];
+  UI.drawFitText(
+    c,
+    `${score} / ${nextTarget}`,
+    progX + progW * 0.5,
+    pillY + 8.5,
+    progW - 12,
+    10.2,
+    8.0,
+    900,
+    '#4A2C2A',
+    'center',
+    'middle'
+  );
+
+  const barX = progX + 8;
+  const barW = Math.max(36, progW - 16);
+  const barY = pillY + pillH - 9;
+  const barH = 5.5;
+  const star3 = Math.max(1, stars[2]);
+  const fillRatio = clamp(score / star3, 0, 1);
+
+  c.save();
+  try {
+    c.fillStyle = 'rgba(74, 44, 42, 0.22)';
+    UI.roundRectPath(c, barX, barY, barW, barH, 3);
+    c.fill();
+
+    if (fillRatio > 0) {
+      const fg = c.createLinearGradient(barX, barY, barX + barW, barY);
+      fg.addColorStop(0, '#F5B82E');
+      fg.addColorStop(1, '#FFDF73');
+      c.fillStyle = fg;
+      UI.roundRectPath(c, barX, barY, Math.max(4, barW * fillRatio), barH, 3);
+      c.fill();
     }
-    if (anyRushReady) {
-      const srvW = 64;
-      const srvX = ix + iw - srvW - 14;
-      UI.drawPillButton(ctx, srvX, oy + 68, srvW, 28, {
-        style: 'cta',
-        icon: 'serve_bell',
-        sprites,
-        iconSize: 14,
-        text: '上菜',
-        fontSize: 10.8,
-        fontWeight: 900,
-        radius: 10
-      });
-      hits.add('rush_serve_btn', srvX, oy + 66, srvW, 32, () => app.serveReadyOrder());
-    }
-    UI.drawUiIcon(ctx, sprites, 'icon_gift', ix + 24, oy + 118, 16);
-    UI.drawFitText(ctx, `秘方里程碑 ${gameState.rushNextMilestone} 分`, ix + 36, oy + 118, iw - 52, 10.5, 9, 800, '#724640');
-  } else {
-    UI.drawUiIcon(ctx, sprites, 'mode_zen', ix + 25, oy + 20, 18);
-    UI.drawFitText(ctx, '悠闲经典', ix + 39, oy + 20, iw - 56, 12.5, 10, 900, '#4A2C2A');
-    UI.drawUiIcon(ctx, sprites, 'icon_gift', ix + 25, oy + 48, 16);
-    UI.drawFitText(ctx, `秘方里程碑 ${gameState.zenNextMilestone} 分`, ix + 39, oy + 48, iw - 56, 11, 9, 800, '#724640');
+  } finally {
+    c.restore();
+  }
+
+  for (let i = 0; i < 3; i++) {
+    const ratio = clamp(stars[i] / star3, 0.12, 1.0);
+    const sx = barX + barW * ratio;
+    const unlocked = score >= stars[i];
+    const popTimer = app.starPopTimers && app.starPopTimers[i] > 0 ? app.starPopTimers[i] : 0;
+    const scaleBoost = popTimer > 0 ? 1 + 0.45 * Math.sin((popTimer / 0.3) * Math.PI) : 1;
+    UI.drawStarIcon(c, sx, barY + barH * 0.5, 4.6 * scaleBoost, unlocked);
   }
 }
 
-function renderWideRightBoard(ctx, x, y, w, h, app, hits, nowSec, guideTargets) {
-  const { gameState, sprites } = app;
-  UI.drawWoodBoard(ctx, x, y, w, h, 16);
-  const ix = x + 10;
-  const iy = y + 10;
-  const iw = w - 20;
-  const ih = h - 20;
-  UI.drawParchmentSheet(ctx, ix, iy, iw, ih, 10);
+function drawUtensilButton(ctx, x, y, w, h, kind, app, hits, shortcutHint = '') {
+  const c = getSafeCtx(ctx);
+  const sprites = app.sprites || {};
+  const saveData = app.saveData || {};
+  const def = TOOLS[kind];
+  const count = Math.max(0, Math.floor((app.toolCounts && app.toolCounts[kind]) || 0));
+  const bought = Math.max(0, Math.floor((app.toolBoughtThisLevel && app.toolBoughtThisLevel[kind]) || 0));
+  const armed = app.activeTool === kind;
+  const canEmergencyBuy = count === 0 && bought < def.maxBuyPerLevel;
 
-  const boxW = (iw - 28) / 2;
-  ctx.fillStyle = '#724640';
-  ctx.font = UI.fontStr(10.5, 800);
-  ctx.textAlign = 'center';
-  ctx.fillText('下一颗', ix + 10 + boxW * 0.5, iy + 18);
-  ctx.fillText('暂存', ix + iw - 10 - boxW * 0.5, iy + 18);
+  UI.drawPillButton(c, x, y, w, h, {
+    style: armed ? 'active' : count > 0 ? 'wood' : canEmergencyBuy ? 'walnut' : 'card',
+    disabled: count === 0 && !canEmergencyBuy,
+    radius: 11,
+    text: ''
+  });
 
-  const boxS = Math.min(78, boxW - 12);
-  drawMiniPreviewBox(ctx, ix + 16, iy + 28, boxS, gameState.nextTier, gameState.nextMeta, sprites, nowSec, false);
-  drawMiniPreviewBox(ctx, ix + iw - boxS - 16, iy + 28, boxS, gameState.holdTier, gameState.holdMeta, sprites, nowSec, true);
-  guideTargets.hold = { x: ix + iw - boxS - 20, y: iy + 10, w: boxS + 8, h: boxS + 22 };
-  hits.add('wide_hold_swap', ix + iw - boxS - 16, iy + 28, boxS, boxS, () => app.swapHoldPocket());
+  const iconKey = kind === 'fork' ? 'tool_fork' : 'tool_spoon';
+  UI.drawUiIcon(c, sprites, iconKey, x + w * 0.5, y + h * 0.37, Math.min(22, h * 0.44));
 
-  let nextSectionY = iy + 28 + boxS + 14;
+  let badgeLabel = `×${count}`;
+  if (count === 0) {
+    badgeLabel = canEmergencyBuy ? `${def.cost}星` : '已尽';
+  } else if (shortcutHint) {
+    badgeLabel = `[${shortcutHint}]×${count}`;
+  }
+  UI.drawFitText(
+    c,
+    armed ? '取消' : badgeLabel,
+    x + w * 0.5,
+    y + h * 0.78,
+    w - 6,
+    9.5,
+    7.5,
+    800,
+    armed ? '#4A2C2A' : count > 0 ? '#4A2C2A' : canEmergencyBuy ? '#FFF6E0' : '#8C7560',
+    'center',
+    'middle'
+  );
 
-  // Unified Relics Strip across ALL modes (Chef / Rush / Zen!)
-  {
-    const relBoxH = 68;
-    const activeSyns = app.getActiveSynergies ? app.getActiveSynergies() : [];
-    const synShort =
-      activeSyns.length > 0
-        ? ` · ${activeSyns.map((s) => `${s.def.tag}${s.tier}`).join(' ')}`
-        : '';
-    UI.drawKissaCard(ctx, ix + 10, nextSectionY, iw - 20, relBoxH, {
-      tone: activeSyns.length > 0 ? 'selected' : 'soft',
-      radius: 9
+  if (count === 0 && canEmergencyBuy && (saveData.bankStardust || 0) >= def.cost) {
+    UI.drawStarIcon(c, x + w - 8, y + 8, 4.2, true);
+  }
+
+  const hitId = kind === 'fork' ? 'tool_fork_btn' : 'tool_spoon_btn';
+  hits.add(hitId, x, y, w, h, () => app.onTapToolButton(kind));
+}
+
+function drawPatronSkillMedallion(ctx, x, y, w, h, app, hits, nowSec, wideStyle = false) {
+  const c = getSafeCtx(ctx);
+  const sprites = app.sprites || {};
+  const saveData = app.saveData || {};
+  const patronId = normalizePatronId(saveData.selectedPatron);
+  const patron = PATRONS.find((p) => p.id === patronId) || PATRONS[0];
+  const charge = clamp(Number(app.skillEnergy) || 0, 0, 100);
+  const ready = charge >= 100;
+  const pulse = ready ? 0.5 + 0.5 * Math.sin(nowSec * 6.5) : 0;
+
+  if (wideStyle) {
+    UI.drawPillButton(c, x, y, w, h, {
+      style: ready ? 'cta' : 'walnut',
+      radius: 13,
+      text: ''
     });
+    const r = Math.min(20, h * 0.38);
+    const cx = x + 28;
+    const cy = y + h * 0.5;
+    c.save();
+    try {
+      c.strokeStyle = 'rgba(255, 248, 220, 0.32)';
+      c.lineWidth = 3.2;
+      c.beginPath();
+      c.arc(cx, cy, r, 0, Math.PI * 2);
+      c.stroke();
+
+      c.strokeStyle = ready ? '#FFF394' : '#F4BA40';
+      c.lineWidth = 3.4;
+      c.beginPath();
+      c.arc(cx, cy, r, -Math.PI * 0.5, -Math.PI * 0.5 + (charge / 100) * Math.PI * 2);
+      c.stroke();
+    } finally {
+      c.restore();
+    }
+    UI.drawUiIcon(c, sprites, patron.id, cx, cy, r * 1.65);
+
+    const tx = cx + r + 10;
+    const tw = Math.max(60, x + w - 10 - tx);
     UI.drawFitText(
-      ctx,
-      `秘方 ${(gameState.relics || []).length}/${MAX_RELIC_SLOTS}${synShort}`,
-      ix + 17,
-      nextSectionY + 13,
-      iw - 76,
-      10.2,
-      8.2,
+      c,
+      `[F] ${patron.skillName}`,
+      tx,
+      y + h * 0.36,
+      tw,
+      12.0,
+      9.5,
       900,
-      '#4A2C2A'
+      ready ? '#4A2C2A' : '#FFF6E2',
+      'left',
+      'middle'
     );
-    UI.drawFitText(ctx, '详情 ›', ix + iw - 17, nextSectionY + 13, 42, 9.5, 8, 800, '#8f4716', 'right');
-    drawMiniRelicStrip(
-      ctx,
-      ix + 16,
-      nextSectionY + 24,
-      iw - 32,
-      36,
-      gameState.relics,
-      hits,
-      'wide_relics_bar',
-      () => app.openRelicsModal(),
-      true,
+    UI.drawFitText(
+      c,
+      ready ? '充能已满 · 点击释放' : `招牌技充能 ${Math.floor(charge)}%`,
+      tx,
+      y + h * 0.69,
+      tw,
+      10.0,
+      8.2,
+      800,
+      ready ? '#6E3B10' : '#EED4AE',
+      'left',
+      'middle'
+    );
+    hits.add('patron_skill_btn', x, y, w, h, () => app.onTapPatronSkill());
+    return;
+  }
+
+  UI.drawKissaCard(c, x, y, w, h, {
+    tone: ready ? 'selected' : 'cream',
+    borderColor: ready ? '#E59A18' : '#B98E58',
+    radius: 12
+  });
+
+  const cx = x + w * 0.5;
+  const cy = y + h * 0.42;
+  const rad = Math.min(w, h) * 0.31 + pulse * 1.2;
+
+  c.save();
+  try {
+    c.strokeStyle = 'rgba(120, 82, 42, 0.22)';
+    c.lineWidth = 3.0;
+    c.beginPath();
+    c.arc(cx, cy, rad, 0, Math.PI * 2);
+    c.stroke();
+
+    if (charge > 0) {
+      c.strokeStyle = ready ? '#F5A31A' : '#58A55C';
+      c.lineWidth = 3.2;
+      c.beginPath();
+      c.arc(cx, cy, rad, -Math.PI * 0.5, -Math.PI * 0.5 + (charge / 100) * Math.PI * 2);
+      c.stroke();
+    }
+  } finally {
+    c.restore();
+  }
+
+  UI.drawUiIcon(c, sprites, patron.id, cx, cy, rad * 1.65);
+  UI.drawFitText(
+    c,
+    ready ? '释放' : `${Math.floor(charge)}%`,
+    cx,
+    y + h * 0.83,
+    w - 6,
+    9.2,
+    7.5,
+    900,
+    ready ? '#B85A08' : '#5A3A28',
+    'center',
+    'middle'
+  );
+
+  hits.add('patron_skill_btn', x, y, w, h, () => app.onTapPatronSkill());
+}
+
+function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
+  const c = getSafeCtx(ctx);
+  const geom = computeTopHeaderGeometry(metrics);
+  const { width, headerBottom, bottomLimit } = geom;
+  const sprites = app.sprites || {};
+  const saveData = app.saveData || {};
+  const gridState = app.gridState;
+  const orderState = app.orderState || {};
+  const animState = app.animState || {};
+  const guideTargets = {};
+  app.guideTargets = guideTargets;
+
+  renderPlayTopBar(c, geom, app, hits, nowSec);
+
+  const isWide = width >= 820;
+
+  if (isWide) {
+    const totalW = Math.min(1120, width - 36);
+    const startX = Math.round((width - totalW) * 0.5);
+    const colTop = headerBottom + 10;
+    const colH = Math.max(420, bottomLimit - colTop);
+
+    const leftW = 264;
+    const rightW = 244;
+    const gapCol = 18;
+    const centerX = startX + leftW + gapCol;
+    const centerW = Math.max(320, totalW - leftW - rightW - gapCol * 2);
+    const rightX = centerX + centerW + gapCol;
+
+    // Left Column: Level Target Summary + Vertical 3-Seat Customers
+    const lvl = getLevelById(app.currentLevelId || orderState.levelId || '1-1') || getLevelById('1-1');
+    const summaryH = 82;
+    UI.drawKissaCard(c, startX, colTop, leftW, summaryH, { tone: 'cream', radius: 12 });
+    const stars = lvl && lvl.stars ? lvl.stars : [750, 1050, 1400];
+    UI.drawFitText(
+      c,
+      `1星 ${stars[0]} · 2星 ${stars[1]} · 3星 ${stars[2]}`,
+      startX + leftW * 0.5,
+      colTop + 24,
+      leftW - 18,
+      11.0,
+      8.8,
+      900,
+      '#4A2C2A',
+      'center',
+      'middle'
+    );
+    UI.drawFitText(
+      c,
+      `已上菜 ${orderState.ordersServed || 0} 单 · VIP ${orderState.vipServed || 0}/${orderState.vipQuotaTarget || 0}`,
+      startX + leftW * 0.5,
+      colTop + 48,
+      leftW - 18,
+      10.2,
+      8.5,
+      700,
+      '#7A5438',
+      'center',
+      'middle'
+    );
+    if (lvl && lvl.desc) {
+      UI.drawFitText(
+        c,
+        lvl.desc,
+        startX + leftW * 0.5,
+        colTop + 67,
+        leftW - 18,
+        9.4,
+        7.8,
+        700,
+        '#8C6853',
+        'center',
+        'middle'
+      );
+    }
+
+    const custRect = {
+      x: startX,
+      y: colTop + summaryH + 8,
+      w: leftW,
+      h: Math.max(200, colH - summaryH - 8)
+    };
+    BoardRenderer.renderCustomersBar(c, custRect, orderState, sprites, hits, nowSec, {
+      vertical: true,
+      animState,
+      guideTargets,
+      onSelectSeat: (idx) => app.selectCustomerSeat(idx)
+    });
+
+    // Center Column: Tray Strip + Shaped Board Stage + Bottom Utensils & Knead Dock
+    const trayRect = { x: centerX, y: colTop, w: centerW, h: 62 };
+    BoardRenderer.renderTrayStrip(c, trayRect, orderState, sprites, hits, nowSec, {
+      theme: app.equippedTheme,
+      animState,
+      guideTargets,
+      boardFullHint: app.boardFullHintTimer > 0,
+      onTapTraySlot: (idx) => app.handleTraySlotTap(idx),
+      onTapTrash: () => app.handleTrashBtnTap()
+    });
+
+    const dockH = 56;
+    const dockY = bottomLimit - dockH;
+    const toolW = 86;
+    const kneadX = centerX + toolW + 10;
+    const kneadW = Math.max(130, centerW - (toolW + 10) * 2);
+    const spoonX = kneadX + kneadW + 10;
+
+    drawUtensilButton(c, centerX, dockY + 2, toolW, dockH - 4, 'fork', app, hits, '1');
+
+    const kneadPressScale = app.kneadPressTimer > 0 ? 0.95 : 1.0;
+    const kPadY = kneadPressScale < 1 ? 3 : 0;
+    UI.drawPillButton(c, kneadX, dockY + kPadY, kneadW, dockH - kPadY * 2, {
+      style: 'cta',
+      icon: 'btn_knead',
+      sprites,
+      iconSize: 22,
+      text: '[Space] 揉面补料',
+      fontSize: 13.5,
+      radius: 13
+    });
+    hits.add('knead_btn', kneadX, dockY, kneadW, dockH, () => app.onTapKneadButton());
+    guideTargets.kneadBtn = { x: kneadX, y: dockY, w: kneadW, h: dockH };
+
+    drawUtensilButton(c, spoonX, dockY + 2, toolW, dockH - 4, 'spoon', app, hits, '2');
+
+    const stageY = colTop + 68;
+    const stageH = Math.max(220, dockY - 8 - stageY);
+    const stageRect = { x: centerX, y: stageY, w: centerW, h: stageH };
+    const layout = BoardRenderer.renderBoardStage(
+      c,
+      stageRect,
+      gridState,
+      orderState,
+      app.equippedTheme,
+      sprites,
+      animState,
+      nowSec,
+      {
+        activeTool: app.activeTool,
+        guideTargets,
+        neededTiers: app.neededTiers
+      }
+    );
+    if (orderState.rushHourActive && !app.activeTool) {
+      UI.drawTagBadge(c, centerX + centerW - 82, stageY + 4, 78, 19, '高峰客流', 'berry', 9.2, 'icon_flame', sprites);
+    }
+
+    // Right Column: Active Patron Stage + Patron Skill CTA + Fever/Shortcuts Card
+    const patronId = normalizePatronId(saveData.selectedPatron);
+    const patron = PATRONS.find((p) => p.id === patronId) || PATRONS[0];
+    const stageCardH = 214;
+    UI.drawKissaCard(c, rightX, colTop, rightW, stageCardH, { tone: 'cream', radius: 13 });
+    if (sprites.patronStage) {
+      UI.drawContainImage(c, sprites.patronStage, rightX + rightW * 0.5, colTop + 92, rightW - 20, 126);
+    }
+    UI.drawUiIcon(c, sprites, patron.id, rightX + 48, colTop + 68, 68);
+    drawSpeechBalloon(c, rightX + 86, colTop + 18, rightW - 96, 76, rightX + 76, colTop + 58);
+    UI.drawWrappedText(
+      c,
+      app.playPatronSpeech || patron.idleLines[0],
+      rightX + 94,
+      colTop + 30,
+      rightW - 112,
+      14,
+      UI.fontStr(9.6, 700),
+      '#4A2C2A',
+      'left',
+      4
+    );
+    UI.drawFitText(
+      c,
+      `${patron.name} · ${patron.shortPassive}`,
+      rightX + rightW * 0.5,
+      colTop + stageCardH - 22,
+      rightW - 20,
+      11.0,
+      9.0,
+      900,
+      '#6E463B',
+      'center',
+      'middle'
+    );
+
+    const skillY = colTop + stageCardH + 10;
+    const skillH = 58;
+    drawPatronSkillMedallion(c, rightX, skillY, rightW, skillH, app, hits, nowSec, true);
+
+    const infoY = skillY + skillH + 10;
+    const infoH = Math.max(110, bottomLimit - infoY);
+    UI.drawKissaCard(c, rightX, infoY, rightW, infoH, { tone: 'soft', radius: 12 });
+    UI.drawThemeSwatch(c, rightX + 12, infoY + 12, rightW - 24, 32, (app.equippedTheme && app.equippedTheme.id) || 'amber');
+    UI.drawFitText(
+      c,
+      (app.equippedTheme && app.equippedTheme.name) || '经典星夜琥珀盘',
+      rightX + rightW * 0.5,
+      infoY + 56,
+      rightW - 24,
+      10.5,
+      8.8,
+      800,
+      '#4A2C2A',
+      'center',
+      'middle'
+    );
+    UI.drawWrappedText(
+      c,
+      '快捷键：WASD/方向键 滑动烤盘 · Space 揉面补料 · 1/2 激活厨具 · F 释放招牌技 · Esc 暂停',
+      rightX + 12,
+      infoY + 74,
+      rightW - 24,
+      15,
+      UI.fontStr(9.4, 700),
+      '#6E463B',
+      'left',
+      5
+    );
+
+    app.currentBoardLayout = layout;
+    return layout;
+  }
+
+  // Portrait 4-Band Layout (375x667 & 390x844)
+  const availH = bottomLimit - headerBottom;
+  const compact = availH < 640;
+  const padX = 8;
+  const innerW = width - padX * 2;
+
+  const custY = headerBottom + (compact ? 4 : 6);
+  const custH = compact ? 100 : 112;
+  BoardRenderer.renderCustomersBar(
+    c,
+    { x: padX, y: custY, w: innerW, h: custH },
+    orderState,
+    sprites,
+    hits,
+    nowSec,
+    {
+      vertical: false,
+      animState,
+      guideTargets,
+      onSelectSeat: (idx) => app.selectCustomerSeat(idx)
+    }
+  );
+
+  const trayY = custY + custH + (compact ? 4 : 5);
+  const trayH = compact ? 54 : 60;
+  BoardRenderer.renderTrayStrip(
+    c,
+    { x: padX, y: trayY, w: innerW, h: trayH },
+    orderState,
+    sprites,
+    hits,
+    nowSec,
+    {
+      theme: app.equippedTheme,
+      animState,
+      guideTargets,
+      boardFullHint: app.boardFullHintTimer > 0,
+      onTapTraySlot: (idx) => app.handleTraySlotTap(idx),
+      onTapTrash: () => app.handleTrashBtnTap()
+    }
+  );
+
+  const dockH = compact ? 56 : 62;
+  const dockY = bottomLimit - dockH;
+  guideTargets.dock = { x: padX, y: dockY, w: innerW, h: dockH };
+
+  // 4 strictly disjoint bottom controls: fork | knead | spoon | patron_skill
+  const forkX = padX + 2;
+  const forkW = 54;
+  const skillW = 60;
+  const skillX = width - padX - skillW;
+  const spoonW = 54;
+  const spoonX = skillX - 6 - spoonW;
+  const kneadX = forkX + forkW + 6;
+  const kneadW = Math.max(108, spoonX - 6 - kneadX);
+
+  drawUtensilButton(c, forkX, dockY + 4, forkW, dockH - 8, 'fork', app, hits, '');
+
+  const kPadY = app.kneadPressTimer > 0 ? 4 : 2;
+  UI.drawPillButton(c, kneadX, dockY + kPadY, kneadW, dockH - kPadY * 2, {
+    style: 'cta',
+    icon: 'btn_knead',
+    sprites,
+    iconSize: compact ? 20 : 22,
+    text: '揉面补料',
+    fontSize: compact ? 12.8 : 13.5,
+    radius: 13
+  });
+  hits.add('knead_btn', kneadX, dockY + 2, kneadW, dockH - 4, () => app.onTapKneadButton());
+  guideTargets.kneadBtn = { x: kneadX, y: dockY + 2, w: kneadW, h: dockH - 4 };
+
+  drawUtensilButton(c, spoonX, dockY + 4, spoonW, dockH - 8, 'spoon', app, hits, '');
+  drawPatronSkillMedallion(c, skillX, dockY + 2, skillW, dockH - 4, app, hits, nowSec, false);
+
+  const stageY = trayY + trayH + 4;
+  const stageH = Math.max(210, dockY - 4 - stageY);
+  const layout = BoardRenderer.renderBoardStage(
+    c,
+    { x: padX, y: stageY, w: innerW, h: stageH },
+    gridState,
+    orderState,
+    app.equippedTheme,
+    sprites,
+    animState,
+    nowSec,
+    {
+      activeTool: app.activeTool,
+      guideTargets,
+      neededTiers: app.neededTiers
+    }
+  );
+
+  if (orderState.rushHourActive && !app.activeTool) {
+    UI.drawTagBadge(
+      c,
+      width - padX - 78,
+      stageY + 2,
+      74,
+      18,
+      '高峰客流',
+      'berry',
+      8.8,
+      'icon_flame',
       sprites
     );
-    nextSectionY += relBoxH + 8;
   }
 
-  if (gameState.mode === 'chef') {
-    const hazBarH = 30;
-    const hazIds = Array.isArray(gameState.shiftHazards) ? gameState.shiftHazards : [];
-    const hazTags = hazIds.map((id) => (SHIFT_HAZARDS[id] ? SHIFT_HAZARDS[id].badge : id));
-    const frozenCnt = (gameState.entities || []).filter((e) => e && !e.merged && e.frozenHp > 0).length;
-    if (frozenCnt > 0) hazTags.push(`冰封×${frozenCnt}`);
-    if (gameState.shiftModifier === 'grand_prix') hazTags.push('评委急单');
-    const hasAffix = hazTags.length > 0;
-    UI.drawKissaCard(ctx, ix + 10, nextSectionY, iw - 20, hazBarH, {
-      tone: hasAffix ? 'amber' : 'soft',
-      radius: 8
-    });
-    const firstHazIcon = hazIds[0] && SHIFT_HAZARDS[hazIds[0]] ? SHIFT_HAZARDS[hazIds[0]].icon : frozenCnt > 0 ? 'icon_frost' : 'icon_judge';
-    if (hasAffix) {
-      UI.drawUiIcon(ctx, sprites, firstHazIcon, ix + 24, nextSectionY + hazBarH * 0.5, 15);
-    }
-    const hazLine = hasAffix ? hazTags.join(' · ') : '无特殊机关';
-    UI.drawFitText(ctx, hazLine, ix + (hasAffix ? 35 : 18), nextSectionY + hazBarH * 0.5 + 0.5, iw - 86, 10, 8.2, 800, hasAffix ? '#6b380a' : '#7b5a3c');
-    UI.drawFitText(ctx, '详情 ›', ix + iw - 16, nextSectionY + hazBarH * 0.5 + 0.5, 38, 9.2, 7.8, 800, '#8f4716', 'right');
-    hits.add('wide_hazards_bar', ix + 10, nextSectionY, iw - 20, hazBarH, () => app.openRelicsModal());
-    nextSectionY += hazBarH + 10;
-  }
-
-  // Evolution Ring 1..9 (minimalist numeric center!)
-  const ry = nextSectionY;
-  UI.drawFitText(ctx, '进化链', ix + iw * 0.5, ry, iw - 20, 11.2, 9.5, 800, '#4A2C2A', 'center');
-
-  const rcx = ix + iw * 0.5;
-  const ringAvailH = iy + ih - (ry + 10);
-  const rcy = ry + 10 + ringAvailH * 0.5;
-  const rx = iw * 0.34;
-  const rRadiusY = Math.min(70, Math.max(48, ringAvailH * 0.37));
-
-  ctx.save();
-  ctx.fillStyle = '#724640';
-  ctx.font = UI.fontStr(13, 900);
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(`${gameState.seenThisRun.size}/9`, rcx, rcy);
-  ctx.restore();
-
-  for (let i = 0; i < TIERS.length; i++) {
-    const t = TIERS[i];
-    const ang = -Math.PI / 2 + (i / TIERS.length) * Math.PI * 2;
-    const nx = rcx + Math.cos(ang) * rx;
-    const ny = rcy + Math.sin(ang) * rRadiusY;
-    const seen = gameState.seenThisRun.has(t.tier);
-    ctx.save();
-    ctx.fillStyle = seen ? '#fff6df' : '#dccab0';
-    ctx.beginPath();
-    ctx.arc(nx, ny, 15, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.lineWidth = 1.6;
-    ctx.strokeStyle = seen ? '#9b6f40' : '#a88f6c';
-    ctx.stroke();
-    if (!seen) ctx.globalAlpha = 0.32;
-    if (sprites.base[t.tier]) {
-      UI.drawContainImage(ctx, sprites.base[t.tier], nx, ny, 22, 22);
-    }
-    ctx.restore();
-    hits.add(`evo_${t.tier}`, nx - 15, ny - 15, 30, 30, () => app.openModal('compendium'));
-  }
+  app.currentBoardLayout = layout;
+  return layout;
 }
 
 function renderToast(ctx, width, headerBottom, app) {
-  if (app.activeModal === 'mode_guide') return;
+  const c = getSafeCtx(ctx);
+  if (!app) return;
   const cur = app.toastCurrent && app.toastCurrent.timer > 0 ? app.toastCurrent : null;
   const minor = app.minorToast && app.minorToast.timer > 0 ? app.minorToast : null;
-  if (!cur && !minor && (!app.toastText || app.toastTimer <= 0)) return;
+  if (!cur && !minor) return;
 
-  const { sprites } = app;
-  const metrics = app.metrics ? app.metrics() : { width, height: 667, safeBottom: 0 };
-  const gs = app.gameState || {};
-  const isInPlay = !app.isLobbyOpen && !app.activeModal;
-  const isWide = width >= 820;
-  const aimDim = isInPlay && gs.aim && gs.aim.active ? 0.30 : 1.0;
+  const sprites = app.sprites || {};
+  const m = typeof app.getMetrics === 'function' ? app.getMetrics() : { width, height: 667, safeBottom: 0 };
+  const botLimit = Math.max(200, (m.height || 667) - Math.max(10, (m.safeBottom || 0) + 8));
 
-  let baseY = headerBottom + 6;
-  if (isInPlay) {
-    // Anchor in-play toasts near top neck zone (clear of bottom merge floor AND overflow warning!)
-    const dangerShift = (gs.dangerDuration || 0) > 0.22 ? 32 : 0;
-    baseY = (isWide ? headerBottom + 10 : headerBottom + (gs.mode === 'chef' ? 118 : 106)) + dangerShift;
-  } else if (app.activeModal) {
-    const botBound = metrics.height - Math.max(12, (metrics.safeBottom || 0) + 10);
-    baseY = botBound - 114;
+  let baseY = headerBottom + 8;
+  if (app.activeModal) {
+    baseY = Math.max(headerBottom + 10, botLimit - 44);
+  } else if (app.screen === 'playing') {
+    baseY = (width >= 820 ? headerBottom + 12 : headerBottom + 114);
   }
 
-  const primary = cur || minor || { text: app.toastText, timer: app.toastTimer, maxTimer: 1.8, level: 'minor' };
+  const primary = cur || minor;
   const isMajor = primary.level === 'major';
-  const queueLen = app.toastQueue ? app.toastQueue.length : 0;
   const elapsed = Math.max(0, (primary.maxTimer || 2.0) - primary.timer);
-  const slideOffset = elapsed < 0.14 ? (1 - elapsed / 0.14) * 6 : 0;
+  const slideOffset = elapsed < 0.14 ? (1 - elapsed / 0.14) * 5 : 0;
 
-  ctx.save();
-  ctx.globalAlpha = Math.min(1, primary.timer * 3.4) * aimDim;
-  const fontSz = isMajor ? 11.4 : 10.6;
-  ctx.font = UI.fontStr(fontSz, 800);
-  const hasIcon = !!(primary.icon && sprites);
-  const iconPad = hasIcon ? 22 : 0;
-  const maxW = Math.min(isMajor ? 360 : 310, width - 26);
-  const extraReserve = isMajor && queueLen > 0 ? 34 : 12;
-  const tw = Math.min(maxW, Math.max(isMajor ? 136 : 108, ctx.measureText(primary.text).width + 26 + iconPad + extraReserve));
-  const th = isMajor ? 28 : 24;
-  const tx = (width - tw) * 0.5;
-  const ty = baseY + slideOffset;
+  c.save();
+  try {
+    c.globalAlpha = clamp(primary.timer * 3.4, 0, 1);
+    const fontSz = isMajor ? 11.2 : 10.4;
+    c.font = UI.fontStr(fontSz, 800);
+    const hasIcon = Boolean(primary.icon);
+    const maxW = Math.min(isMajor ? 356 : 310, width - 24);
+    const tw = clamp(
+      c.measureText(primary.text || '').width + 28 + (hasIcon ? 22 : 0),
+      isMajor ? 132 : 104,
+      maxW
+    );
+    const th = isMajor ? 28 : 24;
+    const tx = Math.round((width - tw) * 0.5);
+    const ty = Math.round(clamp(baseY + slideOffset, headerBottom + 6, botLimit - th - 4));
 
-  UI.drawNoticeBanner(ctx, tx, ty, tw, th, {
-    icon: primary.icon || '',
-    sprites,
-    iconSize: isMajor ? 18 : 16,
-    text: primary.text,
-    fontSize: fontSz,
-    align: hasIcon ? 'left' : 'center',
-    tone: primary.tone || (isMajor ? 'event' : 'info'),
-    rightReserve: extraReserve
-  });
-  if (isMajor && queueLen > 0) {
-    UI.drawTagBadge(ctx, tx + tw - 30, ty + 5.5, 24, 17, `+${queueLen}`, 'amber', 8.8);
-  }
-  ctx.restore();
-
-  // Secondary non-competing minor pill when a major banner is simultaneously active
-  if (cur && cur.level === 'major' && minor && minor.text !== cur.text) {
-    ctx.save();
-    ctx.globalAlpha = Math.min(1, minor.timer * 3.4) * aimDim * 0.94;
-    ctx.font = UI.fontStr(10, 800);
-    const mHasIcon = !!(minor.icon && sprites);
-    const mMaxW = Math.min(290, width - 38);
-    const mw = Math.min(mMaxW, Math.max(96, ctx.measureText(minor.text).width + 24 + (mHasIcon ? 18 : 0)));
-    const mh = 22;
-    const mx = (width - mw) * 0.5;
-    const my = baseY + th + 5;
-    UI.drawNoticeBanner(ctx, mx, my, mw, mh, {
-      icon: minor.icon || '',
+    UI.drawNoticeBanner(c, tx, ty, tw, th, {
+      icon: primary.icon || '',
       sprites,
-      iconSize: 14,
-      text: minor.text,
-      fontSize: 9.8,
-      align: mHasIcon ? 'left' : 'center',
-      tone: minor.tone || 'info',
+      iconSize: isMajor ? 17 : 15,
+      text: primary.text || '',
+      fontSize: fontSz,
+      align: hasIcon ? 'left' : 'center',
+      tone: primary.tone || (isMajor ? 'event' : 'info'),
       rightReserve: 10
     });
-    ctx.restore();
+  } finally {
+    c.restore();
   }
 }
 
@@ -2564,5 +1764,9 @@ module.exports = {
   renderLobbyScreen,
   renderPlayScreen,
   renderToast,
-  computeTopHeaderGeometry
+  computeTopHeaderGeometry,
+  drawRedDot,
+  drawLockIcon,
+  drawChevronIcon,
+  getSafeCtx
 };

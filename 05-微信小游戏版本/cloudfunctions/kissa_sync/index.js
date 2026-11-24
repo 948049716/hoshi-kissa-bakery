@@ -1,11 +1,12 @@
 /**
- * 星夜吃茶 (Hoshi Kissa) 微信云开发聚合云函数 `kissa_sync` (v4.1 安全校验与乐观锁版)
+ * 一起做猫饼 (Hoshi Kissa Bakery v2.0) 微信云开发聚合云函数 `kissa_sync`
  *
+ * 运行环境：Tencent CloudBase Nodejs16.13（仅依赖 `wx-server-sdk`，零外部相对引用）
  * 支持路由 (`event.action`):
- * - `pull`          : 静默获取 OPENID 并拉取玩家云存档（首次访问自动建表与建档）
- * - `push`          : 服务端合理性校验、乐观锁 `revision` 冲突检测、双端星尘增量合并与分模式断点同步
- * - `updateProfile` : 保存用户授权或自定义的店长昵称与头像（防旧端覆盖）
- * - `leaderboard`   : 查询全服主厨闯关榜 / 90秒狂欢榜 / 悠闲榜 Top 50 及当前玩家排名
+ * - `pull`          : 静默获取 OPENID 并拉取玩家 v2 云存档（自动无损迁移老版 v1 云文档并清理废弃字段）
+ * - `push`          : v2 吃茶小铺守恒审计、分章得分上限与纯上菜反作弊校验、双端星尘增量合并及乐观锁 `revision` 同步
+ * - `updateProfile` : 显式更新店长昵称、头像与搭档预设头像并同步至 `metaSave.playerProfile`
+ * - `leaderboard`   : 查询 `stars`（总星数进度榜）与 `score`（星夜累计营业榜，兼容 `totalScore` 别名）Top 50 及个人精确排名
  */
 'use strict';
 
@@ -17,24 +18,130 @@ cloud.init({
 
 const db = cloud.database();
 const _ = db.command;
+
+const SCHEMA_VERSION = 2;
 const PLAYERS_COL = 'players';
 
-const PATRON_COSTS = { mikan: 0, luna: 60, mugi: 100 };
-const THEME_COSTS = { amber: 0, sakura: 80, moonlight: 120 };
-const UPGRADE_COSTS = {
-  up_tools: [40, 90, 160],
-  up_fever: [50, 100, 180],
-  up_combo: [60, 120, 200],
-  up_dust: [45, 95, 170]
-};
+// v2 吃茶小铺永久升级表：3670 + 1150 + 200 + 200 = 5,220 ⭐
+const CATCAKE_UPGRADE_COSTS = Object.freeze({
+  1: Object.freeze([20, 40, 70, 110]),
+  2: Object.freeze([25, 50, 85, 130]),
+  3: Object.freeze([35, 65, 105, 160]),
+  4: Object.freeze([45, 85, 135, 200]),
+  5: Object.freeze([60, 110, 170, 250]),
+  6: Object.freeze([80, 140, 220, 320]),
+  7: Object.freeze([100, 180, 280, 400])
+});
 
-const MAX_CHEF_SCORE = 350000;
-const MAX_RUSH_SCORE = 85000;
-const MAX_ZEN_SCORE = 180000;
-const MAX_PUSH_CHEF_DELTA = 120000;
-const MAX_PUSH_RUSH_DELTA = 65000;
-const MAX_PUSH_ZEN_DELTA = 100000;
+const DEVICE_UPGRADE_COSTS = Object.freeze({
+  dev_tray: Object.freeze([60, 150]),
+  dev_flour: Object.freeze([45, 95, 170]),
+  dev_teapot: Object.freeze([50, 105, 185]),
+  dev_tools: Object.freeze([40, 90, 160])
+});
+
+const PATRON_COSTS = Object.freeze({
+  mikan: 0,
+  luna: 80,
+  mugi: 120
+});
+
+const THEME_COSTS = Object.freeze({
+  amber: 0,
+  sakura: 80,
+  moonlight: 120
+});
+
+const SHOP_TOTAL_CAP = 5220;
+
+// v1 历史成本表（仅用于老存档 v1 -> v2 总星尘无损还原）
+const V1_PATRON_COSTS = Object.freeze({
+  mikan: 0,
+  luna: 60,
+  mugi: 100
+});
+
+const V1_THEME_COSTS = Object.freeze({
+  amber: 0,
+  sakura: 80,
+  moonlight: 120
+});
+
+const V1_UPGRADE_COSTS = Object.freeze({
+  up_tools: Object.freeze([40, 90, 160]),
+  up_fever: Object.freeze([50, 100, 180]),
+  up_combo: Object.freeze([60, 120, 200]),
+  up_dust: Object.freeze([45, 95, 170])
+});
+
+const KNOWN_PATRON_MAP = Object.freeze({
+  mikan: 'mikan',
+  chef_mikan: 'mikan',
+  luna: 'luna',
+  patron_luna: 'luna',
+  mugi: 'mugi',
+  patron_mugi: 'mugi'
+});
+
+// 3 章 × 10 关 = 30 关合法关卡 ID 与反作弊上限
+const VALID_LEVEL_IDS = Object.freeze([
+  '1-1', '1-2', '1-3', '1-4', '1-5', '1-6', '1-7', '1-8', '1-9', '1-10',
+  '2-1', '2-2', '2-3', '2-4', '2-5', '2-6', '2-7', '2-8', '2-9', '2-10',
+  '3-1', '3-2', '3-3', '3-4', '3-5', '3-6', '3-7', '3-8', '3-9', '3-10'
+]);
+const VALID_LEVEL_SET = new Set(VALID_LEVEL_IDS);
+
+const CHAPTER_SCORE_CAPS = Object.freeze({
+  '1': 35000,
+  '2': 90000,
+  '3': 220000
+});
+
+const MAX_TOTAL_STARS = 90;
+const MAX_TOTAL_CUMULATIVE_SCORE = 3450000;
 const MAX_OFFLINE_STARDUST_DELTA = 1500;
+const MAX_INITIAL_UNSYNCED_STARDUST = 6000;
+const MAX_SAFE_EARNED_STARDUST = 9999999;
+const MAX_CONSUMABLE_SPENT_STARDUST = MAX_SAFE_EARNED_STARDUST - SHOP_TOTAL_CAP;
+const MAX_TIMESTAMP_MS = 9999999999999;
+
+const LEGACY_ROOT_FIELDS = Object.freeze([
+  'activeRun',
+  'savedRuns',
+  'bestChef',
+  'bestRush',
+  'bestZen',
+  'bestShiftReached',
+  'shopUpgrades',
+  'bankStardust',
+  'totalEarnedStardust',
+  'lastSyncedEarnedStardust',
+  'unlockedPatrons',
+  'selectedPatron',
+  'unlockedThemes',
+  'equippedTheme',
+  'bgmTrack',
+  'sfxEnabled',
+  'playerProfile',
+  'lifetimeStats'
+]);
+
+const LEGACY_V1_SAVE_DETECTION_KEYS = Object.freeze([
+  'shopUpgrades',
+  'bankStardust',
+  'totalEarnedStardust',
+  'unlockedPatrons',
+  'selectedPatron',
+  'unlockedThemes',
+  'equippedTheme',
+  'bgmTrack',
+  'sfxEnabled',
+  'playerProfile',
+  'lifetimeStats',
+  'bestChef',
+  'bestRush',
+  'bestZen'
+]);
 
 let collectionChecked = false;
 async function ensurePlayersCollection() {
@@ -42,365 +149,1413 @@ async function ensurePlayersCollection() {
   try {
     await db.createCollection(PLAYERS_COL);
   } catch (_err) {
-    // Collection already exists or auto-managed
+    // 集合已存在或环境自动托管
   }
   collectionChecked = true;
 }
 
-function clampInt(val, min, max) {
-  const n = Math.floor(Number(val) || 0);
-  return Math.max(min, Math.min(max, n));
+function hasOwn(obj, key) {
+  if (obj === null || obj === undefined || typeof obj !== 'object') return false;
+  try {
+    return Object.prototype.hasOwnProperty.call(obj, key);
+  } catch (_err) {
+    return false;
+  }
 }
 
-function uniqStrings(arr, fallback) {
-  if (!Array.isArray(arr)) return [...fallback];
-  const out = [...fallback];
-  for (const item of arr) {
-    if (typeof item === 'string' && item.length > 0 && item.length <= 32 && !out.includes(item)) {
-      out.push(item);
+function getOwn(obj, key) {
+  if (!hasOwn(obj, key)) return undefined;
+  try {
+    return obj[key];
+  } catch (_err) {
+    return undefined;
+  }
+}
+
+function safeIsArray(v) {
+  try {
+    return Array.isArray(v);
+  } catch (_err) {
+    return false;
+  }
+}
+
+function safeArrayLength(arr) {
+  if (!safeIsArray(arr)) return 0;
+  try {
+    const len = arr.length;
+    return typeof len === 'number' && len > 0 ? len : 0;
+  } catch (_err) {
+    return 0;
+  }
+}
+
+function safeArrayAt(arr, idx) {
+  if (!safeIsArray(arr) || !hasOwn(arr, idx)) return undefined;
+  try {
+    return arr[idx];
+  } catch (_err) {
+    return undefined;
+  }
+}
+
+function isPlainRecord(v) {
+  if (v === null || v === undefined || typeof v !== 'object') return false;
+  try {
+    return !Array.isArray(v);
+  } catch (_err) {
+    return false;
+  }
+}
+
+function toSafeNum(val) {
+  if (typeof val === 'number') return val;
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (trimmed !== '') return Number(trimmed);
+  }
+  return NaN;
+}
+
+function toFiniteInt(val, fallback) {
+  const fb = fallback !== undefined ? fallback : 0;
+  const n = toSafeNum(val);
+  if (!Number.isFinite(n)) return fb;
+  const floored = Math.floor(n);
+  return floored === 0 ? 0 : floored;
+}
+
+function clampInt(val, min, max, fallback) {
+  const fb = fallback !== undefined ? fallback : min;
+  const n = toSafeNum(val);
+  if (!Number.isFinite(n)) return fb;
+  const floored = Math.floor(n);
+  if (floored < min) return min;
+  if (floored > max) return max;
+  return floored === 0 ? 0 : floored;
+}
+
+function pushUniqueWarning(warnings, code) {
+  if (safeIsArray(warnings) && warnings.indexOf(code) === -1) {
+    warnings.push(code);
+  }
+}
+
+function canonicalizeKnownPatronId(rawId) {
+  if (typeof rawId !== 'string') return null;
+  const trimmed = rawId.trim();
+  if (!hasOwn(KNOWN_PATRON_MAP, trimmed)) return null;
+  return KNOWN_PATRON_MAP[trimmed];
+}
+
+function normalizePatronId(rawId) {
+  return canonicalizeKnownPatronId(rawId) || 'mikan';
+}
+
+function sanitizeUnlockedPatrons(rawArr) {
+  const out = ['mikan'];
+  if (!safeIsArray(rawArr)) return out;
+  const len = safeArrayLength(rawArr);
+  for (let i = 0; i < len; i++) {
+    if (!hasOwn(rawArr, i)) continue;
+    const pid = canonicalizeKnownPatronId(safeArrayAt(rawArr, i));
+    if (pid && out.indexOf(pid) === -1) {
+      out.push(pid);
     }
   }
   return out;
 }
 
-function uniqTierNums(arr) {
-  const set = new Set([1, 2, 3, 4]);
-  if (Array.isArray(arr)) {
-    for (const v of arr) {
-      const t = Math.floor(Number(v) || 0);
-      if (t >= 1 && t <= 9) set.add(t);
+function sanitizeUnlockedThemes(rawArr) {
+  const out = ['amber'];
+  if (!safeIsArray(rawArr)) return out;
+  const len = safeArrayLength(rawArr);
+  for (let i = 0; i < len; i++) {
+    if (!hasOwn(rawArr, i)) continue;
+    const item = safeArrayAt(rawArr, i);
+    if (typeof item !== 'string') continue;
+    const tid = item.trim();
+    if (hasOwn(THEME_COSTS, tid) && out.indexOf(tid) === -1) {
+      out.push(tid);
     }
   }
-  return Array.from(set).sort((a, b) => a - b);
+  return out;
+}
+
+function getChapterScoreCapForLevel(levelId) {
+  if (typeof levelId !== 'string' || !VALID_LEVEL_SET.has(levelId)) return 35000;
+  const chKey = levelId.charAt(0);
+  return hasOwn(CHAPTER_SCORE_CAPS, chKey) ? CHAPTER_SCORE_CAPS[chKey] : 35000;
+}
+
+function computeTotalStars(levelStars) {
+  if (!isPlainRecord(levelStars)) return 0;
+  let total = 0;
+  for (let i = 0; i < VALID_LEVEL_IDS.length; i++) {
+    const id = VALID_LEVEL_IDS[i];
+    if (!hasOwn(levelStars, id)) continue;
+    total += clampInt(getOwn(levelStars, id), 0, 3, 0);
+  }
+  return Math.min(MAX_TOTAL_STARS, total);
+}
+
+function computeTotalCumulativeScore(levelBestScores) {
+  if (!isPlainRecord(levelBestScores)) return 0;
+  let total = 0;
+  for (let i = 0; i < VALID_LEVEL_IDS.length; i++) {
+    const id = VALID_LEVEL_IDS[i];
+    if (!hasOwn(levelBestScores, id)) continue;
+    const cap = getChapterScoreCapForLevel(id);
+    total += clampInt(getOwn(levelBestScores, id), 0, cap, 0);
+  }
+  return Math.min(MAX_TOTAL_CUMULATIVE_SCORE, total);
+}
+
+function computeHighestUnlockedLevel(levelStars) {
+  let highest = '1-1';
+  if (!isPlainRecord(levelStars)) return highest;
+  const totalStars = computeTotalStars(levelStars);
+  for (let i = 1; i < VALID_LEVEL_IDS.length; i++) {
+    const id = VALID_LEVEL_IDS[i];
+    const prevId = VALID_LEVEL_IDS[i - 1];
+    const prevStars = hasOwn(levelStars, prevId) ? clampInt(getOwn(levelStars, prevId), 0, 3, 0) : 0;
+    if (prevStars < 1) break;
+    if (id === '2-1' && totalStars < 18) break;
+    if (id === '3-1' && totalStars < 40) break;
+    highest = id;
+  }
+  return highest;
 }
 
 function computeSpentStardust(meta) {
-  if (!meta || typeof meta !== 'object') return 0;
+  if (!isPlainRecord(meta)) return 0;
   let spent = 0;
-  for (const pid of meta.unlockedPatrons || []) {
-    if (PATRON_COSTS[pid]) spent += PATRON_COSTS[pid];
+
+  const cl = getOwn(meta, 'catcakeLevels');
+  if (isPlainRecord(cl)) {
+    for (let t = 1; t <= 7; t++) {
+      const kStr = String(t);
+      const kC = 'C' + t;
+      const rawLv = hasOwn(cl, kStr)
+        ? getOwn(cl, kStr)
+        : hasOwn(cl, kC)
+        ? getOwn(cl, kC)
+        : 0;
+      const lv = clampInt(rawLv, 0, 4, 0);
+      const costs = CATCAKE_UPGRADE_COSTS[t];
+      for (let i = 0; i < lv; i++) {
+        spent += costs[i];
+      }
+    }
   }
-  for (const tid of meta.unlockedThemes || []) {
-    if (typeof THEME_COSTS[tid] === 'number') spent += THEME_COSTS[tid];
+
+  const du = getOwn(meta, 'deviceUpgrades');
+  if (isPlainRecord(du)) {
+    const devKeys = Object.keys(DEVICE_UPGRADE_COSTS);
+    for (let d = 0; d < devKeys.length; d++) {
+      const key = devKeys[d];
+      const costs = DEVICE_UPGRADE_COSTS[key];
+      const lv = hasOwn(du, key) ? clampInt(getOwn(du, key), 0, costs.length, 0) : 0;
+      for (let i = 0; i < lv; i++) {
+        spent += costs[i];
+      }
+    }
   }
-  const ups = meta.shopUpgrades || {};
-  for (const key of Object.keys(UPGRADE_COSTS)) {
-    const lv = clampInt(ups[key], 0, 3);
-    const costs = UPGRADE_COSTS[key];
-    for (let i = 0; i < lv; i++) spent += costs[i];
+
+  const rawPatrons = getOwn(meta, 'unlockedPatrons');
+  if (safeIsArray(rawPatrons)) {
+    const patrons = sanitizeUnlockedPatrons(rawPatrons);
+    for (let i = 0; i < patrons.length; i++) {
+      const pid = patrons[i];
+      spent += PATRON_COSTS[pid] || 0;
+    }
   }
+
+  const rawThemes = getOwn(meta, 'unlockedThemes');
+  if (safeIsArray(rawThemes)) {
+    const themes = sanitizeUnlockedThemes(rawThemes);
+    for (let i = 0; i < themes.length; i++) {
+      const tid = themes[i];
+      spent += THEME_COSTS[tid] || 0;
+    }
+  }
+
+  if (hasOwn(meta, 'consumableSpentStardust')) {
+    spent += clampInt(getOwn(meta, 'consumableSpentStardust'), 0, MAX_CONSUMABLE_SPENT_STARDUST, 0);
+  }
+
   return spent;
 }
 
-function sanitizeMetaSave(raw) {
-  const src = raw && typeof raw === 'object' ? raw : {};
-  const unlockedPatrons = uniqStrings(src.unlockedPatrons, ['mikan']).filter((id) => PATRON_COSTS[id] !== undefined);
-  const unlockedThemes = uniqStrings(src.unlockedThemes, ['amber']).filter((id) => THEME_COSTS[id] !== undefined);
-  const ups = src.shopUpgrades && typeof src.shopUpgrades === 'object' ? src.shopUpgrades : {};
-  const st = src.lifetimeStats && typeof src.lifetimeStats === 'object' ? src.lifetimeStats : {};
-  const sg = src.seenModeGuides && typeof src.seenModeGuides === 'object' ? src.seenModeGuides : {};
-  const tp = src.seenTips && typeof src.seenTips === 'object' ? src.seenTips : {};
+function normalizeMetaProfile(raw, fallbackPatron) {
+  const src = isPlainRecord(raw) ? raw : {};
+  const rawPresetVal = getOwn(src, 'avatarPreset');
+  const rawPreset = rawPresetVal !== undefined ? canonicalizeKnownPatronId(rawPresetVal) : null;
+  const fbPreset = canonicalizeKnownPatronId(fallbackPatron) || 'mikan';
+  const avatarPreset = rawPreset || fbPreset;
+  const rawNickVal = getOwn(src, 'nickName');
+  const rawNick = typeof rawNickVal === 'string' ? rawNickVal.trim() : '';
+  const rawAvatarVal = getOwn(src, 'avatarUrl');
+  const rawAvatar = typeof rawAvatarVal === 'string' ? rawAvatarVal.trim() : '';
+  const authorized = hasOwn(src, 'authorized') ? Boolean(getOwn(src, 'authorized')) : false;
+  const updatedAt = hasOwn(src, 'updatedAt')
+    ? clampInt(getOwn(src, 'updatedAt'), 0, MAX_TIMESTAMP_MS, 0)
+    : 0;
+  return {
+    nickName: rawNick ? rawNick.slice(0, 16) : '',
+    avatarUrl: rawAvatar ? rawAvatar.slice(0, 512) : '',
+    avatarPreset,
+    authorized,
+    updatedAt
+  };
+}
 
-  const bestShift = clampInt(st.bestShiftReached, 0, 99);
-  // Cross-check Chef best score against highest shift ever reached
-  const shiftChefCap =
-    bestShift <= 1 ? 14000 : bestShift <= 3 ? 45000 : bestShift <= 5 ? 95000 : MAX_CHEF_SCORE;
-
-  const out = {
-    bestChef: clampInt(src.bestChef, 0, shiftChefCap),
-    bestRush: clampInt(src.bestRush, 0, MAX_RUSH_SCORE),
-    bestZen: clampInt(src.bestZen, 0, MAX_ZEN_SCORE),
-    unlockedTiers: uniqTierNums(src.unlockedTiers),
-    bgmTrack: src.bgmTrack === 'bossa' || src.bgmTrack === 'off' ? src.bgmTrack : 'waltz',
-    sfxEnabled: typeof src.sfxEnabled === 'boolean' ? src.sfxEnabled : true,
-    selectedPatron: unlockedPatrons.includes(src.selectedPatron) ? src.selectedPatron : 'mikan',
-    unlockedPatrons,
-    equippedTheme: unlockedThemes.includes(src.equippedTheme) ? src.equippedTheme : 'amber',
-    unlockedThemes,
-    shopUpgrades: {
-      up_tools: clampInt(ups.up_tools, 0, 3),
-      up_fever: clampInt(ups.up_fever, 0, 3),
-      up_combo: clampInt(ups.up_combo, 0, 3),
-      up_dust: clampInt(ups.up_dust, 0, 3)
+function createDefaultMetaSave() {
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    bgmTrack: 'waltz',
+    sfxEnabled: true,
+    bankStardust: 30,
+    totalEarnedStardust: 30,
+    lastSyncedEarnedStardust: 0,
+    consumableSpentStardust: 0,
+    migratedFromV1GiftPending: false,
+    levelStars: {},
+    levelBestScores: {},
+    highestUnlockedLevel: '1-1',
+    catcakeLevels: {
+      '1': 0,
+      '2': 0,
+      '3': 0,
+      '4': 0,
+      '5': 0,
+      '6': 0,
+      '7': 0
     },
-    seenModeGuides: {
-      chef: !!sg.chef,
-      rush: !!sg.rush,
-      zen: !!sg.zen
+    deviceUpgrades: {
+      dev_tray: 0,
+      dev_flour: 0,
+      dev_teapot: 0,
+      dev_tools: 0
     },
-    seenTips: {
-      prep_shop: !!tp.prep_shop,
-      glaze_ring: !!tp.glaze_ring,
-      frozen: !!tp.frozen
+    selectedPatron: 'mikan',
+    unlockedPatrons: ['mikan'],
+    equippedTheme: 'amber',
+    unlockedThemes: ['amber'],
+    seenTutorials: {
+      intro_slide: false,
+      tray_trash: false,
+      flavor_tile: false,
+      ice_tile: false
+    },
+    playerProfile: {
+      nickName: '',
+      avatarUrl: '',
+      avatarPreset: 'mikan',
+      authorized: false,
+      updatedAt: 0
     },
     lifetimeStats: {
-      runsPlayed: clampInt(st.runsPlayed, 0, 999999),
-      ordersCompleted: clampInt(st.ordersCompleted, 0, 9999999),
-      servesTotal: clampInt(st.servesTotal, 0, 9999999),
-      bankShotsTotal: clampInt(st.bankShotsTotal, 0, 9999999),
-      maxAvalancheEver: clampInt(st.maxAvalancheEver, 0, 99),
-      bestShiftReached: bestShift,
-      shiftsClearedTotal: clampInt(st.shiftsClearedTotal, 0, 999999),
-      fiveShiftClears: clampInt(st.fiveShiftClears, 0, 999999),
-      soufflesMade: clampInt(st.soufflesMade, 0, 999999),
-      yarnBroken: clampInt(st.yarnBroken, 0, 999999),
-      maxComboEver: clampInt(st.maxComboEver || 1, 1, 99)
+      runsPlayed: 0,
+      ordersServed: 0,
+      vipServed: 0,
+      maxComboEver: 0,
+      highestSingleServe: 0,
+      totalStars: 0,
+      totalCumulativeScore: 0
     },
-    lastSyncedEarnedStardust: clampInt(src.lastSyncedEarnedStardust || 0, 0, 999999),
-    updatedAt: clampInt(src.updatedAt || Date.now(), 0, 9999999999999)
+    updatedAt: 0
   };
-
-  const spent = computeSpentStardust(out);
-  const rawBank = clampInt(src.bankStardust !== undefined ? src.bankStardust : 30, 0, 999999);
-  const rawEarned = clampInt(src.totalEarnedStardust, 0, 999999);
-  out.totalEarnedStardust = Math.max(30, rawEarned, rawBank + spent);
-  out.bankStardust = Math.max(0, out.totalEarnedStardust - spent);
-  return out;
 }
 
 /**
- * Server-side anti-cheat plausibility & per-push increment validation.
+ * 与客户端 `save_sync.migrateV1ToV2` 100% 同构的服务端老存档迁移函数。
+ * 同时兼容老版云数据库文档顶层存有 `bestChef` / `bestRush` / `bestZen` 而 `metaSave` 省略该字段的情形。
  */
-function validateAndClampClientMeta(serverRaw, clientRaw, runReport = null) {
-  const warnings = [];
-  const client = sanitizeMetaSave(clientRaw);
-  const server = serverRaw ? sanitizeMetaSave(serverRaw) : null;
+function migrateV1ToV2(raw, wrapperDoc) {
+  if (!isPlainRecord(raw) && !isPlainRecord(wrapperDoc)) {
+    return createDefaultMetaSave();
+  }
+  const src = isPlainRecord(raw) ? raw : {};
+  const wrap = isPlainRecord(wrapperDoc) ? wrapperDoc : null;
 
-  // 1. Optional per-run telemetry sanity check (duration & drops vs score)
-  if (runReport && typeof runReport === 'object') {
-    const dur = Number(runReport.durationSec) || 0;
-    const drops = Number(runReport.drops) || 0;
-    const score = Number(runReport.score) || 0;
-    const rMode = runReport.mode || 'chef';
-    if (score > 3000 && (dur < 3 || drops < 2)) {
-      warnings.push('implausible_run_duration_or_drops');
-      if (rMode === 'rush') client.bestRush = server ? server.bestRush : 0;
-      else if (rMode === 'zen') client.bestZen = server ? server.bestZen : 0;
-      else client.bestChef = server ? server.bestChef : 0;
-    } else if (dur > 0 && score / Math.max(5, dur) > 2200) {
-      warnings.push('implausible_score_velocity');
-      if (rMode === 'rush') client.bestRush = Math.min(client.bestRush, (server && server.bestRush) || 12000);
-      else if (rMode === 'zen') client.bestZen = Math.min(client.bestZen, (server && server.bestZen) || 18000);
-      else client.bestChef = Math.min(client.bestChef, (server && server.bestChef) || 25000);
+  const sv = hasOwn(src, 'schemaVersion') ? toSafeNum(getOwn(src, 'schemaVersion')) : 0;
+  if (Number.isFinite(sv) && sv >= SCHEMA_VERSION) {
+    return sanitizeMetaSave(src);
+  }
+
+  const unlockedPatrons = sanitizeUnlockedPatrons(getOwn(src, 'unlockedPatrons'));
+  const rawSelPatron = getOwn(src, 'selectedPatron');
+  const candPatron = rawSelPatron !== undefined ? canonicalizeKnownPatronId(rawSelPatron) : null;
+  const selectedPatron = candPatron && unlockedPatrons.indexOf(candPatron) !== -1 ? candPatron : 'mikan';
+
+  const unlockedThemes = sanitizeUnlockedThemes(getOwn(src, 'unlockedThemes'));
+  const rawEqTheme = getOwn(src, 'equippedTheme');
+  const candTheme = typeof rawEqTheme === 'string' ? rawEqTheme.trim() : '';
+  const equippedTheme = candTheme && unlockedThemes.indexOf(candTheme) !== -1 ? candTheme : 'amber';
+
+  let v1Spent = 0;
+  for (let i = 0; i < unlockedPatrons.length; i++) {
+    v1Spent += V1_PATRON_COSTS[unlockedPatrons[i]] || 0;
+  }
+  for (let i = 0; i < unlockedThemes.length; i++) {
+    v1Spent += V1_THEME_COSTS[unlockedThemes[i]] || 0;
+  }
+  const rawShopUp = getOwn(src, 'shopUpgrades');
+  const upRaw = isPlainRecord(rawShopUp) ? rawShopUp : {};
+  const v1UpKeys = Object.keys(V1_UPGRADE_COSTS);
+  for (let k = 0; k < v1UpKeys.length; k++) {
+    const key = v1UpKeys[k];
+    const costs = V1_UPGRADE_COSTS[key];
+    const lv = hasOwn(upRaw, key) ? clampInt(getOwn(upRaw, key), 0, costs.length, 0) : 0;
+    for (let i = 0; i < lv; i++) {
+      v1Spent += costs[i];
     }
   }
 
-  // 2. Per-push delta guard relative to existing server save
-  if (server) {
-    if (client.bestChef - server.bestChef > MAX_PUSH_CHEF_DELTA) {
-      warnings.push('chef_delta_clamped');
-      client.bestChef = server.bestChef + MAX_PUSH_CHEF_DELTA;
-    }
-    if (client.bestRush - server.bestRush > MAX_PUSH_RUSH_DELTA) {
-      warnings.push('rush_delta_clamped');
-      client.bestRush = server.bestRush + MAX_PUSH_RUSH_DELTA;
-    }
-    if (client.bestZen - server.bestZen > MAX_PUSH_ZEN_DELTA) {
-      warnings.push('zen_delta_clamped');
-      client.bestZen = server.bestZen + MAX_PUSH_ZEN_DELTA;
-    }
+  const bestChef = Math.max(
+    hasOwn(src, 'bestChef') ? clampInt(getOwn(src, 'bestChef'), 0, 350000, 0) : 0,
+    wrap && hasOwn(wrap, 'bestChef') ? clampInt(getOwn(wrap, 'bestChef'), 0, 350000, 0) : 0
+  );
+  const bestRush = Math.max(
+    hasOwn(src, 'bestRush') ? clampInt(getOwn(src, 'bestRush'), 0, 85000, 0) : 0,
+    wrap && hasOwn(wrap, 'bestRush') ? clampInt(getOwn(wrap, 'bestRush'), 0, 85000, 0) : 0
+  );
+  const bestZen = Math.max(
+    hasOwn(src, 'bestZen') ? clampInt(getOwn(src, 'bestZen'), 0, 180000, 0) : 0,
+    wrap && hasOwn(wrap, 'bestZen') ? clampInt(getOwn(wrap, 'bestZen'), 0, 180000, 0) : 0
+  );
 
-    const deltaRuns = Math.max(1, client.lifetimeStats.runsPlayed - server.lifetimeStats.runsPlayed);
-    const maxAllowedDustJump = Math.min(MAX_OFFLINE_STARDUST_DELTA, Math.max(360, deltaRuns * 260 + 120));
-    if (client.totalEarnedStardust - server.totalEarnedStardust > maxAllowedDustJump) {
-      warnings.push('stardust_delta_clamped');
-      client.totalEarnedStardust = server.totalEarnedStardust + maxAllowedDustJump;
-      const spent = computeSpentStardust(client);
-      client.bankStardust = Math.max(0, client.totalEarnedStardust - spent);
-    }
-  } else {
-    // First-time cloud upload cap for unlinked local storage
-    const initRuns = Math.max(1, client.lifetimeStats.runsPlayed);
-    const maxInitEarned = Math.min(3500, 120 + initRuns * 260);
-    if (client.totalEarnedStardust > maxInitEarned) {
-      warnings.push('initial_stardust_clamped');
-      client.totalEarnedStardust = maxInitEarned;
-      const spent = computeSpentStardust(client);
-      client.bankStardust = Math.max(0, client.totalEarnedStardust - spent);
-    }
+  const rawBankVal = getOwn(src, 'bankStardust');
+  const rawBank =
+    hasOwn(src, 'bankStardust') && Number.isFinite(toSafeNum(rawBankVal))
+      ? clampInt(rawBankVal, 0, MAX_SAFE_EARNED_STARDUST, 0)
+      : 30;
+  const rawEarned = hasOwn(src, 'totalEarnedStardust')
+    ? clampInt(getOwn(src, 'totalEarnedStardust'), 0, MAX_SAFE_EARNED_STARDUST, 0)
+    : 0;
+  const v1TotalEarned = Math.max(30, rawEarned, rawBank + v1Spent);
+
+  let bonusOffset = 0;
+  if (unlockedPatrons.indexOf('luna') !== -1) bonusOffset += 20;
+  if (unlockedPatrons.indexOf('mugi') !== -1) bonusOffset += 20;
+  const hasV1Scores = bestChef > 0 || bestRush > 0 || bestZen > 0;
+  if (hasV1Scores) bonusOffset += 50;
+
+  const rawGiftVal = getOwn(src, 'migratedFromV1GiftPending');
+  const migratedFromV1GiftPending =
+    typeof rawGiftVal === 'boolean' ? rawGiftVal : hasV1Scores;
+
+  const totalEarnedWithBonus = Math.min(MAX_SAFE_EARNED_STARDUST, v1TotalEarned + bonusOffset);
+  const rawLastSynced = hasOwn(src, 'lastSyncedEarnedStardust')
+    ? clampInt(getOwn(src, 'lastSyncedEarnedStardust'), 0, v1TotalEarned, 0)
+    : 0;
+  const adjustedLastSynced =
+    rawLastSynced > 0 ? Math.min(totalEarnedWithBonus, rawLastSynced + bonusOffset) : 0;
+
+  const rawStatsVal = getOwn(src, 'lifetimeStats');
+  const stRaw = isPlainRecord(rawStatsVal) ? rawStatsVal : {};
+  const runsPlayed = hasOwn(stRaw, 'runsPlayed') ? clampInt(getOwn(stRaw, 'runsPlayed'), 0, 999999, 0) : 0;
+  const ordersServed = Math.max(
+    hasOwn(stRaw, 'ordersServed') ? clampInt(getOwn(stRaw, 'ordersServed'), 0, 9999999, 0) : 0,
+    hasOwn(stRaw, 'ordersCompleted') ? clampInt(getOwn(stRaw, 'ordersCompleted'), 0, 9999999, 0) : 0,
+    hasOwn(stRaw, 'servesTotal') ? clampInt(getOwn(stRaw, 'servesTotal'), 0, 9999999, 0) : 0
+  );
+  const vipServed = hasOwn(stRaw, 'vipServed') ? clampInt(getOwn(stRaw, 'vipServed'), 0, 9999999, 0) : 0;
+  let maxComboEver = hasOwn(stRaw, 'maxComboEver') ? clampInt(getOwn(stRaw, 'maxComboEver'), 0, 999, 0) : 0;
+  if (maxComboEver === 1 && runsPlayed === 0 && ordersServed === 0 && !hasV1Scores) {
+    maxComboEver = 0;
   }
+  const highestSingleServe = hasOwn(stRaw, 'highestSingleServe')
+    ? clampInt(getOwn(stRaw, 'highestSingleServe'), 0, 220000, 0)
+    : 0;
 
-  return { sanitizedClient: client, warnings };
+  const srcProfVal = getOwn(src, 'playerProfile');
+  const srcTopProfVal = getOwn(src, 'profile');
+  const wrapProfVal = wrap ? getOwn(wrap, 'profile') : null;
+  const wrapPlayerProfVal = wrap ? getOwn(wrap, 'playerProfile') : null;
+  const rawProf = isPlainRecord(srcProfVal)
+    ? srcProfVal
+    : isPlainRecord(srcTopProfVal)
+    ? srcTopProfVal
+    : isPlainRecord(wrapProfVal)
+    ? wrapProfVal
+    : isPlainRecord(wrapPlayerProfVal)
+    ? wrapPlayerProfVal
+    : null;
+
+  const rawBgmVal = getOwn(src, 'bgmTrack');
+  const bgmTrack =
+    rawBgmVal === 'bossa' || rawBgmVal === 'off' || rawBgmVal === 'waltz'
+      ? rawBgmVal
+      : 'waltz';
+  const rawSfxVal = getOwn(src, 'sfxEnabled');
+  const sfxEnabled = typeof rawSfxVal === 'boolean' ? rawSfxVal : true;
+  const updatedAt = hasOwn(src, 'updatedAt')
+    ? clampInt(getOwn(src, 'updatedAt'), 0, MAX_TIMESTAMP_MS, 0)
+    : 0;
+
+  const out = {
+    schemaVersion: SCHEMA_VERSION,
+    bgmTrack,
+    sfxEnabled,
+    bankStardust: 0,
+    totalEarnedStardust: 30,
+    lastSyncedEarnedStardust: adjustedLastSynced,
+    consumableSpentStardust: 0,
+    migratedFromV1GiftPending,
+    levelStars: {},
+    levelBestScores: {},
+    highestUnlockedLevel: '1-1',
+    catcakeLevels: {
+      '1': 0,
+      '2': 0,
+      '3': 0,
+      '4': 0,
+      '5': 0,
+      '6': 0,
+      '7': 0
+    },
+    deviceUpgrades: {
+      dev_tray: 0,
+      dev_flour: 0,
+      dev_teapot: 0,
+      dev_tools: 0
+    },
+    selectedPatron,
+    unlockedPatrons,
+    equippedTheme,
+    unlockedThemes,
+    seenTutorials: {
+      intro_slide: false,
+      tray_trash: false,
+      flavor_tile: false,
+      ice_tile: false
+    },
+    playerProfile: normalizeMetaProfile(rawProf, selectedPatron),
+    lifetimeStats: {
+      runsPlayed,
+      ordersServed,
+      vipServed,
+      maxComboEver,
+      highestSingleServe,
+      totalStars: 0,
+      totalCumulativeScore: 0
+    },
+    updatedAt
+  };
+
+  const v2Spent = computeSpentStardust(out);
+  out.totalEarnedStardust = Math.min(MAX_SAFE_EARNED_STARDUST, Math.max(30, totalEarnedWithBonus, v2Spent));
+  out.bankStardust = Math.max(0, out.totalEarnedStardust - v2Spent);
+  out.lastSyncedEarnedStardust = Math.min(out.totalEarnedStardust, adjustedLastSynced);
+  return out;
 }
 
-function mergeMetaSaves(serverRaw, validatedClient) {
-  if (!serverRaw) {
-    const only = sanitizeMetaSave(validatedClient);
-    only.lastSyncedEarnedStardust = only.totalEarnedStardust;
-    return only;
+function sanitizeMetaSave(raw, warnings, wrapperDoc) {
+  if (!isPlainRecord(raw)) {
+    if (isPlainRecord(wrapperDoc)) {
+      return migrateV1ToV2(null, wrapperDoc);
+    }
+    return createDefaultMetaSave();
   }
-  if (!validatedClient) return sanitizeMetaSave(serverRaw);
-  const a = sanitizeMetaSave(serverRaw);
-  const b = validatedClient;
-  const preferB = (b.updatedAt || 0) >= (a.updatedAt || 0);
+
+  const sv = hasOwn(raw, 'schemaVersion') ? toSafeNum(getOwn(raw, 'schemaVersion')) : 0;
+  if (!Number.isFinite(sv) || sv < SCHEMA_VERSION) {
+    return migrateV1ToV2(raw, wrapperDoc);
+  }
+
+  const rawBgmVal = getOwn(raw, 'bgmTrack');
+  const bgmTrack =
+    rawBgmVal === 'bossa' || rawBgmVal === 'off' || rawBgmVal === 'waltz'
+      ? rawBgmVal
+      : 'waltz';
+  const rawSfxVal = getOwn(raw, 'sfxEnabled');
+  const sfxEnabled = typeof rawSfxVal === 'boolean' ? rawSfxVal : true;
+  const migratedFromV1GiftPending = hasOwn(raw, 'migratedFromV1GiftPending')
+    ? Boolean(getOwn(raw, 'migratedFromV1GiftPending'))
+    : false;
+  const consumableSpentStardust = hasOwn(raw, 'consumableSpentStardust')
+    ? clampInt(getOwn(raw, 'consumableSpentStardust'), 0, MAX_CONSUMABLE_SPENT_STARDUST, 0)
+    : 0;
+
+  const rawScoresObj = getOwn(raw, 'levelBestScores');
+  const rawStarsObj = getOwn(raw, 'levelStars');
+  const inScores = isPlainRecord(rawScoresObj) ? rawScoresObj : {};
+  const inStars = isPlainRecord(rawStarsObj) ? rawStarsObj : {};
+  const levelBestScores = {};
+  const levelStars = {};
+
+  for (let i = 0; i < VALID_LEVEL_IDS.length; i++) {
+    const id = VALID_LEVEL_IDS[i];
+    const cap = getChapterScoreCapForLevel(id);
+
+    let sc = 0;
+    if (hasOwn(inScores, id)) {
+      const rawScNum = toSafeNum(getOwn(inScores, id));
+      if (Number.isFinite(rawScNum)) {
+        const flooredSc = Math.floor(rawScNum);
+        if (flooredSc > cap) {
+          pushUniqueWarning(warnings, 'level_score_cap_clamped');
+        }
+        sc = Math.max(0, Math.min(cap, flooredSc));
+      }
+    }
+    if (sc > 0) {
+      levelBestScores[id] = sc;
+    }
+
+    let st = 0;
+    if (hasOwn(inStars, id)) {
+      const rawStNum = toSafeNum(getOwn(inStars, id));
+      if (Number.isFinite(rawStNum)) {
+        const flooredSt = Math.floor(rawStNum);
+        if (flooredSt > 3 || flooredSt < 0) {
+          pushUniqueWarning(warnings, 'level_stars_clamped');
+        }
+        st = Math.max(0, Math.min(3, flooredSt));
+      }
+    }
+    if (st > 0 && sc <= 0) {
+      pushUniqueWarning(warnings, 'stars_without_score_clamped');
+      st = 0;
+    }
+    if (st > 0) {
+      levelStars[id] = st;
+    }
+  }
+
+  const rawClObj = getOwn(raw, 'catcakeLevels');
+  const clRaw = isPlainRecord(rawClObj) ? rawClObj : {};
+  const catcakeLevels = {};
+  for (let t = 1; t <= 7; t++) {
+    const kStr = String(t);
+    const kC = 'C' + t;
+    const rawLv = hasOwn(clRaw, kStr)
+      ? getOwn(clRaw, kStr)
+      : hasOwn(clRaw, kC)
+      ? getOwn(clRaw, kC)
+      : 0;
+    catcakeLevels[kStr] = clampInt(rawLv, 0, 4, 0);
+  }
+
+  const rawDuObj = getOwn(raw, 'deviceUpgrades');
+  const duRaw = isPlainRecord(rawDuObj) ? rawDuObj : {};
+  const deviceUpgrades = {
+    dev_tray: hasOwn(duRaw, 'dev_tray') ? clampInt(getOwn(duRaw, 'dev_tray'), 0, 2, 0) : 0,
+    dev_flour: hasOwn(duRaw, 'dev_flour') ? clampInt(getOwn(duRaw, 'dev_flour'), 0, 3, 0) : 0,
+    dev_teapot: hasOwn(duRaw, 'dev_teapot') ? clampInt(getOwn(duRaw, 'dev_teapot'), 0, 3, 0) : 0,
+    dev_tools: hasOwn(duRaw, 'dev_tools') ? clampInt(getOwn(duRaw, 'dev_tools'), 0, 3, 0) : 0
+  };
+
+  const unlockedPatrons = sanitizeUnlockedPatrons(getOwn(raw, 'unlockedPatrons'));
+  const rawSelPatron = getOwn(raw, 'selectedPatron');
+  const candPatron = rawSelPatron !== undefined ? canonicalizeKnownPatronId(rawSelPatron) : null;
+  const selectedPatron = candPatron && unlockedPatrons.indexOf(candPatron) !== -1 ? candPatron : 'mikan';
+
+  const unlockedThemes = sanitizeUnlockedThemes(getOwn(raw, 'unlockedThemes'));
+  const rawEqTheme = getOwn(raw, 'equippedTheme');
+  const candTheme = typeof rawEqTheme === 'string' ? rawEqTheme.trim() : '';
+  const equippedTheme = candTheme && unlockedThemes.indexOf(candTheme) !== -1 ? candTheme : 'amber';
+
+  const rawTutObj = getOwn(raw, 'seenTutorials');
+  const tutRaw = isPlainRecord(rawTutObj) ? rawTutObj : {};
+  const seenTutorials = {
+    intro_slide: hasOwn(tutRaw, 'intro_slide') ? Boolean(getOwn(tutRaw, 'intro_slide')) : false,
+    tray_trash: hasOwn(tutRaw, 'tray_trash') ? Boolean(getOwn(tutRaw, 'tray_trash')) : false,
+    flavor_tile: hasOwn(tutRaw, 'flavor_tile') ? Boolean(getOwn(tutRaw, 'flavor_tile')) : false,
+    ice_tile: hasOwn(tutRaw, 'ice_tile') ? Boolean(getOwn(tutRaw, 'ice_tile')) : false
+  };
+
+  const rawProfObj = getOwn(raw, 'playerProfile');
+  const profRaw = isPlainRecord(rawProfObj) ? rawProfObj : null;
+  const playerProfile = normalizeMetaProfile(profRaw, selectedPatron);
+
+  const totalStars = computeTotalStars(levelStars);
+  const totalCumulativeScore = computeTotalCumulativeScore(levelBestScores);
+  const highestUnlockedLevel = computeHighestUnlockedLevel(levelStars);
+
+  const rawStatsObj = getOwn(raw, 'lifetimeStats');
+  const stRaw = isPlainRecord(rawStatsObj) ? rawStatsObj : {};
+  const lifetimeStats = {
+    runsPlayed: hasOwn(stRaw, 'runsPlayed') ? clampInt(getOwn(stRaw, 'runsPlayed'), 0, 999999, 0) : 0,
+    ordersServed: Math.max(
+      hasOwn(stRaw, 'ordersServed') ? clampInt(getOwn(stRaw, 'ordersServed'), 0, 9999999, 0) : 0,
+      hasOwn(stRaw, 'ordersCompleted') ? clampInt(getOwn(stRaw, 'ordersCompleted'), 0, 9999999, 0) : 0,
+      hasOwn(stRaw, 'servesTotal') ? clampInt(getOwn(stRaw, 'servesTotal'), 0, 9999999, 0) : 0
+    ),
+    vipServed: hasOwn(stRaw, 'vipServed') ? clampInt(getOwn(stRaw, 'vipServed'), 0, 9999999, 0) : 0,
+    maxComboEver: hasOwn(stRaw, 'maxComboEver') ? clampInt(getOwn(stRaw, 'maxComboEver'), 0, 999, 0) : 0,
+    highestSingleServe: hasOwn(stRaw, 'highestSingleServe')
+      ? clampInt(getOwn(stRaw, 'highestSingleServe'), 0, 220000, 0)
+      : 0,
+    totalStars,
+    totalCumulativeScore
+  };
+
+  const updatedAt = hasOwn(raw, 'updatedAt')
+    ? clampInt(getOwn(raw, 'updatedAt'), 0, MAX_TIMESTAMP_MS, 0)
+    : 0;
+
+  const out = {
+    schemaVersion: SCHEMA_VERSION,
+    bgmTrack,
+    sfxEnabled,
+    bankStardust: 0,
+    totalEarnedStardust: 30,
+    lastSyncedEarnedStardust: 0,
+    consumableSpentStardust,
+    migratedFromV1GiftPending,
+    levelStars,
+    levelBestScores,
+    highestUnlockedLevel,
+    catcakeLevels,
+    deviceUpgrades,
+    selectedPatron,
+    unlockedPatrons,
+    equippedTheme,
+    unlockedThemes,
+    seenTutorials,
+    playerProfile,
+    lifetimeStats,
+    updatedAt
+  };
+
+  const spent = computeSpentStardust(out);
+  const rawEarnedNum = hasOwn(raw, 'totalEarnedStardust') ? toSafeNum(getOwn(raw, 'totalEarnedStardust')) : NaN;
+  const hasExplicitEarned = hasOwn(raw, 'totalEarnedStardust') && Number.isFinite(rawEarnedNum);
+  const rawBankNum = hasOwn(raw, 'bankStardust') ? toSafeNum(getOwn(raw, 'bankStardust')) : NaN;
+  const hasExplicitBank = hasOwn(raw, 'bankStardust') && Number.isFinite(rawBankNum);
+
+  let baseEarned;
+  if (hasExplicitEarned) {
+    const cleanEarned = clampInt(rawEarnedNum, 0, MAX_SAFE_EARNED_STARDUST, 30);
+    baseEarned = Math.max(30, cleanEarned, spent);
+  } else if (hasExplicitBank) {
+    const cleanBank = clampInt(rawBankNum, 0, MAX_SAFE_EARNED_STARDUST, 0);
+    baseEarned = Math.max(30, cleanBank + spent, spent);
+  } else {
+    baseEarned = Math.max(30, 30 + spent);
+  }
+
+  out.totalEarnedStardust = Math.min(MAX_SAFE_EARNED_STARDUST, baseEarned);
+  out.bankStardust = Math.max(0, out.totalEarnedStardust - spent);
+  out.lastSyncedEarnedStardust = hasOwn(raw, 'lastSyncedEarnedStardust')
+    ? clampInt(getOwn(raw, 'lastSyncedEarnedStardust'), 0, out.totalEarnedStardust, 0)
+    : 0;
+
+  return out;
+}
+
+function cloneValidLevelMap(srcMap) {
+  const out = {};
+  if (!isPlainRecord(srcMap)) return out;
+  for (let i = 0; i < VALID_LEVEL_IDS.length; i++) {
+    const id = VALID_LEVEL_IDS[i];
+    if (hasOwn(srcMap, id)) {
+      const val = getOwn(srcMap, id);
+      if (val !== undefined) {
+        out[id] = val;
+      }
+    }
+  }
+  return out;
+}
+
+function rollbackLevelProgress(clientMeta, serverMeta, levelId) {
+  if (VALID_LEVEL_SET.has(levelId)) {
+    const prevScore =
+      serverMeta && hasOwn(serverMeta.levelBestScores, levelId)
+        ? clampInt(getOwn(serverMeta.levelBestScores, levelId), 0, getChapterScoreCapForLevel(levelId), 0)
+        : 0;
+    const prevStar =
+      serverMeta && hasOwn(serverMeta.levelStars, levelId)
+        ? clampInt(getOwn(serverMeta.levelStars, levelId), 0, 3, 0)
+        : 0;
+
+    if (prevScore > 0) {
+      clientMeta.levelBestScores[levelId] = prevScore;
+    } else {
+      delete clientMeta.levelBestScores[levelId];
+    }
+
+    if (prevStar > 0 && prevScore > 0) {
+      clientMeta.levelStars[levelId] = prevStar;
+    } else {
+      delete clientMeta.levelStars[levelId];
+    }
+  } else {
+    clientMeta.levelBestScores = serverMeta ? cloneValidLevelMap(serverMeta.levelBestScores) : {};
+    clientMeta.levelStars = serverMeta ? cloneValidLevelMap(serverMeta.levelStars) : {};
+  }
+
+  clientMeta.highestUnlockedLevel = computeHighestUnlockedLevel(clientMeta.levelStars);
+  clientMeta.lifetimeStats.totalStars = computeTotalStars(clientMeta.levelStars);
+  clientMeta.lifetimeStats.totalCumulativeScore = computeTotalCumulativeScore(clientMeta.levelBestScores);
+}
+
+/**
+ * 服务端反作弊校验（纯上菜唯一得分铁律、最短时长与分章得分上限）。
+ */
+function validateAndClampClientMeta(serverRaw, clientRaw, runReport, serverWrapperDoc) {
+  const warnings = [];
+  const hasServer = isPlainRecord(serverRaw) || isPlainRecord(serverWrapperDoc);
+  const server = hasServer ? sanitizeMetaSave(serverRaw, null, serverWrapperDoc) : null;
+  const client = sanitizeMetaSave(clientRaw, warnings);
+
+  if (isPlainRecord(runReport)) {
+    const rrScoreNum = hasOwn(runReport, 'score') ? toSafeNum(getOwn(runReport, 'score')) : 0;
+    const rrScore = Number.isFinite(rrScoreNum)
+      ? Math.floor(rrScoreNum)
+      : rrScoreNum === Infinity
+      ? MAX_TOTAL_CUMULATIVE_SCORE + 1
+      : 0;
+
+    const rawServesVal = hasOwn(runReport, 'serves')
+      ? getOwn(runReport, 'serves')
+      : hasOwn(runReport, 'ordersServed')
+      ? getOwn(runReport, 'ordersServed')
+      : 0;
+    const rrServes = toFiniteInt(rawServesVal, 0);
+
+    const rawDurVal = getOwn(runReport, 'durationSec');
+    const hasDur =
+      hasOwn(runReport, 'durationSec') &&
+      rawDurVal !== undefined &&
+      rawDurVal !== null;
+    const rrDuration = hasDur ? toSafeNum(rawDurVal) : NaN;
+
+    const rawLid = getOwn(runReport, 'levelId');
+    const lid = typeof rawLid === 'string' ? rawLid.trim() : '';
+
+    if (rrScore > 0) {
+      let rolledBack = false;
+      if (rrServes < 1) {
+        pushUniqueWarning(warnings, 'zero_serve_score_rejected');
+        rollbackLevelProgress(client, server, lid);
+        rolledBack = true;
+      }
+      if (hasDur && (!Number.isFinite(rrDuration) || rrDuration < 3)) {
+        pushUniqueWarning(warnings, 'implausible_run_duration');
+        if (!rolledBack) {
+          rollbackLevelProgress(client, server, lid);
+          rolledBack = true;
+        }
+      }
+      if (!rolledBack && !VALID_LEVEL_SET.has(lid)) {
+        pushUniqueWarning(warnings, 'invalid_run_level');
+        rollbackLevelProgress(client, server, lid);
+        rolledBack = true;
+      }
+      if (!rolledBack && VALID_LEVEL_SET.has(lid)) {
+        const cap = getChapterScoreCapForLevel(lid);
+        if (rrScore > cap) {
+          pushUniqueWarning(warnings, 'run_score_cap_clamped');
+          pushUniqueWarning(warnings, 'level_score_cap_clamped');
+          if (hasOwn(client.levelBestScores, lid) && client.levelBestScores[lid] > cap) {
+            client.levelBestScores[lid] = cap;
+          }
+          client.lifetimeStats.totalCumulativeScore = computeTotalCumulativeScore(client.levelBestScores);
+        }
+      }
+    }
+  }
+
+  return {
+    sanitizedClient: client,
+    warnings
+  };
+}
+
+function isPlaceholderNickName(nick, defaultName) {
+  if (typeof nick !== 'string') return true;
+  const trimmed = nick.trim();
+  if (!trimmed) return true;
+  if (defaultName && trimmed === defaultName) return true;
+  return /^星夜店长#[0-9A-Za-z_-]{1,8}$/.test(trimmed);
+}
+
+function isPlaceholderCloudProfile(prof, defaultName) {
+  if (!isPlainRecord(prof)) return true;
+  if (getOwn(prof, 'authorized')) return false;
+  if (getOwn(prof, 'avatarUrl')) return false;
+  const preset = getOwn(prof, 'avatarPreset');
+  if (preset && preset !== 'mikan') return false;
+  const ts = getOwn(prof, 'updatedAt');
+  if ((typeof ts === 'number' ? ts : 0) > 0) return false;
+  return isPlaceholderNickName(getOwn(prof, 'nickName'), defaultName);
+}
+
+function isUntouchedDefaultMeta(s) {
+  return Boolean(
+    isPlainRecord(s) &&
+      s.totalEarnedStardust === 30 &&
+      computeSpentStardust(s) === 0 &&
+      s.lifetimeStats &&
+      s.lifetimeStats.runsPlayed === 0 &&
+      s.lifetimeStats.ordersServed === 0 &&
+      s.lifetimeStats.vipServed === 0 &&
+      s.lifetimeStats.totalStars === 0 &&
+      s.lifetimeStats.totalCumulativeScore === 0 &&
+      !s.migratedFromV1GiftPending &&
+      s.selectedPatron === 'mikan' &&
+      s.equippedTheme === 'amber' &&
+      s.bgmTrack === 'waltz' &&
+      s.sfxEnabled === true &&
+      s.seenTutorials &&
+      !s.seenTutorials.intro_slide &&
+      !s.seenTutorials.tray_trash &&
+      !s.seenTutorials.flavor_tile &&
+      !s.seenTutorials.ice_tile &&
+      isPlaceholderCloudProfile(s.playerProfile, '')
+  );
+}
+
+function isUntouchedInitialServerMeta(s, prevRevision) {
+  return Boolean(
+    prevRevision <= 1 &&
+      isPlainRecord(s) &&
+      s.totalEarnedStardust === 30 &&
+      computeSpentStardust(s) === 0 &&
+      s.lifetimeStats &&
+      s.lifetimeStats.runsPlayed === 0 &&
+      s.lifetimeStats.ordersServed === 0 &&
+      s.lifetimeStats.vipServed === 0 &&
+      s.lifetimeStats.totalStars === 0 &&
+      s.lifetimeStats.totalCumulativeScore === 0 &&
+      !s.migratedFromV1GiftPending
+  );
+}
+
+function mergeMetaSaves(serverRaw, clientRaw, warnings, serverWrapperDoc) {
+  const hasServer = isPlainRecord(serverRaw) || isPlainRecord(serverWrapperDoc);
+  const b = sanitizeMetaSave(clientRaw, warnings);
+
+  if (!hasServer) {
+    const spentOnly = computeSpentStardust(b);
+    const maxFirstPush = Math.max(spentOnly, MAX_INITIAL_UNSYNCED_STARDUST);
+    let firstEarned;
+    if (b.totalEarnedStardust > maxFirstPush) {
+      pushUniqueWarning(warnings, 'stardust_delta_clamped');
+      firstEarned = maxFirstPush;
+    } else {
+      firstEarned = Math.max(30, b.totalEarnedStardust, spentOnly);
+    }
+    b.totalEarnedStardust = Math.min(MAX_SAFE_EARNED_STARDUST, firstEarned);
+    b.lastSyncedEarnedStardust = b.totalEarnedStardust;
+    b.bankStardust = Math.max(0, b.totalEarnedStardust - spentOnly);
+    b.updatedAt = Date.now();
+    return b;
+  }
+
+  const a = sanitizeMetaSave(serverRaw, null, serverWrapperDoc);
+  if (!isPlainRecord(clientRaw)) {
+    a.lastSyncedEarnedStardust = a.totalEarnedStardust;
+    return a;
+  }
+
+  const rawWrapRev = isPlainRecord(serverWrapperDoc) ? getOwn(serverWrapperDoc, 'revision') : undefined;
+  const prevRev =
+    isPlainRecord(serverWrapperDoc) && hasOwn(serverWrapperDoc, 'revision')
+      ? Math.max(0, toFiniteInt(rawWrapRev, 1))
+      : 1;
+  const serverUntouchedInitial = isUntouchedInitialServerMeta(a, prevRev);
+  const serverUntouched = isUntouchedDefaultMeta(a);
+  const clientUntouched = isUntouchedDefaultMeta(b);
+
+  const preferB =
+    clientUntouched && !serverUntouched
+      ? false
+      : serverUntouchedInitial || (!clientUntouched && serverUntouched)
+      ? true
+      : (b.updatedAt || 0) >= (a.updatedAt || 0);
   const latest = preferB ? b : a;
 
-  const unlockedPatrons = uniqStrings([...a.unlockedPatrons, ...b.unlockedPatrons], ['mikan']).filter(
-    (id) => PATRON_COSTS[id] !== undefined
-  );
-  const unlockedThemes = uniqStrings([...a.unlockedThemes, ...b.unlockedThemes], ['amber']).filter(
-    (id) => THEME_COSTS[id] !== undefined
+  const levelBestScores = {};
+  const levelStars = {};
+  for (let i = 0; i < VALID_LEVEL_IDS.length; i++) {
+    const id = VALID_LEVEL_IDS[i];
+    const scA = hasOwn(a.levelBestScores, id) ? a.levelBestScores[id] : 0;
+    const scB = hasOwn(b.levelBestScores, id) ? b.levelBestScores[id] : 0;
+    const best = Math.max(scA, scB);
+    if (best > 0) {
+      levelBestScores[id] = best;
+    }
+
+    const stA = hasOwn(a.levelStars, id) ? a.levelStars[id] : 0;
+    const stB = hasOwn(b.levelStars, id) ? b.levelStars[id] : 0;
+    const stars = Math.max(stA, stB);
+    if (stars > 0 && best > 0) {
+      levelStars[id] = stars;
+    }
+  }
+
+  const catcakeLevels = {};
+  for (let t = 1; t <= 7; t++) {
+    const k = String(t);
+    catcakeLevels[k] = Math.max(a.catcakeLevels[k] || 0, b.catcakeLevels[k] || 0);
+  }
+
+  const deviceUpgrades = {
+    dev_tray: Math.max(a.deviceUpgrades.dev_tray || 0, b.deviceUpgrades.dev_tray || 0),
+    dev_flour: Math.max(a.deviceUpgrades.dev_flour || 0, b.deviceUpgrades.dev_flour || 0),
+    dev_teapot: Math.max(a.deviceUpgrades.dev_teapot || 0, b.deviceUpgrades.dev_teapot || 0),
+    dev_tools: Math.max(a.deviceUpgrades.dev_tools || 0, b.deviceUpgrades.dev_tools || 0)
+  };
+
+  const unlockedPatrons = sanitizeUnlockedPatrons(a.unlockedPatrons.concat(b.unlockedPatrons));
+  const selectedPatron =
+    unlockedPatrons.indexOf(latest.selectedPatron) !== -1 ? latest.selectedPatron : 'mikan';
+
+  const unlockedThemes = sanitizeUnlockedThemes(a.unlockedThemes.concat(b.unlockedThemes));
+  const equippedTheme =
+    unlockedThemes.indexOf(latest.equippedTheme) !== -1 ? latest.equippedTheme : 'amber';
+
+  const consumableSpentStardust = clampInt(
+    Math.max(a.consumableSpentStardust || 0, b.consumableSpentStardust || 0),
+    0,
+    MAX_CONSUMABLE_SPENT_STARDUST,
+    0
   );
 
+  const totalStars = computeTotalStars(levelStars);
+  const totalCumulativeScore = computeTotalCumulativeScore(levelBestScores);
+  const highestUnlockedLevel = computeHighestUnlockedLevel(levelStars);
+
   const merged = {
-    bestChef: Math.max(a.bestChef, b.bestChef),
-    bestRush: Math.max(a.bestRush, b.bestRush),
-    bestZen: Math.max(a.bestZen, b.bestZen),
-    unlockedTiers: uniqTierNums([...a.unlockedTiers, ...b.unlockedTiers]),
+    schemaVersion: SCHEMA_VERSION,
     bgmTrack: latest.bgmTrack,
     sfxEnabled: latest.sfxEnabled,
-    selectedPatron: unlockedPatrons.includes(latest.selectedPatron) ? latest.selectedPatron : 'mikan',
+    bankStardust: 0,
+    totalEarnedStardust: 30,
+    lastSyncedEarnedStardust: 0,
+    consumableSpentStardust,
+    migratedFromV1GiftPending:
+      clientUntouched && !serverUntouched
+        ? Boolean(a.migratedFromV1GiftPending)
+        : Boolean(b.migratedFromV1GiftPending),
+    levelStars,
+    levelBestScores,
+    highestUnlockedLevel,
+    catcakeLevels,
+    deviceUpgrades,
+    selectedPatron,
     unlockedPatrons,
-    equippedTheme: unlockedThemes.includes(latest.equippedTheme) ? latest.equippedTheme : 'amber',
+    equippedTheme,
     unlockedThemes,
-    shopUpgrades: {
-      up_tools: Math.max(a.shopUpgrades.up_tools, b.shopUpgrades.up_tools),
-      up_fever: Math.max(a.shopUpgrades.up_fever, b.shopUpgrades.up_fever),
-      up_combo: Math.max(a.shopUpgrades.up_combo, b.shopUpgrades.up_combo),
-      up_dust: Math.max(a.shopUpgrades.up_dust, b.shopUpgrades.up_dust)
+    seenTutorials: {
+      intro_slide: Boolean(a.seenTutorials.intro_slide || b.seenTutorials.intro_slide),
+      tray_trash: Boolean(a.seenTutorials.tray_trash || b.seenTutorials.tray_trash),
+      flavor_tile: Boolean(a.seenTutorials.flavor_tile || b.seenTutorials.flavor_tile),
+      ice_tile: Boolean(a.seenTutorials.ice_tile || b.seenTutorials.ice_tile)
     },
-    seenModeGuides: {
-      chef: !!(a.seenModeGuides.chef || b.seenModeGuides.chef),
-      rush: !!(a.seenModeGuides.rush || b.seenModeGuides.rush),
-      zen: !!(a.seenModeGuides.zen || b.seenModeGuides.zen)
-    },
-    seenTips: {
-      prep_shop: !!(a.seenTips.prep_shop || b.seenTips.prep_shop),
-      glaze_ring: !!(a.seenTips.glaze_ring || b.seenTips.glaze_ring),
-      frozen: !!(a.seenTips.frozen || b.seenTips.frozen)
-    },
+    playerProfile: latest.playerProfile,
     lifetimeStats: {
-      runsPlayed: Math.max(a.lifetimeStats.runsPlayed, b.lifetimeStats.runsPlayed),
-      ordersCompleted: Math.max(a.lifetimeStats.ordersCompleted, b.lifetimeStats.ordersCompleted),
-      servesTotal: Math.max(a.lifetimeStats.servesTotal, b.lifetimeStats.servesTotal),
-      bankShotsTotal: Math.max(a.lifetimeStats.bankShotsTotal, b.lifetimeStats.bankShotsTotal),
-      maxAvalancheEver: Math.max(a.lifetimeStats.maxAvalancheEver, b.lifetimeStats.maxAvalancheEver),
-      bestShiftReached: Math.max(a.lifetimeStats.bestShiftReached, b.lifetimeStats.bestShiftReached),
-      shiftsClearedTotal: Math.max(a.lifetimeStats.shiftsClearedTotal, b.lifetimeStats.shiftsClearedTotal),
-      fiveShiftClears: Math.max(a.lifetimeStats.fiveShiftClears, b.lifetimeStats.fiveShiftClears),
-      soufflesMade: Math.max(a.lifetimeStats.soufflesMade, b.lifetimeStats.soufflesMade),
-      yarnBroken: Math.max(a.lifetimeStats.yarnBroken, b.lifetimeStats.yarnBroken),
-      maxComboEver: Math.max(a.lifetimeStats.maxComboEver, b.lifetimeStats.maxComboEver)
+      runsPlayed: Math.max(a.lifetimeStats.runsPlayed || 0, b.lifetimeStats.runsPlayed || 0),
+      ordersServed: Math.max(a.lifetimeStats.ordersServed || 0, b.lifetimeStats.ordersServed || 0),
+      vipServed: Math.max(a.lifetimeStats.vipServed || 0, b.lifetimeStats.vipServed || 0),
+      maxComboEver: Math.max(a.lifetimeStats.maxComboEver || 0, b.lifetimeStats.maxComboEver || 0),
+      highestSingleServe: Math.max(
+        a.lifetimeStats.highestSingleServe || 0,
+        b.lifetimeStats.highestSingleServe || 0
+      ),
+      totalStars,
+      totalCumulativeScore
     },
     updatedAt: Date.now()
   };
 
   const spent = computeSpentStardust(merged);
-  let totalEarned = Math.max(a.totalEarnedStardust, b.totalEarnedStardust, spent);
-  const base = b.lastSyncedEarnedStardust || 0;
-  if (base >= 30 && b.totalEarnedStardust > base && a.totalEarnedStardust > base) {
-    const clientDelta = Math.min(MAX_OFFLINE_STARDUST_DELTA, b.totalEarnedStardust - base);
-    totalEarned = Math.max(totalEarned, a.totalEarnedStardust + clientDelta);
+  const syncBase = b.lastSyncedEarnedStardust || 0;
+  let totalEarned;
+
+  if (
+    serverUntouchedInitial &&
+    (syncBase === 0 || syncBase === b.totalEarnedStardust || b.migratedFromV1GiftPending)
+  ) {
+    const maxFirstPush = Math.max(spent, MAX_INITIAL_UNSYNCED_STARDUST);
+    if (b.totalEarnedStardust > maxFirstPush) {
+      pushUniqueWarning(warnings, 'stardust_delta_clamped');
+      totalEarned = maxFirstPush;
+    } else {
+      totalEarned = Math.max(30, b.totalEarnedStardust, spent);
+    }
+  } else if (syncBase >= 30 && b.totalEarnedStardust > syncBase && a.totalEarnedStardust > syncBase) {
+    const rawDelta = b.totalEarnedStardust - syncBase;
+    if (rawDelta > MAX_OFFLINE_STARDUST_DELTA) {
+      pushUniqueWarning(warnings, 'stardust_delta_clamped');
+    }
+    const clampedDelta = Math.min(MAX_OFFLINE_STARDUST_DELTA, rawDelta);
+    totalEarned = Math.max(30, spent, a.totalEarnedStardust + clampedDelta);
+  } else if (b.totalEarnedStardust - a.totalEarnedStardust > MAX_OFFLINE_STARDUST_DELTA) {
+    pushUniqueWarning(warnings, 'stardust_delta_clamped');
+    totalEarned = Math.max(30, spent, a.totalEarnedStardust + MAX_OFFLINE_STARDUST_DELTA);
+  } else {
+    totalEarned = Math.max(30, a.totalEarnedStardust, b.totalEarnedStardust, spent);
   }
-  merged.totalEarnedStardust = totalEarned;
-  merged.lastSyncedEarnedStardust = totalEarned;
-  merged.bankStardust = Math.max(0, totalEarned - spent);
+
+  merged.totalEarnedStardust = Math.min(MAX_SAFE_EARNED_STARDUST, totalEarned);
+  merged.lastSyncedEarnedStardust = merged.totalEarnedStardust;
+  merged.bankStardust = Math.max(0, merged.totalEarnedStardust - spent);
   return merged;
 }
 
-function sanitizeProfile(raw, openidSuffix) {
-  const src = raw && typeof raw === 'object' ? raw : {};
-  const defaultName = `星夜店长#${openidSuffix}`;
-  const nick = typeof src.nickName === 'string' && src.nickName.trim() ? src.nickName.trim().slice(0, 16) : defaultName;
-  const avatarUrl = typeof src.avatarUrl === 'string' ? src.avatarUrl.slice(0, 512) : '';
-  const avatarPreset = ['mikan', 'luna', 'mugi'].includes(src.avatarPreset) ? src.avatarPreset : 'mikan';
+function sanitizeProfile(raw, openidSuffix, fallbackPatron) {
+  const src = isPlainRecord(raw) ? raw : {};
+  const suffix =
+    typeof openidSuffix === 'string' && openidSuffix.trim() ? openidSuffix.trim() : '0000';
+  const defaultName = '星夜店长#' + suffix;
+  const rawNickVal = getOwn(src, 'nickName');
+  const rawNick = typeof rawNickVal === 'string' ? rawNickVal.trim() : '';
+  const nickName = rawNick ? rawNick.slice(0, 16) : defaultName;
+  const rawAvatarVal = getOwn(src, 'avatarUrl');
+  const rawAvatar = typeof rawAvatarVal === 'string' ? rawAvatarVal.trim() : '';
+  const avatarUrl = rawAvatar ? rawAvatar.slice(0, 512) : '';
+  const rawPresetVal = getOwn(src, 'avatarPreset');
+  const candPreset = rawPresetVal !== undefined ? canonicalizeKnownPatronId(rawPresetVal) : null;
+  const fbPreset = canonicalizeKnownPatronId(fallbackPatron) || 'mikan';
+  const avatarPreset = candPreset || fbPreset;
+  const authorized = hasOwn(src, 'authorized') ? Boolean(getOwn(src, 'authorized')) : false;
+  const updatedAt = hasOwn(src, 'updatedAt')
+    ? clampInt(getOwn(src, 'updatedAt'), 0, MAX_TIMESTAMP_MS, 0)
+    : 0;
+
   return {
-    nickName: nick,
+    nickName,
     avatarUrl,
     avatarPreset,
-    authorized: !!src.authorized,
-    updatedAt: clampInt(src.updatedAt || 0, 0, 9999999999999)
+    authorized,
+    updatedAt
   };
 }
 
-function mergeProfiles(serverRaw, clientRaw, openidSuffix) {
-  if (!serverRaw && !clientRaw) return sanitizeProfile(null, openidSuffix);
-  if (!serverRaw) return sanitizeProfile(clientRaw, openidSuffix);
-  if (!clientRaw) return sanitizeProfile(serverRaw, openidSuffix);
-  const s = sanitizeProfile(serverRaw, openidSuffix);
-  const c = sanitizeProfile(clientRaw, openidSuffix);
+function mergeProfiles(serverRaw, clientRaw, openidSuffix, fallbackPatron) {
+  const suffix =
+    typeof openidSuffix === 'string' && openidSuffix.trim() ? openidSuffix.trim() : '0000';
+  const defaultName = '星夜店长#' + suffix;
+  const fbPreset = canonicalizeKnownPatronId(fallbackPatron) || 'mikan';
+
+  const hasServer = isPlainRecord(serverRaw);
+  const hasClient = isPlainRecord(clientRaw);
+  if (!hasServer && !hasClient) {
+    return sanitizeProfile(null, suffix, fbPreset);
+  }
+  if (!hasServer) {
+    const cCheck = sanitizeProfile(clientRaw, suffix, 'mikan');
+    const c = sanitizeProfile(clientRaw, suffix, fbPreset);
+    if (isPlaceholderCloudProfile(cCheck, defaultName) && c.avatarPreset === 'mikan' && fbPreset !== 'mikan') {
+      return {
+        nickName: c.nickName,
+        avatarUrl: c.avatarUrl,
+        avatarPreset: fbPreset,
+        authorized: c.authorized,
+        updatedAt: c.updatedAt
+      };
+    }
+    return c;
+  }
+  if (!hasClient) {
+    const sCheck = sanitizeProfile(serverRaw, suffix, 'mikan');
+    const s = sanitizeProfile(serverRaw, suffix, fbPreset);
+    if (isPlaceholderCloudProfile(sCheck, defaultName) && s.avatarPreset === 'mikan' && fbPreset !== 'mikan') {
+      return {
+        nickName: s.nickName,
+        avatarUrl: s.avatarUrl,
+        avatarPreset: fbPreset,
+        authorized: s.authorized,
+        updatedAt: s.updatedAt
+      };
+    }
+    return s;
+  }
+
+  const sCheck = sanitizeProfile(serverRaw, suffix, 'mikan');
+  const cCheck = sanitizeProfile(clientRaw, suffix, 'mikan');
+  const s = sanitizeProfile(serverRaw, suffix, fbPreset);
+  const c = sanitizeProfile(clientRaw, suffix, fbPreset);
+
   if (s.authorized && !c.authorized) return s;
   if (c.authorized && !s.authorized) return c;
-  return (c.updatedAt || 0) >= (s.updatedAt || 0) ? c : s;
-}
 
-function sanitizeActiveRun(raw) {
-  if (!raw || typeof raw !== 'object') return null;
-  if (!['chef', 'rush', 'zen'].includes(raw.mode)) return null;
-  if (raw.mode === 'chef') {
-    raw.score = clampInt(raw.score, 0, MAX_CHEF_SCORE);
-    raw.shiftRevenue = clampInt(raw.shiftRevenue, 0, MAX_CHEF_SCORE);
-    raw.coins = clampInt(raw.coins, 0, 5000);
-  } else if (raw.mode === 'rush') {
-    raw.score = clampInt(raw.score, 0, MAX_RUSH_SCORE);
-  } else {
-    raw.score = clampInt(raw.score, 0, MAX_ZEN_SCORE);
-  }
-  const str = JSON.stringify(raw);
-  if (str.length > 65000) return null;
-  return raw;
-}
+  const sPlaceholder = isPlaceholderCloudProfile(sCheck, defaultName);
+  const cPlaceholder = isPlaceholderCloudProfile(cCheck, defaultName);
+  const sHasCustomNick = !isPlaceholderNickName(sCheck.nickName, defaultName);
+  const cHasCustomNick = !isPlaceholderNickName(cCheck.nickName, defaultName);
+  const sTs = s.updatedAt || 0;
+  const cTs = c.updatedAt || 0;
 
-function mergeSavedRuns(existingDoc, event) {
-  const out = { chef: null, rush: null, zen: null };
-  const prevMap = existingDoc && existingDoc.savedRuns && typeof existingDoc.savedRuns === 'object' ? existingDoc.savedRuns : {};
-  for (const m of ['chef', 'rush', 'zen']) {
-    if (prevMap[m]) out[m] = sanitizeActiveRun(prevMap[m]);
+  if (cTs > sTs && !cPlaceholder) {
+    return {
+      nickName: cHasCustomNick ? c.nickName : sHasCustomNick ? s.nickName : c.nickName,
+      avatarUrl: c.avatarUrl || s.avatarUrl,
+      avatarPreset: c.avatarPreset,
+      authorized: c.authorized,
+      updatedAt: c.updatedAt
+    };
   }
-  if (existingDoc && existingDoc.activeRun) {
-    const leg = sanitizeActiveRun(existingDoc.activeRun);
-    if (leg && (!out[leg.mode] || (leg.savedAt || 0) > (out[leg.mode].savedAt || 0))) {
-      out[leg.mode] = leg;
-    }
+  if (sTs > cTs && !sPlaceholder) {
+    return {
+      nickName: sHasCustomNick ? s.nickName : cHasCustomNick ? c.nickName : s.nickName,
+      avatarUrl: s.avatarUrl || c.avatarUrl,
+      avatarPreset: s.avatarPreset,
+      authorized: s.authorized,
+      updatedAt: s.updatedAt
+    };
   }
 
-  if (event.clearActiveRun && !event.clearSavedRunMode) {
-    return { chef: null, rush: null, zen: null };
+  if (sHasCustomNick && !cHasCustomNick && cTs <= sTs) {
+    return {
+      nickName: s.nickName,
+      avatarUrl: s.avatarUrl || c.avatarUrl,
+      avatarPreset: s.avatarPreset,
+      authorized: s.authorized,
+      updatedAt: s.updatedAt
+    };
   }
-  if (event.clearSavedRunMode && ['chef', 'rush', 'zen'].includes(event.clearSavedRunMode)) {
-    out[event.clearSavedRunMode] = null;
+  if (cHasCustomNick && !sHasCustomNick && sTs <= cTs) {
+    return {
+      nickName: c.nickName,
+      avatarUrl: c.avatarUrl || s.avatarUrl,
+      avatarPreset: c.avatarPreset,
+      authorized: c.authorized,
+      updatedAt: c.updatedAt
+    };
   }
 
-  if (event.savedRuns && typeof event.savedRuns === 'object') {
-    for (const m of ['chef', 'rush', 'zen']) {
-      if (event.savedRuns[m] === null) {
-        if (event.clearSavedRunMode === m) out[m] = null;
-      } else if (event.savedRuns[m]) {
-        const inc = sanitizeActiveRun(event.savedRuns[m]);
-        if (inc && (!out[m] || (inc.savedAt || 0) >= (out[m].savedAt || 0))) {
-          out[m] = inc;
-        }
+  if (cPlaceholder !== sPlaceholder) {
+    const chosen = cPlaceholder ? s : c;
+    const other = cPlaceholder ? c : s;
+    const chosenCustom = cPlaceholder ? sHasCustomNick : cHasCustomNick;
+    const otherCustom = cPlaceholder ? cHasCustomNick : sHasCustomNick;
+    return {
+      nickName: chosenCustom ? chosen.nickName : otherCustom ? other.nickName : s.nickName,
+      avatarUrl: chosen.avatarUrl || other.avatarUrl,
+      avatarPreset: chosen.avatarPreset,
+      authorized: chosen.authorized,
+      updatedAt: chosen.updatedAt
+    };
+  }
+
+  if (cPlaceholder && sPlaceholder) {
+    const primary = cTs > sTs ? c : s;
+    const secondary = cTs > sTs ? s : c;
+    let avatarPreset = primary.avatarPreset;
+    if (avatarPreset === 'mikan') {
+      if (fbPreset !== 'mikan') {
+        avatarPreset = fbPreset;
+      } else if (secondary.avatarPreset && secondary.avatarPreset !== 'mikan') {
+        avatarPreset = secondary.avatarPreset;
       }
     }
-  } else if (event.activeRun !== undefined) {
-    if (event.activeRun === null) {
-      out.chef = null;
-    } else {
-      const inc = sanitizeActiveRun(event.activeRun);
-      if (inc) out[inc.mode] = inc;
+    return {
+      nickName: primary.nickName,
+      avatarUrl: primary.avatarUrl || secondary.avatarUrl,
+      avatarPreset,
+      authorized: primary.authorized,
+      updatedAt: primary.updatedAt
+    };
+  }
+
+  const primary = cTs > sTs ? c : s;
+  const secondary = cTs > sTs ? s : c;
+  const primaryCustom = cTs > sTs ? cHasCustomNick : sHasCustomNick;
+  const secondaryCustom = cTs > sTs ? sHasCustomNick : cHasCustomNick;
+  return {
+    nickName: primaryCustom ? primary.nickName : secondaryCustom ? secondary.nickName : primary.nickName,
+    avatarUrl: primary.avatarUrl || secondary.avatarUrl,
+    avatarPreset: primary.avatarPreset,
+    authorized: primary.authorized,
+    updatedAt: primary.updatedAt
+  };
+}
+
+function applyExplicitProfileUpdate(existingProfileRaw, incomingRaw, openidSuffix, fallbackPatron, now) {
+  const prev = isPlainRecord(existingProfileRaw)
+    ? mergeProfiles(existingProfileRaw, null, openidSuffix, fallbackPatron)
+    : sanitizeProfile(null, openidSuffix, fallbackPatron);
+  const src = isPlainRecord(incomingRaw) ? incomingRaw : {};
+
+  let nickName = prev.nickName;
+  const rawNickVal = getOwn(src, 'nickName');
+  if (typeof rawNickVal === 'string' && rawNickVal.trim() !== '') {
+    nickName = rawNickVal.trim().slice(0, 16);
+  }
+
+  let avatarUrl = prev.avatarUrl;
+  const rawAvatarVal = getOwn(src, 'avatarUrl');
+  if (typeof rawAvatarVal === 'string') {
+    const trimmedUrl = rawAvatarVal.trim();
+    if (trimmedUrl !== '') {
+      avatarUrl = trimmedUrl.slice(0, 512);
+    } else if (getOwn(src, 'clearAvatarUrl') === true) {
+      avatarUrl = '';
     }
   }
 
-  return out;
+  let avatarPreset = prev.avatarPreset;
+  if (hasOwn(src, 'avatarPreset')) {
+    const candPreset = canonicalizeKnownPatronId(getOwn(src, 'avatarPreset'));
+    if (candPreset) {
+      avatarPreset = candPreset;
+    }
+  }
+
+  const authorized = Boolean(
+    prev.authorized || (hasOwn(src, 'authorized') && Boolean(getOwn(src, 'authorized')))
+  );
+  const reqUpdatedAt = hasOwn(src, 'updatedAt')
+    ? clampInt(getOwn(src, 'updatedAt'), 0, MAX_TIMESTAMP_MS, 0)
+    : 0;
+  const updatedAt = Math.max(now, prev.updatedAt || 0, reqUpdatedAt);
+
+  return {
+    nickName,
+    avatarUrl,
+    avatarPreset,
+    authorized,
+    updatedAt
+  };
 }
 
-exports.main = async (event = {}) => {
+function hasLegacyRootFields(doc) {
+  if (!isPlainRecord(doc)) return false;
+  for (let i = 0; i < LEGACY_ROOT_FIELDS.length; i++) {
+    if (hasOwn(doc, LEGACY_ROOT_FIELDS[i])) return true;
+  }
+  return false;
+}
+
+function hasLegacyV1SaveFields(doc) {
+  if (!isPlainRecord(doc)) return false;
+  for (let i = 0; i < LEGACY_V1_SAVE_DETECTION_KEYS.length; i++) {
+    if (hasOwn(doc, LEGACY_V1_SAVE_DETECTION_KEYS[i])) return true;
+  }
+  return false;
+}
+
+function resolveServerMetaRaw(existingDoc) {
+  if (!isPlainRecord(existingDoc)) return null;
+  const rawSrvMeta = getOwn(existingDoc, 'metaSave');
+  if (isPlainRecord(rawSrvMeta)) return rawSrvMeta;
+  if (!hasOwn(existingDoc, 'metaSave') || rawSrvMeta === undefined || hasLegacyV1SaveFields(existingDoc)) {
+    return existingDoc;
+  }
+  return null;
+}
+
+function mergeRawProfilePair(a, b, docSuffix) {
+  const hasA = isPlainRecord(a);
+  const hasB = isPlainRecord(b);
+  if (!hasA && !hasB) return null;
+  if (!hasA) return b;
+  if (!hasB) return a;
+  const mergedMikan = mergeProfiles(a, b, docSuffix, 'mikan');
+  const mergedProbe = mergeProfiles(a, b, docSuffix, 'luna');
+  if (mergedMikan.avatarPreset !== mergedProbe.avatarPreset) {
+    return {
+      nickName: mergedMikan.nickName,
+      avatarUrl: mergedMikan.avatarUrl,
+      authorized: mergedMikan.authorized,
+      updatedAt: mergedMikan.updatedAt
+    };
+  }
+  return mergedMikan;
+}
+
+function resolveTopDocProfile(doc, docSuffix) {
+  if (!isPlainRecord(doc)) return null;
+  const rawTopProf = getOwn(doc, 'profile');
+  const rawRootPlayerProf = getOwn(doc, 'playerProfile');
+  return mergeRawProfilePair(rawTopProf, rawRootPlayerProf, docSuffix);
+}
+
+function resolveRawStoredDocProfile(doc, rawMetaObj, docSuffix) {
+  const topProf = resolveTopDocProfile(doc, docSuffix);
+  const rawMetaProf =
+    isPlainRecord(rawMetaObj) &&
+    rawMetaObj !== doc &&
+    isPlainRecord(getOwn(rawMetaObj, 'playerProfile'))
+      ? getOwn(rawMetaObj, 'playerProfile')
+      : null;
+  return mergeRawProfilePair(topProf, rawMetaProf, docSuffix);
+}
+
+function resolveStoredDocProfile(doc, rawMetaObj, docSuffix, fallbackPatron) {
+  const topProf = resolveTopDocProfile(doc, docSuffix);
+  const rawMetaProf =
+    isPlainRecord(rawMetaObj) &&
+    rawMetaObj !== doc &&
+    isPlainRecord(getOwn(rawMetaObj, 'playerProfile'))
+      ? getOwn(rawMetaObj, 'playerProfile')
+      : null;
+  if (isPlainRecord(topProf) || isPlainRecord(rawMetaProf)) {
+    return mergeProfiles(topProf, rawMetaProf, docSuffix, fallbackPatron);
+  }
+  return sanitizeProfile(null, docSuffix, fallbackPatron);
+}
+
+function resolveDocSelectedPatron(doc, rawMetaObj) {
+  const src = isPlainRecord(rawMetaObj)
+    ? rawMetaObj
+    : isPlainRecord(doc)
+    ? doc
+    : null;
+  if (!isPlainRecord(src)) return 'mikan';
+  const unlocked = sanitizeUnlockedPatrons(getOwn(src, 'unlockedPatrons'));
+  const rawSel = getOwn(src, 'selectedPatron');
+  const cand = rawSel !== undefined ? canonicalizeKnownPatronId(rawSel) : null;
+  return cand && unlocked.indexOf(cand) !== -1 ? cand : 'mikan';
+}
+
+function buildLegacyRemovalPatch() {
+  const patch = {};
+  for (let i = 0; i < LEGACY_ROOT_FIELDS.length; i++) {
+    patch[LEGACY_ROOT_FIELDS[i]] = _.remove();
+  }
+  return patch;
+}
+
+exports.main = async (rawEvent = {}, rawContext = {}) => {
   await ensurePlayersCollection();
-  const wxContext = cloud.getWXContext();
-  const openid = wxContext.OPENID;
+
+  const event = isPlainRecord(rawEvent) ? rawEvent : {};
+  const context = isPlainRecord(rawContext) ? rawContext : {};
+
+  const wxContext = (typeof cloud.getWXContext === 'function' && cloud.getWXContext()) || {};
+  const wxOpenIdVal = isPlainRecord(wxContext) ? getOwn(wxContext, 'OPENID') : undefined;
+  const ctxOpenIdVal = getOwn(context, 'OPENID');
+  const openid =
+    typeof wxOpenIdVal === 'string' && wxOpenIdVal.trim()
+      ? wxOpenIdVal.trim()
+      : typeof ctxOpenIdVal === 'string' && ctxOpenIdVal.trim()
+      ? ctxOpenIdVal.trim()
+      : '';
+
   if (!openid) {
     return { ok: false, reason: 'missing_openid' };
   }
 
-  const openidSuffix = openid.slice(-4).toUpperCase();
-  const action = event.action || 'pull';
+  const openidSuffix = openid.slice(-4).toUpperCase() || '0000';
+  const rawActionVal = getOwn(event, 'action');
+  const hasAction =
+    hasOwn(event, 'action') &&
+    rawActionVal !== undefined &&
+    rawActionVal !== null &&
+    rawActionVal !== '';
+  const action = !hasAction
+    ? 'pull'
+    : typeof rawActionVal === 'string'
+    ? rawActionVal.trim() || 'pull'
+    : '__invalid__';
+
   const docRef = db.collection(PLAYERS_COL).doc(openid);
 
   async function readExisting() {
     try {
       const got = await docRef.get();
-      return got && got.data ? got.data : null;
-    } catch (_e) {
+      const gotData = isPlainRecord(got) ? getOwn(got, 'data') : null;
+      return isPlainRecord(gotData) ? gotData : null;
+    } catch (_err) {
       return null;
     }
   }
@@ -409,207 +1564,780 @@ exports.main = async (event = {}) => {
 
   if (action === 'pull') {
     if (!existing) {
-      const initMeta = sanitizeMetaSave(null);
-      initMeta.lastSyncedEarnedStardust = initMeta.totalEarnedStardust;
-      const initProfile = sanitizeProfile(null, openidSuffix);
       const now = Date.now();
+      const initProfile = sanitizeProfile(null, openidSuffix, 'mikan');
+      const initMeta = createDefaultMetaSave();
+      initMeta.lastSyncedEarnedStardust = initMeta.totalEarnedStardust;
+      initMeta.playerProfile = {
+        nickName: initProfile.nickName,
+        avatarUrl: initProfile.avatarUrl,
+        avatarPreset: initProfile.avatarPreset,
+        authorized: initProfile.authorized,
+        updatedAt: initProfile.updatedAt
+      };
+      initMeta.updatedAt = now;
+
       const newDoc = {
         openidSuffix,
         profile: initProfile,
-        bestChef: 0,
-        bestRush: 0,
-        bestZen: 0,
-        bestShiftReached: 0,
+        totalStars: 0,
+        totalCumulativeScore: 0,
         metaSave: initMeta,
-        activeRun: null,
-        savedRuns: { chef: null, rush: null, zen: null },
         revision: 1,
         createdAt: now,
         updatedAt: now
       };
       await docRef.set({ data: newDoc });
+
       return {
         ok: true,
         isNewUser: true,
+        migratedFromV1: false,
         openidSuffix,
         profile: initProfile,
+        totalStars: 0,
+        totalCumulativeScore: 0,
         metaSave: initMeta,
-        activeRun: null,
-        savedRuns: newDoc.savedRuns,
         revision: 1
       };
     }
 
-    const savedRuns = mergeSavedRuns(existing, {});
-    const primaryRun = savedRuns.chef || savedRuns.rush || savedRuns.zen || null;
+    const rawDocSuffix = getOwn(existing, 'openidSuffix');
+    const docSuffix =
+      typeof rawDocSuffix === 'string' && rawDocSuffix.trim()
+        ? rawDocSuffix.trim()
+        : openidSuffix;
+
+    const rawExistingMeta = getOwn(existing, 'metaSave');
+    const existingMetaObj = isPlainRecord(rawExistingMeta) ? rawExistingMeta : null;
+    const existingSv = existingMetaObj && hasOwn(existingMetaObj, 'schemaVersion')
+      ? toSafeNum(getOwn(existingMetaObj, 'schemaVersion'))
+      : 0;
+    const isExistingV2 = Number.isFinite(existingSv) && existingSv >= SCHEMA_VERSION;
+
+    if (!isExistingV2) {
+      const now = Date.now();
+      const migratedSource = existingMetaObj || existing;
+      const migratedSourceSv = hasOwn(migratedSource, 'schemaVersion')
+        ? toSafeNum(getOwn(migratedSource, 'schemaVersion'))
+        : 0;
+      const wasV1Migration = !(Number.isFinite(migratedSourceSv) && migratedSourceSv >= SCHEMA_VERSION);
+      const migratedMeta = migrateV1ToV2(migratedSource, existing);
+      migratedMeta.lastSyncedEarnedStardust = migratedMeta.totalEarnedStardust;
+      const nextProfile = resolveStoredDocProfile(
+        existing,
+        existingMetaObj,
+        docSuffix,
+        migratedMeta.selectedPatron
+      );
+      migratedMeta.playerProfile = {
+        nickName: nextProfile.nickName,
+        avatarUrl: nextProfile.avatarUrl,
+        avatarPreset: nextProfile.avatarPreset,
+        authorized: nextProfile.authorized,
+        updatedAt: nextProfile.updatedAt
+      };
+      migratedMeta.updatedAt = migratedMeta.updatedAt || now;
+      const nextRev = Math.max(
+        1,
+        toFiniteInt(hasOwn(existing, 'revision') ? getOwn(existing, 'revision') : 1, 1)
+      );
+      const totalStars = migratedMeta.lifetimeStats.totalStars;
+      const totalCumulativeScore = migratedMeta.lifetimeStats.totalCumulativeScore;
+
+      await docRef.update({
+        data: Object.assign(
+          {
+            openidSuffix: docSuffix,
+            profile: _.set(nextProfile),
+            totalStars,
+            totalCumulativeScore,
+            metaSave: _.set(migratedMeta),
+            revision: nextRev,
+            updatedAt: now
+          },
+          buildLegacyRemovalPatch()
+        )
+      });
+
+      return {
+        ok: true,
+        isNewUser: false,
+        migratedFromV1: wasV1Migration,
+        openidSuffix: docSuffix,
+        profile: nextProfile,
+        totalStars,
+        totalCumulativeScore,
+        metaSave: migratedMeta,
+        revision: nextRev
+      };
+    }
+
+    const cleanMeta = sanitizeMetaSave(existingMetaObj);
+    cleanMeta.lastSyncedEarnedStardust = cleanMeta.totalEarnedStardust;
+    const cleanProfile = resolveStoredDocProfile(
+      existing,
+      existingMetaObj,
+      docSuffix,
+      cleanMeta.selectedPatron
+    );
+    cleanMeta.playerProfile = {
+      nickName: cleanProfile.nickName,
+      avatarUrl: cleanProfile.avatarUrl,
+      avatarPreset: cleanProfile.avatarPreset,
+      authorized: cleanProfile.authorized,
+      updatedAt: cleanProfile.updatedAt
+    };
+    const rawExistingPullRev = hasOwn(existing, 'revision')
+      ? getOwn(existing, 'revision')
+      : undefined;
+    const hasCorruptedPullRev =
+      !hasOwn(existing, 'revision') ||
+      typeof rawExistingPullRev !== 'number' ||
+      !Number.isFinite(rawExistingPullRev) ||
+      !Number.isInteger(rawExistingPullRev) ||
+      rawExistingPullRev < 1;
+    const rev = Math.max(
+      1,
+      toFiniteInt(hasOwn(existing, 'revision') ? rawExistingPullRev : 1, 1)
+    );
+    const totalStars = cleanMeta.lifetimeStats.totalStars;
+    const totalCumulativeScore = cleanMeta.lifetimeStats.totalCumulativeScore;
+
+    if (hasLegacyRootFields(existing) || hasCorruptedPullRev) {
+      await docRef.update({
+        data: Object.assign(
+          {
+            openidSuffix: docSuffix,
+            profile: _.set(cleanProfile),
+            totalStars,
+            totalCumulativeScore,
+            metaSave: _.set(cleanMeta),
+            revision: rev,
+            updatedAt: Date.now()
+          },
+          buildLegacyRemovalPatch()
+        )
+      });
+    }
+
     return {
       ok: true,
       isNewUser: false,
-      openidSuffix: existing.openidSuffix || openidSuffix,
-      profile: existing.profile || sanitizeProfile(null, openidSuffix),
-      metaSave: existing.metaSave || null,
-      activeRun: primaryRun,
-      savedRuns,
-      revision: existing.revision || 1
+      migratedFromV1: false,
+      openidSuffix: docSuffix,
+      profile: cleanProfile,
+      totalStars,
+      totalCumulativeScore,
+      metaSave: cleanMeta,
+      revision: rev
     };
   }
 
   if (action === 'push') {
-    const baseRev = Number(event.baseRevision) || 0;
+    const baseRev = hasOwn(event, 'baseRevision') ? toFiniteInt(getOwn(event, 'baseRevision'), 0) : 0;
     let conflictMerged = false;
 
     for (let attempt = 0; attempt < 2; attempt++) {
-      if (attempt > 0) existing = await readExisting();
-      if (existing && baseRev > 0 && baseRev < (existing.revision || 1)) {
+      if (attempt > 0) {
+        existing = await readExisting();
+      }
+
+      const rawExistingRev = existing ? getOwn(existing, 'revision') : undefined;
+      const hasExistingRev =
+        Boolean(existing) && hasOwn(existing, 'revision') && rawExistingRev !== undefined;
+      const prevRev = existing ? Math.max(0, toFiniteInt(rawExistingRev, 0)) : 0;
+
+      if (existing && baseRev > 0 && baseRev < (prevRev || 1)) {
         conflictMerged = true;
       }
 
-      const { sanitizedClient, warnings } = validateAndClampClientMeta(
-        existing && existing.metaSave,
-        event.metaSave,
-        event.runReport || null
-      );
-      const mergedMeta = mergeMetaSaves(existing && existing.metaSave, sanitizedClient);
-      const mergedProfile = mergeProfiles(existing && existing.profile, event.profile, openidSuffix);
-      const nextSavedRuns = mergeSavedRuns(existing, event);
-      const nextPrimaryRun = nextSavedRuns.chef || nextSavedRuns.rush || nextSavedRuns.zen || null;
-      const prevRev = (existing && existing.revision) || 0;
-      const nextRev = prevRev + 1;
-      const now = Date.now();
+      const serverMetaRaw = resolveServerMetaRaw(existing);
+      const clientMetaRaw = getOwn(event, 'metaSave');
+      const hasClientMeta = isPlainRecord(clientMetaRaw);
+      const runReportRaw = getOwn(event, 'runReport');
 
-      const payload = {
-        openidSuffix,
-        profile: mergedProfile,
-        bestChef: mergedMeta.bestChef,
-        bestRush: mergedMeta.bestRush,
-        bestZen: mergedMeta.bestZen,
-        bestShiftReached: mergedMeta.lifetimeStats.bestShiftReached,
-        metaSave: mergedMeta,
-        activeRun: nextPrimaryRun,
-        savedRuns: nextSavedRuns,
-        revision: nextRev,
-        updatedAt: now
+      const validated = validateAndClampClientMeta(
+        serverMetaRaw,
+        clientMetaRaw,
+        runReportRaw,
+        existing
+      );
+      const warnings = validated.warnings;
+      const mergedMeta = mergeMetaSaves(
+        serverMetaRaw,
+        hasClientMeta ? validated.sanitizedClient : null,
+        warnings,
+        existing
+      );
+
+      const rawDocSuffix = existing ? getOwn(existing, 'openidSuffix') : undefined;
+      const docSuffix =
+        typeof rawDocSuffix === 'string' && rawDocSuffix.trim()
+          ? rawDocSuffix.trim()
+          : openidSuffix;
+      const defaultName = '星夜店长#' + docSuffix;
+
+      const rawSrvProf = existing
+        ? resolveRawStoredDocProfile(existing, serverMetaRaw, docSuffix)
+        : null;
+      const serverProfileInput = isPlainRecord(rawSrvProf)
+        ? rawSrvProf
+        : existing
+        ? {}
+        : null;
+
+      const serverHasTouchedProfile =
+        Boolean(existing) &&
+        isPlainRecord(serverProfileInput) &&
+        !isPlaceholderCloudProfile(
+          sanitizeProfile(serverProfileInput, docSuffix, 'mikan'),
+          defaultName
+        );
+      const evProfileRaw = getOwn(event, 'profile');
+      const suppressUntouchedClientProf =
+        Boolean(existing) &&
+        hasClientMeta &&
+        isUntouchedDefaultMeta(validated.sanitizedClient) &&
+        (!isUntouchedDefaultMeta(sanitizeMetaSave(serverMetaRaw, null, existing)) ||
+          serverHasTouchedProfile);
+
+      const evProfIsPlaceholder =
+        !isPlainRecord(evProfileRaw) ||
+        isPlaceholderCloudProfile(sanitizeProfile(evProfileRaw, docSuffix, 'mikan'), defaultName);
+      const effectiveEvProfile =
+        isPlainRecord(evProfileRaw) && !(suppressUntouchedClientProf && evProfIsPlaceholder)
+          ? evProfileRaw
+          : null;
+      const clientMetaProfRaw =
+        hasClientMeta && !suppressUntouchedClientProf
+          ? getOwn(clientMetaRaw, 'playerProfile')
+          : null;
+      const clientProfileInput = isPlainRecord(effectiveEvProfile)
+        ? effectiveEvProfile
+        : isPlainRecord(clientMetaProfRaw)
+        ? clientMetaProfRaw
+        : null;
+
+      const mergedProfile = mergeProfiles(
+        serverProfileInput,
+        clientProfileInput,
+        docSuffix,
+        mergedMeta.selectedPatron
+      );
+
+      mergedMeta.playerProfile = {
+        nickName: mergedProfile.nickName,
+        avatarUrl: mergedProfile.avatarUrl,
+        avatarPreset: mergedProfile.avatarPreset,
+        authorized: mergedProfile.authorized,
+        updatedAt: mergedProfile.updatedAt
       };
 
+      const now = Date.now();
+      mergedMeta.updatedAt = now;
+      const totalStars = mergedMeta.lifetimeStats.totalStars;
+      const totalCumulativeScore = mergedMeta.lifetimeStats.totalCumulativeScore;
+      const nextRev = prevRev + 1;
+
       if (!existing) {
-        payload.createdAt = now;
-        await docRef.set({ data: payload });
+        const setPayload = {
+          openidSuffix: docSuffix,
+          profile: mergedProfile,
+          totalStars,
+          totalCumulativeScore,
+          metaSave: mergedMeta,
+          revision: nextRev,
+          createdAt: now,
+          updatedAt: now
+        };
+        await docRef.set({ data: setPayload });
         return {
           ok: true,
-          openidSuffix,
+          openidSuffix: docSuffix,
           profile: mergedProfile,
+          totalStars,
+          totalCumulativeScore,
           metaSave: mergedMeta,
-          activeRun: nextPrimaryRun,
-          savedRuns: nextSavedRuns,
           revision: nextRev,
           conflictMerged,
           validationWarnings: warnings
         };
       }
 
-      // Optimistic concurrency check on `revision` to prevent lost updates
-      const updRes = await db
-        .collection(PLAYERS_COL)
-        .where({ _id: openid, revision: prevRev })
-        .update({ data: payload });
+      const updatePayload = Object.assign(
+        {
+          openidSuffix: docSuffix,
+          profile: _.set(mergedProfile),
+          totalStars,
+          totalCumulativeScore,
+          metaSave: _.set(mergedMeta),
+          revision: nextRev,
+          updatedAt: now
+        },
+        buildLegacyRemovalPatch()
+      );
+
+      const isUnmatchableRev =
+        hasExistingRev &&
+        ((typeof rawExistingRev === 'number' && !Number.isFinite(rawExistingRev)) ||
+          (typeof rawExistingRev === 'object' && rawExistingRev !== null) ||
+          typeof rawExistingRev === 'function' ||
+          typeof rawExistingRev === 'symbol' ||
+          typeof rawExistingRev === 'bigint');
+
+      let updRes;
+      if (isUnmatchableRev) {
+        updRes = await docRef.update({ data: updatePayload });
+      } else {
+        const revCond = hasExistingRev ? _.eq(rawExistingRev) : _.exists(false);
+        updRes = await db
+          .collection(PLAYERS_COL)
+          .where({ _id: openid, revision: revCond })
+          .update({ data: updatePayload });
+      }
 
       if (updRes && updRes.stats && updRes.stats.updated > 0) {
         return {
           ok: true,
-          openidSuffix,
+          openidSuffix: docSuffix,
           profile: mergedProfile,
+          totalStars,
+          totalCumulativeScore,
           metaSave: mergedMeta,
-          activeRun: nextPrimaryRun,
-          savedRuns: nextSavedRuns,
           revision: nextRev,
           conflictMerged,
           validationWarnings: warnings
         };
       }
+
       conflictMerged = true;
     }
 
-    return { ok: false, reason: 'revision_conflict_retry_exhausted' };
+    return {
+      ok: false,
+      conflict: true,
+      reason: 'revision_conflict_retry_exhausted'
+    };
   }
 
   if (action === 'updateProfile') {
     const now = Date.now();
+    const evProf = getOwn(event, 'profile');
+    const inProf = isPlainRecord(evProf) ? evProf : event;
+
     if (!existing) {
-      const profile = sanitizeProfile(event.profile, openidSuffix);
-      const initMeta = sanitizeMetaSave(null);
+      const initMeta = createDefaultMetaSave();
+      initMeta.lastSyncedEarnedStardust = initMeta.totalEarnedStardust;
+      const nextProfile = applyExplicitProfileUpdate(
+        null,
+        inProf,
+        openidSuffix,
+        initMeta.selectedPatron,
+        now
+      );
+      initMeta.playerProfile = {
+        nickName: nextProfile.nickName,
+        avatarUrl: nextProfile.avatarUrl,
+        avatarPreset: nextProfile.avatarPreset,
+        authorized: nextProfile.authorized,
+        updatedAt: nextProfile.updatedAt
+      };
+      initMeta.updatedAt = now;
+
       await docRef.set({
         data: {
           openidSuffix,
-          profile,
-          bestChef: 0,
-          bestRush: 0,
-          bestZen: 0,
-          bestShiftReached: 0,
+          profile: nextProfile,
+          totalStars: 0,
+          totalCumulativeScore: 0,
           metaSave: initMeta,
-          activeRun: null,
-          savedRuns: { chef: null, rush: null, zen: null },
           revision: 1,
           createdAt: now,
           updatedAt: now
         }
       });
-      return { ok: true, openidSuffix, profile };
+
+      return {
+        ok: true,
+        openidSuffix,
+        profile: nextProfile,
+        revision: 1
+      };
     }
-    const mergedProf = mergeProfiles(existing.profile, event.profile, openidSuffix);
+
+    const rawDocSuffix = getOwn(existing, 'openidSuffix');
+    const docSuffix =
+      typeof rawDocSuffix === 'string' && rawDocSuffix.trim()
+        ? rawDocSuffix.trim()
+        : openidSuffix;
+
+    const serverMetaRaw = resolveServerMetaRaw(existing);
+    const rawExistingMeta = getOwn(existing, 'metaSave');
+    const existingMetaObj = isPlainRecord(rawExistingMeta) ? rawExistingMeta : null;
+    const nextMeta = sanitizeMetaSave(existingMetaObj || existing, null, existing);
+    nextMeta.lastSyncedEarnedStardust = nextMeta.totalEarnedStardust;
+
+    const rawExistingProf = resolveRawStoredDocProfile(existing, serverMetaRaw, docSuffix);
+
+    const nextProfile = applyExplicitProfileUpdate(
+      rawExistingProf,
+      inProf,
+      docSuffix,
+      nextMeta.selectedPatron,
+      now
+    );
+    nextMeta.playerProfile = {
+      nickName: nextProfile.nickName,
+      avatarUrl: nextProfile.avatarUrl,
+      avatarPreset: nextProfile.avatarPreset,
+      authorized: nextProfile.authorized,
+      updatedAt: nextProfile.updatedAt
+    };
+    nextMeta.updatedAt = now;
+
+    const nextRev =
+      Math.max(1, toFiniteInt(hasOwn(existing, 'revision') ? getOwn(existing, 'revision') : 1, 1)) +
+      1;
+    const totalStars = nextMeta.lifetimeStats.totalStars;
+    const totalCumulativeScore = nextMeta.lifetimeStats.totalCumulativeScore;
+
     await docRef.update({
-      data: {
-        profile: mergedProf,
-        revision: (existing.revision || 1) + 1,
-        updatedAt: now
-      }
+      data: Object.assign(
+        {
+          openidSuffix: docSuffix,
+          profile: _.set(nextProfile),
+          totalStars,
+          totalCumulativeScore,
+          metaSave: _.set(nextMeta),
+          revision: nextRev,
+          updatedAt: now
+        },
+        buildLegacyRemovalPatch()
+      )
     });
-    return { ok: true, openidSuffix, profile: mergedProf };
+
+    return {
+      ok: true,
+      openidSuffix: docSuffix,
+      profile: nextProfile,
+      revision: nextRev
+    };
   }
 
   if (action === 'leaderboard') {
-    const mode = event.mode === 'rush' ? 'rush' : event.mode === 'zen' ? 'zen' : 'chef';
-    const scoreField = mode === 'rush' ? 'bestRush' : mode === 'zen' ? 'bestZen' : 'bestChef';
-    const maxCap = mode === 'rush' ? MAX_RUSH_SCORE : mode === 'zen' ? MAX_ZEN_SCORE : MAX_CHEF_SCORE;
+    const evBoardType = getOwn(event, 'boardType');
+    const evMode = getOwn(event, 'mode');
+    const rawBoard =
+      typeof evBoardType === 'string' && evBoardType.trim()
+        ? evBoardType.trim()
+        : typeof evMode === 'string' && evMode.trim()
+        ? evMode.trim()
+        : 'stars';
+    const boardType = rawBoard === 'score' || rawBoard === 'totalScore' ? 'score' : 'stars';
 
-    const topRes = await db
-      .collection(PLAYERS_COL)
-      .where({ [scoreField]: _.gt(0).and(_.lte(maxCap)) })
-      .orderBy(scoreField, 'desc')
-      .limit(50)
-      .get();
+    const boardFilter =
+      boardType === 'stars'
+        ? {
+            totalStars: _.gte(1).and(_.lte(MAX_TOTAL_STARS)),
+            totalCumulativeScore: _.gte(0).and(_.lte(MAX_TOTAL_CUMULATIVE_SCORE))
+          }
+        : {
+            totalCumulativeScore: _.gte(1).and(_.lte(MAX_TOTAL_CUMULATIVE_SCORE)),
+            totalStars: _.gte(0).and(_.lte(MAX_TOTAL_STARS))
+          };
 
-    const list = (topRes.data || []).map((row, idx) => ({
-      rank: idx + 1,
-      isMe: row._id === openid,
-      isNpc: false,
-      nickName: (row.profile && row.profile.nickName) || `星夜店长#${row.openidSuffix || '0000'}`,
-      avatarUrl: (row.profile && row.profile.avatarUrl) || '',
-      avatarPreset: (row.profile && row.profile.avatarPreset) || 'mikan',
-      score: Math.min(maxCap, row[scoreField] || 0),
-      bestShiftReached: row.bestShiftReached || 0
-    }));
+    let query = db.collection(PLAYERS_COL).where(boardFilter);
+    if (boardType === 'stars') {
+      query = query
+        .orderBy('totalStars', 'desc')
+        .orderBy('totalCumulativeScore', 'desc')
+        .orderBy('_id', 'asc');
+    } else {
+      query = query
+        .orderBy('totalCumulativeScore', 'desc')
+        .orderBy('totalStars', 'desc')
+        .orderBy('_id', 'asc');
+    }
+    const topRes = await query.limit(50).get();
+    const rawRows = topRes && safeIsArray(topRes.data) ? topRes.data : [];
+
+    const list = [];
+    const rowLen = safeArrayLength(rawRows);
+    for (let idx = 0; idx < rowLen; idx++) {
+      if (!hasOwn(rawRows, idx)) continue;
+      const row = safeArrayAt(rawRows, idx);
+      const safeRow = isPlainRecord(row) ? row : {};
+      const rawRowId = getOwn(safeRow, '_id');
+      const rowId =
+        typeof rawRowId === 'string' || typeof rawRowId === 'number'
+          ? String(rawRowId)
+          : '';
+      const isMe = rowId === openid;
+      const stars = hasOwn(safeRow, 'totalStars')
+        ? clampInt(getOwn(safeRow, 'totalStars'), 0, MAX_TOTAL_STARS, 0)
+        : 0;
+      const cumScore = hasOwn(safeRow, 'totalCumulativeScore')
+        ? clampInt(getOwn(safeRow, 'totalCumulativeScore'), 0, MAX_TOTAL_CUMULATIVE_SCORE, 0)
+        : 0;
+      const rawRowSuffix = getOwn(safeRow, 'openidSuffix');
+      const suffix =
+        typeof rawRowSuffix === 'string' && rawRowSuffix.trim()
+          ? rawRowSuffix.trim()
+          : rowId.slice(-4).toUpperCase() || '0000';
+      const rawRowMetaObj = getOwn(safeRow, 'metaSave');
+      const rowMetaObj = isPlainRecord(rawRowMetaObj) ? rawRowMetaObj : null;
+      const rowSelectedPatron = resolveDocSelectedPatron(safeRow, rowMetaObj);
+      const resolvedProf = resolveStoredDocProfile(
+        safeRow,
+        rowMetaObj,
+        suffix,
+        rowSelectedPatron
+      );
+      const nickName = resolvedProf.nickName;
+      const avatarUrl = resolvedProf.avatarUrl;
+      const avatarPreset = resolvedProf.avatarPreset;
+
+      list.push({
+        rank: list.length + 1,
+        id: rowId,
+        openidSuffix: suffix,
+        isMe,
+        isSelf: isMe,
+        isNpc: Boolean(hasOwn(safeRow, 'isNpc') && getOwn(safeRow, 'isNpc')),
+        nickName,
+        avatarUrl,
+        avatarPreset,
+        totalStars: stars,
+        totalCumulativeScore: cumScore,
+        totalScore: cumScore,
+        score: boardType === 'stars' ? stars : cumScore
+      });
+    }
+
+    let totalPlayers = list.length;
+    if (list.length >= 50) {
+      const totalCntRes = await db.collection(PLAYERS_COL).where(boardFilter).count();
+      if (totalCntRes && typeof totalCntRes.total === 'number' && totalCntRes.total >= list.length) {
+        totalPlayers = totalCntRes.total;
+      }
+    }
+
+    let rawDocStars = 0;
+    let rawDocScore = 0;
+    let callerDisqualified = false;
+
+    if (existing) {
+      const candStars = hasOwn(existing, 'totalStars') ? getOwn(existing, 'totalStars') : undefined;
+      const candScore = hasOwn(existing, 'totalCumulativeScore')
+        ? getOwn(existing, 'totalCumulativeScore')
+        : undefined;
+      const validStars =
+        typeof candStars === 'number' &&
+        Number.isFinite(candStars) &&
+        Number.isInteger(candStars) &&
+        candStars >= 0 &&
+        candStars <= MAX_TOTAL_STARS;
+      const validScore =
+        typeof candScore === 'number' &&
+        Number.isFinite(candScore) &&
+        Number.isInteger(candScore) &&
+        candScore >= 0 &&
+        candScore <= MAX_TOTAL_CUMULATIVE_SCORE;
+
+      if (!validStars || !validScore) {
+        callerDisqualified = true;
+      } else {
+        rawDocStars = candStars === 0 ? 0 : candStars;
+        rawDocScore = candScore === 0 ? 0 : candScore;
+      }
+    }
+
+    const myStars = existing && !callerDisqualified ? rawDocStars : 0;
+    const myScore = existing && !callerDisqualified ? rawDocScore : 0;
 
     let myRank = null;
-    const inTop = list.find((item) => item.isMe);
-    const myScore = existing ? Math.min(maxCap, existing[scoreField] || 0) : 0;
-    if (inTop) {
+    let inTop = null;
+    for (let i = 0; i < list.length; i++) {
+      if (list[i].isMe) {
+        inTop = list[i];
+        break;
+      }
+    }
+
+    if (callerDisqualified) {
+      myRank = null;
+    } else if (inTop) {
       myRank = inTop.rank;
-    } else if (myScore > 0) {
+    } else if (
+      (boardType === 'stars' && myStars >= 1) ||
+      (boardType === 'score' && myScore >= 1)
+    ) {
+      // Note: `myStars` and `myScore` are verified integers above, so `_.gt(myStars)`
+      // never matches the caller's own doc and stays 100% consistent with `orderBy(..., 'desc')`
+      // even if a corrupted fractional rival document exists in `players`.
+      const higherOrBranches =
+        boardType === 'stars'
+          ? [
+              {
+                totalStars: _.gt(myStars).and(_.lte(MAX_TOTAL_STARS)),
+                totalCumulativeScore: _.gte(0).and(_.lte(MAX_TOTAL_CUMULATIVE_SCORE))
+              },
+              {
+                totalStars: myStars,
+                totalCumulativeScore: _.gt(myScore).and(_.lte(MAX_TOTAL_CUMULATIVE_SCORE))
+              },
+              {
+                totalStars: myStars,
+                totalCumulativeScore: myScore,
+                _id: _.lt(openid)
+              }
+            ]
+          : [
+              {
+                totalCumulativeScore: _.gt(myScore).and(_.lte(MAX_TOTAL_CUMULATIVE_SCORE)),
+                totalStars: _.gte(0).and(_.lte(MAX_TOTAL_STARS))
+              },
+              {
+                totalCumulativeScore: myScore,
+                totalStars: _.gt(myStars).and(_.lte(MAX_TOTAL_STARS))
+              },
+              {
+                totalCumulativeScore: myScore,
+                totalStars: myStars,
+                _id: _.lt(openid)
+              }
+            ];
+
       const higherCnt = await db
         .collection(PLAYERS_COL)
-        .where({ [scoreField]: _.gt(myScore).and(_.lte(maxCap)) })
+        .where(_.or(higherOrBranches))
         .count();
-      myRank = (higherCnt.total || 0) + 1;
+      let higherTotal =
+        higherCnt && typeof higherCnt.total === 'number' && higherCnt.total > 0
+          ? higherCnt.total
+          : 0;
+
+      // Reconcile string `_id < openid` ties: check `dbTiedLt.count()` first so real
+      // CloudBase skips `.get()` scanning when `countedTied > 0`; otherwise paginate
+      // `.skip(offset).limit(100)` for numeric-only `_.lt` mocks (`createCloudSdkStore`).
+      try {
+        const dbTiedLt = await db
+          .collection(PLAYERS_COL)
+          .where({
+            totalStars: myStars,
+            totalCumulativeScore: myScore,
+            _id: _.lt(openid)
+          })
+          .count();
+        const countedTied =
+          dbTiedLt && typeof dbTiedLt.total === 'number' && dbTiedLt.total > 0
+            ? dbTiedLt.total
+            : 0;
+
+        if (countedTied === 0) {
+          let jsTiedBefore = 0;
+          let offset = 0;
+          const maxScan = 5000;
+          while (offset < maxScan) {
+            const tiedSnap = await db
+              .collection(PLAYERS_COL)
+              .where({ totalStars: myStars, totalCumulativeScore: myScore })
+              .orderBy('_id', 'asc')
+              .skip(offset)
+              .limit(100)
+              .get();
+            const batch = tiedSnap && safeIsArray(tiedSnap.data) ? tiedSnap.data : [];
+            const batchLen = safeArrayLength(batch);
+            if (batchLen === 0) break;
+
+            let reachedSelfOrAfter = false;
+            for (let ti = 0; ti < batchLen; ti++) {
+              if (!hasOwn(batch, ti)) continue;
+              const tr = safeArrayAt(batch, ti);
+              const rawTid = isPlainRecord(tr) ? getOwn(tr, '_id') : undefined;
+              const tid =
+                typeof rawTid === 'string'
+                  ? rawTid
+                  : typeof rawTid === 'number'
+                  ? String(rawTid)
+                  : '';
+              if (!tid) continue;
+              if (tid < openid) {
+                jsTiedBefore++;
+              } else {
+                reachedSelfOrAfter = true;
+                break;
+              }
+            }
+
+            if (reachedSelfOrAfter || batchLen < 100) {
+              break;
+            }
+            offset += batchLen;
+          }
+
+          if (jsTiedBefore > 0) {
+            higherTotal += jsTiedBefore;
+          }
+        }
+      } catch (_tieErr) {}
+
+      myRank = higherTotal + 1;
     }
 
     return {
       ok: true,
-      mode,
+      boardType,
       list,
       myRank,
+      totalPlayers,
+      myStars,
       myScore
     };
   }
 
-  return { ok: false, reason: `unknown_action:${action}` };
+  const safeActionLabel =
+    typeof rawActionVal === 'string' ? rawActionVal.slice(0, 32) : typeof rawActionVal;
+  return {
+    ok: false,
+    reason: 'unknown_action:' + safeActionLabel
+  };
 };
+
+exports._internal = Object.freeze({
+  SCHEMA_VERSION,
+  VALID_LEVEL_IDS,
+  CHAPTER_SCORE_CAPS,
+  MAX_TOTAL_STARS,
+  MAX_TOTAL_CUMULATIVE_SCORE,
+  MAX_OFFLINE_STARDUST_DELTA,
+  MAX_INITIAL_UNSYNCED_STARDUST,
+  MAX_CONSUMABLE_SPENT_STARDUST,
+  MAX_SAFE_EARNED_STARDUST,
+  CATCAKE_UPGRADE_COSTS,
+  DEVICE_UPGRADE_COSTS,
+  PATRON_COSTS,
+  THEME_COSTS,
+  SHOP_TOTAL_CAP,
+  V1_PATRON_COSTS,
+  V1_THEME_COSTS,
+  V1_UPGRADE_COSTS,
+  hasOwn,
+  getOwn,
+  toFiniteInt,
+  clampInt,
+  normalizePatronId,
+  computeSpentStardust,
+  computeTotalStars,
+  computeTotalCumulativeScore,
+  computeHighestUnlockedLevel,
+  createDefaultMetaSave,
+  migrateV1ToV2,
+  sanitizeMetaSave,
+  validateAndClampClientMeta,
+  mergeMetaSaves,
+  sanitizeProfile,
+  mergeProfiles,
+  applyExplicitProfileUpdate
+});

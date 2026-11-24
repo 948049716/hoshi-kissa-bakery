@@ -523,9 +523,139 @@ function inferSpriteDims(src) {
   if (s.includes('customers_atlas')) return { w: 1024, h: 512 };
   if (s.includes('board_tiles_atlas')) return { w: 512, h: 256 };
   if (s.includes('ui_atlas')) return { w: 512, h: 512 };
+  if (s.includes('ui_title_plaque')) return { w: 475, h: 290 };
   if (s.includes('title_hero_v2')) return { w: 1280, h: 720 };
   if (s.includes('catcake_')) return { w: 192, h: 192 };
   return { w: 256, h: 256 };
+}
+
+function createMockWebAudioContext(spy) {
+  function makeParam(initial = 0) {
+    return {
+      value: initial,
+      setValueAtTime(v) {
+        this.value = v;
+      },
+      linearRampToValueAtTime(v) {
+        this.value = v;
+      },
+      exponentialRampToValueAtTime(v) {
+        this.value = v;
+      },
+      setTargetAtTime(v) {
+        this.value = v;
+      },
+      cancelScheduledValues() {}
+    };
+  }
+
+  const gainNodes = [];
+  const ctx = {
+    currentTime: 0,
+    sampleRate: 44100,
+    state: 'running',
+    destination: {},
+    _gainNodes: gainNodes,
+    resume() {
+      this.state = 'running';
+      return Promise.resolve();
+    },
+    createGain() {
+      const node = {
+        gain: makeParam(1),
+        connect() {
+          return this;
+        },
+        disconnect() {}
+      };
+      gainNodes.push(node);
+      return node;
+    },
+    createOscillator() {
+      return {
+        type: 'sine',
+        frequency: makeParam(440),
+        detune: makeParam(0),
+        connect() {
+          return this;
+        },
+        disconnect() {},
+        start() {
+          spy.oscillatorStarts += 1;
+        },
+        stop() {}
+      };
+    },
+    createBiquadFilter() {
+      return {
+        type: 'lowpass',
+        frequency: makeParam(12500),
+        Q: makeParam(1),
+        gain: makeParam(0),
+        connect() {
+          return this;
+        },
+        disconnect() {}
+      };
+    },
+    createDynamicsCompressor() {
+      return {
+        threshold: makeParam(-14),
+        knee: makeParam(18),
+        ratio: makeParam(3),
+        attack: makeParam(0.008),
+        release: makeParam(0.22),
+        connect() {
+          return this;
+        },
+        disconnect() {}
+      };
+    },
+    createDelay() {
+      return {
+        delayTime: makeParam(0.05),
+        connect() {
+          return this;
+        },
+        disconnect() {}
+      };
+    },
+    createStereoPanner() {
+      return {
+        pan: makeParam(0),
+        connect() {
+          return this;
+        },
+        disconnect() {}
+      };
+    },
+    createBuffer(channels = 1, length = 1, sampleRate = 44100) {
+      const chData = Array.from({ length: channels }, () => new Float32Array(Math.max(1, length)));
+      return {
+        numberOfChannels: channels,
+        length,
+        sampleRate,
+        getChannelData(ch = 0) {
+          return chData[ch] || chData[0];
+        }
+      };
+    },
+    createBufferSource() {
+      return {
+        buffer: null,
+        loop: false,
+        playbackRate: makeParam(1),
+        connect() {
+          return this;
+        },
+        disconnect() {},
+        start() {},
+        stop() {}
+      };
+    }
+  };
+  spy.lastAudioCtx = ctx;
+  return ctx;
 }
 
 function bootMockApp(viewportOpts = {}, initialStorage = {}) {
@@ -545,7 +675,11 @@ function bootMockApp(viewportOpts = {}, initialStorage = {}) {
     colorStops: [],
     styles: [],
     texts: [],
-    userInfoButtons: []
+    userInfoButtons: [],
+    setInnerAudioOptionCalls: [],
+    createWebAudioContextCalls: 0,
+    oscillatorStarts: 0,
+    lastAudioCtx: null
   };
 
   const storage = new Map();
@@ -555,6 +689,7 @@ function bootMockApp(viewportOpts = {}, initialStorage = {}) {
 
   const resizeListeners = [];
   const touchListeners = { start: [], move: [], end: [], cancel: [] };
+  const keyListeners = [];
   const lifecycleListeners = { show: [], hide: [] };
   const activeTimers = new Set();
 
@@ -690,11 +825,21 @@ function bootMockApp(viewportOpts = {}, initialStorage = {}) {
     onTouchCancel(cb) {
       if (typeof cb === 'function') touchListeners.cancel.push(cb);
     },
+    onKeyDown(cb) {
+      if (typeof cb === 'function') keyListeners.push(cb);
+    },
     onShow(cb) {
       if (typeof cb === 'function') lifecycleListeners.show.push(cb);
     },
     onHide(cb) {
       if (typeof cb === 'function') lifecycleListeners.hide.push(cb);
+    },
+    setInnerAudioOption(opts) {
+      spy.setInnerAudioOptionCalls.push(opts);
+    },
+    createWebAudioContext() {
+      spy.createWebAudioContextCalls += 1;
+      return createMockWebAudioContext(spy);
     },
     vibrateShort() {},
     showShareMenu() {},
@@ -741,6 +886,7 @@ function bootMockApp(viewportOpts = {}, initialStorage = {}) {
     storage,
     resizeListeners,
     touchListeners,
+    keyListeners,
     lifecycleListeners,
     async flushAssets() {
       for (let i = 0; i < 4; i++) {
@@ -1561,8 +1707,8 @@ async function runSectionC() {
     assert.equal(_internal.migrateV1ToV2(v1Fixture).bankStardust, 230);
 
     // Clean mock cloud storage before testing Platform.runBrowserMockCloud
-    Platform.removeStorage('hoshi_kissa_mock_cloud_doc_v1');
-    Platform.removeStorage('hoshi_kissa_mock_cloud_doc_v2');
+    Platform.removeStorage('__hoshi_browser_cloud_doc_v1__');
+    Platform.removeStorage('__hoshi_browser_cloud_doc_v2__');
 
     const pullCloud = await cloudMain({ action: 'pull' });
     const pullMock = await Platform.runBrowserMockCloud({ action: 'pull' });
@@ -1647,8 +1793,10 @@ async function runSectionC() {
       assert.ok(typeof lbMock.myRank === 'number' && lbMock.myRank >= 1);
     }
 
-    Platform.removeStorage('hoshi_kissa_mock_cloud_doc_v1');
-    Platform.removeStorage('hoshi_kissa_mock_cloud_doc_v2');
+    Platform.removeStorage('__hoshi_browser_cloud_doc_v1__');
+    Platform.removeStorage('__hoshi_browser_cloud_doc_v2__');
+    assert.equal(Platform.getStorageJSON('__hoshi_browser_cloud_doc_v1__'), null);
+    assert.equal(Platform.getStorageJSON('__hoshi_browser_cloud_doc_v2__'), null);
   });
 }
 
@@ -1954,7 +2102,7 @@ function walkFilesExcludingCloud(dirPath, acc = []) {
 function verifyHitsGeometry(hits, metrics, contextLabel) {
   assert.ok(Array.isArray(hits) && hits.length > 0, `${contextLabel}: hits empty`);
   const { width, height, safeBottom = 0, menuRect } = metrics;
-  const maxY = height - safeBottom + 0.5;
+  const maxY = height - Math.max(10, safeBottom + 8) + 0.5;
 
   for (const h of hits) {
     assert.ok(
@@ -1964,12 +2112,12 @@ function verifyHitsGeometry(hits, metrics, contextLabel) {
     assert.ok(h.x >= -0.5 && h.x + h.w <= width + 0.5, `${contextLabel}: ${h.id} X out of [0, ${width}]`);
     assert.ok(
       h.y >= -0.5 && h.y + h.h <= maxY,
-      `${contextLabel}: ${h.id} bottom ${h.y + h.h} exceeds height - safeBottom (${height - safeBottom})`
+      `${contextLabel}: ${h.id} bottom ${h.y + h.h} exceeds safeBottom dock limit ${maxY - 0.5}`
     );
     if (menuRect && h.y < menuRect.bottom) {
       assert.ok(
         h.x + h.w <= menuRect.left - 8 + 0.5,
-        `${contextLabel}: ${h.id} right ${h.x + h.w} violates capsule clearance <= ${menuRect.left - 8}`
+        `${contextLabel}: ${h.x + h.w} on ${h.id} violates capsule clearance <= ${menuRect.left - 8}`
       );
     }
   }
@@ -1981,8 +2129,8 @@ function verifyHitsGeometry(hits, metrics, contextLabel) {
       const ox = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
       const oy = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
       assert.ok(
-        ox <= 1 || oy <= 1,
-        `${contextLabel}: overlapping hits ${a.id} and ${b.id} (${ox.toFixed(1)}x${oy.toFixed(1)}px)`
+        ox <= 0 || oy <= 0,
+        `${contextLabel}: overlapping hits ${a.id} and ${b.id} (${ox.toFixed(2)}x${oy.toFixed(2)}px)`
       );
     }
   }
@@ -2631,8 +2779,342 @@ async function runSectionE() {
       }
       assert.equal(dbg.getState().activeTutorialStep, null);
       assert.equal(dbg.getSaveData().seenTutorials.ice_tile, true);
+
+      // W2-F06a: 1-3 with skipTutorial: true MUST NEVER arm tray_trash mid-run
+      dbg.setSaveData(SaveSync.createDefaultSave());
+      dbg.startLevel('1-3', { skipTutorial: true, rng: mulberry32(506) });
+      dbg.advanceTime(0.6);
+      for (let k = 0; k < 4; k++) dbg.knead();
+      let placedSkip = 0;
+      const gSkip = dbg.getState().grid;
+      for (let r = 0; r < gSkip.rows && placedSkip < 3; r++) {
+        for (let c = 0; c < gSkip.cols && placedSkip < 3; c++) {
+          if (gSkip.cells[r][c].tile && dbg.tapBoardCell(r, c).placed) {
+            placedSkip++;
+          }
+        }
+      }
+      assert.equal(dbg.getState().activeTutorialStep, null);
+
+      // W2-F06b: 1-3 single misplaced tile (filled === 1 matching zero seated slots) triggers tray_trash
+      dbg.setSaveData(SaveSync.createDefaultSave());
+      dbg.startLevel('1-3', { skipTutorial: false, rng: mulberry32(507) });
+      dbg.advanceTime(0.6);
+      // Upgrade board tiles with spoon/merges until we have a tier unmatched by any seated customer
+      let unmatchedCoord = null;
+      for (let attempt = 0; attempt < 20 && !unmatchedCoord; attempt++) {
+        const curSt = dbg.getState();
+        const neededSet = new Set();
+        for (const s of curSt.seats) {
+          if (!s) continue;
+          for (const sl of s.slots) neededSet.add(sl.tier);
+        }
+        for (let r = 0; r < curSt.grid.rows && !unmatchedCoord; r++) {
+          for (let c = 0; c < curSt.grid.cols && !unmatchedCoord; c++) {
+            const t = curSt.grid.cells[r][c].tile;
+            if (t && t.frozenHp === 0 && !neededSet.has(t.tier)) {
+              unmatchedCoord = { r, c };
+            }
+          }
+        }
+        if (!unmatchedCoord) {
+          dbg.knead();
+          dbg.slide(dirs[attempt % 4]);
+          // Upgrade first tile via spoon if needed to exceed C1/C2
+          const gCur = dbg.getState().grid;
+          outerSpoon: for (let r = 0; r < gCur.rows; r++) {
+            for (let c = 0; c < gCur.cols; c++) {
+              if (gCur.cells[r][c].tile) {
+                dbg.setSaveData({ ...dbg.getSaveData(), bankStardust: 200 });
+                dbg.useToolOnCell('spoon', r, c);
+                break outerSpoon;
+              }
+            }
+          }
+        }
+      }
+      assert.ok(unmatchedCoord, 'Expected to locate a single tile unmatched by seated 1-3 customers');
+      assert.equal(dbg.tapBoardCell(unmatchedCoord.r, unmatchedCoord.c).placed, true);
+      assert.equal(dbg.getState().tray.filter(Boolean).length, 1);
+      assert.equal(dbg.getState().activeTutorialStep, 'tray_trash');
+
+      // W2-F02: Portrait 390x844 tap on [跳过] (334, 118) over seat_2 dismisses tutorial without selecting seat_2
+      dbg.setSaveData(SaveSync.createDefaultSave());
+      dbg.startLevel('2-1', { skipTutorial: false, rng: mulberry32(508) });
+      dbg.advanceTime(3.2); // ensure all 3 seats incl. seat_2 are occupied
+      assert.equal(dbg.getState().activeTutorialStep, 'flavor_tile');
+      assert.ok(dbg.getState().seats[2] !== null, 'Expected seat_2 to be occupied underneath tutorialSkipRect');
+      const seat2Hit = dbg.getState().hits.find((h) => h.id === 'seat_2');
+      assert.ok(seat2Hit && 334 >= seat2Hit.x && 334 <= seat2Hit.x + seat2Hit.w);
+      assert.ok(118 >= seat2Hit.y && 118 <= seat2Hit.y + seat2Hit.h);
+      for (const fn of env.touchListeners.start) {
+        fn({ touches: [{ clientX: 334, clientY: 118 }], changedTouches: [{ clientX: 334, clientY: 118 }] });
+      }
+      for (const fn of env.touchListeners.end) {
+        fn({ touches: [], changedTouches: [{ clientX: 334, clientY: 118 }] });
+      }
+      assert.equal(dbg.getState().activeTutorialStep, null);
+      assert.equal(dbg.getSaveData().seenTutorials.flavor_tile, true);
+      assert.equal(dbg.getState().preferredSeatIdx, null);
     } finally {
       env.dispose();
+    }
+  });
+
+  await runTest('UT-M07', 'Wave-1 回归门禁：WeChat WebAudio、setSaveData 隔离、防挂死、预校验扣费、原型污染与 45° 斜划死区', async () => {
+    const env = bootMockApp();
+    try {
+      const { dbg, spy, touchListeners, keyListeners } = env;
+
+      // 1) W2-F01 + W2-F07: No premature AudioContext on boot; gesture invokes wx.setInnerAudioOption + wx.createWebAudioContext; setSaveData syncs active BGM
+      assert.equal(spy.createWebAudioContextCalls, 0);
+      dbg.clickHit('lobby_bgm_btn'); // waltz -> bossa + unlock()
+      assert.equal(spy.createWebAudioContextCalls, 1);
+      assert.ok(spy.setInnerAudioOptionCalls.length >= 1);
+      assert.deepEqual(spy.setInnerAudioOptionCalls[0], { obeyMuteSwitch: true });
+      assert.ok(spy.lastAudioCtx && spy.lastAudioCtx._gainNodes.length >= 2);
+      const bgmMasterNode = spy.lastAudioCtx._gainNodes[0]; // first gain node after compressor is _bgmMasterGain
+      assert.ok(bgmMasterNode.gain.value > 0.01, 'Expected active BGM master gain > 0.01');
+
+      // setSaveData({ bgmTrack: 'off' }) stops active BGM; setSaveData({ bgmTrack: 'waltz' }) restarts BGM
+      dbg.setSaveData({ ...dbg.getSaveData(), bgmTrack: 'off' });
+      assert.ok(bgmMasterNode.gain.value <= 0.001, 'Expected BGM master gain ramped down on bgmTrack=off');
+      dbg.setSaveData({ ...dbg.getSaveData(), bgmTrack: 'waltz' });
+      assert.ok(bgmMasterNode.gain.value > 0.01, 'Expected BGM master gain restored on bgmTrack=waltz');
+
+      // SFX oscillator trigger check
+      const oscBefore = spy.oscillatorStarts;
+      dbg.startLevel('1-1', { skipTutorial: true, rng: mulberry32(701) });
+      dbg.knead();
+      assert.ok(spy.oscillatorStarts > oscBefore, 'Expected procedural WebAudio oscillators to fire on SFX');
+
+      // 2) W2-F03a: Spread bankStardust override & non-mutation of input fixture
+      const spreadSaved = dbg.setSaveData({ ...dbg.getSaveData(), bankStardust: 500 });
+      assert.equal(spreadSaved.bankStardust, 500);
+      const frozenV1 = Object.freeze({
+        bankStardust: 50,
+        unlockedPatrons: ['mikan', 'luna'],
+        selectedPatron: 'luna',
+        unlockedThemes: ['amber', 'sakura'],
+        equippedTheme: 'sakura',
+        shopUpgrades: { up_tools: 2 },
+        bestChef: 8000
+      });
+      const migSaved = dbg.setSaveData(frozenV1);
+      assert.equal(migSaved.bankStardust, 230);
+      assert.equal(Object.prototype.hasOwnProperty.call(frozenV1, 'schemaVersion'), false);
+
+      // 3) W2-F04: advanceTime(Infinity / NaN / -5) non-finite guard
+      dbg.startLevel('1-1', { skipTutorial: true, rng: mulberry32(702) });
+      const tlBefore = dbg.getState().timeLeft;
+      dbg.advanceTime(Infinity);
+      dbg.advanceTime(-Infinity);
+      dbg.advanceTime(NaN);
+      dbg.advanceTime('Infinity');
+      dbg.advanceTime(-5);
+      assert.equal(dbg.getState().timeLeft, tlBefore);
+
+      // 4) W2-F05: Invalid/empty/OOB/frozen target cell charges 0 stardust & consumes 0 buy limit; pause modal blocks mutations
+      dbg.setSaveData({ schemaVersion: 2, totalEarnedStardust: 100, bankStardust: 100 });
+      dbg.startLevel('1-1', { skipTutorial: true, rng: mulberry32(703) }); // fork:1, spoon:0
+      assert.equal(dbg.useToolOnCell('spoon', 0, 2).applied, false); // empty cell on 1-1
+      assert.equal(dbg.useToolOnCell('spoon', -1, 0).applied, false); // OOB
+      assert.equal(dbg.useToolOnCell('spoon', NaN, 0).applied, false); // NaN
+      assert.equal(dbg.getSaveData().bankStardust, 100);
+      assert.equal(dbg.getSaveData().consumableSpentStardust, 0);
+
+      // Frozen tile on 3-1 charges 0 stardust for spoon
+      dbg.startLevel('3-1', { skipTutorial: true, rng: mulberry32(704) });
+      assert.equal(dbg.useToolOnCell('spoon', 1, 2).applied, false); // (1,2) is frozen on 3-1
+      assert.equal(dbg.getSaveData().bankStardust, 100);
+      assert.equal(dbg.getSaveData().consumableSpentStardust, 0);
+      // Valid non-frozen tile (0,1) STILL succeeds because 1/level limit was NOT wasted!
+      assert.equal(dbg.useToolOnCell('spoon', 0, 1).upgraded, true);
+      assert.equal(dbg.getSaveData().bankStardust, 80);
+      assert.equal(dbg.getSaveData().consumableSpentStardust, 20);
+
+      // Pause modal blocks tool & tray discard mutations
+      dbg.startLevel('1-1', { skipTutorial: true, rng: mulberry32(705) });
+      assert.equal(dbg.tapBoardCell(0, 0).placed, true);
+      dbg.openModal('pause');
+      assert.equal(dbg.useToolOnCell('fork', 0, 1).applied, false);
+      assert.equal(dbg.doubleTapTray(0).discarded, false);
+      assert.ok(dbg.getState().tray[0] !== null);
+      dbg.closeModal();
+
+      // 5) W2-F08a: Object.prototype pollution immunity on keyboard & catalog lookups
+      dbg.startLevel('1-1', { skipTutorial: true, rng: mulberry32(706) });
+      const tilesBeforeSpace = countBoardTiles(dbg.getState().grid);
+      try {
+        Object.prototype[' '] = 'left';
+        Object.prototype['1'] = 'up';
+        for (const kfn of keyListeners) {
+          kfn({ key: ' ' });
+        }
+        assert.equal(countBoardTiles(dbg.getState().grid), tilesBeforeSpace + 1, 'Space must knead, not slide left');
+        for (const kfn of keyListeners) {
+          kfn({ key: '1' });
+        }
+        assert.equal(dbg.getState().activeTool, 'fork', 'Key 1 must arm fork, not slide up');
+        for (const kfn of keyListeners) {
+          kfn({ key: 'toString' });
+        }
+        assert.equal(dbg.getState().activeTool, 'fork');
+      } finally {
+        delete Object.prototype[' '];
+        delete Object.prototype['1'];
+      }
+      dbg.clickHit('tool_fork_btn'); // disarm fork
+
+      // 6) W2-F08b: Pure 45-degree diagonal swipe (dx=25, dy=25) rejected; curved swipe with axisDiff >= 4 & dist >= 20 accepted
+      dbg.startLevel('1-1', { skipTutorial: true, rng: mulberry32(707) });
+      const bl = dbg.getState().boardLayout;
+      const sx = bl.gridX + bl.gridW * 0.5;
+      const sy = bl.gridY + bl.gridH * 0.5;
+      const gridSnapBefore = JSON.stringify(dbg.getState().grid.cells);
+
+      for (const fn of touchListeners.start) {
+        fn({ touches: [{ clientX: sx, clientY: sy }], changedTouches: [{ clientX: sx, clientY: sy }] });
+      }
+      for (const fn of touchListeners.move) {
+        fn({ touches: [{ clientX: sx + 25, clientY: sy + 25 }], changedTouches: [{ clientX: sx + 25, clientY: sy + 25 }] });
+      }
+      for (const fn of touchListeners.end) {
+        fn({ touches: [], changedTouches: [{ clientX: sx + 25, clientY: sy + 25 }] });
+      }
+      assert.equal(JSON.stringify(dbg.getState().grid.cells), gridSnapBefore, 'Pure 45-deg swipe must NOT slide');
+
+      // Delayed diagonal that establishes primary axis (13,13 -> 19,13: dist > 20, axisDiff = 6 >= 4) slides right
+      for (const fn of touchListeners.start) {
+        fn({ touches: [{ clientX: sx, clientY: sy }], changedTouches: [{ clientX: sx, clientY: sy }] });
+      }
+      for (const fn of touchListeners.move) {
+        fn({ touches: [{ clientX: sx + 13, clientY: sy + 13 }], changedTouches: [{ clientX: sx + 13, clientY: sy + 13 }] });
+      }
+      assert.equal(JSON.stringify(dbg.getState().grid.cells), gridSnapBefore);
+      for (const fn of touchListeners.move) {
+        fn({ touches: [{ clientX: sx + 19, clientY: sy + 13 }], changedTouches: [{ clientX: sx + 19, clientY: sy + 13 }] });
+      }
+      for (const fn of touchListeners.end) {
+        fn({ touches: [], changedTouches: [{ clientX: sx + 19, clientY: sy + 13 }] });
+      }
+      assert.notEqual(JSON.stringify(dbg.getState().grid.cells), gridSnapBefore, 'Established axis after diagonal delay must slide');
+
+      // 7) W2-F09: Shop red-dot parity & leaderboard_auth_btn synthetic clickHit fallback
+      dbg.closeModal();
+      // Return to lobby and check C3 affordability red-dot parity even when 1-4 is locked
+      dbg.openModal('pause');
+      dbg.clickHit('pause_lobby_btn');
+      dbg.setSaveData({
+        ...SaveSync.createDefaultSave(),
+        levelStars: {},
+        catcakeLevels: { 1: 4, 2: 4, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 },
+        bankStardust: 35
+      });
+      // Red dot fill '#E6483B' is drawn on dock_shop when hasAffordableShopItem() is true
+      spy.styles.length = 0;
+      dbg.advanceTime(0.01);
+      assert.ok(spy.styles.includes('#E6483B'), 'Expected dock_shop red dot when C3 (35 stardust) is purchasable');
+      dbg.openModal('shop');
+      assert.equal(dbg.clickHit('shop_buy_catcake_3'), true);
+      dbg.closeModal();
+
+      dbg.openModal('leaderboard');
+      assert.equal(dbg.getSaveData().playerProfile.authorized, false);
+      assert.equal(dbg.clickHit('leaderboard_auth_btn'), true);
+      assert.equal(dbg.getSaveData().playerProfile.authorized, true);
+      dbg.closeModal();
+    } finally {
+      env.dispose();
+    }
+
+    // 8) W2-F03b: Browser mock-cloud (!globalThis.wx) sequential setSaveData + flushCloudPush + reload isolation
+    const origWxOuter = globalThis.wx;
+    delete globalThis.wx;
+    try {
+      for (const modName of ['platform.js', 'game_app.js']) {
+        delete require.cache[path.join(SRC_DIR, modName)];
+      }
+      const freshPlatform = require(path.join(SRC_DIR, 'platform.js'));
+      freshPlatform.removeStorage(Constants.STORAGE_KEY);
+      freshPlatform.removeStorage('__hoshi_browser_cloud_doc_v1__');
+      freshPlatform.removeStorage('__hoshi_browser_cloud_doc_v2__');
+
+      const CloudCfg = require(path.join(SRC_DIR, 'cloud_config.js'));
+      const origDebounce = CloudCfg.SYNC_DEBOUNCE_MS;
+      CloudCfg.SYNC_DEBOUNCE_MS = 25;
+      try {
+        const { createApp: createBrowserApp } = require(path.join(SRC_DIR, 'game_app.js'));
+        const bDbg = createBrowserApp();
+        await new Promise((r) => setTimeout(r, 20));
+
+        // Contaminate browser mock cloud with upgrades from an earlier run
+        bDbg.setSaveData({
+          schemaVersion: 2,
+          totalEarnedStardust: 500,
+          lastSyncedEarnedStardust: 500,
+          bankStardust: 500
+        });
+        bDbg.openModal('shop');
+        bDbg.clickHit('shop_tab_catcakes');
+        assert.equal(bDbg.clickHit('shop_buy_catcake_1'), true); // -20
+        bDbg.clickHit('shop_tab_devices');
+        assert.equal(bDbg.clickHit('shop_buy_dev_tray'), true); // -60
+        bDbg.closeModal();
+        await new Promise((r) => setTimeout(r, 60)); // let flushCloudPush persist to __hoshi_browser_cloud_doc_v1__
+
+        // Now inject v1Fixture via setSaveData, buy catcake_2 (-25 -> 205), wait > debounce, and verify ZERO contamination
+        bDbg.setSaveData({
+          bankStardust: 50,
+          unlockedPatrons: ['mikan', 'luna'],
+          selectedPatron: 'luna',
+          unlockedThemes: ['amber', 'sakura'],
+          equippedTheme: 'sakura',
+          shopUpgrades: { up_tools: 2 },
+          bestChef: 8000
+        });
+        assert.equal(bDbg.getSaveData().bankStardust, 230);
+        assert.equal(bDbg.getSaveData().deviceUpgrades.dev_tray, 0);
+        bDbg.openModal('shop');
+        bDbg.clickHit('shop_tab_catcakes');
+        assert.equal(bDbg.clickHit('shop_buy_catcake_2'), true); // -25 -> 205
+        bDbg.closeModal();
+        await new Promise((r) => setTimeout(r, 60));
+        assert.equal(bDbg.getSaveData().bankStardust, 205);
+        assert.equal(bDbg.getSaveData().deviceUpgrades.dev_tray, 0);
+        assert.equal(bDbg.getSaveData().catcakeLevels['1'], 0);
+
+        // High-stardust setup (5250) + purchase (-20 -> 5230) must NOT be clamped by stale cloud baseline
+        bDbg.setSaveData({
+          schemaVersion: 2,
+          totalEarnedStardust: 5250,
+          lastSyncedEarnedStardust: 5250,
+          bankStardust: 5250
+        });
+        bDbg.openModal('shop');
+        bDbg.clickHit('shop_tab_catcakes');
+        assert.equal(bDbg.clickHit('shop_buy_catcake_1'), true);
+        bDbg.closeModal();
+        await new Promise((r) => setTimeout(r, 60));
+        assert.equal(bDbg.getSaveData().bankStardust, 5230);
+
+        // Reset via setSaveData({}) + simulated Page.reload() must NOT resurrect prior cloud state
+        bDbg.setSaveData({});
+        assert.equal(bDbg.getSaveData().bankStardust, 30);
+        const reloadedDbg = createBrowserApp();
+        await new Promise((r) => setTimeout(r, 40));
+        assert.equal(reloadedDbg.getSaveData().bankStardust, 30);
+        assert.equal(reloadedDbg.getSaveData().deviceUpgrades.dev_tray, 0);
+        reloadedDbg.setSaveData({}); // cancel any timers cleanly
+      } finally {
+        CloudCfg.SYNC_DEBOUNCE_MS = origDebounce;
+        freshPlatform.removeStorage(Constants.STORAGE_KEY);
+        freshPlatform.removeStorage('__hoshi_browser_cloud_doc_v1__');
+        freshPlatform.removeStorage('__hoshi_browser_cloud_doc_v2__');
+      }
+    } finally {
+      if (origWxOuter === undefined) delete globalThis.wx;
+      else globalThis.wx = origWxOuter;
     }
   });
 }

@@ -360,20 +360,37 @@ function drawTitlePlaqueBanner(ctx, x, y, w, h, sprites, subtitle, totalStars) {
   const sp = sprites || {};
   const cx = x + w * 0.5;
 
-  UI.drawWoodBoard(c, x, y, w, h, 13, true);
-  UI.drawParchmentSheet(c, x + 5, y + 4, w - 10, h - 8, 9);
-
-  if (w >= 260) {
-    UI.drawUiIcon(c, sp, 'serve_bell', x + 24, y + h * 0.5, Math.min(24, h * 0.48));
-    UI.drawStarIcon(c, x + w - 24, y + h * 0.5, Math.min(8, h * 0.16), true);
+  let drewPlaque = false;
+  const plaqueImg = sp.titlePlaque;
+  if (plaqueImg && typeof plaqueImg === 'object') {
+    const iw = Number(plaqueImg.naturalWidth || plaqueImg.width) || 0;
+    const ih = Number(plaqueImg.naturalHeight || plaqueImg.height) || 0;
+    if (iw > 0 && ih > 0 && typeof c.drawImage === 'function') {
+      try {
+        const sy = Math.round(ih * 0.12);
+        const sh = Math.max(1, Math.round(ih * 0.76));
+        c.drawImage(plaqueImg, 0, sy, iw, sh, x, y, w, h);
+        drewPlaque = true;
+      } catch (_) {
+        drewPlaque = false;
+      }
+    }
+  }
+  if (!drewPlaque) {
+    UI.drawWoodBoard(c, x, y, w, h, 13, true);
+    UI.drawParchmentSheet(c, x + 5, y + 4, w - 10, h - 8, 9);
+    if (w >= 260) {
+      UI.drawUiIcon(c, sp, 'serve_bell', x + 24, y + h * 0.5, Math.min(24, h * 0.48));
+      UI.drawStarIcon(c, x + w - 24, y + h * 0.5, Math.min(8, h * 0.16), true);
+    }
   }
 
   UI.drawFitText(
     c,
     '一 起 做 猫 饼',
     cx,
-    y + h * (subtitle ? 0.38 : 0.5),
-    w - 68,
+    y + h * (subtitle ? 0.39 : 0.5),
+    w - (drewPlaque ? 92 : 68),
     Math.min(20, h * 0.38),
     13.5,
     900,
@@ -386,8 +403,8 @@ function drawTitlePlaqueBanner(ctx, x, y, w, h, sprites, subtitle, totalStars) {
       c,
       subtitle,
       cx,
-      y + h * 0.73,
-      w - 68,
+      y + h * 0.69,
+      w - (drewPlaque ? 92 : 68),
       10.8,
       8.5,
       800,
@@ -396,8 +413,8 @@ function drawTitlePlaqueBanner(ctx, x, y, w, h, sprites, subtitle, totalStars) {
       'middle'
     );
   } else if (typeof totalStars === 'number') {
-    UI.drawStarIcon(c, cx - 24, y + h * 0.74, 5.5, true);
-    UI.drawFitText(c, `${totalStars}/90`, cx + 6, y + h * 0.74, 60, 10, 8, 800, '#8A5222', 'center', 'middle');
+    UI.drawStarIcon(c, cx - 24, y + h * 0.70, 5.5, true);
+    UI.drawFitText(c, `${totalStars}/90`, cx + 6, y + h * 0.70, 60, 10, 8, 800, '#8A5222', 'center', 'middle');
   }
 }
 
@@ -750,7 +767,7 @@ function renderCampaignMap(ctx, rect, app, hits, nowSec, includeHeroWatermark) {
       UI.drawUiIcon(c, sprites, 'icon_crown', nd.x + 12, nd.y + 12, 13, unlockInfo.unlocked ? 1 : 0.45);
     }
 
-    const labelText = nd.isBoss && lvl ? `${nd.levelId} ${lvl.name.slice(0, 3)}` : nd.levelId;
+    const labelText = nd.isBoss && lvl ? `${nd.levelId} ${lvl.name}` : nd.levelId;
     UI.drawFitText(
       c,
       labelText,
@@ -758,7 +775,7 @@ function renderCampaignMap(ctx, rect, app, hits, nowSec, includeHeroWatermark) {
       nd.y + nd.h * 0.36,
       nd.w - (nd.isBoss ? 22 : 10),
       nd.isBoss ? 11.2 : 11.8,
-      8.5,
+      nd.isBoss ? 7.4 : 8.5,
       900,
       unlockInfo.unlocked ? '#4A2C2A' : '#7D6A58',
       'center',

@@ -43,6 +43,29 @@ const ModalsUI = require('./modals_ui');
 
 let previousAppCleanup = null;
 
+const OWN_PROP = Object.prototype.hasOwnProperty;
+
+function hasOwn(obj, key) {
+  return obj !== null && obj !== undefined && typeof obj === 'object' && OWN_PROP.call(obj, key);
+}
+
+const SLIDE_KEY_MAP = Object.freeze(
+  Object.assign(Object.create(null), {
+    ArrowLeft: 'left',
+    a: 'left',
+    A: 'left',
+    ArrowRight: 'right',
+    d: 'right',
+    D: 'right',
+    ArrowUp: 'up',
+    w: 'up',
+    W: 'up',
+    ArrowDown: 'down',
+    s: 'down',
+    S: 'down'
+  })
+);
+
 function clamp(v, lo, hi) {
   if (!Number.isFinite(v)) return lo;
   return v < lo ? lo : v > hi ? hi : v;
@@ -57,6 +80,7 @@ function rawNowMs() {
 
 function pointInRect(x, y, rect) {
   if (!rect || typeof rect !== 'object') return false;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
   return x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
 }
 
@@ -120,6 +144,8 @@ function createApp() {
   let destroyed = false;
   let rafId = null;
   let cloudPushTimer = null;
+  let saveEpoch = 0;
+  let inSyntheticClickHit = false;
 
   if (typeof document !== 'undefined' && document) {
     try {
@@ -138,11 +164,25 @@ function createApp() {
   const saveData = SaveSync.loadLocalSave(platform);
 
   // Audio initialization & persisted user preference sync
-  const audio = new StarlightAudio(() => platform.createAudioContext());
-  audio.bgmTrack =
-    saveData.bgmTrack === 'bossa' || saveData.bgmTrack === 'off' ? saveData.bgmTrack : 'waltz';
-  audio.bgmEnabled = audio.bgmTrack !== 'off';
-  audio.setSfxEnabled(saveData.sfxEnabled !== false);
+  const audio = new StarlightAudio({
+    createAudioContext: () => platform.createAudioContext()
+  });
+
+  function syncAudioPrefsFromSave() {
+    const nextTrack =
+      saveData.bgmTrack === 'bossa' || saveData.bgmTrack === 'off'
+        ? saveData.bgmTrack
+        : 'waltz';
+    audio.setSfxEnabled(Boolean(saveData.sfxEnabled));
+    if (audio.ctx !== null) {
+      audio.setBGMTrack(nextTrack);
+    } else {
+      audio.bgmTrack = nextTrack;
+      audio.bgmEnabled = nextTrack !== 'off';
+    }
+  }
+
+  syncAudioPrefsFromSave();
 
   // Runtime 30-asset registry matching constants.ASSET_PATHS 1:1
   const sprites = {
@@ -252,6 +292,7 @@ function createApp() {
   let kneadCooldown = 0;
   let autoServeTimer = 0;
   let tutorialAutoFadeTimer = 0;
+  let levelSkipTutorial = false;
   let lastCountdownTickInt = 6;
   let unlockedStarsMask = 0;
   let lastTrayTapSlot = -1;
@@ -308,7 +349,11 @@ function createApp() {
       return cloudState.status;
     },
     get equippedTheme() {
-      return BOARD_THEMES[saveData.equippedTheme] || BOARD_THEMES.amber;
+      const tid = saveData.equippedTheme;
+      return (
+        (typeof tid === 'string' && hasOwn(BOARD_THEMES, tid) ? BOARD_THEMES[tid] : null) ||
+        BOARD_THEMES.amber
+      );
     },
     get isLobbyOpen() {
       return app.screen === 'lobby';
@@ -400,8 +445,12 @@ function createApp() {
     if (tabId === 'catcakes') {
       for (let i = 0; i < CATCAKES.length; i++) {
         const c = CATCAKES[i];
-        const lv = clamp(Math.floor(Number(saveData.catcakeLevels && saveData.catcakeLevels[c.tier]) || 0), 0, 4);
-        if (lv < 4 && isLevelUnlocked(c.unlockLevel, saveData.levelStars).unlocked && bank >= c.upgradeCosts[lv]) {
+        const rawLv =
+          saveData.catcakeLevels && hasOwn(saveData.catcakeLevels, String(c.tier))
+            ? saveData.catcakeLevels[c.tier]
+            : 0;
+        const lv = clamp(Math.floor(Number(rawLv) || 0), 0, 4);
+        if (lv < 4 && bank >= c.upgradeCosts[lv]) {
           return true;
         }
       }
@@ -410,7 +459,11 @@ function createApp() {
     if (tabId === 'devices') {
       for (let i = 0; i < SHOP_DEVICES.length; i++) {
         const d = SHOP_DEVICES[i];
-        const lv = clamp(Math.floor(Number(saveData.deviceUpgrades && saveData.deviceUpgrades[d.id]) || 0), 0, d.maxLv);
+        const rawLv =
+          saveData.deviceUpgrades && hasOwn(saveData.deviceUpgrades, d.id)
+            ? saveData.deviceUpgrades[d.id]
+            : 0;
+        const lv = clamp(Math.floor(Number(rawLv) || 0), 0, d.maxLv);
         if (lv < d.maxLv && bank >= d.costs[lv]) return true;
       }
       return false;
@@ -427,7 +480,9 @@ function createApp() {
       const unlocked = Array.isArray(saveData.unlockedThemes) ? saveData.unlockedThemes : ['amber'];
       for (let i = 0; i < BOARD_THEMES_KEYS.length; i++) {
         const tid = BOARD_THEMES_KEYS[i];
-        if (!unlocked.includes(tid) && bank >= THEME_COSTS[tid]) return true;
+        if (!unlocked.includes(tid) && hasOwn(THEME_COSTS, tid) && bank >= THEME_COSTS[tid]) {
+          return true;
+        }
       }
       return false;
     }
@@ -465,6 +520,7 @@ function createApp() {
       return;
     }
 
+    const reqEpoch = saveEpoch;
     app.leaderboardLoading = true;
     platform
       .callCloudFunction(CloudConfig.CLOUD_FUNCTION_NAME, {
@@ -472,7 +528,7 @@ function createApp() {
         boardType: cleanType
       })
       .then((res) => {
-        if (destroyed) return;
+        if (destroyed || reqEpoch !== saveEpoch) return;
         app.leaderboardLoading = false;
         if (res && res.ok && Array.isArray(res.list) && res.list.length > 0) {
           app.leaderboardData = {
@@ -486,11 +542,17 @@ function createApp() {
         } else {
           refreshOfflineLeaderboardFallback();
         }
+        if (app.activeModal === 'leaderboard') {
+          renderFrame(0);
+        }
       })
       .catch(() => {
-        if (destroyed) return;
+        if (destroyed || reqEpoch !== saveEpoch) return;
         app.leaderboardLoading = false;
         refreshOfflineLeaderboardFallback();
+        if (app.activeModal === 'leaderboard') {
+          renderFrame(0);
+        }
       });
   }
 
@@ -501,6 +563,7 @@ function createApp() {
       cloudPushTimer = null;
     }
 
+    const reqEpoch = saveEpoch;
     cloudState.status = 'syncing';
     cloudState.dirty = false;
 
@@ -517,7 +580,7 @@ function createApp() {
     platform
       .callCloudFunction(CloudConfig.CLOUD_FUNCTION_NAME, payload)
       .then((res) => {
-        if (destroyed) return;
+        if (destroyed || reqEpoch !== saveEpoch) return;
         if (res && res.ok) {
           cloudState.status = 'synced';
           cloudState.retryCount = 0;
@@ -532,6 +595,7 @@ function createApp() {
             merged.lastSyncedEarnedStardust = merged.totalEarnedStardust;
             SaveSync.saveLocalSave(platform, merged);
             Object.assign(saveData, merged);
+            syncAudioPrefsFromSave();
           } else {
             saveData.lastSyncedEarnedStardust = saveData.totalEarnedStardust;
             SaveSync.saveLocalSave(platform, saveData);
@@ -545,7 +609,7 @@ function createApp() {
         }
       })
       .catch(() => {
-        if (destroyed) return;
+        if (destroyed || reqEpoch !== saveEpoch) return;
         cloudState.status = 'retry_pending';
         cloudState.dirty = true;
       });
@@ -559,8 +623,10 @@ function createApp() {
       return;
     }
     if (cloudPushTimer) clearTimeout(cloudPushTimer);
+    const scheduledEpoch = saveEpoch;
     cloudPushTimer = setTimeout(() => {
       cloudPushTimer = null;
+      if (destroyed || scheduledEpoch !== saveEpoch) return;
       flushCloudPush(null);
     }, CloudConfig.SYNC_DEBOUNCE_MS || 1800);
   }
@@ -574,11 +640,12 @@ function createApp() {
       platform.initCloud(CloudConfig.CLOUD_ENV_ID || '');
     } catch (_) {}
 
+    const reqEpoch = saveEpoch;
     cloudState.status = 'syncing';
     platform
       .callCloudFunction(CloudConfig.CLOUD_FUNCTION_NAME, { action: 'pull' })
       .then((res) => {
-        if (destroyed) return;
+        if (destroyed || reqEpoch !== saveEpoch) return;
         if (!res || !res.ok) {
           cloudState.status = 'local_only';
           refreshOfflineLeaderboardFallback();
@@ -597,12 +664,7 @@ function createApp() {
           SaveSync.saveLocalSave(platform, merged);
           Object.assign(saveData, merged);
 
-          audio.bgmTrack =
-            saveData.bgmTrack === 'bossa' || saveData.bgmTrack === 'off'
-              ? saveData.bgmTrack
-              : 'waltz';
-          audio.bgmEnabled = audio.bgmTrack !== 'off';
-          audio.setSfxEnabled(saveData.sfxEnabled !== false);
+          syncAudioPrefsFromSave();
           checkVeteranGiftToast();
 
           if (
@@ -616,7 +678,7 @@ function createApp() {
         refreshOfflineLeaderboardFallback();
       })
       .catch(() => {
-        if (destroyed) return;
+        if (destroyed || reqEpoch !== saveEpoch) return;
         cloudState.status = 'local_only';
         refreshOfflineLeaderboardFallback();
       });
@@ -806,7 +868,7 @@ function createApp() {
     if (saveData.unlockedPatrons.includes(pid)) {
       return app.equipPatron(pid);
     }
-    const cost = PATRON_COSTS[pid] || patron.cost || 0;
+    const cost = hasOwn(PATRON_COSTS, pid) ? PATRON_COSTS[pid] : patron.cost || 0;
     if ((saveData.bankStardust || 0) < cost) {
       audio.playGridBlocked();
       showToast('星尘不足，暂时无法邀请该搭档', { icon: 'icon_stardust', tone: 'warn' });
@@ -836,13 +898,13 @@ function createApp() {
   };
 
   app.buyTheme = function buyTheme(themeId) {
-    const th = BOARD_THEMES[themeId];
+    const th = typeof themeId === 'string' && hasOwn(BOARD_THEMES, themeId) ? BOARD_THEMES[themeId] : null;
     if (!th) return false;
     if (!Array.isArray(saveData.unlockedThemes)) saveData.unlockedThemes = ['amber'];
     if (saveData.unlockedThemes.includes(th.id)) {
       return app.equipTheme(th.id);
     }
-    const cost = THEME_COSTS[th.id] || th.cost || 0;
+    const cost = hasOwn(THEME_COSTS, th.id) ? THEME_COSTS[th.id] : th.cost || 0;
     if ((saveData.bankStardust || 0) < cost) {
       audio.playGridBlocked();
       showToast('星尘不足，暂时无法解锁该烤盘皮肤', { icon: 'icon_stardust', tone: 'warn' });
@@ -857,7 +919,7 @@ function createApp() {
   };
 
   app.equipTheme = function equipTheme(themeId) {
-    const th = BOARD_THEMES[themeId];
+    const th = typeof themeId === 'string' && hasOwn(BOARD_THEMES, themeId) ? BOARD_THEMES[themeId] : null;
     if (!th) return false;
     const unlocked = Array.isArray(saveData.unlockedThemes) ? saveData.unlockedThemes : ['amber'];
     if (!unlocked.includes(th.id)) return false;
@@ -923,14 +985,18 @@ function createApp() {
     };
     persistSave(true);
     if (CloudConfig.ENABLE_CLOUD_SYNC) {
-      platform.callCloudFunction(CloudConfig.CLOUD_FUNCTION_NAME, {
-        action: 'updateProfile',
-        profile: saveData.playerProfile
-      }).then(() => {
-        if (!destroyed && app.activeModal === 'leaderboard') {
-          fetchLeaderboard(app.leaderboardBoardType);
-        }
-      });
+      const reqEpoch = saveEpoch;
+      platform
+        .callCloudFunction(CloudConfig.CLOUD_FUNCTION_NAME, {
+          action: 'updateProfile',
+          profile: saveData.playerProfile
+        })
+        .then(() => {
+          if (!destroyed && reqEpoch === saveEpoch && app.activeModal === 'leaderboard') {
+            fetchLeaderboard(app.leaderboardBoardType);
+          }
+        })
+        .catch(() => {});
     } else {
       refreshOfflineLeaderboardFallback();
     }
@@ -938,7 +1004,15 @@ function createApp() {
   };
 
   app.onTapLeaderboardAuth = function onTapLeaderboardAuth() {
-    if (!platform.hasWx) {
+    const gObj = platform.getGlobal ? platform.getGlobal() : globalThis;
+    const wxObj = gObj && hasOwn(gObj, 'wx') ? gObj.wx : null;
+    const hasNativeUserInfoBtn = Boolean(
+      platform.hasWx &&
+        wxObj &&
+        typeof wxObj === 'object' &&
+        typeof wxObj.createUserInfoButton === 'function'
+    );
+    if (!hasNativeUserInfoBtn || inSyntheticClickHit) {
       saveData.playerProfile = {
         ...(saveData.playerProfile || {}),
         authorized: true
@@ -1008,6 +1082,8 @@ function createApp() {
     app.orderState = null;
     app.activeTool = null;
     app.activeTutorialStep = null;
+    app.tutorialSkipRect = null;
+    levelSkipTutorial = false;
     autoServeTimer = 0;
     syncGameStateMirror();
     syncAudioMood();
@@ -1100,20 +1176,24 @@ function createApp() {
 
   function initTutorialForLevel(levelId, skipTutorial) {
     app.activeTutorialStep = null;
+    app.tutorialSkipRect = null;
     tutorialAutoFadeTimer = 0;
     if (skipTutorial) return;
-    const seen = (saveData && saveData.seenTutorials) || {};
-    if (levelId === '1-1' && !seen.intro_slide) {
+    const seen =
+      saveData && typeof saveData.seenTutorials === 'object' && saveData.seenTutorials
+        ? saveData.seenTutorials
+        : {};
+    if (levelId === '1-1' && !(hasOwn(seen, 'intro_slide') && seen.intro_slide)) {
       app.activeTutorialStep = 'intro_slide_1';
-    } else if (levelId === '2-1' && !seen.flavor_tile) {
+    } else if (levelId === '2-1' && !(hasOwn(seen, 'flavor_tile') && seen.flavor_tile)) {
       app.activeTutorialStep = 'flavor_tile';
-    } else if (levelId === '3-1' && !seen.ice_tile) {
+    } else if (levelId === '3-1' && !(hasOwn(seen, 'ice_tile') && seen.ice_tile)) {
       app.activeTutorialStep = 'ice_tile';
     }
   }
 
   function completeTutorialSaveKey(saveKey) {
-    if (!saveData.seenTutorials) {
+    if (!saveData.seenTutorials || typeof saveData.seenTutorials !== 'object') {
       saveData.seenTutorials = {
         intro_slide: false,
         tray_trash: false,
@@ -1121,34 +1201,71 @@ function createApp() {
         ice_tile: false
       };
     }
-    if (!saveData.seenTutorials[saveKey]) {
+    if (!(hasOwn(saveData.seenTutorials, saveKey) && saveData.seenTutorials[saveKey])) {
       saveData.seenTutorials[saveKey] = true;
       persistSave(true);
     }
     app.activeTutorialStep = null;
+    app.tutorialSkipRect = null;
     tutorialAutoFadeTimer = 0;
   }
 
   function skipCurrentTutorial() {
-    const step = app.activeTutorialStep ? TUTORIAL_STEPS[app.activeTutorialStep] : null;
+    const step =
+      typeof app.activeTutorialStep === 'string' && hasOwn(TUTORIAL_STEPS, app.activeTutorialStep)
+        ? TUTORIAL_STEPS[app.activeTutorialStep]
+        : null;
     if (!step) {
       app.activeTutorialStep = null;
+      app.tutorialSkipRect = null;
       return;
     }
     completeTutorialSaveKey(step.saveKey);
   }
 
   function maybeArmTrayTrashTutorial(forcedByFullTray = false) {
+    if (levelSkipTutorial) return;
     if (app.currentLevelId !== '1-3' || app.activeTutorialStep) return;
-    if (saveData.seenTutorials && saveData.seenTutorials.tray_trash) return;
+    if (
+      saveData.seenTutorials &&
+      hasOwn(saveData.seenTutorials, 'tray_trash') &&
+      saveData.seenTutorials.tray_trash
+    ) {
+      return;
+    }
     if (!app.orderState) return;
 
     let filled = 0;
+    const occupiedIndices = [];
     for (let i = 0; i < app.orderState.trayCapacity; i++) {
-      if (app.orderState.tray[i]) filled++;
+      if (app.orderState.tray[i]) {
+        filled++;
+        occupiedIndices.push(i);
+      }
     }
     const anyReady = app.orderState.seats.some((s) => s && s.readyToServe);
-    if (forcedByFullTray || (filled >= 2 && !anyReady)) {
+
+    let seatedCount = 0;
+    const matchedTraySet = new Set();
+    for (let i = 0; i < app.orderState.seats.length; i++) {
+      const seat = app.orderState.seats[i];
+      if (!seat) continue;
+      seatedCount++;
+      const m = OrderService.matchCustomerWithTray(seat, app.orderState.tray);
+      if (m && Array.isArray(m.usedTrayIndices)) {
+        for (let k = 0; k < m.usedTrayIndices.length; k++) {
+          matchedTraySet.add(m.usedTrayIndices[k]);
+        }
+      }
+    }
+    const hasUnmatchedPlacedTile =
+      seatedCount > 0 && occupiedIndices.some((idx) => !matchedTraySet.has(idx));
+
+    if (
+      forcedByFullTray ||
+      (filled >= 2 && !anyReady) ||
+      (filled >= 1 && !anyReady && hasUnmatchedPlacedTile)
+    ) {
       app.activeTutorialStep = 'tray_trash';
       tutorialAutoFadeTimer = 6.0;
     }
@@ -1236,7 +1353,8 @@ function createApp() {
     app.gridState = GridEngine.createGridState(lvl, lvl.presets);
     app.orderState = OrderService.createOrderState(lvl, saveData, levelRng);
     refreshNeededAndOrderMarks();
-    initTutorialForLevel(lvl.id, Boolean(opts && opts.skipTutorial));
+    levelSkipTutorial = Boolean(opts && opts.skipTutorial);
+    initTutorialForLevel(lvl.id, levelSkipTutorial);
 
     syncGameStateMirror();
     syncAudioMood();
@@ -1521,7 +1639,7 @@ function createApp() {
   }
 
   function executeDiscardTraySlot(slotIdx) {
-    if (app.screen !== 'playing' || !app.orderState) {
+    if (app.screen !== 'playing' || app.activeModal !== null || !app.orderState) {
       return { discarded: false, tile: null };
     }
     const fromPt = traySlotCenterPos(slotIdx);
@@ -1602,7 +1720,7 @@ function createApp() {
   // ==================== Utensils & Patron Active Skills ====================
 
   function tryEmergencyPurchaseTool(kind) {
-    const def = TOOLS[kind];
+    const def = typeof kind === 'string' && hasOwn(TOOLS, kind) ? TOOLS[kind] : null;
     if (!def) return { ok: false, reason: 'invalid_tool' };
     if ((app.toolBoughtThisLevel[kind] || 0) >= def.maxBuyPerLevel) {
       return { ok: false, reason: 'limit_reached' };
@@ -1616,6 +1734,37 @@ function createApp() {
     app.toolCounts[kind] = (app.toolCounts[kind] || 0) + 1;
     audio.playShopBuy();
     return { ok: true };
+  }
+
+  function validateToolTargetCell(kind, r, c) {
+    if (
+      !Number.isInteger(r) ||
+      !Number.isInteger(c) ||
+      r < 0 ||
+      r >= app.gridState.rows ||
+      c < 0 ||
+      c >= app.gridState.cols
+    ) {
+      return { valid: false, reason: 'out_of_bounds' };
+    }
+    const row = app.gridState.cells && app.gridState.cells[r];
+    const cell = row && row[c];
+    if (!cell || cell.type === 'void' || cell.type === 'block') {
+      return { valid: false, reason: 'unplayable_cell' };
+    }
+    if (!cell.tile || typeof cell.tile !== 'object') {
+      return { valid: false, reason: 'empty_cell' };
+    }
+    if (kind === 'spoon') {
+      if ((cell.tile.frozenHp || 0) > 0) {
+        return { valid: false, reason: 'tile_frozen' };
+      }
+      const tier = Number(cell.tile.tier);
+      if (!Number.isInteger(tier) || tier < 1 || tier >= 7) {
+        return { valid: false, reason: 'max_tier' };
+      }
+    }
+    return { valid: true };
   }
 
   app.onTapToolButton = function onTapToolButton(kind) {
@@ -1636,7 +1785,7 @@ function createApp() {
           buyRes.reason === 'limit_reached'
             ? '本关该厨具应急购买次数已用完（限1次）'
             : `星尘不足（需 ${TOOLS[kind].cost} 星尘）`,
-          { icon: TOOLS[kind].icon, tone: 'warn' }
+            { icon: TOOLS[kind].icon, tone: 'warn' }
         );
         return false;
       }
@@ -1652,11 +1801,44 @@ function createApp() {
   };
 
   function applyToolInternal(kind, r, c, allowAutoPurchase = false) {
-    if (app.screen !== 'playing' || !app.gridState || !app.orderState) {
+    if (
+      app.screen !== 'playing' ||
+      app.activeModal !== null ||
+      !app.gridState ||
+      !app.orderState
+    ) {
       return { ok: false, applied: false, reason: 'not_playing' };
     }
     if (kind !== 'fork' && kind !== 'spoon') {
       return { ok: false, applied: false, reason: 'invalid_tool' };
+    }
+
+    const targetCheck = validateToolTargetCell(kind, r, c);
+    if (!targetCheck.valid) {
+      app.activeTool = null;
+      audio.playGridBlocked();
+      if (kind === 'fork') {
+        showToast('清格叉需点选有猫饼或冰封的盘格', { icon: 'tool_fork', tone: 'warn' });
+        return {
+          ok: false,
+          applied: false,
+          kind: 'fork',
+          removed: false,
+          shatteredIce: false,
+          tile: null,
+          reason: targetCheck.reason
+        };
+      }
+      showToast('升阶勺仅可对 1~6 阶非冰封猫饼使用', { icon: 'tool_spoon', tone: 'warn' });
+      return {
+        ok: false,
+        applied: false,
+        kind: 'spoon',
+        upgraded: false,
+        tile: null,
+        skillChargeGain: 0,
+        reason: targetCheck.reason
+      };
     }
 
     if ((app.toolCounts[kind] || 0) <= 0) {
@@ -1908,6 +2090,7 @@ function createApp() {
     app.screen = 'result';
     app.activeTool = null;
     app.activeTutorialStep = null;
+    app.tutorialSkipRect = null;
     app.activeModal = 'level_result';
     autoServeTimer = 0;
 
@@ -2077,8 +2260,9 @@ function createApp() {
   }
 
   function advanceSimulation(totalSeconds) {
-    const safeSec = Math.max(0, Number(totalSeconds) || 0);
-    if (safeSec <= 0) return;
+    const n = Number(totalSeconds);
+    if (!Number.isFinite(n) || n <= 0) return;
+    const safeSec = Math.min(n, 3600);
 
     simElapsedMs += safeSec * 1000;
     let remaining = safeSec;
@@ -2183,6 +2367,8 @@ function createApp() {
     downOnBoard: false,
     downBoardCell: null,
     downTraySlot: -1,
+    downOnTutorialSkip: false,
+    diagonalDelayed: false,
     gestureConsumed: false,
     isModalScroll: false,
     startScrollY: 0
@@ -2197,9 +2383,10 @@ function createApp() {
   }
 
   function handlePointerDown(pt) {
-    if (!pt || destroyed) return;
-    const x = Number(pt.x) || 0;
-    const y = Number(pt.y) || 0;
+    if (!pt || typeof pt !== 'object' || destroyed) return;
+    const x = Number(pt.x);
+    const y = Number(pt.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     audio.unlock();
 
     pointerState.active = true;
@@ -2211,6 +2398,8 @@ function createApp() {
     pointerState.downOnBoard = false;
     pointerState.downBoardCell = null;
     pointerState.downTraySlot = -1;
+    pointerState.downOnTutorialSkip = false;
+    pointerState.diagonalDelayed = false;
     pointerState.gestureConsumed = false;
     pointerState.isModalScroll = false;
     pointerState.startScrollY = app.modalScrollY || 0;
@@ -2223,6 +2412,14 @@ function createApp() {
     }
 
     if (app.screen === 'playing') {
+      if (
+        app.activeTutorialStep &&
+        app.tutorialSkipRect &&
+        pointInRect(x, y, app.tutorialSkipRect)
+      ) {
+        pointerState.downOnTutorialSkip = true;
+        return;
+      }
       const hit = hits.findAt(x, y);
       if (hit && hit.meta && typeof hit.meta.slotIdx === 'number') {
         pointerState.downTraySlot = hit.meta.slotIdx;
@@ -2238,9 +2435,10 @@ function createApp() {
   }
 
   function handlePointerMove(pt) {
-    if (!pt || !pointerState.active || destroyed) return;
-    const x = Number(pt.x) || 0;
-    const y = Number(pt.y) || 0;
+    if (!pt || typeof pt !== 'object' || !pointerState.active || destroyed) return;
+    const x = Number(pt.x);
+    const y = Number(pt.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     pointerState.curX = x;
     pointerState.curY = y;
 
@@ -2264,19 +2462,29 @@ function createApp() {
       const adx = Math.abs(dx);
       const ady = Math.abs(dy);
       const axisDiff = Math.abs(adx - ady);
-      if (dist >= 18 && (axisDiff >= 4 || dist >= 20)) {
-        const dir = adx >= ady ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
-        pointerState.gestureConsumed = true;
-        executeSlide(dir);
-        renderFrame(0);
+      if (dist >= 18) {
+        if (axisDiff < 4) {
+          pointerState.diagonalDelayed = true;
+        } else if (dist >= (pointerState.diagonalDelayed ? 20 : 18)) {
+          const dir = adx > ady ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
+          pointerState.gestureConsumed = true;
+          executeSlide(dir);
+          renderFrame(0);
+        }
       }
     }
   }
 
   function handlePointerUp(pt) {
-    if (!pt || !pointerState.active || destroyed) return;
-    const x = Number(pt.x) || 0;
-    const y = Number(pt.y) || 0;
+    if (!pt || typeof pt !== 'object' || !pointerState.active || destroyed) return;
+    const x = Number(pt.x);
+    const y = Number(pt.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      pointerState.active = false;
+      pointerState.downOnTutorialSkip = false;
+      pointerState.diagonalDelayed = false;
+      return;
+    }
     const dx = x - pointerState.startX;
     const dy = y - pointerState.startY;
     const dist = Math.hypot(dx, dy);
@@ -2286,7 +2494,11 @@ function createApp() {
     const wasDownOnBoard = pointerState.downOnBoard;
     const downCell = pointerState.downBoardCell;
     const downTraySlot = pointerState.downTraySlot;
+    const wasDownOnTutorialSkip = pointerState.downOnTutorialSkip;
+    const wasDiagonalDelayed = pointerState.diagonalDelayed;
     pointerState.active = false;
+    pointerState.downOnTutorialSkip = false;
+    pointerState.diagonalDelayed = false;
 
     if (wasConsumed) return;
 
@@ -2320,12 +2532,17 @@ function createApp() {
         return;
       }
 
-      // Synthetic 2-point swipe (pointerdown -> pointerup without intermediate move)
-      if (wasDownOnBoard && app.activeTool === null && dist >= 18) {
+      // Synthetic 2-point swipe (pointerdown -> pointerup without intermediate move lock)
+      if (
+        wasDownOnBoard &&
+        app.activeTool === null &&
+        dist >= (wasDiagonalDelayed ? 20 : 18)
+      ) {
         const adx = Math.abs(dx);
         const ady = Math.abs(dy);
-        if (Math.abs(adx - ady) >= 2 || dist >= 20) {
-          const dir = adx >= ady ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
+        const axisDiff = Math.abs(adx - ady);
+        if (axisDiff >= 4) {
+          const dir = adx > ady ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
           executeSlide(dir);
           renderFrame(0);
           return;
@@ -2334,6 +2551,18 @@ function createApp() {
 
       // Crisp Tap (< 14px)
       if (dist < 14) {
+        if (
+          (elapsedMs < 350 || wasDownOnTutorialSkip) &&
+          app.activeTutorialStep &&
+          app.tutorialSkipRect &&
+          pointInRect(x, y, app.tutorialSkipRect)
+        ) {
+          audio.playPatronSelect();
+          skipCurrentTutorial();
+          renderFrame(0);
+          return;
+        }
+
         const hit = hits.findAt(x, y);
         if (hit && typeof hit.onClick === 'function') {
           hit.onClick();
@@ -2355,15 +2584,6 @@ function createApp() {
             renderFrame(0);
             return;
           }
-        }
-
-        if (
-          app.activeTutorialStep &&
-          app.tutorialSkipRect &&
-          pointInRect(x, y, app.tutorialSkipRect)
-        ) {
-          skipCurrentTutorial();
-          renderFrame(0);
         }
       }
       return;
@@ -2393,19 +2613,25 @@ function createApp() {
 
   function handlePointerCancel() {
     pointerState.active = false;
+    pointerState.downOnTutorialSkip = false;
+    pointerState.diagonalDelayed = false;
   }
 
   function handleWheel(x, y, dy) {
+    const nx = Number(x);
+    const ny = Number(y);
+    const ndy = Number(dy);
+    if (!Number.isFinite(nx) || !Number.isFinite(ny) || !Number.isFinite(ndy)) return;
     if (app.activeModal && app.modalScrollRect && app.modalMaxScroll > 0) {
-      if (pointInRect(x, y, app.modalScrollRect)) {
-        app.modalScrollY = clamp((app.modalScrollY || 0) + dy * 0.65, 0, app.modalMaxScroll);
+      if (pointInRect(nx, ny, app.modalScrollRect)) {
+        app.modalScrollY = clamp((app.modalScrollY || 0) + ndy * 0.65, 0, app.modalMaxScroll);
         renderFrame(0);
       }
     }
   }
 
   function handleKeyDown(key, ev) {
-    if (destroyed || !key) return;
+    if (destroyed || typeof key !== 'string' || !key) return;
     audio.unlock();
 
     if (key === 'Escape') {
@@ -2429,26 +2655,12 @@ function createApp() {
 
     if (app.screen !== 'playing' || app.activeModal !== null) return;
 
-    const slideMap = {
-      ArrowLeft: 'left',
-      a: 'left',
-      A: 'left',
-      ArrowRight: 'right',
-      d: 'right',
-      D: 'right',
-      ArrowUp: 'up',
-      w: 'up',
-      W: 'up',
-      ArrowDown: 'down',
-      s: 'down',
-      S: 'down'
-    };
-
-    if (slideMap[key]) {
+    const slideDir = SLIDE_KEY_MAP[key];
+    if (slideDir) {
       if (ev && typeof ev.preventDefault === 'function') {
         try { ev.preventDefault(); } catch (_) {}
       }
-      executeSlide(slideMap[key]);
+      executeSlide(slideDir);
       renderFrame(0);
       return;
     }
@@ -2721,21 +2933,78 @@ function createApp() {
     },
 
     setSaveData(rawObj) {
-      const normalized = SaveSync.saveLocalSave(platform, rawObj);
+      saveEpoch += 1;
+      if (cloudPushTimer) {
+        clearTimeout(cloudPushTimer);
+        cloudPushTimer = null;
+      }
+      cloudState.dirty = false;
+
+      let inputObj = rawObj;
+      if (rawObj && typeof rawObj === 'object' && !Array.isArray(rawObj)) {
+        inputObj = { ...rawObj };
+        const isSpreadFromCurrent =
+          Number(rawObj.totalEarnedStardust) === saveData.totalEarnedStardust &&
+          Number(rawObj.bankStardust) !== saveData.bankStardust;
+        const isSpreadFromDefault =
+          Number(rawObj.totalEarnedStardust) === 30 &&
+          Number(rawObj.lastSyncedEarnedStardust || 0) === 0 &&
+          Number(rawObj.bankStardust) !== 30;
+        if (
+          Number(rawObj.schemaVersion) >= 2 &&
+          hasOwn(rawObj, 'bankStardust') &&
+          rawObj.bankStardust !== undefined &&
+          Number.isFinite(Number(rawObj.bankStardust)) &&
+          hasOwn(rawObj, 'totalEarnedStardust') &&
+          (isSpreadFromCurrent || isSpreadFromDefault)
+        ) {
+          delete inputObj.totalEarnedStardust;
+        }
+      }
+
+      const normalized = SaveSync.saveLocalSave(platform, inputObj);
+      normalized.lastSyncedEarnedStardust = normalized.totalEarnedStardust;
+      SaveSync.saveLocalSave(platform, normalized);
+
       const oldKeys = Object.keys(saveData);
       for (let i = 0; i < oldKeys.length; i++) {
-        if (!Object.prototype.hasOwnProperty.call(normalized, oldKeys[i])) {
+        if (!hasOwn(normalized, oldKeys[i])) {
           delete saveData[oldKeys[i]];
         }
       }
       Object.assign(saveData, normalized);
 
-      audio.bgmTrack =
-        saveData.bgmTrack === 'bossa' || saveData.bgmTrack === 'off'
-          ? saveData.bgmTrack
-          : 'waltz';
-      audio.bgmEnabled = audio.bgmTrack !== 'off';
-      audio.setSfxEnabled(saveData.sfxEnabled !== false);
+      checkVeteranGiftToast();
+      syncAudioPrefsFromSave();
+
+      const gObj = platform.getGlobal ? platform.getGlobal() : globalThis;
+      const wxObj = gObj && hasOwn(gObj, 'wx') ? gObj.wx : null;
+      const hasRealWxCloud = Boolean(
+        platform.hasWx &&
+          wxObj &&
+          typeof wxObj === 'object' &&
+          wxObj.cloud &&
+          typeof wxObj.cloud === 'object' &&
+          typeof wxObj.cloud.callFunction === 'function'
+      );
+      if (!hasRealWxCloud) {
+        platform.removeStorage('__hoshi_browser_cloud_doc_v1__');
+        platform.removeStorage('__hoshi_browser_cloud_doc_v2__');
+        const seededSuffix =
+          cloudState.openidSuffix && cloudState.openidSuffix !== 'LOCAL'
+            ? cloudState.openidSuffix
+            : 'CAFE';
+        platform.setStorageJSON('__hoshi_browser_cloud_doc_v1__', {
+          schemaVersion: 2,
+          openidSuffix: seededSuffix,
+          profile: cloneJsonSafe(saveData.playerProfile),
+          totalStars: saveData.lifetimeStats.totalStars,
+          totalCumulativeScore: saveData.lifetimeStats.totalCumulativeScore,
+          metaSave: cloneJsonSafe(saveData),
+          revision: 1
+        });
+        cloudState.revision = 1;
+      }
 
       if (app.screen === 'lobby') {
         app.previewLevelId = saveData.highestUnlockedLevel || '1-1';
@@ -2751,11 +3020,15 @@ function createApp() {
         const nextCap = app.orderState.devTrayLv >= 1 ? 4 : 3;
         app.orderState.trayCapacity = nextCap;
         while (app.orderState.tray.length < nextCap) app.orderState.tray.push(null);
+        if (app.orderState.tray.length > nextCap) {
+          app.orderState.tray.length = nextCap;
+        }
+        refreshNeededAndOrderMarks();
       }
 
-      checkVeteranGiftToast();
       refreshOfflineLeaderboardFallback();
       platform.setWxFriendCloudScore(saveData);
+      syncAudioMood();
       renderFrame(0);
       return cloneJsonSafe(saveData);
     },
@@ -2766,7 +3039,12 @@ function createApp() {
         const it = hits.items[i];
         if (it && it.id === hitId && typeof it.onClick === 'function') {
           audio.unlock();
-          it.onClick();
+          inSyntheticClickHit = true;
+          try {
+            it.onClick();
+          } finally {
+            inSyntheticClickHit = false;
+          }
           renderFrame(0);
           return true;
         }

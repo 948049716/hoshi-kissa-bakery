@@ -1,192 +1,781 @@
 /**
- * Game Constants, Progression Catalogs, Themes, Patrons & Chamber Metrics
- * for Hoshi Kissa: Starlight Patisserie 4.1 (WeChat Mini Game Edition).
+ * Static Catalogs, Progression Tables, Chef Patrons, Board Themes & Atlas Maps
+ * for Hoshi Kissa Bakery v2.0 (WeChat Mini Game Edition).
  */
 'use strict';
 
-const TIERS = [
+const STORAGE_KEY = 'hoshi_kissa_bakery_save_v1';
+const GAME_TITLE = '一起做猫饼';
+
+const CATCAKE_UPGRADE_COSTS = {
+  1: [20, 40, 70, 110],
+  2: [25, 50, 85, 130],
+  3: [35, 65, 105, 160],
+  4: [45, 85, 135, 200],
+  5: [60, 110, 170, 250],
+  6: [80, 140, 220, 320],
+  7: [100, 180, 280, 400]
+};
+
+const CATCAKES = [
   {
     tier: 1,
-    name: '蓝莓星露糖',
-    en: 'Blueberry Dewdrop',
-    radius: 16,
-    points: 15,
-    servePoints: 30,
-    color: '#4674d6',
-    crumbColor: '#b7dcff',
-    material: { friction: 0.12, restitution: 0.22, gravityScale: 1.0, massMult: 1.0 },
-    traitName: '轻滑滚珠',
-    traitDesc: '低摩擦易钻缝，铺底起点。',
-    lore: '凝结星露的晶莹蓝莓糖。',
-    src: 'assets/tier_1.png',
-    actSrc: 'assets/tier_1_act.png',
-    intSrc: 'assets/tier_1_int.png',
-    meta: { anchor_x_norm: 0.4979, anchor_y_norm: 0.5478, radius_norm_w: 0.4972 }
+    id: 'C1',
+    name: '奶团小猫饼',
+    color: '#FFF3DC',
+    crumbColor: '#FFF9EE',
+    basePrice: 30,
+    maxUpgradeLv: 4,
+    upgradeCosts: CATCAKE_UPGRADE_COSTS[1],
+    unlockLevel: '1-1',
+    src: 'assets/catcake_1.png',
+    happySrc: 'assets/catcake_1_happy.png',
+    desc: '圆滚滚白面团小猫饼，豆豆眼配微翘小猫耳，带着温柔奶香。'
   },
   {
     tier: 2,
-    name: '蜜桃泡芙球',
-    en: 'Peach Cream Puff',
-    radius: 22,
-    points: 35,
-    servePoints: 65,
-    color: '#eb8861',
-    crumbColor: '#ffe3c4',
-    material: { friction: 0.18, restitution: 0.52, gravityScale: 1.0, massMult: 1.0 },
-    traitName: '弹壁精灵',
-    traitDesc: '高弹性，弹壁合成 +30% 分。',
-    lore: '蓬松金黄的白桃鲜奶油泡芙。',
-    src: 'assets/tier_2.png',
-    actSrc: 'assets/tier_2_act.png',
-    intSrc: 'assets/tier_2_int.png',
-    meta: { anchor_x_norm: 0.5000, anchor_y_norm: 0.5582, radius_norm_w: 0.4711 }
+    id: 'C2',
+    name: '焦糖猫爪曲奇',
+    color: '#E8A656',
+    crumbColor: '#FBE0B4',
+    basePrice: 70,
+    maxUpgradeLv: 4,
+    upgradeCosts: CATCAKE_UPGRADE_COSTS[2],
+    unlockLevel: '1-1',
+    src: 'assets/catcake_2.png',
+    happySrc: 'assets/catcake_2_happy.png',
+    desc: '烘烤金黄酥脆的猫爪黄油曲奇，焦糖肉垫印着微笑小猫脸。'
   },
   {
     tier: 3,
+    id: 'C3',
     name: '抹茶猫耳团子',
-    en: 'Matcha Kitty Dango',
-    radius: 28,
-    points: 70,
-    servePoints: 130,
-    color: '#7da85c',
-    crumbColor: '#cde6a8',
-    material: { friction: 0.22, restitution: 0.24, gravityScale: 1.0, massMult: 1.0 },
-    traitName: '猫耳共鸣',
-    traitDesc: '合出释出 1.8s 柔磁拉近同阶。',
-    lore: '软糯宇治抹茶猫猫团子。',
-    src: 'assets/tier_3.png',
-    actSrc: 'assets/tier_3_act.png',
-    intSrc: 'assets/tier_3_int.png',
-    meta: { anchor_x_norm: 0.4980, anchor_y_norm: 0.4838, radius_norm_w: 0.4771 }
+    color: '#7DA85C',
+    crumbColor: '#CFE8B4',
+    basePrice: 150,
+    maxUpgradeLv: 4,
+    upgradeCosts: CATCAKE_UPGRADE_COSTS[3],
+    unlockLevel: '1-1',
+    src: 'assets/catcake_3.png',
+    happySrc: 'assets/catcake_3_happy.png',
+    desc: '软糯回甘的宇治抹茶双耳圆团，点缀暖粉腮红与金星糖珠。'
   },
   {
     tier: 4,
-    name: '柠檬蜂蜜布丁塔',
-    en: 'Lemon Honey Tart',
-    radius: 35,
-    points: 130,
-    servePoints: 250,
-    color: '#f2c849',
-    crumbColor: '#ffe38c',
-    material: { friction: 0.26, restitution: 0.18, gravityScale: 1.0, massMult: 1.0 },
-    traitName: '酸甜清杂',
-    traitDesc: '合出蒸发周边最多 2 颗 1 阶糖。',
-    lore: '香脆黄油塔皮盛满柠檬凝乳。',
-    src: 'assets/tier_4.png',
-    actSrc: 'assets/tier_4_act.png',
-    intSrc: 'assets/tier_4_int.png',
-    meta: { anchor_x_norm: 0.4981, anchor_y_norm: 0.5126, radius_norm_w: 0.4459 }
+    id: 'C4',
+    name: '蜂蜜猫猫布丁',
+    color: '#F2C849',
+    crumbColor: '#FFE89E',
+    basePrice: 320,
+    maxUpgradeLv: 4,
+    upgradeCosts: CATCAKE_UPGRADE_COSTS[4],
+    unlockLevel: '1-3',
+    src: 'assets/catcake_4.png',
+    happySrc: 'assets/catcake_4_happy.png',
+    desc: '焦糖顶盖玻璃碟布丁，琥珀蜂蜜小猫慵懒趴在布丁顶上。'
   },
   {
     tier: 5,
-    name: '草莓奶油大福',
-    en: 'Strawberry Daifuku',
-    radius: 43,
-    points: 240,
-    servePoints: 440,
-    color: '#f29eb6',
-    crumbColor: '#ffd4e3',
-    material: { friction: 0.24, restitution: 0.20, gravityScale: 1.0, massMult: 1.0 },
-    traitName: '软糯聚拢',
-    traitDesc: '合出释放内吸涡流聚拢连合。',
-    lore: '冰凉樱粉麻薯裹着雪白奶油。',
-    src: 'assets/tier_5.png',
-    actSrc: 'assets/tier_5_act.png',
-    intSrc: 'assets/tier_5_int.png',
-    meta: { anchor_x_norm: 0.4980, anchor_y_norm: 0.5767, radius_norm_w: 0.4601 }
+    id: 'C5',
+    name: '草莓猫咪大福',
+    color: '#F29EB6',
+    crumbColor: '#FFD8E4',
+    basePrice: 680,
+    maxUpgradeLv: 4,
+    upgradeCosts: CATCAKE_UPGRADE_COSTS[5],
+    unlockLevel: '1-6',
+    src: 'assets/catcake_5.png',
+    happySrc: 'assets/catcake_5_happy.png',
+    desc: '樱粉软糯麻薯裹着雪白奶油须，头顶鲜红欲滴的甜心草莓。'
   },
   {
     tier: 6,
-    name: '焦糖星云甜甜圈',
-    en: 'Caramel Star Donut',
-    radius: 52,
-    points: 420,
-    servePoints: 760,
-    color: '#b86228',
-    crumbColor: '#eab074',
-    material: { friction: 0.22, restitution: 0.22, gravityScale: 1.0, massMult: 1.0 },
-    traitName: '焦糖陀螺',
-    traitDesc: '合出旋搅 1.4s，拨动卡位破死锁。',
-    lore: '海盐琥珀焦糖与可可流心甜甜圈。',
-    src: 'assets/tier_6.png',
-    actSrc: 'assets/tier_6_act.png',
-    intSrc: 'assets/tier_6_int.png',
-    meta: { anchor_x_norm: 0.5000, anchor_y_norm: 0.4905, radius_norm_w: 0.4832 }
+    id: 'C6',
+    name: '星空猫马卡龙',
+    color: '#9B7FD6',
+    crumbColor: '#E3D6FF',
+    basePrice: 1400,
+    maxUpgradeLv: 4,
+    upgradeCosts: CATCAKE_UPGRADE_COSTS[6],
+    unlockLevel: '2-1',
+    src: 'assets/catcake_6.png',
+    happySrc: 'assets/catcake_6_happy.png',
+    desc: '薰衣草紫双层星空糖霜马卡龙，夹着银星箔纸猫耳与云朵奶霜。'
   },
   {
     tier: 7,
-    name: '星夜猫猫马卡龙',
-    en: 'Cosmic Kitty Macaron',
-    radius: 62,
-    points: 720,
-    servePoints: 1200,
-    color: '#9b7fd6',
-    crumbColor: '#e2d5ff',
-    material: { friction: 0.21, restitution: 0.22, gravityScale: 0.52, massMult: 0.72 },
-    traitName: '云端微浮',
-    traitDesc: '52% 重力微浮不压底，抽走易雪崩。',
-    lore: '薰衣草杏仁饼壳夹着云朵奶霜。',
-    src: 'assets/tier_7.png',
-    actSrc: 'assets/tier_7_act.png',
-    intSrc: 'assets/tier_7_int.png',
-    meta: { anchor_x_norm: 0.4960, anchor_y_norm: 0.4947, radius_norm_w: 0.4851 }
-  },
-  {
-    tier: 8,
-    name: '皇家栗子蒙布朗',
-    en: 'Royal Mont Blanc',
-    radius: 73,
-    points: 1200,
-    servePoints: 1950,
-    color: '#8f5936',
-    crumbColor: '#d9a97c',
-    material: { friction: 0.27, restitution: 0.16, gravityScale: 1.08, massMult: 1.75 },
-    traitName: '重锤碾压',
-    traitDesc: '下坠压碎下方最多 2 颗 1~2 阶。',
-    lore: '分量十足的糖炒栗蓉蒙布朗。',
-    src: 'assets/tier_8.png',
-    actSrc: 'assets/tier_8_act.png',
-    intSrc: 'assets/tier_8_int.png',
-    meta: { anchor_x_norm: 0.4980, anchor_y_norm: 0.5080, radius_norm_w: 0.4860 }
-  },
-  {
-    tier: 9,
-    name: '星冠猫神舒芙蕾',
-    en: 'Crown Cat Soufflé',
-    radius: 86,
-    points: 2400,
-    servePoints: 3200,
-    color: '#f5be58',
-    crumbColor: '#ffea99',
-    material: { friction: 0.26, restitution: 0.16, gravityScale: 1.0, massMult: 1.35 },
-    traitName: '猫神双择',
-    traitDesc: '留罐全局 ×2.0；点击献礼 +3200 清杂。',
-    lore: '星夜吃茶传说级至高甜点。',
-    src: 'assets/tier_9.png',
-    actSrc: 'assets/tier_9_act.png',
-    intSrc: 'assets/tier_9_int.png',
-    meta: { anchor_x_norm: 0.4903, anchor_y_norm: 0.6025, radius_norm_w: 0.3841 }
+    id: 'C7',
+    name: '星冠猫神蛋糕',
+    color: '#F5BE58',
+    crumbColor: '#FFEB9E',
+    basePrice: 2800,
+    maxUpgradeLv: 4,
+    upgradeCosts: CATCAKE_UPGRADE_COSTS[7],
+    unlockLevel: '3-1',
+    src: 'assets/catcake_7.png',
+    happySrc: 'assets/catcake_7_happy.png',
+    desc: '头戴闪耀小皇冠的蓬松双层舒芙蕾猫神蛋糕，星夜吃茶至高献礼。'
   }
 ];
 
-const WILDCARD_RADIUS = 20;
-const YARN_BALL_RADIUS = 21;
+const CATCAKE_MAP = {};
+for (const item of CATCAKES) {
+  CATCAKE_MAP[item.tier] = item;
+  Object.defineProperty(CATCAKE_MAP, item.id, {
+    value: item,
+    enumerable: false,
+    configurable: false,
+    writable: false
+  });
+}
+
+function toSafeNum(x) {
+  if (typeof x === 'number') return x;
+  if (typeof x === 'string' && x.trim() !== '') return Number(x);
+  return NaN;
+}
+
+function getCatcakePrice(tier, upgradeLv = 0) {
+  let key = null;
+  if (typeof tier === 'number') {
+    if (Number.isInteger(tier) && tier >= 1 && tier <= 7) {
+      key = String(tier);
+    }
+  } else if (typeof tier === 'string') {
+    const trimmed = tier.trim();
+    if (/^(?:[1-7]|C[1-7])$/.test(trimmed)) {
+      key = trimmed;
+    }
+  }
+  if (key === null || !Object.prototype.hasOwnProperty.call(CATCAKE_MAP, key)) {
+    return 0;
+  }
+  const def = CATCAKE_MAP[key];
+  if (!def || typeof def.basePrice !== 'number' || !Number.isFinite(def.basePrice)) {
+    return 0;
+  }
+  const rawLv = toSafeNum(upgradeLv);
+  const lv = Number.isFinite(rawLv)
+    ? Math.max(0, Math.min(4, Math.floor(rawLv)))
+    : 0;
+  return Math.round(def.basePrice * (1 + 0.2 * lv));
+}
+
+const FLAVORS = {
+  plain: {
+    id: 'plain',
+    name: '原味',
+    shortLabel: '原味',
+    mult: 1.0,
+    isWildcard: false,
+    cellCode: '.',
+    tileIcon: null,
+    color: '#FFF6E5',
+    badgeColor: '#C69F69'
+  },
+  matcha: {
+    id: 'matcha',
+    name: '宇治抹茶',
+    shortLabel: '抹茶',
+    mult: 1.35,
+    isWildcard: false,
+    cellCode: 'M',
+    tileIcon: 'tile_matcha',
+    color: '#7DA85C',
+    badgeColor: '#4E7D34'
+  },
+  berry: {
+    id: 'berry',
+    name: '甜心草莓',
+    shortLabel: '草莓',
+    mult: 1.35,
+    isWildcard: false,
+    cellCode: 'B',
+    tileIcon: 'tile_berry',
+    color: '#E86A8C',
+    badgeColor: '#C84067'
+  },
+  gold: {
+    id: 'gold',
+    name: '星光金箔',
+    shortLabel: '镀金',
+    mult: 1.50,
+    isWildcard: true,
+    cellCode: 'G',
+    tileIcon: 'tile_gold',
+    color: '#F5BE58',
+    badgeColor: '#D48B1C'
+  }
+};
+
+const COMBO_SIZE_MULTS = {
+  1: 1.00,
+  2: 1.18,
+  3: 1.35
+};
+
+const SERVE_COMBO_MULTS = [1.00, 1.10, 1.22, 1.35, 1.50];
+const SERVE_COMBO_WINDOW_SEC = 10.0;
+
+const PATIENCE_TIP_BANDS = {
+  greenThreshold: 0.55,
+  greenMult: 1.30,
+  yellowThreshold: 0.25,
+  yellowMult: 1.00,
+  redMult: 0.85
+};
+
+const FEVER_CONFIG = {
+  durationSec: 10.0,
+  scoreMult: 1.35,
+  patienceDecayMult: 0.5,
+  gainNormal: 20,
+  gainGreen: 25,
+  gainVip: 35
+};
+
+const DEVICE_UPGRADE_COSTS = {
+  dev_tray: [60, 150],
+  dev_flour: [45, 95, 170],
+  dev_teapot: [50, 105, 185],
+  dev_tools: [40, 90, 160]
+};
+
+function getSafeDeviceDesc(ctx, fallbackIdx, maxLv, lv) {
+  const descs =
+    ctx && Array.isArray(ctx.levelDescs)
+      ? ctx.levelDescs
+      : SHOP_DEVICES[fallbackIdx].levelDescs;
+  const raw = toSafeNum(lv);
+  const idx = Number.isFinite(raw)
+    ? Math.max(0, Math.min(maxLv, Math.floor(raw)))
+    : 0;
+  return descs[idx];
+}
+
+const SHOP_DEVICES = [
+  {
+    id: 'dev_tray',
+    name: '宽大木托盘',
+    icon: 'serve_bell',
+    maxLv: 2,
+    costs: DEVICE_UPGRADE_COSTS.dev_tray,
+    traySlots: [3, 4, 4],
+    threeItemBonus: [0, 0, 0.12],
+    desc: '扩充配餐托盘容量至 4 格，满级 3 品套餐额外享 +12% 装盘小费',
+    levelDescs: [
+      '当前 3 格托盘 · 下级：扩充至 4 格托盘',
+      '当前 4 格托盘 · 下级：4 格且 3 品套餐 +12% 小费',
+      '已满级：4 格宽大托盘 · 3 品套餐永久 +12% 小费'
+    ],
+    getDesc(lv = 0) {
+      return getSafeDeviceDesc(this, 0, 2, lv);
+    }
+  },
+  {
+    id: 'dev_flour',
+    name: '精选猫饼粉',
+    icon: 'icon_sieve',
+    maxLv: 3,
+    costs: DEVICE_UPGRADE_COSTS.dev_flour,
+    c2Rates: [0.10, 0.18, 0.26, 0.35],
+    desc: '提升滑动与揉面补料直接刷出 2 阶焦糖猫爪曲奇的概率',
+    levelDescs: [
+      '当前 C2 概率 10% · 下级：提升至 18%',
+      '当前 C2 概率 18% · 下级：提升至 26%',
+      '当前 C2 概率 26% · 下级：提升至 35%',
+      '已满级：滑动与补料刷出 C2 概率达 35%'
+    ],
+    getDesc(lv = 0) {
+      return getSafeDeviceDesc(this, 1, 3, lv);
+    }
+  },
+  {
+    id: 'dev_teapot',
+    name: '暖心红茶壶',
+    icon: 'icon_hourglass',
+    maxLv: 3,
+    costs: DEVICE_UPGRADE_COSTS.dev_teapot,
+    patienceBonus: [0, 0.12, 0.24, 0.38],
+    desc: '好茶暖人心，延长全体在座顾客的初始耐心等待时长',
+    levelDescs: [
+      '当前耐心 +0% · 下级：初始耐心延长 +12%',
+      '当前耐心 +12% · 下级：初始耐心延长 +24%',
+      '当前耐心 +24% · 下级：初始耐心延长 +38%',
+      '已满级：全体顾客初始耐心延长 +38%'
+    ],
+    getDesc(lv = 0) {
+      return getSafeDeviceDesc(this, 2, 3, lv);
+    }
+  },
+  {
+    id: 'dev_tools',
+    name: '备货厨具架',
+    icon: 'icon_toolbox',
+    maxLv: 3,
+    costs: DEVICE_UPGRADE_COSTS.dev_tools,
+    startTools: [
+      { fork: 1, spoon: 0 },
+      { fork: 1, spoon: 1 },
+      { fork: 2, spoon: 1 },
+      { fork: 2, spoon: 2 }
+    ],
+    desc: '增加每关开局免费携带的泡泡清格叉与升阶魔法勺数量',
+    levelDescs: [
+      '当前开局 叉1 勺0 · 下级：开局 叉1 勺1',
+      '当前开局 叉1 勺1 · 下级：开局 叉2 勺1',
+      '当前开局 叉2 勺1 · 下级：开局 叉2 勺2',
+      '已满级：每关开局免费自带 清格叉×2 · 升阶勺×2'
+    ],
+    getDesc(lv = 0) {
+      return getSafeDeviceDesc(this, 3, 3, lv);
+    }
+  }
+];
+
+const CUSTOMERS = [
+  {
+    id: 'cust_ragdoll',
+    name: '奶糖布偶猫',
+    patienceMult: 1.15,
+    bountyMult: 1.00,
+    isUrgent: false,
+    isVip: false,
+    rewardDustBonus: 0,
+    atlasCol: 0,
+    atlasRow: 0,
+    preferredFlavor: 'any',
+    preferredSlotCounts: [1, 2],
+    preferredMaxTier: 3,
+    desc: '温柔随和的蓝眼布偶猫，偏爱 1~2 品基础小甜点。'
+  },
+  {
+    id: 'cust_orange',
+    name: '焦糖橘猫大叔',
+    patienceMult: 1.00,
+    bountyMult: 1.00,
+    isUrgent: false,
+    isVip: false,
+    rewardDustBonus: 0,
+    atlasCol: 1,
+    atlasRow: 0,
+    preferredFlavor: 'any',
+    preferredSlotCounts: [2, 3],
+    desc: '食量豪爽的胖橘猫大叔，喜欢 2~3 品双拼大份量组合。'
+  },
+  {
+    id: 'cust_silver',
+    name: '银渐层书生猫',
+    patienceMult: 1.05,
+    bountyMult: 1.00,
+    isUrgent: false,
+    isVip: false,
+    rewardDustBonus: 0,
+    atlasCol: 2,
+    atlasRow: 0,
+    preferredFlavor: 'matcha',
+    preferredSlotCounts: [1, 2, 3],
+    desc: '品味挑剔的书生猫，第 2 章起高频点名宇治抹茶风味猫饼。'
+  },
+  {
+    id: 'cust_rabbit',
+    name: '奶油垂耳兔',
+    patienceMult: 1.00,
+    bountyMult: 1.00,
+    isUrgent: false,
+    isVip: false,
+    rewardDustBonus: 0,
+    atlasCol: 3,
+    atlasRow: 0,
+    preferredFlavor: 'berry',
+    preferredSlotCounts: [1, 2, 3],
+    desc: '元气甜美的垂耳兔常客，第 3 章起高频点名草莓果酱猫饼。'
+  },
+  {
+    id: 'cust_fox',
+    name: '焦糖小狐狸',
+    patienceMult: 0.78,
+    bountyMult: 1.25,
+    isUrgent: true,
+    isVip: false,
+    rewardDustBonus: 0,
+    atlasCol: 0,
+    atlasRow: 1,
+    badgeText: '急单 ×1.25',
+    badgeIcon: 'icon_flame',
+    preferredFlavor: 'any',
+    preferredSlotCounts: [1, 2],
+    desc: '赶时间的急性子上班族，耐心掉得快但小费高达 1.25 倍。'
+  },
+  {
+    id: 'cust_raccoon',
+    name: '栗子小浣熊',
+    patienceMult: 1.10,
+    bountyMult: 1.00,
+    isUrgent: false,
+    isVip: false,
+    rewardDustBonus: 0,
+    atlasCol: 1,
+    atlasRow: 1,
+    preferredFlavor: 'any',
+    preferredSlotCounts: [3],
+    preferredMaxTier: 4,
+    desc: '喜欢多种小饼混搭的小浣熊，偏爱 3 品组合塔套餐。'
+  },
+  {
+    id: 'cust_shiba',
+    name: '蓝莓小柴犬',
+    patienceMult: 0.95,
+    bountyMult: 1.00,
+    isUrgent: false,
+    isVip: false,
+    rewardDustBonus: 0,
+    atlasCol: 2,
+    atlasRow: 1,
+    preferredFlavor: 'any',
+    preferredSlotCounts: [1, 2, 3],
+    desc: '活力十足的全品类常客，各阶猫饼随机组合都爱点。'
+  },
+  {
+    id: 'cust_critic',
+    name: '星冠美食家白猫',
+    patienceMult: 0.85,
+    bountyMult: 1.50,
+    isUrgent: false,
+    isVip: true,
+    rewardDustBonus: 5,
+    atlasCol: 3,
+    atlasRow: 1,
+    badgeText: 'VIP ×1.5',
+    badgeIcon: 'icon_crown',
+    preferredFlavor: 'any',
+    preferredMinTier: 5,
+    preferredSlotCounts: [1, 2, 3],
+    desc: '星冠 VIP 美食评委，必点高阶或风味名点，完单额外赠 5 星尘红包。'
+  }
+];
+
+const CUSTOMER_MAP = {};
+const CUSTOMERS_ATLAS_RECTS = {};
+for (const c of CUSTOMERS) {
+  CUSTOMER_MAP[c.id] = c;
+  CUSTOMERS_ATLAS_RECTS[c.id] = {
+    x: c.atlasCol * 256,
+    y: c.atlasRow * 256,
+    w: 256,
+    h: 256
+  };
+}
+
+const BOARD_TILES_ATLAS_RECTS = {
+  tile_gold: { x: 0, y: 0, w: 128, h: 128 },
+  tile_matcha: { x: 128, y: 0, w: 128, h: 128 },
+  tile_berry: { x: 256, y: 0, w: 128, h: 128 },
+  tile_block: { x: 384, y: 0, w: 128, h: 128 },
+  tile_ice: { x: 0, y: 128, w: 128, h: 128 },
+  btn_knead: { x: 128, y: 128, w: 128, h: 128 },
+  btn_trash: { x: 256, y: 128, w: 128, h: 128 },
+  badge_flavor_set: { x: 384, y: 128, w: 128, h: 128 }
+};
+
+const PATRON_COSTS = {
+  mikan: 0,
+  luna: 80,
+  mugi: 120
+};
+
+function normalizePatronId(rawId) {
+  if (typeof rawId !== 'string') return 'mikan';
+  if (rawId === 'luna' || rawId === 'patron_luna') return 'luna';
+  if (rawId === 'mugi' || rawId === 'patron_mugi') return 'mugi';
+  if (rawId === 'mikan' || rawId === 'chef_mikan') return 'mikan';
+  return 'mikan';
+}
+
+const PATRONS = [
+  {
+    id: 'mikan',
+    name: '小蜜柑',
+    shortName: '小蜜柑',
+    badge: 'mode_chef',
+    cost: PATRON_COSTS.mikan,
+    src: 'assets/chef_mikan.png',
+    skillName: '安抚猫薄荷茶',
+    activeSkill: {
+      id: 'comfort_tea',
+      icon: 'icon_stardust',
+      name: '安抚猫薄荷茶',
+      shortLabel: '安抚茶',
+      patienceRestoreRatio: 0.45,
+      freezeSec: 5.0,
+      chargeNormalServe: 28,
+      chargeVipServe: 40,
+      chargeHighMerge: 8,
+      highMergeMinTier: 5,
+      desc: '全体在座顾客耐心立刻恢复 +45%，且接下来 5.0 秒内顾客耐心冻结不流逝'
+    },
+    passive: {
+      serveScoreMult: 1.08,
+      c2RateBonus: 0,
+      combo3Bonus: 0
+    },
+    passiveDesc: '全套餐上菜得分永久 +8% · 主动技恢复全座 45% 耐心并冻结 5 秒',
+    shortPassive: '全单得分 +8%',
+    greet: '今天也一起来烤香喷喷的猫饼吧！',
+    thanks: '热乎乎的猫饼端上桌啦，香气满满～',
+    idleLines: [
+      '轻点亮金圈的猫饼装进托盘，凑齐套餐就自动上菜啦！',
+      '急缺小面团时，随时点击下方揉面补料哦～',
+      '放错托盘别慌，双击托盘槽位就能倒进厨余篮！',
+      '我的安抚猫薄荷茶能帮焦急的客人稳住耐心哦～'
+    ]
+  },
+  {
+    id: 'luna',
+    name: '眠眠星兔',
+    shortName: '眠眠星兔',
+    badge: 'icon_moon',
+    cost: PATRON_COSTS.luna,
+    src: 'assets/patron_luna.png',
+    skillName: '星月整盘术',
+    activeSkill: {
+      id: 'lunar_tidy',
+      icon: 'icon_moon',
+      name: '星月整盘术',
+      shortLabel: '整盘术',
+      clearTier: 1,
+      sortDescending: true,
+      nextServeMult: 1.50,
+      chargeNormalServe: 28,
+      chargeVipServe: 40,
+      chargeHighMerge: 8,
+      highMergeMinTier: 5,
+      desc: '瞬间清除盘内所有非冰封 1 阶猫饼，剩余猫饼按高到低归拢左上角，且下一份上菜得分 ×1.50'
+    },
+    passive: {
+      serveScoreMult: 1.00,
+      c2RateBonus: 0.08,
+      combo3Bonus: 0
+    },
+    passiveDesc: '滑动与补料刷出 C2 概率额外 +8% · 主动技清 1 阶整盘且下一单 ×1.50',
+    shortPassive: 'C2 概率 +8%',
+    greet: '今晚月色真温柔，烤盘乱了就交给我整理吧～',
+    thanks: '星光落进甜点里啦，谢谢店长！',
+    idleLines: [
+      '带我出战，揉面和滑动更容易直接刷出焦糖猫爪曲奇哦～',
+      '星月整盘术能一键清空 1 阶面团并把大猫饼排整齐！',
+      '释放星月整盘术后，紧接着端出的大单享 1.5 倍高分呢',
+      '镀金猫饼可是万能风味王牌，留给挑剔的客人最划算～'
+    ]
+  },
+  {
+    id: 'mugi',
+    name: '蜂蜜柴柴',
+    shortName: '蜂蜜柴柴',
+    badge: 'icon_flame',
+    cost: PATRON_COSTS.mugi,
+    src: 'assets/patron_mugi.png',
+    skillName: '元气烤炉暴击',
+    activeSkill: {
+      id: 'oven_crit',
+      icon: 'icon_flame',
+      name: '元气烤炉暴击',
+      shortLabel: '烤炉暴击',
+      shatterAllIce: true,
+      upgradeCount: 2,
+      grantFlavor: 'gold',
+      chargeNormalServe: 28,
+      chargeVipServe: 40,
+      chargeHighMerge: 8,
+      highMergeMinTier: 5,
+      desc: '震碎全盘所有冰封格，并随机选取最多 2 颗非满阶猫饼直接 +1 阶且附加镀金状态'
+    },
+    passive: {
+      serveScoreMult: 1.00,
+      c2RateBonus: 0,
+      combo3Bonus: 0.10
+    },
+    passiveDesc: '达成 3 连及以上上菜时额外 +10% 加成 · 主动技全屏破冰并镀金升阶 2 颗猫饼',
+    shortPassive: '3 连上菜 +10%',
+    greet: '汪呜！火力全开，连着上菜冲三星吧！',
+    thanks: '太满足啦！金灿灿的猫饼最棒了！',
+    idleLines: [
+      '遇到冰封格别怕，在它上下左右相邻格合成就能震碎冰壳！',
+      '我的元气烤炉暴击能全屏破冰，还送两颗镀金升阶猫饼！',
+      '保持 10 秒内连续出餐，3 连以上有我的额外 10% 加成哦！',
+      '合出 5 阶以上大猫饼还能加快充能招牌技呢！'
+    ]
+  }
+];
+
+const TOOLS = {
+  fork: {
+    id: 'fork',
+    name: '泡泡清格叉',
+    shortName: '清格叉',
+    icon: 'tool_fork',
+    cost: 15,
+    maxBuyPerLevel: 1,
+    src: 'assets/tool_fork.png',
+    shortcutKey: '1',
+    desc: '点选烤盘内任意一颗猫饼将其消除腾空位，或直接震碎冰封格冰壳'
+  },
+  spoon: {
+    id: 'spoon',
+    name: '升阶魔法勺',
+    shortName: '升阶勺',
+    icon: 'tool_spoon',
+    cost: 20,
+    maxBuyPerLevel: 1,
+    src: 'assets/tool_spoon.png',
+    shortcutKey: '2',
+    desc: '点选烤盘内任意一颗 1~6 阶非冰封猫饼，立即升为下一阶并保留原有风味'
+  }
+};
+
+const THEME_COSTS = {
+  amber: 0,
+  sakura: 80,
+  moonlight: 120
+};
+
+const BOARD_THEMES = {
+  amber: {
+    id: 'amber',
+    icon: 'icon_stardust',
+    name: '经典星夜琥珀盘',
+    cost: THEME_COSTS.amber,
+    desc: '暖胡桃木外框配暖米茶色格底，暗金星光边框与暖金萤火虫',
+    frameStops: ['#d59c3b', '#ad7424', '#8c5a18'],
+    frameBorder: '#4A2C2A',
+    frameHighlight: 'rgba(255, 250, 220, 0.72)',
+    boardBgTop: '#243B4A',
+    boardBgBot: '#182834',
+    boardInnerBorder: 'rgba(255, 224, 132, 0.45)',
+    cellFill: 'rgba(255, 244, 218, 0.88)',
+    cellFillAlt: 'rgba(250, 236, 202, 0.88)',
+    cellBorder: '#C69552',
+    cellInnerSheen: 'rgba(255, 252, 240, 0.65)',
+    trayBg: '#6E4221',
+    trayBorder: '#432418',
+    traySlotFill: 'rgba(255, 246, 224, 0.90)',
+    traySlotBorder: '#B98848',
+    collar: ['#ffe495', '#d59c3b', '#8c5a18'],
+    collarHighlight: 'rgba(255, 250, 220, 0.72)',
+    rimGlow: 'rgba(255, 244, 214, 0.35)',
+    guideLine: 'rgba(255, 224, 132, 0.62)',
+    lockColor: [255, 228, 102],
+    moteKind: 'star',
+    moteColor: 'rgba(255, 236, 178, 0.28)',
+    ambientRgb: '255, 232, 148',
+    stageTint: 'rgba(8, 13, 19, 0.42)'
+  },
+  sakura: {
+    id: 'sakura',
+    icon: 'icon_ribbon',
+    name: '樱花琉璃木盘',
+    cost: THEME_COSTS.sakura,
+    desc: '玫瑰金樱粉包边配浅暮樱粉格底，飘落水彩樱花瓣粒子',
+    frameStops: ['#ffd1e1', '#df86a5', '#b05675'],
+    frameBorder: '#4A2C2A',
+    frameHighlight: 'rgba(255, 238, 246, 0.82)',
+    boardBgTop: '#5E2B44',
+    boardBgBot: '#3E1A2C',
+    boardInnerBorder: 'rgba(255, 198, 220, 0.50)',
+    cellFill: 'rgba(255, 235, 243, 0.90)',
+    cellFillAlt: 'rgba(252, 224, 236, 0.90)',
+    cellBorder: '#D484A0',
+    cellInnerSheen: 'rgba(255, 248, 252, 0.72)',
+    trayBg: '#7D3B56',
+    trayBorder: '#4A2233',
+    traySlotFill: 'rgba(255, 240, 246, 0.92)',
+    traySlotBorder: '#CC7E99',
+    collar: ['#ffd1e1', '#df86a5', '#b05675'],
+    collarHighlight: 'rgba(255, 238, 246, 0.82)',
+    rimGlow: 'rgba(255, 198, 220, 0.48)',
+    guideLine: 'rgba(255, 182, 212, 0.72)',
+    lockColor: [255, 162, 206],
+    moteKind: 'petal',
+    moteColor: 'rgba(255, 192, 218, 0.45)',
+    ambientRgb: '255, 186, 214',
+    stageTint: 'rgba(54, 18, 38, 0.38)'
+  },
+  moonlight: {
+    id: 'moonlight',
+    icon: 'icon_moon',
+    name: '深海月光石盘',
+    cost: THEME_COSTS.moonlight,
+    desc: '秘银月白包边配冰月浅蓝格底，悬浮冷月星海微光粒子',
+    frameStops: ['#e6f7ff', '#87bddb', '#48779c'],
+    frameBorder: '#2C465E',
+    frameHighlight: 'rgba(240, 252, 255, 0.85)',
+    boardBgTop: '#1A4063',
+    boardBgBot: '#102840',
+    boardInnerBorder: 'rgba(166, 232, 255, 0.48)',
+    cellFill: 'rgba(225, 244, 255, 0.88)',
+    cellFillAlt: 'rgba(210, 236, 252, 0.88)',
+    cellBorder: '#6EA6C9',
+    cellInnerSheen: 'rgba(245, 252, 255, 0.75)',
+    trayBg: '#2B5374',
+    trayBorder: '#1A344B',
+    traySlotFill: 'rgba(234, 248, 255, 0.90)',
+    traySlotBorder: '#6BA2C4',
+    collar: ['#e6f7ff', '#87bddb', '#48779c'],
+    collarHighlight: 'rgba(240, 252, 255, 0.85)',
+    rimGlow: 'rgba(166, 232, 255, 0.46)',
+    guideLine: 'rgba(148, 226, 255, 0.72)',
+    lockColor: [132, 226, 255],
+    moteKind: 'starfish',
+    moteColor: 'rgba(154, 236, 255, 0.42)',
+    ambientRgb: '150, 228, 255',
+    stageTint: 'rgba(8, 26, 48, 0.44)'
+  }
+};
+
+const BOARD_THEME_LIST = [BOARD_THEMES.amber, BOARD_THEMES.sakura, BOARD_THEMES.moonlight];
 
 const ASSET_PATHS = {
   bg: 'assets/bakery_bg.jpg',
-  hero: 'assets/title_hero.jpg',
   shopSign: 'assets/icon_shop_sign.png',
-  yarnBall: 'assets/event_yarn_ball.png',
   uiAtlas: 'assets/ui_atlas.png',
   uiAtlas2: 'assets/ui_atlas_2.png',
   uiAtlas3: 'assets/ui_atlas_3.png',
   titlePlaque: 'assets/ui_title_plaque.png',
   patronStage: 'assets/ui_patron_stage.png',
   serveBell: 'assets/ui_serve_bell.png',
+
+  hero: 'assets/title_hero_v2.jpg',
+  customersAtlas: 'assets/customers_atlas.png',
+  boardTilesAtlas: 'assets/board_tiles_atlas.png',
+
+  patrons: {
+    mikan: 'assets/chef_mikan.png',
+    luna: 'assets/patron_luna.png',
+    mugi: 'assets/patron_mugi.png'
+  },
+
   tools: {
-    shake: 'assets/tool_shake.png',
     fork: 'assets/tool_fork.png',
     spoon: 'assets/tool_spoon.png'
+  },
+
+  catcakes: {
+    1: 'assets/catcake_1.png',
+    2: 'assets/catcake_2.png',
+    3: 'assets/catcake_3.png',
+    4: 'assets/catcake_4.png',
+    5: 'assets/catcake_5.png',
+    6: 'assets/catcake_6.png',
+    7: 'assets/catcake_7.png'
+  },
+  catcakesHappy: {
+    1: 'assets/catcake_1_happy.png',
+    2: 'assets/catcake_2_happy.png',
+    3: 'assets/catcake_3_happy.png',
+    4: 'assets/catcake_4_happy.png',
+    5: 'assets/catcake_5_happy.png',
+    6: 'assets/catcake_6_happy.png',
+    7: 'assets/catcake_7_happy.png'
   }
 };
 
@@ -247,868 +836,359 @@ const UI_ATLAS_3_RECTS = {
   icon_close: { x: 384, y: 384, w: 128, h: 128 }
 };
 
-// Legacy 3.0 Blessings merged into unified 4.1 Relics (`RELICS`) & Prep/Milestone system
-const BLESSINGS = [];
-
-const PATRONS = [
+const TUTORIAL_STEPS = [
   {
-    id: 'mikan',
-    name: '小蜜柑',
-    shortName: '小蜜柑',
-    badge: 'mode_chef',
-    cost: 0,
-    src: 'assets/chef_mikan.png',
-    skillName: '金勺捞底',
-    activeSkill: {
-      id: 'scoop',
-      icon: 'tool_spoon',
-      name: '金勺捞底',
-      shortLabel: '捞底',
-      desc: '捞出 1~5 阶甜品回罐口（不吞手牌），触发抽底雪崩'
-    },
-    passiveDesc: '捞底不吞牌 · 全单+20% · 开局+12币 · 每幕首出+25%技',
-    shortPassive: '全单+20% · +12币',
-    greet: '点订单【上菜】或长按亮铃甜品就能出餐腾空间哦！',
-    thanks: '抽底上菜一气呵成，香气满满～',
-    idleLines: [
-      '点订单台【上菜】或长按罐内亮铃甜品出餐！',
-      '每幕不清罐，趁鲜度热单免步上菜腾空间～',
-      '金勺捞底可把底层甜品捞回重发',
-      '先撞侧壁再合成才触发真弹壁加成哦'
-    ]
+    id: 'intro_slide_1',
+    saveKey: 'intro_slide',
+    levelId: '1-1',
+    stepIndex: 1,
+    groupTotal: 3,
+    nextStepId: 'intro_slide_2',
+    trigger: 'level_start',
+    focus: 'board_merge',
+    spotlightCells: [{ r: 0, c: 0 }, { r: 0, c: 1 }],
+    spotlightHitIds: [],
+    completeOn: 'valid_merge_slide',
+    icon: 'icon_paw_guide',
+    tag: '新手引导 1/3',
+    title: '滑动合成猫饼',
+    text: '向左或向右滑动，把两颗小面团合成为焦糖猫爪曲奇！',
+    lines: ['向左或向右滑动烤盘，将两颗奶团小猫饼合成为焦糖猫爪曲奇']
   },
   {
-    id: 'luna',
-    name: '眠眠星兔',
-    shortName: '眠眠星兔',
-    badge: 'icon_moon',
-    cost: 60,
-    src: 'assets/patron_luna.png',
-    skillName: '星月移形',
-    activeSkill: {
-      id: 'swap',
-      icon: 'icon_moon',
-      name: '星月移形',
-      shortLabel: '移形',
-      desc: '互换两颗甜品位置并释放柔磁共鸣'
-    },
-    passiveDesc: '移形 · 柔磁Lv.1 · 虹保底-2步 · 首刷免单 · 虹合+5币',
-    shortPassive: '柔磁 · 虹-2 · 免刷',
-    greet: '今晚月色真好，整备首刷我请客～',
-    thanks: '吃到幸福的味道了，谢谢主厨！',
-    idleLines: [
-      '整备间每幕首次刷新我帮你免单～',
-      '星月移形可对调任意两颗甜品',
-      '带我营业自带柔磁且彩虹保底 -2 步',
-      '彩虹合成还能额外掉 +5 秘方币'
-    ]
+    id: 'intro_slide_2',
+    saveKey: 'intro_slide',
+    levelId: '1-1',
+    stepIndex: 2,
+    groupTotal: 3,
+    nextStepId: 'intro_slide_3',
+    trigger: 'after_intro_slide_1',
+    focus: 'knead_btn',
+    spotlightCells: [],
+    spotlightHitIds: ['knead_btn'],
+    completeOn: 'knead_click',
+    icon: 'btn_knead',
+    tag: '新手引导 2/3',
+    title: '揉面补充原料',
+    text: '急缺原料时，点击【揉面补料】随时往盘里加 1 颗小猫饼！',
+    lines: ['点击下方揉面补料按钮，随时往烤盘空格投放 1 颗新猫饼']
   },
   {
-    id: 'mugi',
-    name: '蜂蜜柴柴',
-    shortName: '蜂蜜柴柴',
-    badge: 'icon_flame',
-    cost: 100,
-    src: 'assets/patron_mugi.png',
-    skillName: '元气重锤',
-    activeSkill: {
-      id: 'meteor_shot',
-      icon: 'icon_flame',
-      name: '元气重锤',
-      shortLabel: '重锤',
-      desc: '下发撞击首颗直接升阶并震碎周边冰霜'
-    },
-    passiveDesc: '重锤破冰 · 真弹壁+35%分/+3币 · 开局摇+1',
-    shortPassive: '真弹壁+3币 · 摇+1',
-    greet: '汪呜！先撞玻璃侧壁反弹合成赚 +3 秘方币！',
-    thanks: '太满足啦！下次还要再来！',
-    idleLines: [
-      '先撞侧壁反弹直合额外赚 +3 秘方币！',
-      '元气重锤撞谁就帮谁升阶并破冰',
-      '3 连击以上能大幅回复招牌技',
-      '蒙布朗超重，落下直接压碎小糖'
-    ]
+    id: 'intro_slide_3',
+    saveKey: 'intro_slide',
+    levelId: '1-1',
+    stepIndex: 3,
+    groupTotal: 3,
+    nextStepId: null,
+    trigger: 'after_intro_slide_2',
+    focus: 'serve_tray',
+    spotlightCells: 'servable',
+    spotlightHitIds: ['tray_slot_0', 'tray_slot_1', 'tray_slot_2'],
+    completeOn: 'first_order_served',
+    icon: 'serve_bell',
+    tag: '新手引导 3/3',
+    title: '装盘自动上菜得分',
+    text: '单击亮金圈的猫饼装进配餐托盘，凑齐订单就自动上菜得分啦！',
+    lines: ['轻点亮暖金圈的猫饼装入配餐托盘，凑齐顾客菜单即可自动上菜得分']
+  },
+  {
+    id: 'tray_trash',
+    saveKey: 'tray_trash',
+    levelId: '1-3',
+    stepIndex: 1,
+    groupTotal: 1,
+    nextStepId: null,
+    trigger: 'tray_multi_or_full',
+    focus: 'tray_trash',
+    spotlightCells: [],
+    spotlightHitIds: ['tray_slot_0', 'tray_slot_1', 'tray_slot_2', 'tray_trash_btn'],
+    completeOn: 'tray_trash_or_auto_fade',
+    autoFadeSec: 6.0,
+    icon: 'btn_trash',
+    tag: '托盘技巧',
+    title: '双击丢弃腾出托盘',
+    text: '放错或想换组合？双击托盘里的猫饼即可丢进厨余桶腾位（不扣分）！',
+    lines: ['快速双击托盘槽位即可将猫饼丢进厨余篮腾位，绝不扣减已有分数']
+  },
+  {
+    id: 'flavor_tile',
+    saveKey: 'flavor_tile',
+    levelId: '2-1',
+    stepIndex: 1,
+    groupTotal: 1,
+    nextStepId: null,
+    trigger: 'level_start',
+    focus: 'flavor_tile',
+    spotlightCellTypes: ['matcha'],
+    spotlightHitIds: [],
+    completeOn: 'matcha_dye_or_merge',
+    icon: 'tile_matcha',
+    tag: '风味烘焙格',
+    title: '宇治抹茶洒粉染色',
+    text: '带绿叶的格子会为猫饼洒上抹茶粉！搭配抹茶订单可享 ×1.35 赏金！',
+    lines: ['猫饼停留在抹茶格或于此合成即染为抹茶风味，同阶跨风味依然可正常合并']
+  },
+  {
+    id: 'ice_tile',
+    saveKey: 'ice_tile',
+    levelId: '3-1',
+    stepIndex: 1,
+    groupTotal: 1,
+    nextStepId: null,
+    trigger: 'level_start',
+    focus: 'ice_tile',
+    spotlightCells: 'frozen_and_orthogonal',
+    spotlightHitIds: [],
+    completeOn: 'ice_shatter',
+    icon: 'tile_ice',
+    tag: '邻接破冰',
+    title: '正交合成震碎冰壳',
+    text: '冰封猫饼被冻住啦！在它上下左右相邻格完成一次合成就能震碎冰壳！',
+    lines: ['在冰封格正上下左右 4 个相邻格完成合成（或用清格叉）即可破冰释放猫饼']
   }
 ];
 
-const CASCADE_MULTIPLIERS = [1.0, 1.4, 1.85, 2.35, 2.9];
+for (const step of TUTORIAL_STEPS) {
+  Object.defineProperty(TUTORIAL_STEPS, step.id, {
+    value: step,
+    enumerable: false,
+    configurable: false,
+    writable: false
+  });
+}
+Object.defineProperty(TUTORIAL_STEPS, 'intro_slide', {
+  value: TUTORIAL_STEPS[0],
+  enumerable: false,
+  configurable: false,
+  writable: false
+});
 
-const SHOP_UPGRADES = [
-  {
-    id: 'up_tools',
-    icon: 'icon_toolbox',
-    name: '备货充沛',
-    costs: [40, 90, 160],
-    maxLv: 3,
-    shortTag: (lv) => `备货Lv.${lv}`,
-    desc: (lv) => {
-      if (lv === 0) return '下级：开局 摇罐+1';
-      if (lv === 1) return '当前 摇+1 · 下级 摇+1 勺+1';
-      if (lv === 2) return '当前 摇+1 勺+1 · 下级 摇+2 勺+1';
-      return '满级：每局开局 摇罐+2 · 升阶勺+1';
-    }
-  },
-  {
-    id: 'up_fever',
-    icon: 'icon_flame',
-    name: '暖炉预热',
-    costs: [50, 100, 180],
-    values: [0, 20, 38, 55],
-    maxLv: 3,
-    shortTag: (lv) => `暖炉Lv.${lv}`,
-    desc: (lv) => {
-      const vals = [0, 20, 38, 55];
-      if (lv === 0) return '下级：开局初始能量 +20%';
-      if (lv < 3) return `当前 +${vals[lv]}% · 下级 +${vals[lv + 1]}% 初始能量`;
-      return '满级：开局自带 55% 技能与星光能量';
-    }
-  },
-  {
-    id: 'up_combo',
-    icon: 'icon_hourglass',
-    name: '节奏节拍器',
-    costs: [60, 120, 200],
-    values: [0, 0.25, 0.50, 0.80],
-    maxLv: 3,
-    shortTag: (lv) => `节拍Lv.${lv}`,
-    desc: (lv) => {
-      const vals = [0, 0.25, 0.50, 0.80];
-      if (lv === 0) return '下级：连击与雪崩窗 +0.25s';
-      if (lv < 3) return `当前 +${vals[lv].toFixed(2)}s · 下级 +${vals[lv + 1].toFixed(2)}s`;
-      return '满级：连击与雪崩窗口永久 +0.80s';
-    }
-  },
-  {
-    id: 'up_dust',
-    icon: 'icon_stardust',
-    name: '星尘糖霜壶',
-    costs: [45, 95, 170],
-    mults: [1, 1.15, 1.3, 1.5],
-    startCoins: [0, 5, 10, 15],
-    maxLv: 3,
-    shortTag: (lv) => `糖霜Lv.${lv}`,
-    desc: (lv) => {
-      const pcts = [0, 15, 30, 50];
-      const coins = [0, 5, 10, 15];
-      if (lv === 0) return '下级：星尘+15% · 开局+5币';
-      if (lv < 3) return `当前 +${pcts[lv]}%/+${coins[lv]}币 · 下级 +${pcts[lv + 1]}%/+${coins[lv + 1]}币`;
-      return '满级：结算星尘 +50% · 闯关开局 +15币';
-    }
-  }
-];
+const VALID_SAVE_LEVEL_ID_RE = /^(?:[123]-(?:[1-9]|10))$/;
 
-// =========================================================================
-// 4.1 Overhaul: Persistent-Jar 5-Shift Roguelike, Unified 18 Relics & 6 Mods
-// =========================================================================
-const SHIFTS = [
-  {
-    shift: 1,
-    name: '暮色试营业',
-    steps: 16,
-    target: 1200,
-    baseCoins: 35,
-    badge: '第1幕·试营',
-    modifier: null,
-    desc: '预置 4 颗甜品，点【上菜】或长按亮铃甜品体验抽底雪崩'
-  },
-  {
-    shift: 2,
-    name: '晚风星灯夜',
-    steps: 16,
-    target: 2600,
-    baseCoins: 45,
-    badge: '第2幕·星环',
-    modifier: 'golden_breeze',
-    desc: '全罐原位续战 + 焦糖星环穿环镀金'
-  },
-  {
-    shift: 3,
-    name: '挑剔美食家',
-    steps: 17,
-    target: 4400,
-    baseCoins: 60,
-    isMiniBoss: true,
-    badge: '小Boss·破冰',
-    modifier: 'mini_boss',
-    desc: '黄油弹柱机关 + 2 颗冰封甜品，周边合成/重锤破冰 +¥120'
-  },
-  {
-    shift: 4,
-    name: '午夜猫猫派对',
-    steps: 17,
-    target: 7600,
-    baseCoins: 80,
-    badge: '第4幕·机关',
-    modifier: 'party_events',
-    desc: '随机场地机关 + 捣蛋毛线球（震碎 +¥750 / +10币）'
-  },
-  {
-    shift: 5,
-    name: '星冠大赏',
-    steps: 18,
-    target: 12800,
-    baseCoins: 100,
-    isFinalBoss: true,
-    badge: '终极Boss',
-    modifier: 'grand_prix',
-    desc: '冰封残局 + 场地机关 + 每 6 步评委急单（×2.5 且 +2步）'
-  }
-];
-
-const SHIFT_HAZARDS = {
-  glaze_ring: {
-    id: 'glaze_ring',
-    icon: 'icon_stardust',
-    name: '焦糖星环',
-    badge: '焦糖环',
-    color: '#b87618',
-    bg: '#fff5d9',
-    desc: '穿过巡游星环即刻镀金（合成 ×2.0 / 出餐 ×1.6）'
-  },
-  divider: {
-    id: 'divider',
-    icon: 'icon_divider',
-    name: '木质隔板',
-    badge: '木隔板',
-    color: '#8f4f22',
-    bg: '#f9e9d6',
-    desc: '罐底中央立起半高隔板，善用侧壁弹射跨越左右槽'
-  },
-  bumpers: {
-    id: 'bumpers',
-    icon: 'icon_bumper',
-    name: '黄油弹柱',
-    badge: '弹柱',
-    color: '#b56e10',
-    bg: '#fff3d4',
-    desc: '双侧高弹星柱，撞柱高回弹并爆 +¥40 弹射小费（每颗限3次）'
-  },
-  fast_fresh: {
-    id: 'fast_fresh',
-    icon: 'mode_rush',
-    name: '极速冷盘',
-    badge: '冷盘',
-    color: '#b5452e',
-    bg: '#ffece4',
-    desc: '鲜度缩至 5 步，鲜度内 ×2.0，超时降至 ×0.75'
-  }
-};
-
-function getShiftConfig(shiftNum) {
-  const n = Math.max(1, Math.floor(Number(shiftNum) || 1));
-  if (n <= SHIFTS.length) return SHIFTS[n - 1];
-  const extra = n - 5;
-  const target = Math.round((12800 * Math.pow(1.45, extra)) / 100) * 100;
-  return {
-    shift: n,
-    name: `无尽加时 #${extra}`,
-    steps: 18,
-    target,
-    baseCoins: 110 + (extra - 1) * 15,
-    isEndless: true,
-    badge: `加时·第${n}幕`,
-    modifier: 'grand_prix',
-    desc: '全罐续战 + 双机关轮换 + 冰封残局 + 评委急单'
-  };
+function getSafeSaveLevelStar(s, id) {
+  if (!s || typeof s !== 'object' || Array.isArray(s)) return 0;
+  if (typeof id !== 'string' || !VALID_SAVE_LEVEL_ID_RE.test(id)) return 0;
+  const levelStars = Object.prototype.hasOwnProperty.call(s, 'levelStars') ? s.levelStars : null;
+  if (!levelStars || typeof levelStars !== 'object' || Array.isArray(levelStars)) return 0;
+  if (!Object.prototype.hasOwnProperty.call(levelStars, id)) return 0;
+  const v = toSafeNum(levelStars[id]);
+  if (!Number.isFinite(v) || v <= 0) return 0;
+  return Math.min(3, Math.max(0, Math.floor(v)));
 }
 
-const MAX_RELIC_SLOTS = 4;
+function getSafeLifetimeStat(s, key) {
+  if (!s || typeof s !== 'object' || Array.isArray(s)) return 0;
+  if (typeof key !== 'string') return 0;
+  const stats = Object.prototype.hasOwnProperty.call(s, 'lifetimeStats') ? s.lifetimeStats : null;
+  if (!stats || typeof stats !== 'object' || Array.isArray(stats)) return 0;
+  if (!Object.prototype.hasOwnProperty.call(stats, key)) return 0;
+  const v = toSafeNum(stats[key]);
+  return Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
+}
 
-const RELIC_ARCHETYPES = {
-  cascade: { id: 'cascade', icon: 'icon_wave', tag: '#雪崩', name: '抽底雪崩流', color: '#467a63', bg: '#ebf6ee' },
-  bank: { id: 'bank', icon: 'icon_billiard', tag: '#弹壁', name: '弹壁台球流', color: '#8a5d2b', bg: '#f9eedb' },
-  trait: { id: 'trait', icon: 'icon_alchemy', tag: '#异能', name: '异能催化流', color: '#8c4966', bg: '#fbeef4' },
-  greed: { id: 'greed', icon: 'icon_crown', tag: '#贪婪', name: '贪婪豪赌流', color: '#a85c14', bg: '#fff3d6' }
-};
-
-const ARCHETYPE_SYNERGIES = {
-  cascade: {
-    id: 'cascade',
-    tag: '#雪崩',
-    short2: '雪崩窗+0.8s · 出餐+10%技',
-    short3: '雪崩连合加成 +50%',
-    tier2Desc: '2件：雪崩窗 +0.8s，出餐额外 +10% 招牌技',
-    tier3Desc: '3件：雪崩连合倍率加成再 +50%'
-  },
-  bank: {
-    id: 'bank',
-    tag: '#弹壁',
-    short2: '真弹壁+30% · 回+8%狂热',
-    short3: '真弹壁合成必镀金',
-    tier2Desc: '2件：真弹壁加成 +30%，回 +8% 狂热能',
-    tier3Desc: '3件：真弹壁合成甜品 100% 自动镀金'
-  },
-  trait: {
-    id: 'trait',
-    tag: '#异能',
-    short2: '异能范围+22% · +¥60',
-    short3: '异能回+15%技 · +6星露',
-    tier2Desc: '2件：异能范围 +22%，触发额外 +¥60',
-    tier3Desc: '3件：异能触发回 +15% 招牌技并 +6 星露'
-  },
-  greed: {
-    id: 'greed',
-    tag: '#贪婪',
-    short2: '基薪+12币 · VIP赏+20%',
-    short3: '全局营业额 +25%',
-    tier2Desc: '2件：过关基薪 +12币，VIP 赏金 +20%',
-    tier3Desc: '3件：全局合成与出餐额外 +25%'
+function sumSaveStars(s) {
+  if (!s || typeof s !== 'object' || Array.isArray(s)) return 0;
+  const ts = getSafeLifetimeStat(s, 'totalStars');
+  if (ts > 0) {
+    return Math.min(90, Math.max(0, ts));
   }
-};
-
-const RELICS = [
-  // Archetype 1: Cascade / Serve Build (includes merged Shockwave blessing!)
-  {
-    id: 'rel_aftershock',
-    archetype: 'cascade',
-    rarity: 'common',
-    rarityLabel: '普通',
-    icon: 'icon_wave',
-    name: '热盘余震',
-    price: 30,
-    desc: '出餐原位产生 135px 内吸脉冲，拉拢周边相撞'
-  },
-  {
-    id: 'rel_domino',
-    archetype: 'cascade',
-    rarity: 'rare',
-    rarityLabel: '稀有',
-    icon: 'serve_bell',
-    name: '多米诺餐铃',
-    price: 45,
-    desc: '雪崩窗延至 4.2s，每段连合额外 +35% 分'
-  },
-  {
-    id: 'rel_tradeup',
-    archetype: 'cascade',
-    rarity: 'rare',
-    rarityLabel: '稀有',
-    icon: 'icon_flame',
-    name: '以小换大炉',
-    price: 50,
-    desc: '出餐 ≥4 阶时，罐内随机 1 颗最低阶免费升阶'
-  },
-  {
-    id: 'rel_perpetual',
-    archetype: 'cascade',
-    rarity: 'legendary',
-    rarityLabel: '传说',
-    icon: 'icon_infinity',
-    name: '翻台永动机',
-    price: 70,
-    desc: '雪崩 2 连返步上限升至 6 步，空闲桌刷双倍鲜度单'
-  },
-  {
-    id: 'rel_shockwave',
-    archetype: 'cascade',
-    rarity: 'common',
-    rarityLabel: '普通',
-    icon: 'icon_wind',
-    name: '星爆扩音鼓',
-    price: 32,
-    desc: '合成气浪范围与推力 +65%，滚落促成多米诺连合'
-  },
-  // Archetype 2: Bank-Shot / Pinball Build
-  {
-    id: 'rel_prism',
-    archetype: 'bank',
-    rarity: 'common',
-    rarityLabel: '普通',
-    icon: 'icon_prism',
-    name: '玻璃折光糖',
-    price: 30,
-    desc: '真弹壁首合加成升至 +90%，且下颗手牌必镀金'
-  },
-  {
-    id: 'rel_bouncy',
-    archetype: 'bank',
-    rarity: 'common',
-    rarityLabel: '普通',
-    icon: 'icon_billiard',
-    name: '高弹舒芙蕾壁',
-    price: 35,
-    desc: '撞墙弹性/初速提升，解锁二段真弹壁 +130%'
-  },
-  {
-    id: 'rel_bumpers',
-    archetype: 'bank',
-    rarity: 'rare',
-    rarityLabel: '稀有',
-    icon: 'icon_bumper',
-    name: '私藏黄油弹柱',
-    price: 50,
-    desc: '永久安装 2 枚弹柱，碰柱 +¥45 且合成 +35%'
-  },
-  {
-    id: 'rel_ricochet',
-    archetype: 'bank',
-    rarity: 'legendary',
-    rarityLabel: '传说',
-    icon: 'icon_arrow',
-    name: '神枪跳阶箭',
-    price: 75,
-    desc: '真弹壁直合 45% 跳升 +2 阶并回 35% 招牌技'
-  },
-  // Archetype 3: Trait / Alchemy Build (includes merged CritJump blessing!)
-  {
-    id: 'rel_echo',
-    archetype: 'trait',
-    rarity: 'rare',
-    rarityLabel: '稀有',
-    icon: 'icon_alchemy',
-    name: '双重异能炉',
-    price: 50,
-    desc: '4~8 阶甜品在出餐瞬间再发动一次异能'
-  },
-  {
-    id: 'rel_lemonade',
-    archetype: 'trait',
-    rarity: 'common',
-    rarityLabel: '普通',
-    icon: 'tier_4',
-    name: '柠檬汽水机',
-    price: 35,
-    desc: '柠檬塔 165px 清最多 4 颗 1~2 阶，每颗 +¥90/+3币'
-  },
-  {
-    id: 'rel_antigrav',
-    archetype: 'trait',
-    rarity: 'legendary',
-    rarityLabel: '传说',
-    icon: 'icon_ufo',
-    name: '月光反重力箱',
-    price: 70,
-    desc: '每 4 步倒置重力 1.3s，倒置期间合成 +80%'
-  },
-  {
-    id: 'rel_resonance',
-    archetype: 'trait',
-    rarity: 'common',
-    rarityLabel: '普通',
-    icon: 'icon_magnet',
-    name: '共鸣磁铃',
-    price: 30,
-    desc: '甜品发动异能时，全罐同阶柔磁牵引 2.5s'
-  },
-  {
-    id: 'rel_crit_star',
-    archetype: 'trait',
-    rarity: 'rare',
-    rarityLabel: '稀有',
-    icon: 'icon_bolt',
-    name: '奇迹跳阶石',
-    price: 48,
-    desc: '任意合成 18% 概率直跳 +2 阶并额外 +75% 得分'
-  },
-  // Archetype 4: High-Roller / Greed Build (rebalanced!)
-  {
-    id: 'rel_aged',
-    archetype: 'greed',
-    rarity: 'rare',
-    rarityLabel: '稀有',
-    icon: 'icon_ledger',
-    name: '陈酿焦糖账本',
-    price: 45,
-    desc: '罐内可出餐甜品每多留 1 步 +30% 价（上限 +150%）'
-  },
-  {
-    id: 'rel_crown_aura',
-    archetype: 'greed',
-    rarity: 'legendary',
-    rarityLabel: '传说',
-    icon: 'icon_crown',
-    name: '星冠威压',
-    price: 75,
-    desc: '每有 1 颗 ≥6 阶甜品，全局营业额 +25%（上限 +75%）'
-  },
-  {
-    id: 'rel_double_vip',
-    archetype: 'greed',
-    rarity: 'rare',
-    rarityLabel: '稀有',
-    icon: 'icon_ribbon',
-    name: '双席 VIP 厅',
-    price: 55,
-    desc: '快餐桌升为第二 VIP 桌，VIP 赏金 +20%'
-  },
-  {
-    id: 'rel_interest',
-    archetype: 'greed',
-    rarity: 'common',
-    rarityLabel: '普通',
-    icon: 'icon_scale',
-    name: '聚宝盆账本',
-    price: 35,
-    desc: '每件秘方 +8% 营业额，每 10 币再 +5%（上限 +65%）'
+  const levelStars = Object.prototype.hasOwnProperty.call(s, 'levelStars') ? s.levelStars : null;
+  if (levelStars && typeof levelStars === 'object' && !Array.isArray(levelStars)) {
+    let sum = 0;
+    const keys = Object.keys(levelStars);
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i];
+      if (!VALID_SAVE_LEVEL_ID_RE.test(k)) continue;
+      sum += getSafeSaveLevelStar(s, k);
+    }
+    return Math.min(90, sum);
   }
-];
-
-const DECK_MODS = [
-  {
-    id: 'mod_trim_t1',
-    icon: 'icon_sieve',
-    name: '筛除1阶蓝莓',
-    price: 40,
-    maxBuy: 1,
-    desc: '移除本局 1 阶出率，提纯 2~3 阶手牌'
-  },
-  {
-    id: 'mod_boost_t3',
-    icon: 'mode_zen',
-    name: '抹茶原料浓缩',
-    price: 35,
-    maxBuy: 2,
-    desc: '本局 3~4 阶出现权重翻倍'
-  },
-  {
-    id: 'mod_gold_tray',
-    icon: 'icon_stardust',
-    name: '镀金烤盘',
-    price: 30,
-    maxBuy: 2,
-    desc: '手牌镀金概率 +18%（合成×2.0/出餐×1.6）'
-  },
-  {
-    id: 'mod_rainbow',
-    icon: 'icon_rainbow',
-    name: '星露浓缩瓶',
-    price: 35,
-    maxBuy: 2,
-    desc: '彩虹保底 -3 步，立送 1 颗进队列'
-  },
-  {
-    id: 'mod_steps',
-    icon: 'icon_hourglass',
-    name: '延长夜班',
-    price: 25,
-    maxBuy: 99,
-    desc: '下幕初始步数 +3 步'
-  },
-  {
-    id: 'mod_tool',
-    icon: 'icon_toolbox',
-    name: '紧急厨具补给',
-    price: 20,
-    maxBuy: 99,
-    desc: '立刻补充 摇罐+1 与 升阶勺+1'
-  }
-];
-
-const JAR_THEMES = {
-  amber: {
-    id: 'amber',
-    icon: 'icon_stardust',
-    name: '星夜琥珀罐',
-    cost: 0,
-    desc: '暖金黄铜领口 · 深茶蓝星夜玻璃',
-    collar: ['#ffe495', '#d59c3b', '#8c5a18'],
-    collarHighlight: 'rgba(255, 250, 220, 0.72)',
-    glassTop: 'rgba(170, 225, 238, 0.14)',
-    glassMid: 'rgba(22, 60, 74, 0.24)',
-    glassBot: 'rgba(255, 228, 175, 0.14)',
-    rimGlow: 'rgba(255, 244, 214, 0.35)',
-    guideLine: 'rgba(255, 224, 132, 0.62)',
-    guideTouch: 'rgba(255, 232, 152, 0.88)',
-    lockColor: [255, 228, 102],
-    moteKind: 'star',
-    moteColor: 'rgba(255, 236, 178, 0.28)',
-    ambientRgb: '255, 232, 148',
-    stageTint: 'rgba(8, 13, 19, 0.42)'
-  },
-  sakura: {
-    id: 'sakura',
-    icon: 'icon_ribbon',
-    name: '樱花琉璃罐',
-    cost: 80,
-    desc: '玫瑰金领口 · 飘落樱花瓣与樱粉光环',
-    collar: ['#ffd1e1', '#df86a5', '#b05675'],
-    collarHighlight: 'rgba(255, 238, 246, 0.82)',
-    glassTop: 'rgba(255, 206, 224, 0.2)',
-    glassMid: 'rgba(98, 42, 68, 0.24)',
-    glassBot: 'rgba(255, 186, 212, 0.2)',
-    rimGlow: 'rgba(255, 198, 220, 0.48)',
-    guideLine: 'rgba(255, 182, 212, 0.72)',
-    guideTouch: 'rgba(255, 198, 224, 0.92)',
-    lockColor: [255, 162, 206],
-    moteKind: 'petal',
-    moteColor: 'rgba(255, 192, 218, 0.45)',
-    ambientRgb: '255, 186, 214',
-    stageTint: 'rgba(54, 18, 38, 0.38)'
-  },
-  moonlight: {
-    id: 'moonlight',
-    icon: 'icon_moon',
-    name: '深海月光瓶',
-    cost: 120,
-    desc: '秘银月白领口 · 冰海青蓝折射玻璃',
-    collar: ['#e6f7ff', '#87bddb', '#48779c'],
-    collarHighlight: 'rgba(240, 252, 255, 0.85)',
-    glassTop: 'rgba(164, 234, 255, 0.18)',
-    glassMid: 'rgba(16, 54, 86, 0.28)',
-    glassBot: 'rgba(128, 220, 255, 0.18)',
-    rimGlow: 'rgba(166, 232, 255, 0.46)',
-    guideLine: 'rgba(148, 226, 255, 0.72)',
-    guideTouch: 'rgba(182, 240, 255, 0.92)',
-    lockColor: [132, 226, 255],
-    moteKind: 'starfish',
-    moteColor: 'rgba(154, 236, 255, 0.42)',
-    ambientRgb: '150, 228, 255',
-    stageTint: 'rgba(8, 26, 48, 0.44)'
-  }
-};
-const JAR_THEME_LIST = [JAR_THEMES.amber, JAR_THEMES.sakura, JAR_THEMES.moonlight];
+  return 0;
+}
 
 const ACHIEVEMENTS = [
   {
-    id: 'first_run',
+    id: 'first_serve',
     tierImg: 1,
+    catcakeTier: 1,
+    icon: 'serve_bell',
     name: '初开夜灯',
-    desc: '完成 1 局星夜营业',
-    check: (s) => (s.lifetimeStats.runsPlayed || 0) >= 1
+    desc: '成功完成第 1 单猫饼上菜',
+    check: (s) => getSafeLifetimeStat(s, 'ordersServed') >= 1
   },
   {
     id: 'combo_4',
+    tierImg: 2,
+    catcakeTier: 2,
+    icon: 'icon_flame',
+    name: '行云流水',
+    desc: '达成 4 连及以上连续上菜',
+    check: (s) => getSafeLifetimeStat(s, 'maxComboEver') >= 4
+  },
+  {
+    id: 'ch1_clear',
     tierImg: 3,
-    name: '多米诺乐手',
-    desc: '单局达成 4 连合',
-    check: (s) => (s.lifetimeStats.maxComboEver || 1) >= 4
+    catcakeTier: 3,
+    icon: 'mode_chef',
+    name: '街角名店',
+    desc: '通关第 1 章 1-10 星夜店考核',
+    check: (s) => getSafeSaveLevelStar(s, '1-10') >= 1
   },
   {
-    id: 'yarn_3',
-    tierImg: 5,
-    name: '线团克星',
-    desc: '震碎 3 颗捣蛋毛线球',
-    check: (s) => (s.lifetimeStats.yarnBroken || 0) >= 3
-  },
-  {
-    id: 'rush_3000',
-    tierImg: 6,
-    name: '狂欢之星',
-    desc: '90秒狂欢突破 3,000 分',
-    check: (s) => (s.bestRush || 0) >= 3000
-  },
-  {
-    id: 'souffle_1',
-    tierImg: 9,
-    name: '猫神降临',
-    desc: '合出 9 阶猫神舒芙蕾',
-    check: (s) => (s.lifetimeStats.soufflesMade || 0) >= 1 || s.unlockedTiers.includes(9)
-  },
-  {
-    id: 'comp_all',
-    tierImg: 7,
-    name: '全品收藏家',
-    desc: '甜品图鉴全部解锁',
-    check: (s) => s.unlockedTiers.length >= 9
-  },
-  {
-    id: 'shift_clear_1',
+    id: 'vip_5',
     tierImg: 4,
-    name: '夜班达人',
-    desc: '主厨模式通关 1 幕',
-    check: (s) => (s.lifetimeStats.shiftsClearedTotal || 0) >= 1
+    catcakeTier: 4,
+    icon: 'icon_crown',
+    name: '美食家赞许',
+    desc: '累计服务 5 位星冠美食家白猫',
+    check: (s) => getSafeLifetimeStat(s, 'vipServed') >= 5
   },
   {
-    id: 'shift_clear_5',
-    tierImg: 8,
-    name: '星冠大赏王',
-    desc: '完整通关 5 幕闯关',
-    check: (s) => (s.lifetimeStats.bestShiftReached || 0) >= 5 && (s.lifetimeStats.fiveShiftClears || 0) >= 1
+    id: 'stars_30',
+    tierImg: 5,
+    catcakeTier: 5,
+    icon: 'icon_stardust',
+    name: '繁星满盘',
+    desc: '累计获得 30 颗关卡评星',
+    check: (s) => sumSaveStars(s) >= 30
+  },
+  {
+    id: 'ch2_clear',
+    tierImg: 6,
+    catcakeTier: 6,
+    icon: 'icon_ribbon',
+    name: '樱花主厨',
+    desc: '通关第 2 章 2-10 樱花露台大赏',
+    check: (s) => getSafeSaveLevelStar(s, '2-10') >= 1
+  },
+  {
+    id: 'campaign_clear',
+    tierImg: 7,
+    catcakeTier: 7,
+    icon: 'icon_moon',
+    name: '月光猫神祭',
+    desc: '通关终章 3-10 星冠夜宴终章',
+    check: (s) => getSafeSaveLevelStar(s, '3-10') >= 1
+  },
+  {
+    id: 'stars_90',
+    tierImg: 7,
+    catcakeTier: 7,
+    icon: 'icon_trophy',
+    name: '全三星猫神宗师',
+    desc: '全部 30 关达成 90 星满星毕业',
+    check: (s) => sumSaveStars(s) >= 90
   }
 ];
 
-const JAR = {
-  canvasW: 440,
-  canvasH: 520,
-  left: 30,
-  right: 410,
-  neckY: 74,
-  dangerY: 112,
-  floorY: 492,
-  cornerR: 96,
-  dropY: 38
-};
+const DEFAULT_NPC_RIVALS = [
+  { nickName: '月光甜点师·小葵', avatarPreset: 'luna', totalStars: 87, totalCumulativeScore: 618400, isNpc: true },
+  { nickName: '甜点大师喵', avatarPreset: 'mikan', totalStars: 76, totalCumulativeScore: 462800, isNpc: true },
+  { nickName: '柴柴烘焙坊', avatarPreset: 'mugi', totalStars: 58, totalCumulativeScore: 284500, isNpc: true },
+  { nickName: '焦糖布丁喵', avatarPreset: 'mikan', totalStars: 39, totalCumulativeScore: 146200, isNpc: true },
+  { nickName: '星露茶会·奈奈', avatarPreset: 'luna', totalStars: 22, totalCumulativeScore: 54800, isNpc: true },
+  { nickName: '晚风猫饼屋', avatarPreset: 'mugi', totalStars: 9, totalCumulativeScore: 12600, isNpc: true }
+];
 
-const STORAGE_KEY = 'hoshi_kissa_bakery_save_v1';
+const CHEF_RANK_TIERS = [
+  { minStars: 85, minScore: 500000, title: '传奇猫神宗师' },
+  { minStars: 65, minScore: 280000, title: '月光星冠主厨' },
+  { minStars: 40, minScore: 130000, title: '樱花首席甜点师' },
+  { minStars: 18, minScore: 40000, title: '星夜主厨店长' },
+  { minStars: 6, minScore: 4000, title: '温柔猫饼烘焙师' },
+  { minStars: 0, minScore: 0, title: '见习猫饼学徒' }
+];
 
-// Pure visual FX emote kinds (rendered via vector/icons in jar_renderer, zero emoji!)
-const SOLO_EMOTES = ['star', 'note', 'meow', 'star', 'heart', 'star', 'bang', 'crown', 'crown'];
+function getChefRank(starsOrInput = 0, cumulativeScoreArg = null) {
+  let stars = 0;
+  let score = 0;
 
-const MODE_GUIDES = {
-  chef: {
-    mode: 'chef',
-    icon: 'mode_chef',
-    title: '主厨闯关指引',
-    subtitle: '5 幕续炉 · 订单腾位 · 秘方构筑',
-    steps: [
-      {
-        focus: 'launcher',
-        icon: 'icon_launcher',
-        tag: '1 / 3 · 定角弹射',
-        title: '中央调角发射，先撞壁再合享真弹壁加成',
-        lines: [
-          '中央恒速发射，拖动调角预览落点与异能范围',
-          '上滑移出罐口松手可取消发射'
-        ]
-      },
-      {
-        focus: 'serve',
-        icon: 'serve_bell',
-        tag: '2 / 3 · 上菜腾位',
-        title: '点订单【上菜】或长按亮铃甜品出餐',
-        lines: [
-          '跨幕不清罐！趁热单免步上菜腾空间（冷单耗1步，雪崩返还）',
-          '抽走底层甜品引发塌落连合，享雪崩加成与返步'
-        ]
-      },
-      {
-        focus: 'hud_skill',
-        icon: 'icon_coin',
-        tag: '3 / 3 · 秘方共鸣',
-        title: '限步达标营业额，幕间整备凑共鸣',
-        lines: [
-          '达标可提前打烊赚利息币，进整备间选购秘方',
-          '同标签 2/3 件激活共鸣，上菜蓄满释放伙伴招牌技'
-        ]
+  if (starsOrInput && typeof starsOrInput === 'object') {
+    if (!Array.isArray(starsOrInput)) {
+      let resolvedStars = null;
+      if (
+        Object.prototype.hasOwnProperty.call(starsOrInput, 'totalStars') &&
+        starsOrInput.totalStars !== undefined &&
+        starsOrInput.totalStars !== null
+      ) {
+        const ts = toSafeNum(starsOrInput.totalStars);
+        resolvedStars = Number.isFinite(ts) && ts > 0 ? Math.min(90, Math.floor(ts)) : 0;
       }
-    ]
-  },
-  rush: {
-    mode: 'rush',
-    icon: 'mode_rush',
-    title: '90秒狂欢指引',
-    subtitle: '极速连发 · 连出延时 · 自动秘方',
-    steps: [
-      {
-        focus: 'launcher',
-        icon: 'icon_launcher',
-        tag: '1 / 3 · 极速连发',
-        title: '无步数限制，冲刺星光狂热',
-        lines: [
-          '拖动调角快速连发，合成充能触发星光狂热',
-          '达成分数里程碑自动装备随机秘方不打断节奏'
-        ]
-      },
-      {
-        focus: 'serve',
-        icon: 'serve_bell',
-        tag: '2 / 3 · 连出续命',
-        title: '点【上菜】或长按亮铃甜品连出延时',
-        lines: [
-          '开局即送闪电单，出餐立得 +3.0s~+4.5s 延时',
-          '12 秒内连出叠加上菜倍率与延时'
-        ]
-      },
-      {
-        focus: 'danger_dock',
-        icon: 'icon_wind',
-        tag: '3 / 3 · 星风救急',
-        title: '溢罐自动吹散不秒死',
-        lines: [
-          '溢罐触发星风清顶（扣 5s），善用摇罐与招牌技控场'
-        ]
+      stars = resolvedStars !== null ? resolvedStars : sumSaveStars(starsOrInput);
+
+      let resolvedScore = 0;
+      if (Object.prototype.hasOwnProperty.call(starsOrInput, 'totalCumulativeScore')) {
+        const tcs = toSafeNum(starsOrInput.totalCumulativeScore);
+        if (Number.isFinite(tcs) && tcs > 0) {
+          resolvedScore = Math.floor(tcs);
+        }
       }
-    ]
-  },
-  zen: {
-    mode: 'zen',
-    icon: 'mode_zen',
-    title: '悠闲经典指引',
-    subtitle: '无压合成 · 自动秘方 · 探索 9 阶',
-    steps: [
-      {
-        focus: 'launcher',
-        icon: 'icon_launcher',
-        tag: '1 / 2 · 随心弹射',
-        title: '零步数与计时压力，尽享弹射',
-        lines: [
-          '瞄准可合成目标时自动预览各阶甜品异能范围',
-          '先撞玻璃侧壁反弹合成享真弹壁加成'
-        ]
-      },
-      {
-        focus: 'hold_milestone',
-        icon: 'icon_gift',
-        tag: '2 / 2 · 暂存与秘方',
-        title: '暂存调牌 · 达分自动获赠秘方',
-        lines: [
-          '点右上「存」槽换牌，向 9 阶猫神舒芙蕾冲刺'
-        ]
+      if (resolvedScore === 0) {
+        const lifeScore = getSafeLifetimeStat(starsOrInput, 'totalCumulativeScore');
+        if (lifeScore > 0) {
+          resolvedScore = lifeScore;
+        } else if (Object.prototype.hasOwnProperty.call(starsOrInput, 'score')) {
+          const sc = toSafeNum(starsOrInput.score);
+          if (Number.isFinite(sc) && sc > 0) {
+            resolvedScore = Math.floor(sc);
+          }
+        }
       }
-    ]
-  },
-  tip_glaze_ring: {
-    mode: 'tip_glaze_ring',
-    isMechanicTip: true,
-    icon: 'icon_stardust',
-    title: '机关 · 焦糖星环',
-    subtitle: '穿环镀金 · 高倍收益',
-    steps: [
-      {
-        focus: 'glaze_ring',
-        icon: 'icon_stardust',
-        tag: '机关指南',
-        title: '甜品穿过巡游星环即刻镀金',
-        lines: [
-          '镀金甜品合成 ×2.0、出餐 ×1.6，瞄准穿环会亮星芒提示'
-        ]
-      }
-    ]
-  },
-  tip_frozen: {
-    mode: 'tip_frozen',
-    isMechanicTip: true,
-    icon: 'icon_frost',
-    title: '机制 · 冰封残局',
-    subtitle: '破冰立得 +¥120',
-    steps: [
-      {
-        focus: 'frozen',
-        icon: 'icon_frost',
-        tag: '破冰指南',
-        title: '周边合成 / 重锤 / 摇罐均可破冰',
-        lines: [
-          '冰封甜品暂不可合成或上菜，周边 110px 合成或摇罐即可震碎'
-        ]
-      }
-    ]
+      score = resolvedScore;
+    }
+  } else {
+    const rawNum = toSafeNum(starsOrInput);
+    const num = Number.isFinite(rawNum) && rawNum > 0 ? rawNum : 0;
+    if (cumulativeScoreArg !== null && cumulativeScoreArg !== undefined) {
+      stars = Math.min(90, Math.floor(num));
+      const rawScoreArg = toSafeNum(cumulativeScoreArg);
+      score = Number.isFinite(rawScoreArg) && rawScoreArg > 0 ? Math.floor(rawScoreArg) : 0;
+    } else if (num <= 90) {
+      stars = Math.floor(num);
+    } else {
+      score = Math.floor(num);
+    }
   }
-};
 
-function getChefRank(score) {
-  if (score >= 25000) return '传奇猫神宗师';
-  if (score >= 12000) return '星夜首席主厨';
-  if (score >= 5500) return '银星甜点师';
-  if (score >= 2000) return '温柔烘焙师';
-  return '见习甜点师';
+  for (const tier of CHEF_RANK_TIERS) {
+    if (stars >= tier.minStars && tier.minStars > 0) return tier.title;
+    if (score >= tier.minScore && tier.minScore > 0) return tier.title;
+  }
+  return CHEF_RANK_TIERS[CHEF_RANK_TIERS.length - 1].title;
 }
 
 module.exports = {
-  TIERS,
-  WILDCARD_RADIUS,
-  YARN_BALL_RADIUS,
+  STORAGE_KEY,
+  GAME_TITLE,
+  CATCAKES,
+  CATCAKE_MAP,
+  CATCAKE_UPGRADE_COSTS,
+  getCatcakePrice,
+  FLAVORS,
+  COMBO_SIZE_MULTS,
+  SERVE_COMBO_MULTS,
+  SERVE_COMBO_WINDOW_SEC,
+  PATIENCE_TIP_BANDS,
+  FEVER_CONFIG,
+  SHOP_DEVICES,
+  DEVICE_UPGRADE_COSTS,
+  CUSTOMERS,
+  CUSTOMER_MAP,
+  CUSTOMERS_ATLAS_RECTS,
+  BOARD_TILES_ATLAS_RECTS,
+  PATRONS,
+  PATRON_COSTS,
+  normalizePatronId,
+  TOOLS,
+  BOARD_THEMES,
+  BOARD_THEME_LIST,
+  THEME_COSTS,
   ASSET_PATHS,
   UI_ATLAS_RECTS,
   UI_ATLAS_2_RECTS,
   UI_ATLAS_3_RECTS,
-  MODE_GUIDES,
-  BLESSINGS,
-  PATRONS,
-  CASCADE_MULTIPLIERS,
-  SHOP_UPGRADES,
-  SHIFTS,
-  SHIFT_HAZARDS,
-  getShiftConfig,
-  MAX_RELIC_SLOTS,
-  RELIC_ARCHETYPES,
-  ARCHETYPE_SYNERGIES,
-  RELICS,
-  DECK_MODS,
-  JAR_THEMES,
-  JAR_THEME_LIST,
+  TUTORIAL_STEPS,
   ACHIEVEMENTS,
-  JAR,
-  STORAGE_KEY,
-  SOLO_EMOTES,
+  DEFAULT_NPC_RIVALS,
   getChefRank
 };

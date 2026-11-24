@@ -1,450 +1,1221 @@
 /**
- * Save Data Migration, Lossless Delta Cloud Merge & Per-Mode Breakpoint Snapshot Engine
- * Shared by client `game_app.js` for offline-first WeChat CloudBase sync.
+ * Save Data Schema v2, Lossless v1->v2 Migration & Multi-Device Cloud Merge Engine
+ * Shared by client `game_app.js` and `platform.js` for Hoshi Kissa Bakery v2.0.
  */
 'use strict';
 
-const { PATRONS, JAR_THEMES, SHOP_UPGRADES, RELICS, DECK_MODS } = require('./constants');
+const {
+  STORAGE_KEY,
+  CATCAKE_UPGRADE_COSTS,
+  DEVICE_UPGRADE_COSTS,
+  PATRON_COSTS,
+  normalizePatronId,
+  THEME_COSTS
+} = require('./constants');
 
-const ACTIVE_RUN_STORAGE_KEY = 'hoshi_kissa_active_run_v1';
-const ACTIVE_RUNS_STORAGE_KEY = 'hoshi_kissa_active_runs_v2';
+const {
+  CHAPTERS,
+  VALID_LEVEL_IDS,
+  getLevelById,
+  computeTotalStars,
+  isLevelUnlocked
+} = require('./levels_data');
 
-const MAX_PLAUSIBLE_CHEF = 350000;
-const MAX_PLAUSIBLE_RUSH = 85000;
-const MAX_PLAUSIBLE_ZEN = 180000;
+const SCHEMA_VERSION = 2;
 const MAX_OFFLINE_STARDUST_DELTA = 1500;
+const MAX_SAFE_STARDUST = 9999999;
+const SHOP_TOTAL_CAP = 5220;
+const MAX_CONSUMABLE_SPENT_STARDUST = MAX_SAFE_STARDUST - SHOP_TOTAL_CAP;
+const MAX_TOTAL_CUMULATIVE_SCORE = 3450000;
+const MAX_TIMESTAMP_MS = 9999999999999;
 
-function clampInt(val, min, max) {
-  const n = Math.floor(Number(val) || 0);
-  return Math.max(min, Math.min(max, n));
+const LEGACY_RUN_STORAGE_KEYS = [
+  'hoshi_kissa_active_run_v1',
+  'hoshi_kissa_active_runs_v2',
+  'hoshi_kissa_saved_runs_v2'
+];
+
+// Frozen legacy v1 shop & progression caps strictly for v1 -> v2 reconstruction
+const V1_MAX_PLAUSIBLE_CHEF = 350000;
+const V1_MAX_PLAUSIBLE_RUSH = 85000;
+const V1_MAX_PLAUSIBLE_ZEN = 180000;
+const V1_PATRON_COSTS = { mikan: 0, luna: 60, mugi: 100 };
+const V1_THEME_COSTS = { amber: 0, sakura: 80, moonlight: 120 };
+const V1_UPGRADE_COSTS = {
+  up_tools: [40, 90, 160],
+  up_fever: [50, 100, 180],
+  up_combo: [60, 120, 200],
+  up_dust: [45, 95, 170]
+};
+const V1_UPGRADE_KEYS = ['up_tools', 'up_fever', 'up_combo', 'up_dust'];
+
+const TUTORIAL_KEYS = ['intro_slide', 'tray_trash', 'flavor_tile', 'ice_tile'];
+const DEVICE_KEYS = ['dev_tray', 'dev_flour', 'dev_teapot', 'dev_tools'];
+
+const KNOWN_PATRON_INPUTS = new Set([
+  'mikan',
+  'chef_mikan',
+  'luna',
+  'patron_luna',
+  'mugi',
+  'patron_mugi'
+]);
+
+const CHAPTER_SCORE_CAPS = {};
+for (let i = 0; i < CHAPTERS.length; i++) {
+  const ch = CHAPTERS[i];
+  CHAPTER_SCORE_CAPS[ch.chapter] = ch.maxScoreAntiCheatCap;
 }
 
-function computeSpentStardust(save) {
-  if (!save || typeof save !== 'object') return 0;
-  let spent = 0;
-  if (Array.isArray(save.unlockedPatrons)) {
-    for (const id of save.unlockedPatrons) {
-      const p = PATRONS.find((item) => item.id === id);
-      if (p && p.cost > 0) spent += p.cost;
-    }
+function hasOwn(obj, key) {
+  if (obj === null || obj === undefined || typeof obj !== 'object') return false;
+  try {
+    return Object.prototype.hasOwnProperty.call(obj, key);
+  } catch (_) {
+    return false;
   }
-  if (Array.isArray(save.unlockedThemes)) {
-    for (const id of save.unlockedThemes) {
-      const th = JAR_THEMES[id];
-      if (th && th.cost > 0) spent += th.cost;
-    }
-  }
-  const ups = save.shopUpgrades && typeof save.shopUpgrades === 'object' ? save.shopUpgrades : {};
-  for (const up of SHOP_UPGRADES) {
-    const lv = clampInt(ups[up.id], 0, up.maxLv);
-    for (let i = 0; i < lv; i++) {
-      spent += up.costs[i] || 0;
-    }
-  }
-  return spent;
 }
 
-function normalizeProfile(raw, fallbackPatron = 'mikan') {
-  const src = raw && typeof raw === 'object' ? raw : {};
-  const preset = ['mikan', 'luna', 'mugi'].includes(src.avatarPreset)
-    ? src.avatarPreset
-    : ['mikan', 'luna', 'mugi'].includes(fallbackPatron)
-    ? fallbackPatron
-    : 'mikan';
+function getOwn(obj, key) {
+  if (!hasOwn(obj, key)) return undefined;
+  try {
+    return obj[key];
+  } catch (_) {
+    return undefined;
+  }
+}
+
+function safeIsArray(v) {
+  try {
+    return Array.isArray(v);
+  } catch (_) {
+    return false;
+  }
+}
+
+function safeArrayLength(arr) {
+  if (!safeIsArray(arr)) return 0;
+  try {
+    const len = arr.length;
+    return typeof len === 'number' && len > 0 ? len : 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
+function safeArrayAt(arr, idx) {
+  if (!safeIsArray(arr) || !hasOwn(arr, idx)) return undefined;
+  try {
+    return arr[idx];
+  } catch (_) {
+    return undefined;
+  }
+}
+
+function isPlainRecord(v) {
+  if (v === null || v === undefined || typeof v !== 'object') return false;
+  try {
+    return !Array.isArray(v);
+  } catch (_) {
+    return false;
+  }
+}
+
+function toSafeNum(x) {
+  if (typeof x === 'number') return x;
+  if (typeof x === 'string' && x.trim() !== '') return Number(x);
+  return NaN;
+}
+
+function clampSafeInt(val, min, max, fallback = min) {
+  const n = toSafeNum(val);
+  if (!Number.isFinite(n)) {
+    return fallback === 0 ? 0 : fallback;
+  }
+  const floored = Math.floor(n);
+  if (floored < min) return min === 0 ? 0 : min;
+  if (floored > max) return max === 0 ? 0 : max;
+  return floored === 0 ? 0 : floored;
+}
+
+function canonicalizeKnownPatronId(rawId) {
+  if (typeof rawId !== 'string') return null;
+  const trimmed = rawId.trim();
+  if (!KNOWN_PATRON_INPUTS.has(trimmed)) return null;
+  return normalizePatronId(trimmed);
+}
+
+function sanitizeUnlockedPatrons(rawArr) {
+  const seen = new Set(['mikan']);
+  const out = ['mikan'];
+  if (safeIsArray(rawArr)) {
+    const len = safeArrayLength(rawArr);
+    for (let i = 0; i < len; i++) {
+      if (!hasOwn(rawArr, i)) continue;
+      const pid = canonicalizeKnownPatronId(safeArrayAt(rawArr, i));
+      if (pid && !seen.has(pid)) {
+        seen.add(pid);
+        out.push(pid);
+      }
+    }
+  }
+  return out;
+}
+
+function sanitizeUnlockedThemes(rawArr) {
+  const seen = new Set(['amber']);
+  const out = ['amber'];
+  if (safeIsArray(rawArr)) {
+    const len = safeArrayLength(rawArr);
+    for (let i = 0; i < len; i++) {
+      if (!hasOwn(rawArr, i)) continue;
+      const rawItem = safeArrayAt(rawArr, i);
+      if (typeof rawItem !== 'string') continue;
+      const tid = rawItem.trim();
+      if (hasOwn(THEME_COSTS, tid) && !seen.has(tid)) {
+        seen.add(tid);
+        out.push(tid);
+      }
+    }
+  }
+  return out;
+}
+
+function getLevelScoreCap(levelId) {
+  const lvl = getLevelById(levelId);
+  if (!lvl) return 35000;
+  return hasOwn(CHAPTER_SCORE_CAPS, lvl.chapter) ? CHAPTER_SCORE_CAPS[lvl.chapter] : 220000;
+}
+
+function computeCumulativeScore(levelBestScores) {
+  if (!isPlainRecord(levelBestScores)) return 0;
+  let total = 0;
+  for (let i = 0; i < VALID_LEVEL_IDS.length; i++) {
+    const id = VALID_LEVEL_IDS[i];
+    if (!hasOwn(levelBestScores, id)) continue;
+    total += clampSafeInt(getOwn(levelBestScores, id), 0, getLevelScoreCap(id), 0);
+  }
+  return Math.min(MAX_TOTAL_CUMULATIVE_SCORE, total);
+}
+
+function computeHighestUnlockedLevel(levelStars) {
+  const safeStars = {};
+  if (isPlainRecord(levelStars)) {
+    for (let i = 0; i < VALID_LEVEL_IDS.length; i++) {
+      const id = VALID_LEVEL_IDS[i];
+      if (!hasOwn(levelStars, id)) continue;
+      const s = clampSafeInt(getOwn(levelStars, id), 0, 3, 0);
+      if (s > 0) {
+        safeStars[id] = s;
+      }
+    }
+  }
+  let highest = '1-1';
+  for (let i = 0; i < VALID_LEVEL_IDS.length; i++) {
+    const id = VALID_LEVEL_IDS[i];
+    if (isLevelUnlocked(id, safeStars).unlocked) {
+      highest = id;
+    } else {
+      break;
+    }
+  }
+  return highest;
+}
+
+function createDefaultSave() {
   return {
-    nickName: typeof src.nickName === 'string' && src.nickName.trim() ? src.nickName.trim().slice(0, 16) : '',
-    avatarUrl: typeof src.avatarUrl === 'string' ? src.avatarUrl.slice(0, 512) : '',
-    avatarPreset: preset,
-    authorized: !!src.authorized,
-    updatedAt: clampInt(src.updatedAt || 0, 0, 9999999999999)
-  };
-}
-
-function normalizeSaveData(parsed) {
-  const defaults = {
-    bestChef: 0,
-    bestZen: 0,
-    bestRush: 0,
-    unlockedTiers: [1, 2, 3, 4],
+    schemaVersion: SCHEMA_VERSION,
     bgmTrack: 'waltz',
     sfxEnabled: true,
     bankStardust: 30,
     totalEarnedStardust: 30,
     lastSyncedEarnedStardust: 0,
+    consumableSpentStardust: 0,
+    migratedFromV1GiftPending: false,
+    levelStars: {},
+    levelBestScores: {},
+    highestUnlockedLevel: '1-1',
+    catcakeLevels: {
+      '1': 0,
+      '2': 0,
+      '3': 0,
+      '4': 0,
+      '5': 0,
+      '6': 0,
+      '7': 0
+    },
+    deviceUpgrades: {
+      dev_tray: 0,
+      dev_flour: 0,
+      dev_teapot: 0,
+      dev_tools: 0
+    },
     selectedPatron: 'mikan',
     unlockedPatrons: ['mikan'],
     equippedTheme: 'amber',
     unlockedThemes: ['amber'],
-    shopUpgrades: { up_tools: 0, up_fever: 0, up_combo: 0, up_dust: 0 },
-    seenModeGuides: { chef: false, rush: false, zen: false },
-    seenTips: { prep_shop: false, glaze_ring: false, frozen: false },
-    playerProfile: normalizeProfile(null, 'mikan'),
+    seenTutorials: {
+      intro_slide: false,
+      tray_trash: false,
+      flavor_tile: false,
+      ice_tile: false
+    },
+    playerProfile: {
+      nickName: '',
+      avatarUrl: '',
+      avatarPreset: 'mikan',
+      authorized: false,
+      updatedAt: 0
+    },
     lifetimeStats: {
       runsPlayed: 0,
-      ordersCompleted: 0,
-      servesTotal: 0,
-      bankShotsTotal: 0,
-      maxAvalancheEver: 0,
-      bestShiftReached: 0,
-      shiftsClearedTotal: 0,
-      fiveShiftClears: 0,
-      soufflesMade: 0,
-      yarnBroken: 0,
-      maxComboEver: 1
+      ordersServed: 0,
+      vipServed: 0,
+      maxComboEver: 0,
+      highestSingleServe: 0,
+      totalStars: 0,
+      totalCumulativeScore: 0
     },
     updatedAt: 0
   };
+}
 
-  if (!parsed || typeof parsed !== 'object') return defaults;
+function normalizeProfile(raw, fallbackPatron = 'mikan') {
+  const src = isPlainRecord(raw) ? raw : {};
+  const rawPresetVal = getOwn(src, 'avatarPreset');
+  const rawPreset = rawPresetVal !== undefined ? canonicalizeKnownPatronId(rawPresetVal) : null;
+  const fbPreset = canonicalizeKnownPatronId(fallbackPatron) || 'mikan';
+  const preset = rawPreset || fbPreset;
+  const rawNickVal = getOwn(src, 'nickName');
+  const rawNick = typeof rawNickVal === 'string' ? rawNickVal.trim() : '';
+  const rawAvatarVal = getOwn(src, 'avatarUrl');
+  const rawAvatar = typeof rawAvatarVal === 'string' ? rawAvatarVal.trim() : '';
+  const rawAuthVal = getOwn(src, 'authorized');
+  const authorized = rawAuthVal !== undefined ? Boolean(rawAuthVal) : false;
+  const rawUpdatedVal = getOwn(src, 'updatedAt');
+  const updatedAt = rawUpdatedVal !== undefined ? clampSafeInt(rawUpdatedVal, 0, MAX_TIMESTAMP_MS, 0) : 0;
+  return {
+    nickName: rawNick ? rawNick.slice(0, 16) : '',
+    avatarUrl: rawAvatar ? rawAvatar.slice(0, 512) : '',
+    avatarPreset: preset,
+    authorized,
+    updatedAt
+  };
+}
 
-  const bestChef = clampInt(parsed.bestChef, 0, MAX_PLAUSIBLE_CHEF);
-  const bestZen = clampInt(parsed.bestZen, 0, MAX_PLAUSIBLE_ZEN);
-  const bestRush = clampInt(parsed.bestRush, 0, MAX_PLAUSIBLE_RUSH);
+function readCatcakeLevel(ccObj, tier) {
+  if (!isPlainRecord(ccObj)) return 0;
+  const strKey = String(tier);
+  if (hasOwn(ccObj, strKey)) {
+    return clampSafeInt(getOwn(ccObj, strKey), 0, 4, 0);
+  }
+  const cKey = `C${tier}`;
+  if (hasOwn(ccObj, cKey)) {
+    return clampSafeInt(getOwn(ccObj, cKey), 0, 4, 0);
+  }
+  return 0;
+}
 
-  const unlockedPatrons = Array.isArray(parsed.unlockedPatrons)
-    ? Array.from(new Set(['mikan', ...parsed.unlockedPatrons.filter((id) => PATRONS.some((p) => p.id === id))]))
-    : ['mikan'];
-  const selectedPatron = unlockedPatrons.includes(parsed.selectedPatron) ? parsed.selectedPatron : 'mikan';
+function computeSpentStardust(save) {
+  if (!isPlainRecord(save)) return 0;
+  let spent = 0;
 
-  const unlockedThemes = Array.isArray(parsed.unlockedThemes)
-    ? Array.from(new Set(['amber', ...parsed.unlockedThemes.filter((id) => !!JAR_THEMES[id])]))
-    : ['amber'];
-  const equippedTheme = unlockedThemes.includes(parsed.equippedTheme) ? parsed.equippedTheme : 'amber';
-
-  const tierSet = new Set([1, 2, 3, 4]);
-  if (Array.isArray(parsed.unlockedTiers)) {
-    for (const v of parsed.unlockedTiers) {
-      const t = clampInt(v, 0, 99);
-      if (t >= 1 && t <= 9) tierSet.add(t);
+  const cc = getOwn(save, 'catcakeLevels');
+  if (isPlainRecord(cc)) {
+    for (let tier = 1; tier <= 7; tier++) {
+      const lv = readCatcakeLevel(cc, tier);
+      const costs = CATCAKE_UPGRADE_COSTS[tier];
+      for (let i = 0; i < lv; i++) {
+        spent += costs[i] || 0;
+      }
     }
   }
 
-  const upRaw = parsed.shopUpgrades && typeof parsed.shopUpgrades === 'object' ? parsed.shopUpgrades : {};
-  const stRaw = parsed.lifetimeStats && typeof parsed.lifetimeStats === 'object' ? parsed.lifetimeStats : {};
-  const sgRaw = parsed.seenModeGuides && typeof parsed.seenModeGuides === 'object' ? parsed.seenModeGuides : {};
-  const tpRaw = parsed.seenTips && typeof parsed.seenTips === 'object' ? parsed.seenTips : {};
-
-  let bankStardust;
-  if (typeof parsed.bankStardust === 'number' && Number.isFinite(parsed.bankStardust)) {
-    bankStardust = Math.max(0, Math.floor(parsed.bankStardust));
-  } else if (bestChef > 0 || bestZen > 0) {
-    bankStardust = Math.max(60, Math.min(260, 60 + Math.floor(Math.max(bestChef, bestZen) / 300)));
-  } else {
-    bankStardust = defaults.bankStardust;
+  const dev = getOwn(save, 'deviceUpgrades');
+  if (isPlainRecord(dev)) {
+    for (let k = 0; k < DEVICE_KEYS.length; k++) {
+      const key = DEVICE_KEYS[k];
+      const costs = DEVICE_UPGRADE_COSTS[key];
+      const maxLv = costs.length;
+      const lv = hasOwn(dev, key) ? clampSafeInt(getOwn(dev, key), 0, maxLv, 0) : 0;
+      for (let i = 0; i < lv; i++) {
+        spent += costs[i] || 0;
+      }
+    }
   }
 
+  const rawPatrons = getOwn(save, 'unlockedPatrons');
+  if (safeIsArray(rawPatrons)) {
+    const patrons = sanitizeUnlockedPatrons(rawPatrons);
+    for (let i = 0; i < patrons.length; i++) {
+      const pid = patrons[i];
+      if (hasOwn(PATRON_COSTS, pid)) {
+        spent += PATRON_COSTS[pid] || 0;
+      }
+    }
+  }
+
+  const rawThemes = getOwn(save, 'unlockedThemes');
+  if (safeIsArray(rawThemes)) {
+    const themes = sanitizeUnlockedThemes(rawThemes);
+    for (let i = 0; i < themes.length; i++) {
+      const tid = themes[i];
+      if (hasOwn(THEME_COSTS, tid)) {
+        spent += THEME_COSTS[tid] || 0;
+      }
+    }
+  }
+
+  if (hasOwn(save, 'consumableSpentStardust')) {
+    spent += clampSafeInt(
+      getOwn(save, 'consumableSpentStardust'),
+      0,
+      MAX_CONSUMABLE_SPENT_STARDUST,
+      0
+    );
+  }
+
+  return spent;
+}
+
+function normalizeV2Save(raw) {
+  if (!isPlainRecord(raw)) return createDefaultSave();
+
+  const rawUnlockedPatrons = getOwn(raw, 'unlockedPatrons');
+  const unlockedPatrons =
+    rawUnlockedPatrons !== undefined ? sanitizeUnlockedPatrons(rawUnlockedPatrons) : ['mikan'];
+  const rawSelPatron = getOwn(raw, 'selectedPatron');
+  const candPatron = rawSelPatron !== undefined ? canonicalizeKnownPatronId(rawSelPatron) : null;
+  const selectedPatron = candPatron && unlockedPatrons.includes(candPatron) ? candPatron : 'mikan';
+
+  const rawUnlockedThemes = getOwn(raw, 'unlockedThemes');
+  const unlockedThemes =
+    rawUnlockedThemes !== undefined ? sanitizeUnlockedThemes(rawUnlockedThemes) : ['amber'];
+  const rawEqTheme = getOwn(raw, 'equippedTheme');
+  const candTheme = typeof rawEqTheme === 'string' ? rawEqTheme.trim() : null;
+  const equippedTheme = candTheme && unlockedThemes.includes(candTheme) ? candTheme : 'amber';
+
+  const levelStars = {};
+  const rawLevelStars = getOwn(raw, 'levelStars');
+  const inStars = isPlainRecord(rawLevelStars) ? rawLevelStars : null;
+  if (inStars) {
+    for (let i = 0; i < VALID_LEVEL_IDS.length; i++) {
+      const id = VALID_LEVEL_IDS[i];
+      if (!hasOwn(inStars, id)) continue;
+      const s = clampSafeInt(getOwn(inStars, id), 0, 3, 0);
+      if (s > 0) {
+        levelStars[id] = s;
+      }
+    }
+  }
+
+  const levelBestScores = {};
+  const rawLevelScores = getOwn(raw, 'levelBestScores');
+  const inScores = isPlainRecord(rawLevelScores) ? rawLevelScores : null;
+  if (inScores) {
+    for (let i = 0; i < VALID_LEVEL_IDS.length; i++) {
+      const id = VALID_LEVEL_IDS[i];
+      if (!hasOwn(inScores, id)) continue;
+      const sc = clampSafeInt(getOwn(inScores, id), 0, getLevelScoreCap(id), 0);
+      if (sc > 0) {
+        levelBestScores[id] = sc;
+      }
+    }
+  }
+
+  const highestUnlockedLevel = computeHighestUnlockedLevel(levelStars);
+
+  const rawCc = getOwn(raw, 'catcakeLevels');
+  const inCc = isPlainRecord(rawCc) ? rawCc : null;
+  const catcakeLevels = {
+    '1': readCatcakeLevel(inCc, 1),
+    '2': readCatcakeLevel(inCc, 2),
+    '3': readCatcakeLevel(inCc, 3),
+    '4': readCatcakeLevel(inCc, 4),
+    '5': readCatcakeLevel(inCc, 5),
+    '6': readCatcakeLevel(inCc, 6),
+    '7': readCatcakeLevel(inCc, 7)
+  };
+
+  const rawDev = getOwn(raw, 'deviceUpgrades');
+  const inDev = isPlainRecord(rawDev) ? rawDev : null;
+  const deviceUpgrades = {
+    dev_tray: inDev && hasOwn(inDev, 'dev_tray') ? clampSafeInt(getOwn(inDev, 'dev_tray'), 0, 2, 0) : 0,
+    dev_flour: inDev && hasOwn(inDev, 'dev_flour') ? clampSafeInt(getOwn(inDev, 'dev_flour'), 0, 3, 0) : 0,
+    dev_teapot: inDev && hasOwn(inDev, 'dev_teapot') ? clampSafeInt(getOwn(inDev, 'dev_teapot'), 0, 3, 0) : 0,
+    dev_tools: inDev && hasOwn(inDev, 'dev_tools') ? clampSafeInt(getOwn(inDev, 'dev_tools'), 0, 3, 0) : 0
+  };
+
+  const rawTut = getOwn(raw, 'seenTutorials');
+  const inTut = isPlainRecord(rawTut) ? rawTut : null;
+  const seenTutorials = {
+    intro_slide: Boolean(inTut && getOwn(inTut, 'intro_slide')),
+    tray_trash: Boolean(inTut && getOwn(inTut, 'tray_trash')),
+    flavor_tile: Boolean(inTut && getOwn(inTut, 'flavor_tile')),
+    ice_tile: Boolean(inTut && getOwn(inTut, 'ice_tile'))
+  };
+
+  const rawStats = getOwn(raw, 'lifetimeStats');
+  const stRaw = isPlainRecord(rawStats) ? rawStats : {};
+  const ordersServed = Math.max(
+    hasOwn(stRaw, 'ordersServed') ? clampSafeInt(getOwn(stRaw, 'ordersServed'), 0, 9999999, 0) : 0,
+    hasOwn(stRaw, 'ordersCompleted')
+      ? clampSafeInt(getOwn(stRaw, 'ordersCompleted'), 0, 9999999, 0)
+      : 0,
+    hasOwn(stRaw, 'servesTotal') ? clampSafeInt(getOwn(stRaw, 'servesTotal'), 0, 9999999, 0) : 0
+  );
+
+  const bgmRaw = hasOwn(raw, 'bgmTrack') ? getOwn(raw, 'bgmTrack') : 'waltz';
+  const bgmTrack = bgmRaw === 'waltz' || bgmRaw === 'bossa' || bgmRaw === 'off' ? bgmRaw : 'waltz';
+  const rawSfx = getOwn(raw, 'sfxEnabled');
+  const sfxEnabled = typeof rawSfx === 'boolean' ? rawSfx : true;
+  const consumableSpentStardust = hasOwn(raw, 'consumableSpentStardust')
+    ? clampSafeInt(getOwn(raw, 'consumableSpentStardust'), 0, MAX_CONSUMABLE_SPENT_STARDUST, 0)
+    : 0;
+  const migratedFromV1GiftPending = hasOwn(raw, 'migratedFromV1GiftPending')
+    ? Boolean(getOwn(raw, 'migratedFromV1GiftPending'))
+    : false;
+
   const out = {
-    bestChef,
-    bestZen,
-    bestRush,
-    unlockedTiers: Array.from(tierSet).sort((a, b) => a - b),
-    bgmTrack:
-      parsed.bgmTrack === 'waltz' || parsed.bgmTrack === 'bossa' || parsed.bgmTrack === 'off'
-        ? parsed.bgmTrack
-        : 'waltz',
-    sfxEnabled: typeof parsed.sfxEnabled === 'boolean' ? parsed.sfxEnabled : true,
-    bankStardust,
+    schemaVersion: SCHEMA_VERSION,
+    bgmTrack,
+    sfxEnabled,
+    bankStardust: 30,
     totalEarnedStardust: 30,
-    lastSyncedEarnedStardust: clampInt(parsed.lastSyncedEarnedStardust || 0, 0, 999999),
+    lastSyncedEarnedStardust: 0,
+    consumableSpentStardust,
+    migratedFromV1GiftPending,
+    levelStars,
+    levelBestScores,
+    highestUnlockedLevel,
+    catcakeLevels,
+    deviceUpgrades,
     selectedPatron,
     unlockedPatrons,
     equippedTheme,
     unlockedThemes,
-    shopUpgrades: {
-      up_tools: clampInt(upRaw.up_tools, 0, 3),
-      up_fever: clampInt(upRaw.up_fever, 0, 3),
-      up_combo: clampInt(upRaw.up_combo, 0, 3),
-      up_dust: clampInt(upRaw.up_dust, 0, 3)
-    },
-    seenModeGuides: {
-      chef: !!sgRaw.chef,
-      rush: !!sgRaw.rush,
-      zen: !!sgRaw.zen
-    },
-    seenTips: {
-      prep_shop: !!tpRaw.prep_shop,
-      glaze_ring: !!tpRaw.glaze_ring,
-      frozen: !!tpRaw.frozen
-    },
-    playerProfile: normalizeProfile(parsed.playerProfile, selectedPatron),
+    seenTutorials,
+    playerProfile: normalizeProfile(getOwn(raw, 'playerProfile'), selectedPatron),
     lifetimeStats: {
-      runsPlayed: clampInt(stRaw.runsPlayed, 0, 999999),
-      ordersCompleted: clampInt(stRaw.ordersCompleted, 0, 9999999),
-      servesTotal: clampInt(stRaw.servesTotal, 0, 9999999),
-      bankShotsTotal: clampInt(stRaw.bankShotsTotal, 0, 9999999),
-      maxAvalancheEver: clampInt(stRaw.maxAvalancheEver, 0, 999),
-      bestShiftReached: clampInt(stRaw.bestShiftReached, 0, 999),
-      shiftsClearedTotal: clampInt(stRaw.shiftsClearedTotal, 0, 999999),
-      fiveShiftClears: clampInt(stRaw.fiveShiftClears, 0, 999999),
-      soufflesMade: clampInt(stRaw.soufflesMade, 0, 999999),
-      yarnBroken: clampInt(stRaw.yarnBroken, 0, 999999),
-      maxComboEver: clampInt(stRaw.maxComboEver || 1, 1, 999)
+      runsPlayed: hasOwn(stRaw, 'runsPlayed') ? clampSafeInt(getOwn(stRaw, 'runsPlayed'), 0, 999999, 0) : 0,
+      ordersServed,
+      vipServed: hasOwn(stRaw, 'vipServed') ? clampSafeInt(getOwn(stRaw, 'vipServed'), 0, 9999999, 0) : 0,
+      maxComboEver: hasOwn(stRaw, 'maxComboEver') ? clampSafeInt(getOwn(stRaw, 'maxComboEver'), 0, 999, 0) : 0,
+      highestSingleServe: hasOwn(stRaw, 'highestSingleServe')
+        ? clampSafeInt(getOwn(stRaw, 'highestSingleServe'), 0, 220000, 0)
+        : 0,
+      totalStars: computeTotalStars(levelStars),
+      totalCumulativeScore: computeCumulativeScore(levelBestScores)
     },
-    updatedAt: clampInt(parsed.updatedAt || 0, 0, 9999999999999)
+    updatedAt: hasOwn(raw, 'updatedAt') ? clampSafeInt(getOwn(raw, 'updatedAt'), 0, MAX_TIMESTAMP_MS, 0) : 0
   };
 
   const spent = computeSpentStardust(out);
-  const rawEarned = clampInt(parsed.totalEarnedStardust, 0, 999999);
-  out.totalEarnedStardust = Math.max(30, rawEarned, out.bankStardust + spent);
-  out.bankStardust = Math.max(0, out.totalEarnedStardust - spent);
-  if (out.lastSyncedEarnedStardust > out.totalEarnedStardust) {
-    out.lastSyncedEarnedStardust = out.totalEarnedStardust;
+  const rawEarnedVal = getOwn(raw, 'totalEarnedStardust');
+  const rawBankVal = getOwn(raw, 'bankStardust');
+  const hasExplicitEarned = hasOwn(raw, 'totalEarnedStardust') && Number.isFinite(toSafeNum(rawEarnedVal));
+  const hasExplicitBank = hasOwn(raw, 'bankStardust') && Number.isFinite(toSafeNum(rawBankVal));
+
+  let totalEarnedStardust;
+  if (hasExplicitEarned) {
+    const rawEarned = clampSafeInt(rawEarnedVal, 0, MAX_SAFE_STARDUST, 30);
+    totalEarnedStardust = Math.max(30, rawEarned, spent);
+  } else if (hasExplicitBank) {
+    const rawBank = clampSafeInt(rawBankVal, 0, MAX_SAFE_STARDUST, 0);
+    totalEarnedStardust = Math.max(30, rawBank + spent);
+  } else {
+    totalEarnedStardust = Math.max(30, 30 + spent);
   }
+
+  out.totalEarnedStardust = Math.min(MAX_SAFE_STARDUST, totalEarnedStardust);
+  out.bankStardust = Math.max(0, out.totalEarnedStardust - spent);
+  out.lastSyncedEarnedStardust = hasOwn(raw, 'lastSyncedEarnedStardust')
+    ? clampSafeInt(getOwn(raw, 'lastSyncedEarnedStardust'), 0, out.totalEarnedStardust, 0)
+    : 0;
+
   return out;
+}
+
+function migrateV1ToV2(parsed) {
+  if (!isPlainRecord(parsed)) {
+    return createDefaultSave();
+  }
+
+  const sv = hasOwn(parsed, 'schemaVersion') ? toSafeNum(getOwn(parsed, 'schemaVersion')) : 0;
+  if (Number.isFinite(sv) && sv >= SCHEMA_VERSION) {
+    return normalizeV2Save(parsed);
+  }
+
+  const rawUnlockedPatrons = getOwn(parsed, 'unlockedPatrons');
+  const unlockedPatrons =
+    rawUnlockedPatrons !== undefined ? sanitizeUnlockedPatrons(rawUnlockedPatrons) : ['mikan'];
+  const rawSelPatron = getOwn(parsed, 'selectedPatron');
+  const candPatron = rawSelPatron !== undefined ? canonicalizeKnownPatronId(rawSelPatron) : null;
+  const selectedPatron = candPatron && unlockedPatrons.includes(candPatron) ? candPatron : 'mikan';
+
+  const rawUnlockedThemes = getOwn(parsed, 'unlockedThemes');
+  const unlockedThemes =
+    rawUnlockedThemes !== undefined ? sanitizeUnlockedThemes(rawUnlockedThemes) : ['amber'];
+  const rawEqTheme = getOwn(parsed, 'equippedTheme');
+  const candTheme = typeof rawEqTheme === 'string' ? rawEqTheme.trim() : null;
+  const equippedTheme = candTheme && unlockedThemes.includes(candTheme) ? candTheme : 'amber';
+
+  // Reconstruct v1 spent stardust BEFORE dropping legacy shopUpgrades
+  let v1Spent = 0;
+  for (let i = 0; i < unlockedPatrons.length; i++) {
+    const pid = unlockedPatrons[i];
+    if (hasOwn(V1_PATRON_COSTS, pid)) {
+      v1Spent += V1_PATRON_COSTS[pid] || 0;
+    }
+  }
+  for (let i = 0; i < unlockedThemes.length; i++) {
+    const tid = unlockedThemes[i];
+    if (hasOwn(V1_THEME_COSTS, tid)) {
+      v1Spent += V1_THEME_COSTS[tid] || 0;
+    }
+  }
+  const rawShopUp = getOwn(parsed, 'shopUpgrades');
+  const upRaw = isPlainRecord(rawShopUp) ? rawShopUp : {};
+  for (let k = 0; k < V1_UPGRADE_KEYS.length; k++) {
+    const key = V1_UPGRADE_KEYS[k];
+    const lv = hasOwn(upRaw, key) ? clampSafeInt(getOwn(upRaw, key), 0, 3, 0) : 0;
+    const costs = V1_UPGRADE_COSTS[key];
+    for (let i = 0; i < lv; i++) {
+      v1Spent += costs[i] || 0;
+    }
+  }
+
+  const bestChef = hasOwn(parsed, 'bestChef')
+    ? clampSafeInt(getOwn(parsed, 'bestChef'), 0, V1_MAX_PLAUSIBLE_CHEF, 0)
+    : 0;
+  const bestRush = hasOwn(parsed, 'bestRush')
+    ? clampSafeInt(getOwn(parsed, 'bestRush'), 0, V1_MAX_PLAUSIBLE_RUSH, 0)
+    : 0;
+  const bestZen = hasOwn(parsed, 'bestZen')
+    ? clampSafeInt(getOwn(parsed, 'bestZen'), 0, V1_MAX_PLAUSIBLE_ZEN, 0)
+    : 0;
+
+  let rawBank = 30;
+  if (hasOwn(parsed, 'bankStardust')) {
+    const bNum = toSafeNum(getOwn(parsed, 'bankStardust'));
+    if (Number.isFinite(bNum)) {
+      rawBank = clampSafeInt(bNum, 0, MAX_SAFE_STARDUST, 0);
+    }
+  }
+
+  const rawEarned = hasOwn(parsed, 'totalEarnedStardust')
+    ? clampSafeInt(getOwn(parsed, 'totalEarnedStardust'), 0, MAX_SAFE_STARDUST, 0)
+    : 0;
+  const v1TotalEarned = Math.max(30, rawEarned, rawBank + v1Spent);
+
+  let migrationBonus = 0;
+  if (unlockedPatrons.includes('luna')) {
+    migrationBonus += 20;
+  }
+  if (unlockedPatrons.includes('mugi')) {
+    migrationBonus += 20;
+  }
+  const isVeteran = bestChef > 0 || bestRush > 0 || bestZen > 0;
+  if (isVeteran) {
+    migrationBonus += 50;
+  }
+
+  const rawGiftFlag = getOwn(parsed, 'migratedFromV1GiftPending');
+  const migratedFromV1GiftPending =
+    typeof rawGiftFlag === 'boolean' ? rawGiftFlag : isVeteran;
+
+  const totalEarnedStardust = Math.min(MAX_SAFE_STARDUST, v1TotalEarned + migrationBonus);
+  const rawSynced = hasOwn(parsed, 'lastSyncedEarnedStardust')
+    ? clampSafeInt(getOwn(parsed, 'lastSyncedEarnedStardust'), 0, v1TotalEarned, 0)
+    : 0;
+  const lastSyncedEarnedStardust =
+    rawSynced > 0 ? Math.min(totalEarnedStardust, rawSynced + migrationBonus) : 0;
+
+  const bgmRaw = hasOwn(parsed, 'bgmTrack') ? getOwn(parsed, 'bgmTrack') : 'waltz';
+  const bgmTrack = bgmRaw === 'waltz' || bgmRaw === 'bossa' || bgmRaw === 'off' ? bgmRaw : 'waltz';
+  const rawSfx = getOwn(parsed, 'sfxEnabled');
+  const sfxEnabled = typeof rawSfx === 'boolean' ? rawSfx : true;
+
+  const rawStats = getOwn(parsed, 'lifetimeStats');
+  const stRaw = isPlainRecord(rawStats) ? rawStats : {};
+  const runsPlayed = hasOwn(stRaw, 'runsPlayed') ? clampSafeInt(getOwn(stRaw, 'runsPlayed'), 0, 999999, 0) : 0;
+  const ordersServed = Math.max(
+    hasOwn(stRaw, 'ordersServed') ? clampSafeInt(getOwn(stRaw, 'ordersServed'), 0, 9999999, 0) : 0,
+    hasOwn(stRaw, 'ordersCompleted')
+      ? clampSafeInt(getOwn(stRaw, 'ordersCompleted'), 0, 9999999, 0)
+      : 0,
+    hasOwn(stRaw, 'servesTotal') ? clampSafeInt(getOwn(stRaw, 'servesTotal'), 0, 9999999, 0) : 0
+  );
+  const vipServed = hasOwn(stRaw, 'vipServed') ? clampSafeInt(getOwn(stRaw, 'vipServed'), 0, 9999999, 0) : 0;
+  const rawCombo = hasOwn(stRaw, 'maxComboEver') ? clampSafeInt(getOwn(stRaw, 'maxComboEver'), 0, 999, 0) : 0;
+  const maxComboEver =
+    rawCombo === 1 && runsPlayed === 0 && ordersServed === 0 && !isVeteran ? 0 : rawCombo;
+  const highestSingleServe = hasOwn(stRaw, 'highestSingleServe')
+    ? clampSafeInt(getOwn(stRaw, 'highestSingleServe'), 0, 220000, 0)
+    : 0;
+
+  const out = createDefaultSave();
+  out.bgmTrack = bgmTrack;
+  out.sfxEnabled = sfxEnabled;
+  out.migratedFromV1GiftPending = migratedFromV1GiftPending;
+  out.selectedPatron = selectedPatron;
+  out.unlockedPatrons = unlockedPatrons;
+  out.equippedTheme = equippedTheme;
+  out.unlockedThemes = unlockedThemes;
+  out.playerProfile = normalizeProfile(getOwn(parsed, 'playerProfile'), selectedPatron);
+  out.lifetimeStats = {
+    runsPlayed,
+    ordersServed,
+    vipServed,
+    maxComboEver,
+    highestSingleServe,
+    totalStars: 0,
+    totalCumulativeScore: 0
+  };
+  out.updatedAt = hasOwn(parsed, 'updatedAt')
+    ? clampSafeInt(getOwn(parsed, 'updatedAt'), 0, MAX_TIMESTAMP_MS, 0)
+    : 0;
+
+  const v2Spent = computeSpentStardust(out);
+  out.totalEarnedStardust = Math.min(MAX_SAFE_STARDUST, Math.max(30, totalEarnedStardust, v2Spent));
+  out.bankStardust = Math.max(0, out.totalEarnedStardust - v2Spent);
+  out.lastSyncedEarnedStardust = Math.min(out.totalEarnedStardust, lastSyncedEarnedStardust);
+
+  return out;
+}
+
+function normalizeSaveData(raw) {
+  if (!isPlainRecord(raw)) {
+    return createDefaultSave();
+  }
+  const sv = hasOwn(raw, 'schemaVersion') ? toSafeNum(getOwn(raw, 'schemaVersion')) : 0;
+  if (!Number.isFinite(sv) || sv < SCHEMA_VERSION) {
+    return migrateV1ToV2(raw);
+  }
+  return normalizeV2Save(raw);
+}
+
+function isPlaceholderNickName(nick) {
+  if (typeof nick !== 'string') return true;
+  const trimmed = nick.trim();
+  if (!trimmed) return true;
+  return /^星夜店长#[0-9A-Za-z_-]{1,8}$/.test(trimmed);
+}
+
+function mergeProfileRecords(lProf, cProf, preferLocal = true, fallbackPatron = 'mikan') {
+  if (cProf.authorized && !lProf.authorized) return { ...cProf };
+  if (!cProf.authorized && lProf.authorized) return { ...lProf };
+
+  const lPlaceholder = isDefaultPlaceholderProfile(lProf);
+  const cPlaceholder = isDefaultPlaceholderProfile(cProf);
+  const lHasCustomNick = !isPlaceholderNickName(lProf.nickName);
+  const cHasCustomNick = !isPlaceholderNickName(cProf.nickName);
+  const lTs = lProf.updatedAt || 0;
+  const cTs = cProf.updatedAt || 0;
+
+  if (cTs > lTs && !cPlaceholder) {
+    return {
+      ...cProf,
+      nickName: cHasCustomNick ? cProf.nickName : lHasCustomNick ? lProf.nickName : cProf.nickName,
+      avatarUrl: cProf.avatarUrl || lProf.avatarUrl
+    };
+  }
+  if (lTs > cTs && !lPlaceholder) {
+    return {
+      ...lProf,
+      nickName: lHasCustomNick ? lProf.nickName : cHasCustomNick ? cProf.nickName : lProf.nickName,
+      avatarUrl: lProf.avatarUrl || cProf.avatarUrl
+    };
+  }
+
+  if (cHasCustomNick && !lHasCustomNick && lTs <= cTs) {
+    return {
+      ...cProf,
+      avatarUrl: cProf.avatarUrl || lProf.avatarUrl
+    };
+  }
+  if (lHasCustomNick && !cHasCustomNick && cTs <= lTs) {
+    return {
+      ...lProf,
+      avatarUrl: lProf.avatarUrl || cProf.avatarUrl
+    };
+  }
+
+  if (lPlaceholder !== cPlaceholder) {
+    const chosen = lPlaceholder ? cProf : lProf;
+    const other = lPlaceholder ? lProf : cProf;
+    const chosenCustom = lPlaceholder ? cHasCustomNick : lHasCustomNick;
+    const otherCustom = lPlaceholder ? lHasCustomNick : cHasCustomNick;
+    const fallbackNick = preferLocal
+      ? lProf.nickName || cProf.nickName
+      : cProf.nickName || lProf.nickName;
+    return {
+      ...chosen,
+      nickName: chosenCustom ? chosen.nickName : otherCustom ? other.nickName : fallbackNick,
+      avatarUrl: chosen.avatarUrl || other.avatarUrl
+    };
+  }
+
+  const primary = preferLocal ? lProf : cProf;
+  const secondary = preferLocal ? cProf : lProf;
+  const fbPreset = canonicalizeKnownPatronId(fallbackPatron) || 'mikan';
+  let avatarPreset = primary.avatarPreset;
+  if (lPlaceholder && cPlaceholder && avatarPreset === 'mikan') {
+    if (fbPreset !== 'mikan') {
+      avatarPreset = fbPreset;
+    } else if (secondary.avatarPreset && secondary.avatarPreset !== 'mikan') {
+      avatarPreset = secondary.avatarPreset;
+    }
+  }
+
+  return {
+    ...primary,
+    nickName: primary.nickName || secondary.nickName,
+    avatarUrl: primary.avatarUrl || secondary.avatarUrl,
+    avatarPreset
+  };
+}
+
+function isDefaultPlaceholderProfile(prof) {
+  if (!isPlainRecord(prof)) return true;
+  if (getOwn(prof, 'authorized')) return false;
+  if (getOwn(prof, 'avatarUrl')) return false;
+  const preset = getOwn(prof, 'avatarPreset');
+  if (preset && preset !== 'mikan') return false;
+  const ts = getOwn(prof, 'updatedAt');
+  if ((typeof ts === 'number' ? ts : 0) > 0) return false;
+  return isPlaceholderNickName(getOwn(prof, 'nickName'));
+}
+
+function isUntouchedDefaultSave(s) {
+  return Boolean(
+    s &&
+      s.totalEarnedStardust === 30 &&
+      computeSpentStardust(s) === 0 &&
+      s.lifetimeStats.runsPlayed === 0 &&
+      s.lifetimeStats.ordersServed === 0 &&
+      s.lifetimeStats.vipServed === 0 &&
+      s.lifetimeStats.totalStars === 0 &&
+      s.lifetimeStats.totalCumulativeScore === 0 &&
+      !s.migratedFromV1GiftPending &&
+      s.selectedPatron === 'mikan' &&
+      s.equippedTheme === 'amber' &&
+      s.bgmTrack === 'waltz' &&
+      s.sfxEnabled === true &&
+      !s.seenTutorials.intro_slide &&
+      !s.seenTutorials.tray_trash &&
+      !s.seenTutorials.flavor_tile &&
+      !s.seenTutorials.ice_tile &&
+      isDefaultPlaceholderProfile(s.playerProfile)
+  );
 }
 
 function mergeSaveData(localRaw, cloudRaw, cloudProfile = null) {
   const local = normalizeSaveData(localRaw);
-  if (!cloudRaw && !cloudProfile) return local;
-  const cloud = normalizeSaveData(cloudRaw || {});
-  const preferLocal = (local.updatedAt || 0) >= (cloud.updatedAt || 0);
-  const latest = preferLocal ? local : cloud;
 
-  const unlockedPatrons = Array.from(new Set(['mikan', ...local.unlockedPatrons, ...cloud.unlockedPatrons]));
-  const unlockedThemes = Array.from(new Set(['amber', ...local.unlockedThemes, ...cloud.unlockedThemes]));
-  const unlockedTiers = Array.from(new Set([...local.unlockedTiers, ...cloud.unlockedTiers])).sort((a, b) => a - b);
-
-  // Merge player profile: prefer authorized profile or newer updatedAt
-  const cProf = cloudProfile ? normalizeProfile(cloudProfile, latest.selectedPatron) : cloud.playerProfile;
-  const lProf = local.playerProfile;
-  let mergedProf = lProf;
-  if (cProf.authorized && !lProf.authorized) {
-    mergedProf = cProf;
-  } else if (!cProf.authorized && lProf.authorized) {
-    mergedProf = lProf;
-  } else if ((cProf.updatedAt || 0) > (lProf.updatedAt || 0) && cProf.nickName) {
-    mergedProf = cProf;
-  } else if (!lProf.nickName && cProf.nickName) {
-    mergedProf = cProf;
+  if (!isPlainRecord(cloudRaw)) {
+    if (isPlainRecord(cloudProfile)) {
+      const cProfCheck = normalizeProfile(cloudProfile, 'mikan');
+      const cProf = isDefaultPlaceholderProfile(cProfCheck)
+        ? cProfCheck
+        : normalizeProfile(cloudProfile, local.selectedPatron);
+      local.playerProfile = mergeProfileRecords(
+        local.playerProfile,
+        cProf,
+        !isUntouchedDefaultSave(local),
+        local.selectedPatron
+      );
+    }
+    return local;
   }
 
+  const cloud = normalizeSaveData(cloudRaw);
+  const localUntouched = isUntouchedDefaultSave(local);
+  const cloudUntouched = isUntouchedDefaultSave(cloud);
+  const preferLocal =
+    localUntouched !== cloudUntouched
+      ? cloudUntouched
+      : (local.updatedAt || 0) >= (cloud.updatedAt || 0);
+  const latest = preferLocal ? local : cloud;
+
+  const levelStars = {};
+  const levelBestScores = {};
+  for (let i = 0; i < VALID_LEVEL_IDS.length; i++) {
+    const id = VALID_LEVEL_IDS[i];
+    const s = Math.max(
+      hasOwn(local.levelStars, id) ? local.levelStars[id] : 0,
+      hasOwn(cloud.levelStars, id) ? cloud.levelStars[id] : 0
+    );
+    if (s > 0) levelStars[id] = s;
+
+    const sc = Math.max(
+      hasOwn(local.levelBestScores, id) ? local.levelBestScores[id] : 0,
+      hasOwn(cloud.levelBestScores, id) ? cloud.levelBestScores[id] : 0
+    );
+    if (sc > 0) levelBestScores[id] = sc;
+  }
+
+  const highestUnlockedLevel = computeHighestUnlockedLevel(levelStars);
+
+  const catcakeLevels = {};
+  for (let tier = 1; tier <= 7; tier++) {
+    const k = String(tier);
+    catcakeLevels[k] = Math.max(local.catcakeLevels[k] || 0, cloud.catcakeLevels[k] || 0);
+  }
+
+  const deviceUpgrades = {
+    dev_tray: Math.max(local.deviceUpgrades.dev_tray || 0, cloud.deviceUpgrades.dev_tray || 0),
+    dev_flour: Math.max(local.deviceUpgrades.dev_flour || 0, cloud.deviceUpgrades.dev_flour || 0),
+    dev_teapot: Math.max(local.deviceUpgrades.dev_teapot || 0, cloud.deviceUpgrades.dev_teapot || 0),
+    dev_tools: Math.max(local.deviceUpgrades.dev_tools || 0, cloud.deviceUpgrades.dev_tools || 0)
+  };
+
+  const unlockedPatrons = sanitizeUnlockedPatrons([
+    ...local.unlockedPatrons,
+    ...cloud.unlockedPatrons
+  ]);
+  const selectedPatron = unlockedPatrons.includes(latest.selectedPatron)
+    ? latest.selectedPatron
+    : 'mikan';
+
+  const unlockedThemes = sanitizeUnlockedThemes([
+    ...local.unlockedThemes,
+    ...cloud.unlockedThemes
+  ]);
+  const equippedTheme = unlockedThemes.includes(latest.equippedTheme)
+    ? latest.equippedTheme
+    : 'amber';
+
+  const seenTutorials = {};
+  for (let i = 0; i < TUTORIAL_KEYS.length; i++) {
+    const k = TUTORIAL_KEYS[i];
+    seenTutorials[k] = Boolean(local.seenTutorials[k] || cloud.seenTutorials[k]);
+  }
+
+  let migratedFromV1GiftPending;
+  if (cloudUntouched && !localUntouched) {
+    migratedFromV1GiftPending = local.migratedFromV1GiftPending;
+  } else if (localUntouched && !cloudUntouched) {
+    migratedFromV1GiftPending = cloud.migratedFromV1GiftPending;
+  } else {
+    migratedFromV1GiftPending = latest.migratedFromV1GiftPending;
+  }
+
+  let cProf = cloud.playerProfile;
+  if (isPlainRecord(cloudProfile)) {
+    const cProfCheck = normalizeProfile(cloudProfile, 'mikan');
+    cProf = isDefaultPlaceholderProfile(cProfCheck)
+      ? cProfCheck
+      : normalizeProfile(cloudProfile, selectedPatron);
+  }
+  const mergedProfile = mergeProfileRecords(
+    local.playerProfile,
+    cProf,
+    preferLocal,
+    selectedPatron
+  );
+
   const merged = {
-    bestChef: Math.max(local.bestChef, cloud.bestChef),
-    bestZen: Math.max(local.bestZen, cloud.bestZen),
-    bestRush: Math.max(local.bestRush, cloud.bestRush),
-    unlockedTiers,
+    schemaVersion: SCHEMA_VERSION,
     bgmTrack: latest.bgmTrack,
     sfxEnabled: latest.sfxEnabled,
-    selectedPatron: unlockedPatrons.includes(latest.selectedPatron) ? latest.selectedPatron : 'mikan',
+    bankStardust: 0,
+    totalEarnedStardust: 30,
+    lastSyncedEarnedStardust: 0,
+    consumableSpentStardust: clampSafeInt(
+      Math.max(local.consumableSpentStardust || 0, cloud.consumableSpentStardust || 0),
+      0,
+      MAX_CONSUMABLE_SPENT_STARDUST,
+      0
+    ),
+    migratedFromV1GiftPending,
+    levelStars,
+    levelBestScores,
+    highestUnlockedLevel,
+    catcakeLevels,
+    deviceUpgrades,
+    selectedPatron,
     unlockedPatrons,
-    equippedTheme: unlockedThemes.includes(latest.equippedTheme) ? latest.equippedTheme : 'amber',
+    equippedTheme,
     unlockedThemes,
-    shopUpgrades: {
-      up_tools: Math.max(local.shopUpgrades.up_tools, cloud.shopUpgrades.up_tools),
-      up_fever: Math.max(local.shopUpgrades.up_fever, cloud.shopUpgrades.up_fever),
-      up_combo: Math.max(local.shopUpgrades.up_combo, cloud.shopUpgrades.up_combo),
-      up_dust: Math.max(local.shopUpgrades.up_dust, cloud.shopUpgrades.up_dust)
-    },
-    seenModeGuides: {
-      chef: !!(local.seenModeGuides.chef || cloud.seenModeGuides.chef),
-      rush: !!(local.seenModeGuides.rush || cloud.seenModeGuides.rush),
-      zen: !!(local.seenModeGuides.zen || cloud.seenModeGuides.zen)
-    },
-    seenTips: {
-      prep_shop: !!(local.seenTips.prep_shop || cloud.seenTips.prep_shop),
-      glaze_ring: !!(local.seenTips.glaze_ring || cloud.seenTips.glaze_ring),
-      frozen: !!(local.seenTips.frozen || cloud.seenTips.frozen)
-    },
-    playerProfile: mergedProf,
+    seenTutorials,
+    playerProfile: mergedProfile,
     lifetimeStats: {
       runsPlayed: Math.max(local.lifetimeStats.runsPlayed, cloud.lifetimeStats.runsPlayed),
-      ordersCompleted: Math.max(local.lifetimeStats.ordersCompleted, cloud.lifetimeStats.ordersCompleted),
-      servesTotal: Math.max(local.lifetimeStats.servesTotal, cloud.lifetimeStats.servesTotal),
-      bankShotsTotal: Math.max(local.lifetimeStats.bankShotsTotal, cloud.lifetimeStats.bankShotsTotal),
-      maxAvalancheEver: Math.max(local.lifetimeStats.maxAvalancheEver, cloud.lifetimeStats.maxAvalancheEver),
-      bestShiftReached: Math.max(local.lifetimeStats.bestShiftReached, cloud.lifetimeStats.bestShiftReached),
-      shiftsClearedTotal: Math.max(local.lifetimeStats.shiftsClearedTotal, cloud.lifetimeStats.shiftsClearedTotal),
-      fiveShiftClears: Math.max(local.lifetimeStats.fiveShiftClears, cloud.lifetimeStats.fiveShiftClears),
-      soufflesMade: Math.max(local.lifetimeStats.soufflesMade, cloud.lifetimeStats.soufflesMade),
-      yarnBroken: Math.max(local.lifetimeStats.yarnBroken, cloud.lifetimeStats.yarnBroken),
-      maxComboEver: Math.max(local.lifetimeStats.maxComboEver, cloud.lifetimeStats.maxComboEver)
+      ordersServed: Math.max(local.lifetimeStats.ordersServed, cloud.lifetimeStats.ordersServed),
+      vipServed: Math.max(local.lifetimeStats.vipServed, cloud.lifetimeStats.vipServed),
+      maxComboEver: Math.max(local.lifetimeStats.maxComboEver, cloud.lifetimeStats.maxComboEver),
+      highestSingleServe: Math.max(
+        local.lifetimeStats.highestSingleServe,
+        cloud.lifetimeStats.highestSingleServe
+      ),
+      totalStars: computeTotalStars(levelStars),
+      totalCumulativeScore: computeCumulativeScore(levelBestScores)
     },
     updatedAt: Math.max(local.updatedAt || 0, cloud.updatedAt || 0, Date.now())
   };
 
   const spent = computeSpentStardust(merged);
-  // Lossless additive delta merge when both devices diverged from a known synced baseline!
-  let additiveEarned = Math.max(local.totalEarnedStardust, cloud.totalEarnedStardust, spent);
-  const base = local.lastSyncedEarnedStardust || 0;
-  if (
-    base >= 30 &&
-    local.totalEarnedStardust > base &&
-    cloud.totalEarnedStardust > base
-  ) {
-    const localDelta = Math.min(MAX_OFFLINE_STARDUST_DELTA, local.totalEarnedStardust - base);
-    additiveEarned = Math.max(additiveEarned, cloud.totalEarnedStardust + localDelta);
+  const lSync = local.lastSyncedEarnedStardust || 0;
+  const cSync = cloud.lastSyncedEarnedStardust || 0;
+
+  const effLocal =
+    lSync >= 30 && local.totalEarnedStardust > lSync
+      ? lSync + Math.min(MAX_OFFLINE_STARDUST_DELTA, local.totalEarnedStardust - lSync)
+      : local.totalEarnedStardust;
+  const effCloud =
+    cSync >= 30 && cloud.totalEarnedStardust > cSync
+      ? cSync + Math.min(MAX_OFFLINE_STARDUST_DELTA, cloud.totalEarnedStardust - cSync)
+      : cloud.totalEarnedStardust;
+
+  let additiveEarned = Math.max(30, effLocal, effCloud, spent);
+
+  if (lSync >= 30 && local.totalEarnedStardust > lSync && effCloud > lSync) {
+    const localDelta = Math.min(MAX_OFFLINE_STARDUST_DELTA, local.totalEarnedStardust - lSync);
+    additiveEarned = Math.max(additiveEarned, effCloud + localDelta);
   }
-  merged.totalEarnedStardust = additiveEarned;
+
+  if (cSync >= 30 && cloud.totalEarnedStardust > cSync && effLocal > cSync) {
+    const cloudDelta = Math.min(MAX_OFFLINE_STARDUST_DELTA, cloud.totalEarnedStardust - cSync);
+    additiveEarned = Math.max(additiveEarned, effLocal + cloudDelta);
+  }
+
+  merged.totalEarnedStardust = Math.min(MAX_SAFE_STARDUST, additiveEarned);
   merged.lastSyncedEarnedStardust = merged.totalEarnedStardust;
   merged.bankStardust = Math.max(0, merged.totalEarnedStardust - spent);
+
   return merged;
 }
 
-function serializeActiveRun(gameState, activeModal) {
-  if (!gameState || gameState.over) return null;
-  const isPrepModal = activeModal === 'prep_shop' || activeModal === 'shift_victory';
-  // Only snapshot runs where the player has actually progressed (>= 1 drop, or shift >= 2, or in prep_shop/victory)
-  if (!isPrepModal && (gameState.dropsMadeThisRun || 0) < 1 && (gameState.shift || 1) <= 1) {
-    return null;
-  }
-  if (gameState.mode === 'rush' && (gameState.rushTimer || 0) <= 3.0) {
-    return null;
-  }
-
-  return {
-    v: 2,
-    savedAt: Date.now(),
-    startedAt: gameState.runStartedAt || Date.now(),
-    mode: gameState.mode,
-    score: gameState.score || 0,
-    stardust: gameState.stardust || 0,
-    dangerDuration: +(gameState.dangerDuration || 0).toFixed(2),
-    shift: gameState.shift || 1,
-    shiftName: gameState.shiftName || '暮色试营业',
-    shiftBadge: gameState.shiftBadge || '第1幕·试营',
-    shiftModifier: gameState.shiftModifier || null,
-    shiftHazards: [...(gameState.shiftHazards || [])],
-    shiftsClearedThisRun: gameState.shiftsClearedThisRun || 0,
-    shiftRevenue: gameState.shiftRevenue || 0,
-    shiftTarget: gameState.shiftTarget || 1200,
-    stepsLeft: gameState.stepsLeft || 0,
-    stepsMax: gameState.stepsMax || 16,
-    shiftStepsUsed: gameState.shiftStepsUsed || 0,
-    shiftStepRefunds: gameState.shiftStepRefunds || 0,
-    freeSkipsLeft: gameState.freeSkipsLeft !== undefined ? gameState.freeSkipsLeft : 1,
-    mugiBankCoinHits: gameState.mugiBankCoinHits || 0,
-    mikanFirstServeUsed: !!gameState.mikanFirstServeUsed,
-    quickOrdersCompleted: gameState.quickOrdersCompleted || 0,
-    shiftClearedFlag: !!gameState.shiftClearedFlag,
-    coins: gameState.coins || 0,
-    relics: [...(gameState.relics || [])].filter((id) => RELICS.some((r) => r.id === id)),
-    deckMods: { ...(gameState.deckMods || {}) },
-    nextShiftBonusSteps: gameState.nextShiftBonusSteps || 0,
-    antigravDropCounter: gameState.antigravDropCounter || 0,
-    dropsMadeThisRun: gameState.dropsMadeThisRun || 0,
-    soufflesMadeThisRun: gameState.soufflesMadeThisRun || 0,
-    yarnBrokenThisRun: gameState.yarnBrokenThisRun || 0,
-    iceShatteredThisRun: gameState.iceShatteredThisRun || 0,
-    glazeHitsThisRun: gameState.glazeHitsThisRun || 0,
-    servesCompleted: gameState.servesCompleted || 0,
-    ordersCompleted: gameState.ordersCompleted || 0,
-    bankShotsLanded: gameState.bankShotsLanded || 0,
-    maxAvalancheRun: gameState.maxAvalancheRun || 0,
-    maxCombo: gameState.maxCombo || 1,
-    maxTierRun: gameState.maxTierRun || 4,
-    seenThisRun: Array.from(gameState.seenThisRun || [1, 2, 3, 4]),
-    skillEnergy: +(gameState.skillEnergy || 0).toFixed(2),
-    nextShotMeteor: !!gameState.nextShotMeteor,
-    feverEnergy: +(gameState.feverEnergy || 0).toFixed(2),
-    tools: { ...(gameState.tools || { shake: 2, spoon: 1 }) },
-    perks: { ...(gameState.perks || {}) },
-    pendingBlessings: 0,
-    dropsUntilRainbow: gameState.dropsUntilRainbow || 12,
-    canHoldThisTurn: gameState.canHoldThisTurn !== false,
-    curTier: gameState.curTier || 2,
-    curMeta: { ...(gameState.curMeta || { wildcard: false, golden: false }) },
-    nextTier: gameState.nextTier || 1,
-    nextMeta: { ...(gameState.nextMeta || { wildcard: false, golden: false }) },
-    holdTier: gameState.holdTier || null,
-    holdMeta: gameState.holdMeta ? { ...gameState.holdMeta } : null,
-    zenNextMilestone: gameState.zenNextMilestone || 600,
-    rushTimer: +(gameState.rushTimer || 90).toFixed(2),
-    rushNextMilestone: gameState.rushNextMilestone || 1200,
-    activeEvent: gameState.activeEvent ? { ...gameState.activeEvent } : null,
-    resumeModal: isPrepModal ? activeModal : null,
-    prepShop: activeModal === 'prep_shop' && gameState.prepShop ? JSON.parse(JSON.stringify(gameState.prepShop)) : null,
-    victoryOffer: activeModal === 'shift_victory' && gameState.victoryOffer ? JSON.parse(JSON.stringify(gameState.victoryOffer)) : null,
-    orders: (gameState.orders || []).map((o) => ({
-      uid: o.uid,
-      kind: o.kind,
-      slotOrigin: o.slotOrigin || o.kind,
-      isJudgeRush: !!o.isJudgeRush,
-      isStarterBlitz: !!o.isStarterBlitz,
-      bonusSteps: o.bonusSteps || 0,
-      label: o.label,
-      patronId: o.patron ? o.patron.id : 'mikan',
-      slots: (o.slots || []).map((s) => ({ tier: s.tier, done: !!s.done })),
-      bonusScore: o.bonusScore || 100,
-      rewardDust: o.rewardDust || 12,
-      freshSteps: o.freshSteps || 0,
-      freshMax: o.freshMax || 6,
-      freshMult: o.freshMult || 1.35,
-      staleMult: o.staleMult || 1.0,
-      completed: !!o.completed
-    })),
-    entities: (gameState.entities || [])
-      .filter((e) => e && !e.merged)
-      .slice(0, 48)
-      .map((e) => ({
-        tier: e.tier || 1,
-        x: +e.x.toFixed(2),
-        y: +e.y.toFixed(2),
-        angle: +(e.angle || 0).toFixed(3),
-        isWildcard: !!e.isWildcard,
-        isGolden: !!e.isGolden,
-        isYarnBall: !!e.isYarnBall,
-        yarnHp: e.isYarnBall ? e.yarnHp || 2 : 0,
-        frozenHp: e.frozenHp || 0,
-        agedStacks: e.agedStacks || 0,
-        bumperRewardCount: e.bumperRewardCount || 0,
-        bumperCrit: !!e.bumperCrit
-      }))
-  };
-}
-
-function validateActiveRunSnapshot(snap) {
-  if (!snap || typeof snap !== 'object') return null;
-  if (!['chef', 'rush', 'zen'].includes(snap.mode)) return null;
-  if (!Array.isArray(snap.entities) || !Array.isArray(snap.orders)) return null;
-  if (snap.deckMods && typeof snap.deckMods === 'object') {
-    for (const k of Object.keys(snap.deckMods)) {
-      if (!DECK_MODS.some((m) => m.id === k)) delete snap.deckMods[k];
+function readPlatformJSON(platform, key) {
+  if (!platform || typeof platform !== 'object') return null;
+  try {
+    if (typeof platform.getStorageJSON === 'function') {
+      return platform.getStorageJSON(key);
     }
-  }
-  return snap;
-}
-
-function normalizeSavedRunsMap(rawMap, legacySingleSnap = null) {
-  const out = { chef: null, rush: null, zen: null };
-  if (rawMap && typeof rawMap === 'object') {
-    for (const m of ['chef', 'rush', 'zen']) {
-      const v = validateActiveRunSnapshot(rawMap[m]);
-      if (v && v.mode === m) out[m] = v;
+    if (typeof platform.getStorageSync === 'function') {
+      const raw = platform.getStorageSync(key);
+      if (raw === '' || raw === null || raw === undefined) return null;
+      return typeof raw === 'string' ? JSON.parse(raw) : raw;
     }
-  }
-  const leg = validateActiveRunSnapshot(legacySingleSnap);
-  if (leg && (!out[leg.mode] || (leg.savedAt || 0) > (out[leg.mode].savedAt || 0))) {
-    out[leg.mode] = leg;
-  }
-  return out;
+    if (typeof platform.getItem === 'function') {
+      const raw = platform.getItem(key);
+      return raw ? JSON.parse(raw) : null;
+    }
+  } catch (_) {}
+  return null;
 }
 
-function mergeSavedRunsMaps(localMap, cloudMap, cloudSingleLegacy = null) {
-  const a = normalizeSavedRunsMap(localMap, null);
-  const b = normalizeSavedRunsMap(cloudMap, cloudSingleLegacy);
-  const merged = { chef: null, rush: null, zen: null };
-  for (const m of ['chef', 'rush', 'zen']) {
-    if (a[m] && b[m]) {
-      merged[m] = (a[m].savedAt || 0) >= (b[m].savedAt || 0) ? a[m] : b[m];
+function writePlatformJSON(platform, key, value) {
+  if (!platform || typeof platform !== 'object') return;
+  try {
+    if (typeof platform.setStorageJSON === 'function') {
+      platform.setStorageJSON(key, value);
+      return;
+    }
+    const serialized = JSON.stringify(value);
+    if (typeof platform.setStorageSync === 'function') {
+      platform.setStorageSync(key, serialized);
+      return;
+    }
+    if (typeof platform.setItem === 'function') {
+      platform.setItem(key, serialized);
+    }
+  } catch (_) {}
+}
+
+function deletePlatformKey(platform, key) {
+  if (!platform || typeof platform !== 'object') return;
+  try {
+    if (typeof platform.removeStorage === 'function') {
+      platform.removeStorage(key);
+      return;
+    }
+    if (typeof platform.removeStorageSync === 'function') {
+      platform.removeStorageSync(key);
+      return;
+    }
+    if (typeof platform.setStorageSync === 'function') {
+      platform.setStorageSync(key, '');
+      return;
+    }
+    if (typeof platform.removeItem === 'function') {
+      platform.removeItem(key);
+    }
+  } catch (_) {}
+}
+
+function loadLocalSave(platform) {
+  for (let i = 0; i < LEGACY_RUN_STORAGE_KEYS.length; i++) {
+    deletePlatformKey(platform, LEGACY_RUN_STORAGE_KEYS[i]);
+  }
+
+  const raw = readPlatformJSON(platform, STORAGE_KEY);
+  const rawSv = isPlainRecord(raw) ? getOwn(raw, 'schemaVersion') : undefined;
+  const wasLegacyV1 =
+    isPlainRecord(raw) &&
+    (!hasOwn(raw, 'schemaVersion') || !(toSafeNum(rawSv) >= SCHEMA_VERSION));
+
+  const save = normalizeSaveData(raw);
+  if (wasLegacyV1) {
+    writePlatformJSON(platform, STORAGE_KEY, save);
+  }
+  return save;
+}
+
+function saveLocalSave(platform, save) {
+  const now = Date.now();
+  const normalized = normalizeSaveData(isPlainRecord(save) ? save : null);
+  normalized.updatedAt = now;
+
+  if (isPlainRecord(save)) {
+    try {
+      if (!Object.isFrozen(save) && Object.isExtensible(save)) {
+        const existingKeys = Object.keys(save);
+        for (let i = 0; i < existingKeys.length; i++) {
+          const k = existingKeys[i];
+          if (!hasOwn(normalized, k)) {
+            try {
+              delete save[k];
+            } catch (_) {}
+          }
+        }
+        const normKeys = Object.keys(normalized);
+        for (let i = 0; i < normKeys.length; i++) {
+          const nk = normKeys[i];
+          try {
+            save[nk] = normalized[nk];
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+  }
+
+  writePlatformJSON(platform, STORAGE_KEY, normalized);
+  return normalized;
+}
+
+function readFirstStatField(obj, keys, min, max, fallback) {
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i];
+    if (!hasOwn(obj, k)) continue;
+    const val = getOwn(obj, k);
+    if (val === undefined) continue;
+    return clampSafeInt(val, min, max, fallback);
+  }
+  return fallback === 0 ? 0 : fallback;
+}
+
+function recordLevelSettlementToSave(
+  save,
+  levelId,
+  score,
+  starsEarned,
+  totalDustAward,
+  runStats
+) {
+  const base = normalizeSaveData(save);
+  const lvl = getLevelById(levelId);
+
+  const nextLevelStars = { ...base.levelStars };
+  const nextLevelBestScores = { ...base.levelBestScores };
+
+  if (lvl) {
+    const cap = getLevelScoreCap(lvl.id);
+    const cleanScore = clampSafeInt(score, 0, cap, 0);
+
+    let cleanStars;
+    if (starsEarned === undefined || starsEarned === null) {
+      cleanStars =
+        cleanScore >= lvl.stars[2]
+          ? 3
+          : cleanScore >= lvl.stars[1]
+          ? 2
+          : cleanScore >= lvl.stars[0]
+          ? 1
+          : 0;
     } else {
-      merged[m] = a[m] || b[m] || null;
+      cleanStars = clampSafeInt(starsEarned, 0, 3, 0);
+    }
+
+    const prevStars = hasOwn(nextLevelStars, lvl.id) ? nextLevelStars[lvl.id] : 0;
+    const mergedStars = Math.max(prevStars, cleanStars);
+    if (mergedStars > 0) {
+      nextLevelStars[lvl.id] = mergedStars;
+    }
+
+    const prevBest = hasOwn(nextLevelBestScores, lvl.id) ? nextLevelBestScores[lvl.id] : 0;
+    const mergedBest = Math.max(prevBest, cleanScore);
+    if (mergedBest > 0) {
+      nextLevelBestScores[lvl.id] = mergedBest;
     }
   }
-  return merged;
+
+  const dustGain = clampSafeInt(totalDustAward, 0, MAX_OFFLINE_STARDUST_DELTA, 0);
+  const nextTotalEarned = Math.min(MAX_SAFE_STARDUST, base.totalEarnedStardust + dustGain);
+
+  const rs = isPlainRecord(runStats) ? runStats : {};
+  const runsDelta = hasOwn(rs, 'runsPlayedDelta')
+    ? clampSafeInt(getOwn(rs, 'runsPlayedDelta'), 0, 10, 1)
+    : 1;
+  const ordersDelta = readFirstStatField(
+    rs,
+    ['ordersServed', 'serves', 'ordersCompleted', 'servesTotal'],
+    0,
+    9999,
+    0
+  );
+  const vipDelta = hasOwn(rs, 'vipServed') ? clampSafeInt(getOwn(rs, 'vipServed'), 0, 999, 0) : 0;
+  const runMaxCombo = readFirstStatField(
+    rs,
+    ['maxCombo', 'maxComboEver', 'comboMax'],
+    0,
+    999,
+    0
+  );
+  const runBestServe = readFirstStatField(
+    rs,
+    ['highestSingleServe', 'bestSingleServe', 'maxSingleServe'],
+    0,
+    220000,
+    0
+  );
+
+  const candidate = {
+    ...base,
+    totalEarnedStardust: nextTotalEarned,
+    lastSyncedEarnedStardust: base.lastSyncedEarnedStardust,
+    levelStars: nextLevelStars,
+    levelBestScores: nextLevelBestScores,
+    lifetimeStats: {
+      runsPlayed: Math.min(999999, base.lifetimeStats.runsPlayed + runsDelta),
+      ordersServed: Math.min(9999999, base.lifetimeStats.ordersServed + ordersDelta),
+      vipServed: Math.min(9999999, base.lifetimeStats.vipServed + vipDelta),
+      maxComboEver: Math.max(base.lifetimeStats.maxComboEver, runMaxCombo),
+      highestSingleServe: Math.max(base.lifetimeStats.highestSingleServe, runBestServe),
+      totalStars: computeTotalStars(nextLevelStars),
+      totalCumulativeScore: computeCumulativeScore(nextLevelBestScores)
+    },
+    updatedAt: Date.now()
+  };
+
+  return normalizeV2Save(candidate);
 }
 
 module.exports = {
-  ACTIVE_RUN_STORAGE_KEY,
-  ACTIVE_RUNS_STORAGE_KEY,
-  MAX_PLAUSIBLE_CHEF,
-  MAX_PLAUSIBLE_RUSH,
-  MAX_PLAUSIBLE_ZEN,
+  SCHEMA_VERSION,
+  MAX_OFFLINE_STARDUST_DELTA,
+  LEGACY_RUN_STORAGE_KEYS,
+  createDefaultSave,
+  migrateV1ToV2,
   computeSpentStardust,
   normalizeProfile,
+  computeHighestUnlockedLevel,
+  computeCumulativeScore,
   normalizeSaveData,
   mergeSaveData,
-  serializeActiveRun,
-  validateActiveRunSnapshot,
-  normalizeSavedRunsMap,
-  mergeSavedRunsMaps
+  mergeMetaSaves: mergeSaveData,
+  loadLocalSave,
+  saveLocalSave,
+  recordLevelSettlementToSave
 };

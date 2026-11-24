@@ -599,11 +599,364 @@ def extract_plan_b_assets():
     return report
 
 
+def _find_cleanest_split(fg_mask_1d: np.ndarray, center_idx: int, radius: int) -> int:
+    lo = max(1, center_idx - radius)
+    hi = min(len(fg_mask_1d) - 2, center_idx + radius)
+    best_idx = center_idx
+    best_score = float("inf")
+    for idx in range(lo, hi + 1):
+        # Prefer zero/low foreground count, tie-breaking toward geometric center
+        score = float(fg_mask_1d[idx]) * 100.0 + abs(idx - center_idx) * 0.05
+        if score < best_score:
+            best_score = score
+            best_idx = idx
+    return best_idx
+
+
+def _smart_grid_splits_4x2(rgb: np.ndarray) -> tuple[list[int], list[int]]:
+    h, w, _ = rgb.shape
+    arr = rgb.astype(np.float32)
+    corners = np.array(
+        [
+            arr[0:8, 0:8].mean(axis=(0, 1)),
+            arr[0:8, w - 8 : w].mean(axis=(0, 1)),
+            arr[h - 8 : h, 0:8].mean(axis=(0, 1)),
+            arr[h - 8 : h, w - 8 : w].mean(axis=(0, 1)),
+        ]
+    )
+    bg_color = np.median(corners, axis=0)
+    fg = np.linalg.norm(arr - bg_color[None, None, :], axis=2) > 28.0
+    col_fg = fg.sum(axis=0)
+    row_fg = fg.sum(axis=1)
+
+    rx = max(12, int(w * 0.065))
+    ry = max(12, int(h * 0.08))
+    xs = [
+        0,
+        _find_cleanest_split(col_fg, w // 4, rx),
+        _find_cleanest_split(col_fg, w // 2, rx),
+        _find_cleanest_split(col_fg, (w * 3) // 4, rx),
+        w,
+    ]
+    ys = [
+        0,
+        _find_cleanest_split(row_fg, h // 2, ry),
+        h,
+    ]
+    return xs, ys
+
+
+def _remove_tiny_specks(rgba: np.ndarray, min_pixels: int = 24, alpha_thresh: int = 20) -> np.ndarray:
+    mask = rgba[:, :, 3] > alpha_thresh
+    h, w = mask.shape
+    labels = np.zeros((h, w), dtype=np.int32)
+    cur_label = 0
+    keep_labels = set()
+
+    for sy in range(h):
+        for sx in range(w):
+            if mask[sy, sx] and labels[sy, sx] == 0:
+                cur_label += 1
+                q = deque([(sy, sx)])
+                labels[sy, sx] = cur_label
+                cnt = 0
+                while q:
+                    cy, cx = q.popleft()
+                    cnt += 1
+                    for dy in (-1, 0, 1):
+                        for dx in (-1, 0, 1):
+                            if dy == 0 and dx == 0:
+                                continue
+                            ny, nx = cy + dy, cx + dx
+                            if 0 <= ny < h and 0 <= nx < w and mask[ny, nx] and labels[ny, nx] == 0:
+                                labels[ny, nx] = cur_label
+                                q.append((ny, nx))
+                if cnt >= min_pixels:
+                    keep_labels.add(cur_label)
+
+    out = rgba.copy()
+    if keep_labels:
+        drop = (labels > 0) & (~np.isin(labels, list(keep_labels)))
+        out[drop, 3] = 0
+    return out
+
+
+def _normalize_cell_rgba(
+    cell_img: Image.Image,
+    target_size: int,
+    margin_ratio: float = 0.08,
+    bg_dist_thresh: float = 30.0,
+    decontam_thresh: float = 112.0,
+    keep_main_only: bool = False,
+) -> Image.Image:
+    # Trim 2px border safety in case edge has compression noise
+    cw, ch = cell_img.size
+    if cw > 20 and ch > 20:
+        cell_img = cell_img.crop((2, 2, cw - 2, ch - 2))
+
+    rgba_img = floodfill_remove_bg(
+        np.array(cell_img),
+        bg_dist_thresh=bg_dist_thresh,
+        decontam_thresh=decontam_thresh,
+        keep_main_only=keep_main_only,
+    )
+    if not keep_main_only:
+        min_px = max(18, int(cw * ch * 0.00045))
+        rgba_img = Image.fromarray(_remove_tiny_specks(np.array(rgba_img), min_pixels=min_px), mode="RGBA")
+
+    # Compute tight bbox on alpha > 16 to ignore near-zero haze
+    arr = np.array(rgba_img)
+    ys, xs = np.where(arr[:, :, 3] > 16)
+    if len(xs) > 0 and len(ys) > 0:
+        rgba_img = rgba_img.crop((int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1))
+
+    inner = max(16, int(round(target_size * (1.0 - 2.0 * margin_ratio))))
+    scale = min(float(inner) / max(1, rgba_img.width), float(inner) / max(1, rgba_img.height))
+    nw = max(1, int(round(rgba_img.width * scale)))
+    nh = max(1, int(round(rgba_img.height * scale)))
+    resized = rgba_img.resize((nw, nh), Image.Resampling.LANCZOS)
+
+    canvas = Image.new("RGBA", (target_size, target_size), (0, 0, 0, 0))
+    ox = (target_size - nw) // 2
+    oy = (target_size - nh) // 2
+    canvas.alpha_composite(resized, (ox, oy))
+    return canvas
+
+
+def _save_png_dual(img: Image.Image, filename: str, minigame_dir: Path, quantize_minigame: bool = True) -> tuple[float, float]:
+    out_master = PNG_DIR / filename
+    img.save(out_master, optimize=True)
+    master_kb = out_master.stat().st_size / 1024.0
+
+    minigame_dir.mkdir(parents=True, exist_ok=True)
+    out_mini = minigame_dir / filename
+    if quantize_minigame:
+        q_img = img.quantize(colors=256, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE)
+        q_img.save(out_mini, optimize=True)
+        # If quantized happened to be bigger or broken, keep RGBA optimized
+        if out_mini.stat().st_size > out_master.stat().st_size:
+            img.save(out_mini, optimize=True)
+    else:
+        img.save(out_mini, optimize=True)
+    mini_kb = out_mini.stat().st_size / 1024.0
+    return round(master_kb, 1), round(mini_kb, 1)
+
+
+def _knockout_tile_gold_center(norm: Image.Image) -> Image.Image:
+    """
+    Punch out the enclosed white interior square hole of `tile_gold` (128x128 RGBA),
+    decontaminating any white fringe on the inner frame border and leaving a hollow
+    center with a soft warm-gold inner rim glaze (alpha <= 32, center alpha <= 12).
+    """
+    rgba = np.array(norm, dtype=np.float32)
+    h, w, _ = rgba.shape
+    rgb = rgba[:, :, :3]
+    alpha = rgba[:, :, 3]
+
+    white = np.array([255.0, 255.0, 255.0], dtype=np.float32)
+    dist_w = np.linalg.norm(rgb - white[None, None, :], axis=2)
+    luma = 0.299 * rgb[:, :, 0] + 0.587 * rgb[:, :, 1] + 0.114 * rgb[:, :, 2]
+    sat = rgb.max(axis=2) - rgb.min(axis=2)
+
+    # Match enclosed white / pale-cream hole pixels without crossing #4A2C2A inner outline or saturated gold frame
+    is_hole_cand = (alpha > 0) & ((dist_w < 38.0) | ((luma > 226.0) & (sat < 48.0)))
+
+    hole_mask = np.zeros((h, w), dtype=bool)
+    q = deque()
+    cy0, cy1 = int(h * 0.36), int(h * 0.64)
+    cx0, cx1 = int(w * 0.36), int(w * 0.64)
+    for sy in range(cy0, cy1):
+        for sx in range(cx0, cx1):
+            if is_hole_cand[sy, sx] and not hole_mask[sy, sx]:
+                hole_mask[sy, sx] = True
+                q.append((sy, sx))
+
+    while q:
+        cy, cx = q.popleft()
+        for ny, nx in ((cy - 1, cx), (cy + 1, cx), (cy, cx - 1), (cy, cx + 1)):
+            if 0 <= ny < h and 0 <= nx < w and not hole_mask[ny, nx]:
+                if is_hole_cand[ny, nx]:
+                    hole_mask[ny, nx] = True
+                    q.append((ny, nx))
+
+    if hole_mask.sum() < 64:
+        return norm
+
+    # Decontaminate 1px inner frame rim adjacent to hole_mask so zero white inner halo remains
+    padded = np.pad(hole_mask, 1, mode="constant", constant_values=False)
+    adj_hole = (
+        padded[:-2, 1:-1] | padded[2:, 1:-1] | padded[1:-1, :-2] | padded[1:-1, 2:]
+        | padded[:-2, :-2] | padded[:-2, 2:] | padded[2:, :-2] | padded[2:, 2:]
+    )
+    inner_edge = (~hole_mask) & (alpha > 0) & adj_hole
+    for y, x in zip(*np.where(inner_edge)):
+        d = dist_w[y, x]
+        if d < 112.0:
+            a = float(np.clip((d - 14.0) / (112.0 - 14.0), 0.15, 1.0))
+            alpha[y, x] = min(alpha[y, x], a * 255.0)
+            rgb[y, x] = np.clip((rgb[y, x] - (1.0 - a) * white) / max(a, 0.25), 0.0, 255.0)
+
+    # Subtle warm-gold inner rim glow (<= 32 alpha near frame, 0..8 alpha in center)
+    rim_src = ((~hole_mask) & (alpha > 64)).astype(np.uint8) * 255
+    rim_blur = np.array(
+        Image.fromarray(rim_src, mode="L").filter(ImageFilter.GaussianBlur(radius=3.2)),
+        dtype=np.float32,
+    ) / 255.0
+    for y, x in zip(*np.where(hole_mask)):
+        rgb[y, x] = np.array([255.0, 214.0, 102.0], dtype=np.float32)
+        alpha[y, x] = float(np.clip(rim_blur[y, x] * 40.0, 0.0, 32.0))
+
+    out = np.dstack([np.clip(rgb, 0, 255).astype(np.uint8), np.clip(alpha, 0, 255).astype(np.uint8)])
+    return Image.fromarray(out, mode="RGBA")
+
+
+def extract_v2_assets(verify_out: str | None = None):
+    """
+    Slice & normalize 《一起做猫饼》 2.0 sprite sheets and hero cover into:
+      - catcake_1.png .. catcake_7.png (192x192 RGBA)
+      - catcake_1_happy.png .. catcake_7_happy.png (192x192 RGBA)
+      - customers_atlas.png (1024x512 RGBA, 4x2 grid of 256x256)
+      - board_tiles_atlas.png (512x256 RGBA, 4x2 grid of 128x128)
+      - title_hero_v2.jpg (1280x720 RGB JPEG)
+    Incrementally writes to both `02-游戏素材-精修透明PNG/` and `05-微信小游戏版本/assets/`
+    without deleting legacy v4.1 assets.
+    """
+    minigame_dir = REPO_ROOT / "05-微信小游戏版本" / "assets"
+    req_files = {
+        "base": RAW_DIR / "v2_catcakes_base_sheet.jpg",
+        "happy": RAW_DIR / "v2_catcakes_happy_sheet.jpg",
+        "customers": RAW_DIR / "v2_customers_sheet.jpg",
+        "tiles": RAW_DIR / "v2_board_tiles_sheet.jpg",
+        "hero": RAW_DIR / "v2_title_hero_raw.jpg",
+    }
+    for key, p in req_files.items():
+        if not p.exists():
+            raise FileNotFoundError(f"Missing 2.0 raw source [{key}]: {p}")
+
+    report = []
+    preview_thumbs: list[tuple[str, Image.Image]] = []
+
+    # 1. Catcakes Base (first 7 cells of 4x2)
+    base_rgb = np.array(Image.open(req_files["base"]).convert("RGB"))
+    xs, ys = _smart_grid_splits_4x2(base_rgb)
+    base_pil = Image.fromarray(base_rgb)
+    for idx in range(7):
+        r, c = divmod(idx, 4)
+        cell = base_pil.crop((xs[c], ys[r], xs[c + 1], ys[r + 1]))
+        norm = _normalize_cell_rgba(cell, 192, margin_ratio=0.075, bg_dist_thresh=28.0, keep_main_only=False)
+        fname = f"catcake_{idx + 1}.png"
+        mkb, skb = _save_png_dual(norm, fname, minigame_dir)
+        report.append((fname, norm.size, skb))
+        preview_thumbs.append((f"C{idx+1} ({skb}K)", norm))
+
+    # 2. Catcakes Happy (first 7 cells of 4x2)
+    happy_rgb = np.array(Image.open(req_files["happy"]).convert("RGB"))
+    xs, ys = _smart_grid_splits_4x2(happy_rgb)
+    happy_pil = Image.fromarray(happy_rgb)
+    for idx in range(7):
+        r, c = divmod(idx, 4)
+        cell = happy_pil.crop((xs[c], ys[r], xs[c + 1], ys[r + 1]))
+        norm = _normalize_cell_rgba(cell, 192, margin_ratio=0.075, bg_dist_thresh=28.0, keep_main_only=False)
+        fname = f"catcake_{idx + 1}_happy.png"
+        mkb, skb = _save_png_dual(norm, fname, minigame_dir)
+        report.append((fname, norm.size, skb))
+        preview_thumbs.append((f"C{idx+1}_hp ({skb}K)", norm))
+
+    # 3. Customers Atlas (8 cells -> 1024x512)
+    cust_rgb = np.array(Image.open(req_files["customers"]).convert("RGB"))
+    xs, ys = _smart_grid_splits_4x2(cust_rgb)
+    cust_pil = Image.fromarray(cust_rgb)
+    cust_atlas = Image.new("RGBA", (1024, 512), (0, 0, 0, 0))
+    for idx in range(8):
+        r, c = divmod(idx, 4)
+        cell = cust_pil.crop((xs[c], ys[r], xs[c + 1], ys[r + 1]))
+        norm = _normalize_cell_rgba(cell, 256, margin_ratio=0.06, bg_dist_thresh=28.0, keep_main_only=True)
+        cust_atlas.alpha_composite(norm, (c * 256, r * 256))
+        preview_thumbs.append((f"Cust_{idx+1}", norm))
+    mkb, skb = _save_png_dual(cust_atlas, "customers_atlas.png", minigame_dir)
+    report.append(("customers_atlas.png", cust_atlas.size, skb))
+
+    # 4. Board Tiles Atlas (8 cells -> 512x256)
+    tiles_rgb = np.array(Image.open(req_files["tiles"]).convert("RGB"))
+    xs, ys = _smart_grid_splits_4x2(tiles_rgb)
+    tiles_pil = Image.fromarray(tiles_rgb)
+    tiles_atlas = Image.new("RGBA", (512, 256), (0, 0, 0, 0))
+    for idx in range(8):
+        r, c = divmod(idx, 4)
+        cell = tiles_pil.crop((xs[c], ys[r], xs[c + 1], ys[r + 1]))
+        norm = _normalize_cell_rgba(cell, 128, margin_ratio=0.06, bg_dist_thresh=28.0, keep_main_only=False)
+        if idx == 0:
+            norm = _knockout_tile_gold_center(norm)
+        tiles_atlas.alpha_composite(norm, (c * 128, r * 128))
+        preview_thumbs.append((f"Tile_{idx+1}", norm))
+    mkb, skb = _save_png_dual(tiles_atlas, "board_tiles_atlas.png", minigame_dir)
+    report.append(("board_tiles_atlas.png", tiles_atlas.size, skb))
+
+    # 5. Title Hero v2 (1280x720 16:9 cover crop)
+    hero_img = Image.open(req_files["hero"]).convert("RGB")
+    hw, hh = hero_img.size
+    target_ratio = 16.0 / 9.0
+    cur_ratio = float(hw) / max(1, hh)
+    if cur_ratio > target_ratio:
+        new_w = int(round(hh * target_ratio))
+        ox = (hw - new_w) // 2
+        hero_img = hero_img.crop((ox, 0, ox + new_w, hh))
+    elif cur_ratio < target_ratio:
+        new_h = int(round(hw / target_ratio))
+        oy = (hh - new_h) // 2
+        hero_img = hero_img.crop((0, oy, hw, oy + new_h))
+    hero_resized = hero_img.resize((1280, 720), Image.Resampling.LANCZOS)
+    hero_master = PNG_DIR / "title_hero_v2.jpg"
+    hero_mini = minigame_dir / "title_hero_v2.jpg"
+    hero_resized.save(hero_master, format="JPEG", quality=88, optimize=True)
+    hero_resized.save(hero_mini, format="JPEG", quality=86, optimize=True)
+    hkb = round(hero_mini.stat().st_size / 1024.0, 1)
+    report.append(("title_hero_v2.jpg", hero_resized.size, hkb))
+
+    # Build Dark + Checkerboard QA Contact Sheet (6 cols x 5 rows = 30 slots)
+    cols = 6
+    rows_cnt = (len(preview_thumbs) + cols - 1) // cols
+    cell_w, cell_h = 180, 196
+    sheet = Image.new("RGBA", (cols * cell_w + 24, rows_cnt * cell_h + 24), (24, 32, 48, 255))
+    draw = ImageDraw.Draw(sheet)
+    for i, (label, im) in enumerate(preview_thumbs):
+        rr, cc = divmod(i, cols)
+        bx = 12 + cc * cell_w
+        by = 12 + rr * cell_h
+        # Subtle two-tone checker behind each icon to expose any white background remnants
+        for cy in range(by + 24, by + cell_h - 8, 16):
+            for cx in range(bx + 8, bx + cell_w - 8, 16):
+                even = ((cx // 16) + (cy // 16)) % 2 == 0
+                c_fill = (36, 48, 68, 255) if even else (20, 28, 42, 255)
+                draw.rectangle([cx, cy, min(cx + 15, bx + cell_w - 9), min(cy + 15, by + cell_h - 9)], fill=c_fill)
+        thumb = im.copy()
+        thumb.thumbnail((148, 148), Image.Resampling.LANCZOS)
+        tx = bx + (cell_w - thumb.width) // 2
+        ty = by + 26 + (152 - thumb.height) // 2
+        sheet.alpha_composite(thumb, (tx, ty))
+        draw.text((bx + 10, by + 6), label, fill=(255, 232, 168, 255))
+
+    if verify_out:
+        vp = Path(verify_out)
+        vp.parent.mkdir(parents=True, exist_ok=True)
+        sheet.convert("RGB").save(vp, quality=92)
+
+    total_mini_kb = round(sum(item[2] for item in report), 1)
+    print(f"2.0 assets extracted ({len(report)} outputs, mini-game total {total_mini_kb} KB):")
+    for item in report:
+        print("  -", item)
+    return report
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--plan-b", action="store_true", help="Extract only 3.0 Plan B 2x2 sprite sheet")
+    parser.add_argument("--v2", action="store_true", help="Extract 2.0 Cat-Cake sheets, atlases & hero cover")
+    parser.add_argument("--verify-out", type=str, default=None, help="Optional output path for QA contact sheet")
     args = parser.parse_args()
-    if args.plan_b:
+    if args.v2:
+        extract_v2_assets(verify_out=args.verify_out)
+    elif args.plan_b:
         extract_plan_b_assets()
     else:
         meta = extract_desserts()

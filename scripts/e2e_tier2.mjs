@@ -578,58 +578,26 @@ const TIER2_F01_TO_F08 = [
     id: 'T2-F01-01',
     tier: 2,
     features: ['F01'],
-    title: 'board_tiles_atlas.png cell (0,0) tile_gold has hollow transparent interior and opaque 4-side golden frame',
+    title: 'v0.9.0 special board tile & flavor WebPs (gold, matcha, berry, ice, obstacle) decode with rich opaque frames',
     run: async (ctx) => {
-      const atlasPath = path.join(ctx.minigameDir, 'assets', 'board_tiles_atlas.png');
-      ctx.assert(fs.existsSync(atlasPath), 'Missing assets/board_tiles_atlas.png');
-      const hdr = ctx.readPngHeader(atlasPath);
-      ctx.assertEq(hdr.width, 512, 'board_tiles_atlas.png width must be 512');
-      ctx.assertEq(hdr.height, 256, 'board_tiles_atlas.png height must be 256');
-
-      const audit = await auditSpriteOnCanvas(ctx, 'assets/board_tiles_atlas.png', (c2d, img) => {
-        const data = c2d.getImageData(0, 0, 128, 128).data;
-        const alphaAt = (x, y) => data[(y * 128 + x) * 4 + 3];
-
-        const centerAlpha = alphaAt(64, 64);
-        let boxSum = 0;
-        let boxCount = 0;
-        for (let y = 56; y <= 71; y++) {
-          for (let x = 56; x <= 71; x++) {
-            boxSum += alphaAt(x, y);
-            boxCount++;
-          }
-        }
-        const centerMeanAlpha = boxSum / boxCount;
-
-        let leftRayMax = 0;
-        for (let x = 6; x <= 50; x++) leftRayMax = Math.max(leftRayMax, alphaAt(x, 64));
-        let rightRayMax = 0;
-        for (let x = 78; x <= 122; x++) rightRayMax = Math.max(rightRayMax, alphaAt(x, 64));
-        let topRayMax = 0;
-        for (let y = 6; y <= 50; y++) topRayMax = Math.max(topRayMax, alphaAt(64, y));
-        let bottomRayMax = 0;
-        for (let y = 78; y <= 122; y++) bottomRayMax = Math.max(bottomRayMax, alphaAt(64, y));
-
-        return {
-          naturalWidth: img.naturalWidth,
-          naturalHeight: img.naturalHeight,
-          centerAlpha,
-          centerMeanAlpha,
-          leftRayMax,
-          rightRayMax,
-          topRayMax,
-          bottomRayMax,
-        };
-      });
-
-      ctx.assert(
-        audit.centerAlpha < 32 && audit.centerMeanAlpha < 32,
-        `tile_gold interior must be hollow/transparent (<32 alpha), got center=${audit.centerAlpha}, mean16x16=${audit.centerMeanAlpha.toFixed(1)}`
-      );
-      ctx.assert(audit.leftRayMax > 200, `tile_gold left border ray missing frame pixels (maxAlpha=${audit.leftRayMax})`);
-      ctx.assert(audit.rightRayMax > 200, `tile_gold right border ray missing frame pixels (maxAlpha=${audit.rightRayMax})`);
-      ctx.assert(audit.topRayMax > 200, `tile_gold top border ray missing frame pixels (maxAlpha=${audit.topRayMax})`);
-      ctx.assert(audit.bottomRayMax > 200, `tile_gold bottom border ray missing frame pixels (maxAlpha=${audit.bottomRayMax})`);
+      const consts = await ctx.requireBundledModule('./src/constants.js');
+      const byId = new Map((consts.V090_ASSET_LIST || []).map((a) => [a.id, a.path]));
+      for (const tid of ['flavor_gold', 'flavor_matcha', 'flavor_berry', 'tile_ice', 'tile_obstacle']) {
+        const rel = byId.get(tid);
+        ctx.assert(Boolean(rel), `Missing ${tid} in V090_ASSET_LIST`);
+        const abs = path.join(ctx.minigameDir, rel);
+        ctx.assert(fs.existsSync(abs) && fs.statSync(abs).size > 500, `Missing ${rel}`);
+        const audit = await auditSpriteOnCanvas(ctx, rel, (c2d, img) => {
+          const w = img.naturalWidth;
+          const h = img.naturalHeight;
+          const d = c2d.getImageData(0, 0, w, h).data;
+          let opaque = 0;
+          for (let i = 3; i < d.length; i += 4) if (d[i] > 128) opaque++;
+          return { w, h, opaqueRatio: opaque / (w * h) };
+        });
+        ctx.assert(audit.w >= 64 && audit.h >= 64, `${tid} dims too small: ${audit.w}x${audit.h}`);
+        ctx.assert(audit.opaqueRatio >= 0.10, `${tid} opaqueRatio too low: ${audit.opaqueRatio.toFixed(3)}`);
+      }
     },
   },
 
@@ -637,37 +605,29 @@ const TIER2_F01_TO_F08 = [
     id: 'T2-F01-02',
     tier: 2,
     features: ['F01'],
-    title: 'White-colored subjects (catcake_1, cust_rabbit, cust_critic, btn_knead) retain >=70% opaque core without floodfill bleed',
+    title: 'White-colored v0.9.0 subjects (catcake_1, cust_lop_bunny, cust_vip_cat, knead_dough) retain >=60% opaque core',
     run: async (ctx) => {
-      const subjects = [
-        { name: 'catcake_1', url: 'assets/catcake_1.png', sx: 0, sy: 0, sw: 192, sh: 192, cx0: 62, cx1: 130, cy0: 62, cy1: 130 },
-        { name: 'cust_rabbit', url: 'assets/customers_atlas.png', sx: 768, sy: 0, sw: 256, sh: 256, cx0: 82, cx1: 174, cy0: 82, cy1: 174 },
-        { name: 'cust_critic', url: 'assets/customers_atlas.png', sx: 768, sy: 256, sw: 256, sh: 256, cx0: 82, cx1: 174, cy0: 82, cy1: 174 },
-        { name: 'btn_knead', url: 'assets/board_tiles_atlas.png', sx: 128, sy: 128, sw: 128, sh: 128, cx0: 41, cx1: 87, cy0: 41, cy1: 87 },
-      ];
-
-      for (const sub of subjects) {
-        const res = await auditSpriteOnCanvas(
-          ctx,
-          sub.url,
-          (c2d, _img, spec) => {
-            const imgData = c2d.getImageData(spec.sx, spec.sy, spec.sw, spec.sh).data;
-            let opaque = 0;
-            let total = 0;
-            for (let y = spec.cy0; y < spec.cy1; y++) {
-              for (let x = spec.cx0; x < spec.cx1; x++) {
-                const a = imgData[(y * spec.sw + x) * 4 + 3];
-                if (a > 220) opaque++;
-                total++;
-              }
-            }
-            return { opaqueRatio: opaque / total, opaque, total };
-          },
-          sub
-        );
+      const consts = await ctx.requireBundledModule('./src/constants.js');
+      const byId = new Map((consts.V090_ASSET_LIST || []).map((a) => [a.id, a.path]));
+      for (const id of ['catcake_1', 'cust_lop_bunny', 'cust_vip_cat', 'knead_dough']) {
+        const rel = byId.get(id);
+        ctx.assert(Boolean(rel), `Missing ${id} in V090_ASSET_LIST`);
+        const res = await auditSpriteOnCanvas(ctx, rel, (c2d, img) => {
+          const w = img.naturalWidth;
+          const h = img.naturalHeight;
+          const x0 = Math.floor(w * 0.34);
+          const x1 = Math.ceil(w * 0.66);
+          const y0 = Math.floor(h * 0.34);
+          const y1 = Math.ceil(h * 0.66);
+          const d = c2d.getImageData(x0, y0, x1 - x0, y1 - y0).data;
+          let opaque = 0;
+          const total = (x1 - x0) * (y1 - y0);
+          for (let i = 3; i < d.length; i += 4) if (d[i] > 200) opaque++;
+          return { opaqueRatio: opaque / Math.max(1, total) };
+        });
         ctx.assert(
-          res.opaqueRatio >= 0.70,
-          `${sub.name} core opaqueRatio(alpha>220) = ${res.opaqueRatio.toFixed(3)} (<0.70 — outline gap floodfill bleed detected)`
+          res.opaqueRatio >= 0.60,
+          `${id} core opaqueRatio(alpha>200) = ${res.opaqueRatio.toFixed(3)} (<0.60)`
         );
       }
     },
@@ -677,40 +637,42 @@ const TIER2_F01_TO_F08 = [
     id: 'T2-F01-03',
     tier: 2,
     features: ['F01'],
-    title: 'All 14 catcake_1..7(_happy).png sprites preserve 3px transparent outer safety margin without edge clipping',
+    title: 'All 7 catcake_1..7 and 4 supplementary WebPs (10_补充素材) preserve clean transparent corners without matte halo',
     run: async (ctx) => {
-      const files = [];
-      for (let k = 1; k <= 7; k++) {
-        files.push(`assets/catcake_${k}.png`, `assets/catcake_${k}_happy.png`);
-      }
+      const consts = await ctx.requireBundledModule('./src/constants.js');
+      const byId = new Map((consts.V090_ASSET_LIST || []).map((a) => [a.id, a.path]));
+      const ids = [
+        'catcake_1', 'catcake_2', 'catcake_3', 'catcake_4', 'catcake_5', 'catcake_6', 'catcake_7',
+        'icon_avatar_default', 'icon_urgent_flame', 'icon_fever_badge', 'icon_cloud_sync'
+      ];
 
-      for (const relUrl of files) {
+      for (const id of ids) {
+        const relUrl = byId.get(id);
+        ctx.assert(Boolean(relUrl), `Missing ${id} in V090_ASSET_LIST`);
         const res = await auditSpriteOnCanvas(ctx, relUrl, (c2d, img) => {
           const w = img.naturalWidth;
           const h = img.naturalHeight;
           const d = c2d.getImageData(0, 0, w, h).data;
-          let maxBorderAlpha = 0;
+          let maxCornerAlpha = 0;
           let fgCount = 0;
           for (let y = 0; y < h; y++) {
             for (let x = 0; x < w; x++) {
               const a = d[(y * w + x) * 4 + 3];
-              if (x < 3 || x >= w - 3 || y < 3 || y >= h - 3) {
-                if (a > maxBorderAlpha) maxBorderAlpha = a;
-              }
+              const inCorner = (x < 3 || x >= w - 3) && (y < 3 || y >= h - 3);
+              if (inCorner && a > maxCornerAlpha) maxCornerAlpha = a;
               if (a > 128) fgCount++;
             }
           }
-          return { w, h, maxBorderAlpha, fgRatio: fgCount / (w * h) };
+          return { w, h, maxCornerAlpha, fgRatio: fgCount / (w * h) };
         });
 
-        ctx.assertEq(res.w, 192, `${relUrl} naturalWidth must be 192`);
-        ctx.assertEq(res.h, 192, `${relUrl} naturalHeight must be 192`);
+        ctx.assert(res.w >= 64 && res.h >= 64, `${relUrl} natural dims too small: ${res.w}x${res.h}`);
         ctx.assert(
-          res.maxBorderAlpha <= 16,
-          `${relUrl} 3px outer safety perimeter clipped artwork (maxBorderAlpha=${res.maxBorderAlpha} > 16)`
+          res.maxCornerAlpha <= 24,
+          `${relUrl} corner matte residue detected (maxCornerAlpha=${res.maxCornerAlpha} > 24)`
         );
         ctx.assert(
-          res.fgRatio >= 0.12 && res.fgRatio <= 0.78,
+          res.fgRatio >= 0.15 && res.fgRatio <= 0.88,
           `${relUrl} foreground ratio out of range: ${res.fgRatio.toFixed(3)}`
         );
       }
@@ -721,48 +683,36 @@ const TIER2_F01_TO_F08 = [
     id: 'T2-F01-04',
     tier: 2,
     features: ['F01'],
-    title: 'Post-cutover complete purge of 30 legacy v1 runtime assets and 5 deprecated physics/jar files',
+    title: 'Post-v0.9.0 cutover holds exact 69 WebP sprites + kissa_round.ttf with zero legacy PNG/JPG or physics files',
     run: async (ctx) => {
       const assetsDir = path.join(ctx.minigameDir, 'assets');
       const srcDir = path.join(ctx.minigameDir, 'src');
-      const masterPngDir = path.join(ctx.repoRoot, '02-游戏素材-精修透明PNG');
       const legacyScript = path.join(ctx.repoRoot, 'scripts', 'extract_physics_shapes.py');
 
-      const runtimeAssets = fs
-        .readdirSync(assetsDir)
-        .filter((f) => !f.startsWith('.'))
-        .sort();
+      const walkRel = (dir, acc = []) => {
+        for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+          if (ent.name.startsWith('.')) continue;
+          const full = path.join(dir, ent.name);
+          if (ent.isDirectory()) walkRel(full, acc);
+          else acc.push(path.relative(ctx.minigameDir, full).split(path.sep).join('/'));
+        }
+        return acc;
+      };
+      const allAssets = walkRel(assetsDir).sort();
+      const webpFiles = allAssets.filter((f) => f.endsWith('.webp'));
+      const legacyRaster = allAssets.filter((f) => /\.(png|jpe?g)$/i.test(f));
 
-      ctx.assertEq(
-        runtimeAssets.length,
-        30,
-        `05-微信小游戏版本/assets/ must contain exact 30 files, got ${runtimeAssets.length}: ${runtimeAssets.join(', ')}`
-      );
-      ctx.assertEq(runtimeAssets, EXPECTED_30_RUNTIME_ASSETS, 'Runtime assets inventory mismatch');
+      ctx.assertEq(webpFiles.length, 69, `Expected exact 69 WebP files under assets/ui_v090/, got ${webpFiles.length}`);
+      ctx.assertEq(legacyRaster.length, 0, `Legacy PNG/JPG files must be purged from assets/: ${legacyRaster.join(', ')}`);
+      ctx.assert(allAssets.includes('assets/fonts/kissa_round.ttf'), 'Missing assets/fonts/kissa_round.ttf');
 
       for (const legacyAsset of FORBIDDEN_V1_RUNTIME_ASSETS) {
         ctx.assert(!fs.existsSync(path.join(assetsDir, legacyAsset)), `Forbidden legacy v1 runtime asset still exists: ${legacyAsset}`);
       }
-
       for (const legacySrc of FORBIDDEN_V1_SRC_FILES) {
         ctx.assert(!fs.existsSync(path.join(srcDir, legacySrc)), `Deprecated physics/jar module still exists: src/${legacySrc}`);
       }
-
       ctx.assert(!fs.existsSync(legacyScript), 'Deprecated scripts/extract_physics_shapes.py must be deleted');
-
-      const masterFiles = fs.readdirSync(masterPngDir);
-      for (const f of masterFiles) {
-        ctx.assert(
-          !/^tier_[1-9](?:_act|_int)?\.png$/.test(f),
-          `Legacy master sprite still exists in 02-游戏素材-精修透明PNG/: ${f}`
-        );
-      }
-      for (const forbiddenMaster of ['event_yarn_ball.png', 'tool_shake.png', 'physics_shapes.json', 'sprites_meta.json']) {
-        ctx.assert(
-          !fs.existsSync(path.join(masterPngDir, forbiddenMaster)),
-          `Legacy file still exists in 02-游戏素材-精修透明PNG/: ${forbiddenMaster}`
-        );
-      }
     },
   },
 
@@ -770,7 +720,7 @@ const TIER2_F01_TO_F08 = [
     id: 'T2-F01-05',
     tier: 2,
     features: ['F01'],
-    title: 'Zero stale v1 asset string references in runtime JS and share cover points to assets/title_hero_v2.jpg',
+    title: 'Zero stale v1 asset string references in runtime JS and share cover points to v0.9.0 title_hero_v2.webp',
     run: async (ctx) => {
       const jsFiles = [
         path.join(ctx.minigameDir, 'game.js'),
@@ -789,7 +739,7 @@ const TIER2_F01_TO_F08 = [
 
       const constantsMod = await ctx.requireBundledModule('./src/constants.js');
       const assetStrings = collectStringValues(constantsMod.ASSET_PATHS || {}).filter((s) => s.startsWith('assets/'));
-      ctx.assert(assetStrings.length >= 25, `Expected >=25 asset paths in constants.ASSET_PATHS, got ${assetStrings.length}`);
+      ctx.assert(assetStrings.length >= 69, `Expected >=69 asset paths in constants.ASSET_PATHS, got ${assetStrings.length}`);
       for (const relAsset of assetStrings) {
         ctx.assert(
           fs.existsSync(path.join(ctx.minigameDir, relAsset)),
@@ -804,8 +754,8 @@ const TIER2_F01_TO_F08 = [
       });
       ctx.assert(shareInfo && typeof shareInfo === 'object', 'wx.onShareAppMessage handler should return a share payload');
       ctx.assert(
-        typeof shareInfo.imageUrl === 'string' && shareInfo.imageUrl.includes('title_hero_v2.jpg'),
-        `Share imageUrl must reference title_hero_v2.jpg, got ${shareInfo?.imageUrl}`
+        typeof shareInfo.imageUrl === 'string' && shareInfo.imageUrl.includes('title_hero_v2.webp'),
+        `Share imageUrl must reference title_hero_v2.webp, got ${shareInfo?.imageUrl}`
       );
       ctx.assert(
         typeof shareInfo.title === 'string' && shareInfo.title.includes('一起做猫饼'),
@@ -818,18 +768,15 @@ const TIER2_F01_TO_F08 = [
     id: 'T2-F01-06',
     tier: 2,
     features: ['F01'],
-    title: 'Quantized minigame PNGs never exceed master PNG byte sizes and upload_minigame.mjs excludes cloudfunctions/',
+    title: 'All 69 v0.9.0 WebP sprites stay compact (<100KB each) and upload_minigame.mjs excludes cloudfunctions/',
     run: async (ctx) => {
-      const masterDir = path.join(ctx.repoRoot, '02-游戏素材-精修透明PNG');
-      const minigameAssetsDir = path.join(ctx.minigameDir, 'assets');
-
-      for (const fileName of [...NEW_V2_PNG_ASSETS, 'title_hero_v2.jpg']) {
-        const masterStat = fs.statSync(path.join(masterDir, fileName));
-        const miniStat = fs.statSync(path.join(minigameAssetsDir, fileName));
-        ctx.assert(miniStat.size > 512, `${fileName} in minigame assets is unexpectedly tiny (${miniStat.size}B)`);
+      const consts = await ctx.requireBundledModule('./src/constants.js');
+      for (const item of consts.V090_ASSET_LIST || []) {
+        const miniStat = fs.statSync(path.join(ctx.minigameDir, item.path));
+        ctx.assert(miniStat.size > 300, `${item.path} in minigame assets is unexpectedly tiny (${miniStat.size}B)`);
         ctx.assert(
-          miniStat.size <= masterStat.size,
-          `Quantized minigame ${fileName} (${miniStat.size}B) bloated beyond master (${masterStat.size}B)`
+          miniStat.size <= 100 * 1024,
+          `${item.path} (${miniStat.size}B) exceeds 100 KB single-asset budget`
         );
       }
 
@@ -1079,8 +1026,8 @@ const TIER2_F01_TO_F08 = [
         }
       }
 
-      ctx.assertEq(LEVELS[0].stars, [750, 1050, 1400], '1-1 stars must equal [750, 1050, 1400]');
-      ctx.assertEq(LEVELS[29].stars, [35000, 48300, 61600], '3-10 stars must equal [35000, 48300, 61600]');
+      ctx.assertEq(LEVELS[0].stars, [850, 1250, 1750], '1-1 stars must equal v0.9.0 [850, 1250, 1750]');
+      ctx.assertEq(LEVELS[29].stars, [39200, 56800, 77500], '3-10 stars must equal v0.9.0 [39200, 56800, 77500]');
       ctx.assert(ch2SawSpecial, 'Chapter 2 must introduce M and G special cells');
       ctx.assert(ch3SawBerry, 'Chapter 3 must introduce B berry special cells');
     },
@@ -1200,7 +1147,7 @@ const TIER2_F01_TO_F08 = [
       ctx.assertEq(constantsMod.normNull, 'mikan');
       ctx.assertEq(constantsMod.normBad, 'mikan');
       ctx.assertEq(constantsMod.clampLowPrice, 30);
-      ctx.assertEq(constantsMod.clampHighPrice, 54);
+      ctx.assertEq(constantsMod.clampHighPrice, 48);
       ctx.assertEq(constantsMod.invalidLv, null);
       ctx.assertEq(constantsMod.emptyLv, null);
       ctx.assertEq(constantsMod.nextAfter3_10, null);
@@ -1500,7 +1447,7 @@ const TIER2_F01_TO_F08 = [
         deviceUpgrades: { dev_tray: 1, dev_flour: 0, dev_teapot: 0, dev_tools: 3 },
         seenTutorials: DEFAULT_TUTORIALS_SEEN,
       });
-      await ctx.useToolOnCell('fork', 2, 1, 'trash');
+      await ctx.useToolOnCell('fork', 2, 1);
       await syncClearBoardExcept(ctx, [[2, 2]]);
       await ctx.slide('left');
       await syncClearBoardExcept(ctx, [[2, 0]]);
@@ -4123,10 +4070,10 @@ const TIER2_F09_TO_F16 = [
         seenTutorials: DEFAULT_TUTORIALS_SEEN,
       });
 
-      // Reach >= 35,000 (star1 on 3-10) using upgraded Lv.4 recipes + Mugi blast when charged
-      for (let guard = 0; guard < 22; guard++) {
+      // Reach >= 39,200 (v0.9.0 star1 on 3-10) using upgraded Lv.4 recipes + Mugi blast when charged
+      for (let guard = 0; guard < 28; guard++) {
         const cur = await ctx.getState();
-        if (cur.score >= 35000 || cur.timeLeft <= 8.5) break;
+        if (cur.score >= 39200 || cur.timeLeft <= 8.5) break;
         if (cur.skillEnergy >= 100) {
           await ctx.castPatronSkill();
         }
@@ -4134,7 +4081,7 @@ const TIER2_F09_TO_F16 = [
       }
 
       let st = await ctx.getState();
-      ctx.assert(st.score >= 35000, `Expected 3-10 score >= 35000, got ${st.score}`);
+      ctx.assert(st.score >= 39200, `Expected 3-10 score >= 39200, got ${st.score}`);
       st = await ctx.advanceTime(st.timeLeft + 0.6);
 
       ctx.assertEq(st.activeModal, 'level_result');

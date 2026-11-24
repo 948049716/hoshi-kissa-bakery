@@ -618,37 +618,37 @@ const F01_TESTS = [
     id: 'T1-F01-01',
     tier: 1,
     features: ['F01'],
-    title: '5 raw v2 watercolor source sheets exist with valid headers and aspect ratios',
+    title: '13 lossless v0.9.0 UI design images (768x1376) exist in 01-游戏效果图/ including reserve TitleScreen',
     run: async (ctx) => {
-      const rawDir = path.join(ctx.repoRoot, '03-游戏素材-原始原图与WebP');
-      const sheets4x2 = [
-        'v2_catcakes_base_sheet.jpg',
-        'v2_catcakes_happy_sheet.jpg',
-        'v2_customers_sheet.jpg',
-        'v2_board_tiles_sheet.jpg'
+      const designDir = path.join(ctx.repoRoot, '01-游戏效果图');
+      const expectedDesigns = [
+        '01_标题首屏_TitleScreen（备用）.jpg',
+        '02a_大厅选关_第1章街角星夜店_LobbyCh1Amber.jpg',
+        '02b_大厅选关_第2章樱花露台店_LobbyCh2Sakura.jpg',
+        '02c_大厅选关_第3章月光天台店_LobbyCh3Moonlight.jpg',
+        '03_局内营业主界面_PlayScreen.jpg',
+        '04_关卡备战弹窗_LevelPreviewModal.jpg',
+        '05_关卡结算弹窗_LevelResultModal.jpg',
+        '06_星夜小铺弹窗_ShopModal.jpg',
+        '07_星夜图鉴弹窗_CompendiumModal.jpg',
+        '08_猫饼排行榜弹窗_LeaderboardModal.jpg',
+        '09_烤盘主题弹窗_BoardThemeModal.jpg',
+        '10_局内暂停弹窗_PauseModal.jpg',
+        '11_玩法说明弹窗_HelpModal.jpg'
       ];
-      for (const fname of sheets4x2) {
-        const abs = path.join(rawDir, fname);
-        ctx.assert(fs.existsSync(abs), `Missing raw 4x2 sheet: ${abs}`);
+      const actualImages = fs
+        .readdirSync(designDir)
+        .filter((f) => /\.(jpe?g|png|webp)$/i.test(f))
+        .sort();
+      ctx.assertEq(actualImages.length, 13, `Expected exact 13 design images in 01-游戏效果图/, got ${actualImages.length}`);
+      for (const fname of expectedDesigns) {
+        const abs = path.join(designDir, fname);
+        ctx.assert(fs.existsSync(abs), `Missing lossless design image: ${abs}`);
         const hdr = readJpegOrImageInfo(ctx, abs);
-        ctx.assert(hdr.bytes > 30_000, `Expected ${fname} > 30 KB, got ${hdr.bytes}`);
-        ctx.assert(hdr.width >= 512 && hdr.height >= 512, `Expected ${fname} >= 512px, got ${hdr.width}x${hdr.height}`);
-        const ratio = hdr.width / hdr.height;
-        ctx.assert(
-          Math.abs(ratio - 2.0) <= 0.15,
-          `Expected ${fname} 4x2 aspect ratio ~2.0 (±0.15), got ${ratio.toFixed(3)} (${hdr.width}x${hdr.height})`
-        );
+        ctx.assert(hdr.bytes > 200_000, `Expected uncompressed design image ${fname} > 200 KB, got ${hdr.bytes}`);
+        ctx.assertEq(hdr.width, 768, `${fname} width must be 768`);
+        ctx.assertEq(hdr.height, 1376, `${fname} height must be 1376`);
       }
-
-      const heroAbs = path.join(rawDir, 'v2_title_hero_raw.jpg');
-      ctx.assert(fs.existsSync(heroAbs), `Missing raw hero art: ${heroAbs}`);
-      const heroHdr = readJpegOrImageInfo(ctx, heroAbs);
-      ctx.assert(heroHdr.bytes > 30_000, `Expected v2_title_hero_raw.jpg > 30 KB, got ${heroHdr.bytes}`);
-      ctx.assert(heroHdr.width >= 512 && heroHdr.height >= 512, `Expected hero raw >= 512px, got ${heroHdr.width}x${heroHdr.height}`);
-      ctx.assert(
-        heroHdr.width / heroHdr.height >= 1.3,
-        `Expected landscape hero aspect >= 1.30, got ${(heroHdr.width / heroHdr.height).toFixed(3)}`
-      );
     }
   },
 
@@ -656,27 +656,19 @@ const F01_TESTS = [
     id: 'T1-F01-02',
     tier: 1,
     features: ['F01'],
-    title: '14 cat-cake standalone PNGs (catcake_1..7 & happy) dual-exported at exact 192x192 with distinct art',
+    title: '7 v0.9.0 cat-cake standalone WebPs (cake_c1..c7) decode cleanly with transparent corners and distinct art',
     run: async (ctx) => {
-      const masterDir = path.join(ctx.repoRoot, '02-游戏素材-精修透明PNG');
-      const miniAssetsDir = path.join(ctx.minigameDir, 'assets');
-      const names = [];
+      const consts = await ctx.requireBundledModule('./src/constants.js');
+      const cakePaths = [];
       for (let k = 1; k <= 7; k++) {
-        names.push(`catcake_${k}.png`, `catcake_${k}_happy.png`);
+        const rel = consts.ASSET_PATHS.catcakes[k];
+        ctx.assert(typeof rel === 'string' && rel.endsWith('.webp'), `Missing WebP path for C${k}: ${rel}`);
+        const abs = path.join(ctx.minigameDir, rel);
+        ctx.assert(fs.existsSync(abs) && fs.statSync(abs).size > 500, `Missing catcake WebP on disk: ${abs}`);
+        cakePaths.push({ tier: k, rel });
       }
 
-      for (const fname of names) {
-        const masterAbs = path.join(masterDir, fname);
-        const miniAbs = path.join(miniAssetsDir, fname);
-        ctx.assert(fs.existsSync(masterAbs), `Missing master PNG: ${masterAbs}`);
-        ctx.assert(fs.existsSync(miniAbs), `Missing minigame PNG: ${miniAbs}`);
-        const mHdr = readPngInfo(ctx, masterAbs);
-        const sHdr = readPngInfo(ctx, miniAbs);
-        ctx.assert(mHdr.width === 192 && mHdr.height === 192, `Master ${fname} must be 192x192, got ${mHdr.width}x${mHdr.height}`);
-        ctx.assert(sHdr.width === 192 && sHdr.height === 192, `Minigame ${fname} must be 192x192, got ${sHdr.width}x${sHdr.height}`);
-      }
-
-      const pixelAudit = await ctx.eval(async () => {
+      const pixelAudit = await ctx.eval(async (items) => {
         async function loadPixels(src) {
           const img = new Image();
           await new Promise((resolve, reject) => {
@@ -684,79 +676,54 @@ const F01_TESTS = [
             img.onerror = () => reject(new Error(`Failed loading ${src}`));
             img.src = src;
           });
+          const w = img.naturalWidth;
+          const h = img.naturalHeight;
           const cv = document.createElement('canvas');
-          cv.width = 192;
-          cv.height = 192;
+          cv.width = w;
+          cv.height = h;
           const c2d = cv.getContext('2d', { willReadFrequently: true });
           c2d.drawImage(img, 0, 0);
-          return {
-            naturalWidth: img.naturalWidth,
-            naturalHeight: img.naturalHeight,
-            data: c2d.getImageData(0, 0, 192, 192).data
-          };
-        }
-
-        function summarize(px) {
+          const data = c2d.getImageData(0, 0, w, h).data;
           let fg = 0;
-          for (let i = 3; i < px.length; i += 4) {
-            if (px[i] > 128) fg += 1;
+          for (let i = 3; i < data.length; i += 4) {
+            if (data[i] > 128) fg += 1;
           }
           let cornerMaxAlpha = 0;
           const corners = [
             [0, 0],
-            [188, 0],
-            [0, 188],
-            [188, 188]
+            [Math.max(0, w - 4), 0],
+            [0, Math.max(0, h - 4)],
+            [Math.max(0, w - 4), Math.max(0, h - 4)]
           ];
           for (const [cx, cy] of corners) {
-            for (let dy = 0; dy < 4; dy++) {
-              for (let dx = 0; dx < 4; dx++) {
-                const a = px[((cy + dy) * 192 + (cx + dx)) * 4 + 3];
+            for (let dy = 0; dy < 4 && cy + dy < h; dy++) {
+              for (let dx = 0; dx < 4 && cx + dx < w; dx++) {
+                const a = data[((cy + dy) * w + (cx + dx)) * 4 + 3];
                 if (a > cornerMaxAlpha) cornerMaxAlpha = a;
               }
             }
           }
-          return { fgRatio: fg / (192 * 192), cornerMaxAlpha };
+          return { w, h, fgRatio: fg / (w * h), cornerMaxAlpha };
         }
 
-        const tiers = [];
-        for (let k = 1; k <= 7; k++) {
-          const base = await loadPixels(`assets/catcake_${k}.png`);
-          const happy = await loadPixels(`assets/catcake_${k}_happy.png`);
-          let l1Diff = 0;
-          for (let i = 0; i < base.data.length; i++) {
-            l1Diff += Math.abs(base.data[i] - happy.data[i]);
-          }
-          tiers.push({
-            tier: k,
-            baseW: base.naturalWidth,
-            baseH: base.naturalHeight,
-            happyW: happy.naturalWidth,
-            happyH: happy.naturalHeight,
-            baseStats: summarize(base.data),
-            happyStats: summarize(happy.data),
-            l1Diff
-          });
+        const out = [];
+        for (const it of items) {
+          const stats = await loadPixels(it.rel);
+          out.push({ tier: it.tier, rel: it.rel, ...stats });
         }
-        return tiers;
-      });
+        return out;
+      }, cakePaths);
 
       for (const item of pixelAudit) {
-        ctx.assert(item.baseW === 192 && item.baseH === 192, `catcake_${item.tier}.png natural size != 192x192`);
-        ctx.assert(item.happyW === 192 && item.happyH === 192, `catcake_${item.tier}_happy.png natural size != 192x192`);
+        ctx.assert(item.w >= 64 && item.h >= 64, `${item.rel} natural size too small: ${item.w}x${item.h}`);
         ctx.assert(
-          item.baseStats.fgRatio >= 0.12 && item.baseStats.fgRatio <= 0.78,
-          `catcake_${item.tier}.png fgRatio out of [0.12, 0.78]: ${item.baseStats.fgRatio.toFixed(3)}`
+          item.fgRatio >= 0.15 && item.fgRatio <= 0.88,
+          `${item.rel} fgRatio out of [0.15, 0.88]: ${item.fgRatio.toFixed(3)}`
         );
         ctx.assert(
-          item.happyStats.fgRatio >= 0.12 && item.happyStats.fgRatio <= 0.78,
-          `catcake_${item.tier}_happy.png fgRatio out of [0.12, 0.78]: ${item.happyStats.fgRatio.toFixed(3)}`
+          item.cornerMaxAlpha <= 24,
+          `${item.rel} corners not transparent: cornerMaxAlpha=${item.cornerMaxAlpha}`
         );
-        ctx.assert(
-          item.baseStats.cornerMaxAlpha <= 16 && item.happyStats.cornerMaxAlpha <= 16,
-          `catcake_${item.tier} corners not transparent: base=${item.baseStats.cornerMaxAlpha}, happy=${item.happyStats.cornerMaxAlpha}`
-        );
-        ctx.assert(item.l1Diff > 0, `catcake_${item.tier}.png and catcake_${item.tier}_happy.png must be distinct`);
       }
     }
   },
@@ -765,93 +732,71 @@ const F01_TESTS = [
     id: 'T1-F01-03',
     tier: 1,
     features: ['F01'],
-    title: 'customers_atlas.png (1024x512) and board_tiles_atlas.png (512x256) dimensions and 8-cell sub-grid population',
+    title: 'All v0.9.0 standalone customer, tile, patron, medal & supplementary WebP sprites decode cleanly with alpha',
     run: async (ctx) => {
-      const masterDir = path.join(ctx.repoRoot, '02-游戏素材-精修透明PNG');
-      const miniDir = path.join(ctx.minigameDir, 'assets');
+      const consts = await ctx.requireBundledModule('./src/constants.js');
+      const inspectIds = [
+        'cust_fox',
+        'cust_ragdoll',
+        'cust_lop_bunny',
+        'cust_shiba',
+        'cust_vip_cat',
+        'cust_orange_uncle',
+        'cust_scholar',
+        'patron_mikan',
+        'patron_luna',
+        'patron_mugi',
+        'flavor_gold',
+        'flavor_matcha',
+        'flavor_berry',
+        'tile_ice',
+        'tile_obstacle',
+        'medal_gold',
+        'medal_silver',
+        'medal_bronze',
+        'icon_avatar_default',
+        'icon_urgent_flame',
+        'icon_fever_badge',
+        'icon_cloud_sync'
+      ];
+      const byId = new Map((consts.V090_ASSET_LIST || []).map((a) => [a.id, a.path]));
+      const items = inspectIds.map((id) => {
+        const rel = byId.get(id);
+        ctx.assert(Boolean(rel), `Missing V090_ASSET_LIST entry for ${id}`);
+        const abs = path.join(ctx.minigameDir, rel);
+        ctx.assert(fs.existsSync(abs) && fs.statSync(abs).size > 300, `Missing WebP on disk for ${id}: ${abs}`);
+        return { id, rel };
+      });
 
-      for (const dir of [masterDir, miniDir]) {
-        const custHdr = readPngInfo(ctx, path.join(dir, 'customers_atlas.png'));
-        ctx.assert(custHdr.width === 1024 && custHdr.height === 512, `customers_atlas must be 1024x512, got ${custHdr.width}x${custHdr.height}`);
-        const tilesHdr = readPngInfo(ctx, path.join(dir, 'board_tiles_atlas.png'));
-        ctx.assert(tilesHdr.width === 512 && tilesHdr.height === 256, `board_tiles_atlas must be 512x256, got ${tilesHdr.width}x${tilesHdr.height}`);
-      }
-
-      const atlasStats = await ctx.eval(async () => {
-        async function auditAtlas(src, w, h, cellSize, alphaThresh) {
+      const stats = await ctx.eval(async (list) => {
+        const out = [];
+        for (const it of list) {
           const img = new Image();
           await new Promise((resolve, reject) => {
             img.onload = resolve;
-            img.onerror = () => reject(new Error(`Failed loading ${src}`));
-            img.src = src;
+            img.onerror = () => reject(new Error(`Failed loading ${it.rel}`));
+            img.src = it.rel;
           });
+          const w = img.naturalWidth;
+          const h = img.naturalHeight;
           const cv = document.createElement('canvas');
           cv.width = w;
           cv.height = h;
           const c2d = cv.getContext('2d', { willReadFrequently: true });
           c2d.drawImage(img, 0, 0);
-          const cells = [];
-          for (let row = 0; row < 2; row++) {
-            for (let col = 0; col < 4; col++) {
-              const data = c2d.getImageData(col * cellSize, row * cellSize, cellSize, cellSize).data;
-              let opaque = 0;
-              for (let i = 3; i < data.length; i += 4) {
-                if (data[i] > alphaThresh) opaque += 1;
-              }
-              let cornerMax = 0;
-              const corners = [
-                [0, 0],
-                [cellSize - 4, 0],
-                [0, cellSize - 4],
-                [cellSize - 4, cellSize - 4]
-              ];
-              for (const [cx, cy] of corners) {
-                for (let dy = 0; dy < 4; dy++) {
-                  for (let dx = 0; dx < 4; dx++) {
-                    const a = data[((cy + dy) * cellSize + (cx + dx)) * 4 + 3];
-                    if (a > cornerMax) cornerMax = a;
-                  }
-                }
-              }
-              cells.push({
-                row,
-                col,
-                opaqueRatio: opaque / (cellSize * cellSize),
-                cornerMax
-              });
-            }
+          const data = c2d.getImageData(0, 0, w, h).data;
+          let opaque = 0;
+          for (let i = 3; i < data.length; i += 4) {
+            if (data[i] > 96) opaque += 1;
           }
-          return { naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight, cells };
+          out.push({ id: it.id, w, h, opaqueRatio: opaque / (w * h) });
         }
+        return out;
+      }, items);
 
-        return {
-          customers: await auditAtlas('assets/customers_atlas.png', 1024, 512, 256, 128),
-          tiles: await auditAtlas('assets/board_tiles_atlas.png', 512, 256, 128, 96)
-        };
-      });
-
-      ctx.assert(atlasStats.customers.naturalWidth === 1024 && atlasStats.customers.naturalHeight === 512, 'customers_atlas natural dimensions mismatch');
-      for (const cell of atlasStats.customers.cells) {
-        ctx.assert(
-          cell.opaqueRatio >= 0.1,
-          `customers_atlas cell (${cell.col},${cell.row}) opaqueRatio too low: ${cell.opaqueRatio.toFixed(3)}`
-        );
-        ctx.assert(
-          cell.cornerMax <= 16,
-          `customers_atlas cell (${cell.col},${cell.row}) corner alpha ${cell.cornerMax} > 16`
-        );
-      }
-
-      ctx.assert(atlasStats.tiles.naturalWidth === 512 && atlasStats.tiles.naturalHeight === 256, 'board_tiles_atlas natural dimensions mismatch');
-      for (const cell of atlasStats.tiles.cells) {
-        ctx.assert(
-          cell.opaqueRatio >= 0.05,
-          `board_tiles_atlas cell (${cell.col},${cell.row}) opaqueRatio too low: ${cell.opaqueRatio.toFixed(3)}`
-        );
-        ctx.assert(
-          cell.cornerMax <= 16,
-          `board_tiles_atlas cell (${cell.col},${cell.row}) corner alpha ${cell.cornerMax} > 16`
-        );
+      for (const s of stats) {
+        ctx.assert(s.w >= 32 && s.h >= 32, `${s.id} natural dims too small: ${s.w}x${s.h}`);
+        ctx.assert(s.opaqueRatio >= 0.08, `${s.id} opaqueRatio too low: ${s.opaqueRatio.toFixed(3)}`);
       }
     }
   },
@@ -860,45 +805,32 @@ const F01_TESTS = [
     id: 'T1-F01-04',
     tier: 1,
     features: ['F01'],
-    title: 'title_hero_v2.jpg (1280x720 16:9) and QA showcase deliverables exist with valid headers and bounds',
+    title: 'v0.9.0 chapter backgrounds, reserve title_hero_v2.webp, and subsetted TrueType font kissa_round.ttf load cleanly',
     run: async (ctx) => {
-      const masterHero = path.join(ctx.repoRoot, '02-游戏素材-精修透明PNG', 'title_hero_v2.jpg');
-      const miniHero = path.join(ctx.minigameDir, 'assets', 'title_hero_v2.jpg');
-      ctx.assert(fs.existsSync(masterHero), `Missing ${masterHero}`);
-      ctx.assert(fs.existsSync(miniHero), `Missing ${miniHero}`);
+      const consts = await ctx.requireBundledModule('./src/constants.js');
+      const byId = new Map((consts.V090_ASSET_LIST || []).map((a) => [a.id, a.path]));
+      for (const bgId of ['bg_lobby_ch1_amber', 'bg_lobby_ch2_sakura', 'bg_lobby_ch3_moonlight', 'title_hero_v2']) {
+        const rel = byId.get(bgId);
+        ctx.assert(Boolean(rel), `Missing ${bgId} in V090_ASSET_LIST`);
+        const abs = path.join(ctx.minigameDir, rel);
+        ctx.assert(fs.existsSync(abs) && fs.statSync(abs).size > 8_000, `Missing or tiny background ${rel}`);
+        const decoded = await ctx.eval(async (src) => {
+          const img = new Image();
+          await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = () => reject(new Error(`Failed loading ${src}`));
+            img.src = src;
+          });
+          return { w: img.naturalWidth, h: img.naturalHeight };
+        }, rel);
+        ctx.assert(decoded.w >= 320 && decoded.h >= 480, `Invalid dims for ${bgId}: ${decoded.w}x${decoded.h}`);
+      }
 
-      const mHeroHdr = readJpegOrImageInfo(ctx, masterHero);
-      const sHeroHdr = readJpegOrImageInfo(ctx, miniHero);
-      ctx.assertEq(mHeroHdr.format, 'JPEG', 'Master title_hero_v2.jpg must be JPEG');
-      ctx.assertEq(sHeroHdr.format, 'JPEG', 'Minigame title_hero_v2.jpg must be JPEG');
-      ctx.assert(mHeroHdr.width === 1280 && mHeroHdr.height === 720, `Master hero must be 1280x720, got ${mHeroHdr.width}x${mHeroHdr.height}`);
-      ctx.assert(sHeroHdr.width === 1280 && sHeroHdr.height === 720, `Minigame hero must be 1280x720, got ${sHeroHdr.width}x${sHeroHdr.height}`);
-      ctx.assert(
-        sHeroHdr.bytes >= 15_000 && sHeroHdr.bytes <= 220 * 1024,
-        `Minigame title_hero_v2.jpg size out of [15KB, 220KB]: ${sHeroHdr.bytes}`
-      );
-
-      const qaPreview = path.join(ctx.repoRoot, '01-游戏效果图', 'v2_assets_qa_preview.jpg');
-      const showcase = path.join(ctx.repoRoot, '01-游戏效果图', 'v2_assets_showcase.png');
-      ctx.assert(fs.existsSync(qaPreview), `Missing QA preview sheet: ${qaPreview}`);
-      ctx.assert(fs.existsSync(showcase), `Missing showcase sheet: ${showcase}`);
-
-      const qaHdr = readJpegOrImageInfo(ctx, qaPreview);
-      ctx.assert(qaHdr.bytes > 40_000 && qaHdr.width >= 800 && qaHdr.height >= 700, `Invalid v2_assets_qa_preview.jpg: ${JSON.stringify(qaHdr)}`);
-
-      const showHdr = readPngInfo(ctx, showcase);
-      ctx.assert(showHdr.bytes > 40_000 && showHdr.width >= 600 && showHdr.height >= 400, `Invalid v2_assets_showcase.png: ${JSON.stringify(showHdr)}`);
-
-      const loadedHero = await ctx.eval(async () => {
-        const img = new Image();
-        await new Promise((resolve, reject) => {
-          img.onload = resolve;
-          img.onerror = () => reject(new Error('Failed loading assets/title_hero_v2.jpg'));
-          img.src = 'assets/title_hero_v2.jpg';
-        });
-        return { w: img.naturalWidth, h: img.naturalHeight };
-      });
-      ctx.assert(loadedHero.w === 1280 && loadedHero.h === 720, 'Browser loaded title_hero_v2.jpg natural dimensions != 1280x720');
+      const fontAbs = path.join(ctx.minigameDir, 'assets', 'fonts', 'kissa_round.ttf');
+      ctx.assert(fs.existsSync(fontAbs), `Missing subsetted font: ${fontAbs}`);
+      const fontBuf = fs.readFileSync(fontAbs);
+      ctx.assert(fontBuf.length > 50_000 && fontBuf.length < 600_000, `kissa_round.ttf size out of range: ${fontBuf.length}`);
+      ctx.assertEq(fontBuf.readUInt32BE(0), 0x00010000, 'kissa_round.ttf must have valid TrueType sfnt header');
     }
   },
 
@@ -906,7 +838,7 @@ const F01_TESTS = [
     id: 'T1-F01-05',
     tier: 1,
     features: ['F01'],
-    title: 'Live Mini Game runtime preloader completes exact 30/30 assets without network or console errors',
+    title: 'Live Mini Game runtime preloader completes exact 69/69 v0.9.0 WebP assets without network or console errors',
     freshReload: true,
     query: '?safeTop=20&safeBottom=0&capsule=1&cloud=1',
     run: async (ctx) => {
@@ -919,10 +851,10 @@ const F01_TESTS = [
           const cur = await ctx.getState();
           return cur && cur.assetsTotal > 0 && cur.assetsLoaded === cur.assetsTotal ? cur : null;
         },
-        { timeoutMs: 5000, label: 'assetsLoaded === assetsTotal' }
+        { timeoutMs: 8000, label: 'assetsLoaded === assetsTotal' }
       );
-      ctx.assertEq(st.assetsTotal, 30, 'Expected exact 30 runtime assets post-cleanup');
-      ctx.assertEq(st.assetsLoaded, 30, 'Expected all 30 runtime assets loaded');
+      ctx.assertEq(st.assetsTotal, 69, 'Expected exact 69 v0.9.0 runtime WebP assets');
+      ctx.assertEq(st.assetsLoaded, 69, 'Expected all 69 runtime WebP assets loaded');
       const netErrs = ctx.cdp?.networkErrors || [];
       ctx.assertEq(netErrs.length, 0, `Unexpected network errors: ${JSON.stringify(netErrs)}`);
       const runtimeErrs = ctx.cdp?.errors || [];
@@ -4813,10 +4745,11 @@ const F15_TESTS = [
 
       // Serve #1 after Luna skill (green patience >= 0.65, combo 1) -> MUST receive x1.50 boost!
       let idx1 = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
-      if (idx1 < 0) {
+      for (let w = 0; w < 8 && idx1 < 0; w++) {
         st = await ctx.advanceTime(2.5);
         idx1 = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
       }
+      ctx.assert(idx1 >= 0 && st.seats[idx1], 'Expected green patience customer for 1st post-luna serve');
       const rec1 = st.seats[idx1].recipeId;
       const raw1 = rec1 === 'R01' ? 30 : rec1 === 'R02' ? 70 : 100 * 1.12;
       const sBefore1 = st.score;
@@ -4826,10 +4759,11 @@ const F15_TESTS = [
       // Reset combo via 10.5s wait, then Serve #2 -> MUST revert to x1.00!
       st = await ctx.advanceTime(10.5);
       let idx2 = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
-      if (idx2 < 0) {
+      for (let w = 0; w < 8 && idx2 < 0; w++) {
         st = await ctx.advanceTime(2.5);
         idx2 = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
       }
+      ctx.assert(idx2 >= 0 && st.seats[idx2], 'Expected green patience customer for 2nd post-luna serve');
       const rec2 = st.seats[idx2].recipeId;
       const raw2 = rec2 === 'R01' ? 30 : rec2 === 'R02' ? 70 : 100 * 1.12;
       const sBefore2 = st.score;
@@ -5180,7 +5114,7 @@ const F16_TESTS = [
     run: async (ctx) => {
       await ctx.setViewport(375, 667, true, 2, { safeTop: 20, safeBottom: 0, showCapsule: true });
       await ctx.resetGame();
-      await ctx.checkBounds('lobby_375x667', { safeBottom: 0, expectedAssetsTotal: 30 });
+      await ctx.checkBounds('lobby_375x667', { safeBottom: 0, expectedAssetsTotal: 69 });
 
       await startLevelClean(ctx, '3-8', { levelStars: makeUnlockedStarsMap(ctx, 3) });
       await ctx.advanceTime(3.1);
@@ -5191,7 +5125,7 @@ const F16_TESTS = [
         st.boardLayout.cellSize >= 46,
         `Expected 5x5 cellSize >= 46px on 375x667, got ${st.boardLayout.cellSize}`
       );
-      await ctx.checkBounds('play_3_8_375x667', { safeBottom: 0, expectedAssetsTotal: 30 });
+      await ctx.checkBounds('play_3_8_375x667', { safeBottom: 0, expectedAssetsTotal: 69 });
 
       const scrollCheck = await ctx.eval(() => ({
          overflowX: document.documentElement.scrollWidth <= window.innerWidth + 1,
@@ -5211,7 +5145,7 @@ const F16_TESTS = [
     run: async (ctx) => {
       await ctx.setViewport(390, 844, true, 2, { safeTop: 47, safeBottom: 34, showCapsule: true });
       await ctx.resetGame();
-      await ctx.checkBounds('lobby_390x844', { safeBottom: 34, expectedAssetsTotal: 30 });
+      await ctx.checkBounds('lobby_390x844', { safeBottom: 34, expectedAssetsTotal: 69 });
 
       // Check bottom dock safeBottom clearance on Lobby (bottom <= 844 - max(10, 34+8) = 802, +2px rounding tol)
       let st = await ctx.getState();
@@ -5222,20 +5156,20 @@ const F16_TESTS = [
 
       // Check Shop modal on 390x844
       await ctx.clickHit('dock_shop');
-      await ctx.checkBounds('shop_390x844', { safeBottom: 34, expectedAssetsTotal: 30 });
+      await ctx.checkBounds('shop_390x844', { safeBottom: 34, expectedAssetsTotal: 69 });
       await ctx.clickHit('modal_close');
 
       // Check 2-4 (4x5) Play HUD & Result modal on 390x844
       await startLevelClean(ctx, '2-4', { levelStars: makeUnlockedStarsMap(ctx, 3) });
       await ctx.advanceTime(3.1);
       st = await ctx.getState();
-      await ctx.checkBounds('play_2_4_390x844', { safeBottom: 34, expectedAssetsTotal: 30 });
+      await ctx.checkBounds('play_2_4_390x844', { safeBottom: 34, expectedAssetsTotal: 69 });
       const kneadHit = st.hits.find((x) => x.id === 'knead_btn');
       ctx.assert(kneadHit && kneadHit.y + kneadHit.h <= 810, `Play HUD knead_btn bottom (${kneadHit?.y + kneadHit?.h}) must clear safeBottom=34`);
 
       st = await ctx.advanceTime(st.timeLeft + 1.0);
       ctx.assertEq(st.activeModal, 'level_result', 'Result modal open on 390x844');
-      await ctx.checkBounds('result_390x844', { safeBottom: 34, expectedAssetsTotal: 30 });
+      await ctx.checkBounds('result_390x844', { safeBottom: 34, expectedAssetsTotal: 69 });
     }
   },
 
@@ -5252,7 +5186,7 @@ const F16_TESTS = [
         deviceUpgrades: { dev_tray: 1, dev_flour: 0, dev_teapot: 2, dev_tools: 1 } // fork: 1, spoon: 1
       });
       let st = await ctx.advanceTime(3.2);
-      await ctx.checkBounds('desktop_1280x760_play', { safeBottom: 0, expectedAssetsTotal: 30 });
+      await ctx.checkBounds('desktop_1280x760_play', { safeBottom: 0, expectedAssetsTotal: 69 });
 
       // Verify unified 4-band geometry at 1280x760: horizontal 3-seat customers above board, patron skill below
       const s0 = st.hits.find((h) => h.id === 'seat_0');

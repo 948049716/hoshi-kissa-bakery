@@ -24,6 +24,7 @@ const {
   BOARD_THEMES,
   THEME_COSTS,
   ASSET_PATHS,
+  V090_ASSET_LIST,
   TUTORIAL_STEPS,
   normalizePatronId
 } = require('./constants');
@@ -189,64 +190,84 @@ function createApp() {
 
   syncAudioPrefsFromSave();
 
-  // Runtime 30-asset registry matching constants.ASSET_PATHS 1:1
+  // Ensure v0.9.0 rounded font is initialized even when createApp() is invoked directly by tests
+  if (typeof UI.initGameFont === 'function') {
+    UI.initGameFont('assets/fonts/kissa_round.ttf');
+  }
+
+  // Runtime 69-asset WebP registry matching constants.V090_ASSET_LIST 1:1
   const sprites = {
-    bg: null,
-    shopSign: null,
-    uiAtlas: null,
-    uiAtlas2: null,
-    uiAtlas3: null,
-    titlePlaque: null,
-    patronStage: null,
-    serveBell: null,
+    byId: {},
     hero: null,
-    customersAtlas: null,
-    boardTilesAtlas: null,
+    titlePlaque: null,
+    lobbyPlaque: null,
+    servingPlate: null,
+    resultRibbon: null,
+    kneadDough: null,
+    lobbyBgs: { amber: null, sakura: null, moonlight: null },
     patrons: { mikan: null, luna: null, mugi: null },
     tools: { fork: null, spoon: null },
+    customers: {},
+    devices: {},
+    themes: {},
+    medals: {},
     catcakes: {},
     catcakesHappy: {},
     loadedCount: 0,
-    totalCount: 30
+    totalCount: V090_ASSET_LIST.length
   };
 
-  function preloadAssets() {
-    const tasks = [
-      { src: ASSET_PATHS.bg, assign: (img) => { sprites.bg = img; } },
-      { src: ASSET_PATHS.shopSign, assign: (img) => { sprites.shopSign = img; } },
-      { src: ASSET_PATHS.uiAtlas, assign: (img) => { sprites.uiAtlas = img; } },
-      { src: ASSET_PATHS.uiAtlas2, assign: (img) => { sprites.uiAtlas2 = img; } },
-      { src: ASSET_PATHS.uiAtlas3, assign: (img) => { sprites.uiAtlas3 = img; } },
-      { src: ASSET_PATHS.titlePlaque, assign: (img) => { sprites.titlePlaque = img; } },
-      { src: ASSET_PATHS.patronStage, assign: (img) => { sprites.patronStage = img; } },
-      { src: ASSET_PATHS.serveBell, assign: (img) => { sprites.serveBell = img; } },
-      { src: ASSET_PATHS.hero, assign: (img) => { sprites.hero = img; } },
-      { src: ASSET_PATHS.customersAtlas, assign: (img) => { sprites.customersAtlas = img; } },
-      { src: ASSET_PATHS.boardTilesAtlas, assign: (img) => { sprites.boardTilesAtlas = img; } },
-      { src: ASSET_PATHS.patrons.mikan, assign: (img) => { sprites.patrons.mikan = img; } },
-      { src: ASSET_PATHS.patrons.luna, assign: (img) => { sprites.patrons.luna = img; } },
-      { src: ASSET_PATHS.patrons.mugi, assign: (img) => { sprites.patrons.mugi = img; } },
-      { src: ASSET_PATHS.tools.fork, assign: (img) => { sprites.tools.fork = img; } },
-      { src: ASSET_PATHS.tools.spoon, assign: (img) => { sprites.tools.spoon = img; } }
-    ];
-
-    for (let t = 1; t <= 7; t++) {
-      const tier = t;
-      tasks.push({
-        src: ASSET_PATHS.catcakes[tier],
-        assign: (img) => {
-          sprites.catcakes[tier] = img;
-          sprites[`catcake_${tier}`] = img;
-        }
-      });
-      tasks.push({
-        src: ASSET_PATHS.catcakesHappy[tier],
-        assign: (img) => {
-          sprites.catcakesHappy[tier] = img;
-          sprites[`catcake_${tier}_happy`] = img;
-        }
-      });
+  function bindSpriteById(id, img) {
+    sprites.byId[id] = img;
+    sprites[id] = img;
+    if (id === 'title_hero_v2') sprites.hero = img;
+    else if (id === 'title_plaque_banner') sprites.titlePlaque = img;
+    else if (id === 'lobby_plaque_blank') sprites.lobbyPlaque = img;
+    else if (id === 'serving_plate') sprites.servingPlate = img;
+    else if (id === 'result_ribbon') sprites.resultRibbon = img;
+    else if (id === 'knead_dough') sprites.kneadDough = img;
+    else if (id === 'bg_lobby_ch1_amber') sprites.lobbyBgs.amber = img;
+    else if (id === 'bg_lobby_ch2_sakura') sprites.lobbyBgs.sakura = img;
+    else if (id === 'bg_lobby_ch3_moonlight') sprites.lobbyBgs.moonlight = img;
+    else if (id === 'patron_mikan') sprites.patrons.mikan = img;
+    else if (id === 'patron_luna') sprites.patrons.luna = img;
+    else if (id === 'patron_mugi') sprites.patrons.mugi = img;
+    else if (id === 'tool_swap_fork') sprites.tools.fork = img;
+    else if (id === 'tool_upgrade_spoon') sprites.tools.spoon = img;
+    else if (id === 'cust_ragdoll') sprites.customers.cust_ragdoll = img;
+    else if (id === 'cust_orange_uncle') sprites.customers.cust_orange = img;
+    else if (id === 'cust_scholar') sprites.customers.cust_silver = img;
+    else if (id === 'cust_lop_bunny') sprites.customers.cust_rabbit = img;
+    else if (id === 'cust_fox') sprites.customers.cust_fox = img;
+    else if (id === 'cust_raccoon') sprites.customers.cust_raccoon = img;
+    else if (id === 'cust_shiba') sprites.customers.cust_shiba = img;
+    else if (id === 'cust_vip_cat') sprites.customers.cust_critic = img;
+    else if (id === 'device_tray') sprites.devices.dev_tray = img;
+    else if (id === 'device_flour') sprites.devices.dev_flour = img;
+    else if (id === 'device_teapot') sprites.devices.dev_teapot = img;
+    else if (id === 'device_rack') sprites.devices.dev_tools = img;
+    else if (id === 'theme_amber') sprites.themes.amber = img;
+    else if (id === 'theme_sakura') sprites.themes.sakura = img;
+    else if (id === 'theme_moonlight') sprites.themes.moonlight = img;
+    else if (id === 'medal_gold') sprites.medals.gold = img;
+    else if (id === 'medal_silver') sprites.medals.silver = img;
+    else if (id === 'medal_bronze') sprites.medals.bronze = img;
+    else {
+      const mHappy = /^catcake_([1-7])_happy$/.exec(id);
+      if (mHappy) {
+        sprites.catcakesHappy[Number(mHappy[1])] = img;
+      } else {
+        const mBase = /^catcake_([1-7])$/.exec(id);
+        if (mBase) sprites.catcakes[Number(mBase[1])] = img;
+      }
     }
+  }
+
+  function preloadAssets() {
+    const tasks = V090_ASSET_LIST.map((entry) => ({
+      id: entry.id,
+      src: entry.path
+    }));
 
     sprites.totalCount = tasks.length;
 
@@ -269,7 +290,7 @@ function createApp() {
         if (destroyed || counted) return;
         if (img) {
           counted = true;
-          task.assign(img);
+          bindSpriteById(task.id, img);
           sprites.loadedCount += 1;
         }
       });
@@ -318,6 +339,7 @@ function createApp() {
     activeModal: null,
     activeShopTab: 'catcakes',
     activeCompendiumTab: 'catcakes',
+    selectedCompendiumTier: 1,
     leaderboardBoardType: 'stars',
     leaderboardData: platform.buildOfflineLeaderboard('stars', saveData, 'LOCAL'),
     leaderboardLoading: false,
@@ -333,6 +355,18 @@ function createApp() {
     currentPatronLine: '',
     playPatronSpeech: '',
     confirmDialog: null,
+
+    // Smooth UI transition animation states (purely visual; HitRegistry always uses resting bounds)
+    uiAnim: {
+      modalOpenTimer: 1,
+      tabSwitchTimer: 1,
+      chapterFadeTimer: 1,
+      prevChapter: initialLvl ? initialLvl.chapter : 1,
+      chapterSlideDir: 0,
+      pressedHitId: null,
+      bgmSwitchPos: audio.bgmEnabled && audio.bgmTrack !== 'off' ? 1 : 0,
+      sfxSwitchPos: audio.sfxEnabled ? 1 : 0
+    },
 
     saveData,
     sprites,
@@ -553,6 +587,11 @@ function createApp() {
   }
 
   function fetchLeaderboard(boardType) {
+    if (boardType === 'friends') {
+      app.leaderboardBoardType = 'friends';
+      app.leaderboardLoading = false;
+      return;
+    }
     const cleanType = boardType === 'score' ? 'score' : 'stars';
     app.leaderboardBoardType = cleanType;
     refreshOfflineLeaderboardFallback();
@@ -819,8 +858,12 @@ function createApp() {
 
   app.switchChapter = function switchChapter(delta) {
     const maxChapter = Math.max(1, CHAPTERS.length);
-    const next = clamp(app.selectedChapter + (delta > 0 ? 1 : -1), 1, maxChapter);
+    const dir = delta > 0 ? 1 : -1;
+    const next = clamp(app.selectedChapter + dir, 1, maxChapter);
     if (next === app.selectedChapter) return false;
+    app.uiAnim.prevChapter = app.selectedChapter;
+    app.uiAnim.chapterSlideDir = dir;
+    app.uiAnim.chapterFadeTimer = 0;
     app.selectedChapter = next;
     audio.playPatronSelect();
     const chapStatus = isChapterUnlocked(next, saveData.levelStars);
@@ -856,7 +899,7 @@ function createApp() {
     const unlocked = Array.isArray(saveData.unlockedPatrons) ? saveData.unlockedPatrons : ['mikan'];
     if (unlocked.length < 2) {
       app.openShop('patrons');
-      showToast('去吃茶小铺邀请新主厨搭档吧', { icon: 'icon_shop' });
+      showToast('去星夜小铺邀请新主厨搭档吧', { icon: 'icon_shop' });
       return true;
     }
     const cur = normalizePatronId(saveData.selectedPatron);
@@ -877,7 +920,7 @@ function createApp() {
     const unlocked = Array.isArray(saveData.unlockedPatrons) ? saveData.unlockedPatrons : ['mikan'];
     if (!unlocked.includes(pid)) {
       audio.playGridBlocked();
-      showToast('请先前往吃茶小铺邀请解锁该搭档', { icon: 'icon_shop', tone: 'warn' });
+      showToast('请先前往星夜小铺邀请解锁该搭档', { icon: 'icon_shop', tone: 'warn' });
       return false;
     }
     saveData.selectedPatron = pid;
@@ -892,6 +935,8 @@ function createApp() {
     app.activeShopTab = validTab;
     app.activeModal = 'shop';
     app.modalScrollY = 0;
+    app.uiAnim.modalOpenTimer = 0;
+    app.uiAnim.tabSwitchTimer = 1;
     audio.playPatronSelect();
     syncAudioMood();
   };
@@ -906,6 +951,8 @@ function createApp() {
     app.activeShopTab = 'catcakes';
     app.activeModal = 'shop';
     app.modalScrollY = 0;
+    app.uiAnim.modalOpenTimer = 0;
+    app.uiAnim.tabSwitchTimer = 1;
     audio.playPatronSelect();
     syncGameStateMirror();
     syncAudioMood();
@@ -913,6 +960,9 @@ function createApp() {
 
   app.setShopTab = function setShopTab(tabId) {
     if (tabId === 'catcakes' || tabId === 'devices' || tabId === 'patrons' || tabId === 'themes') {
+      if (app.activeShopTab !== tabId) {
+        app.uiAnim.tabSwitchTimer = 0;
+      }
       app.activeShopTab = tabId;
       app.modalScrollY = 0;
       audio.playPatronSelect();
@@ -1026,7 +1076,7 @@ function createApp() {
     const cost = hasOwn(THEME_COSTS, th.id) ? THEME_COSTS[th.id] : th.cost || 0;
     if ((saveData.bankStardust || 0) < cost) {
       audio.playGridBlocked();
-      showToast('星尘不足，暂时无法解锁该烤盘皮肤', { icon: 'icon_stardust', tone: 'warn' });
+      showToast('星尘不足，暂时无法解锁该烤盘主题', { icon: 'icon_stardust', tone: 'warn' });
       return false;
     }
     saveData.unlockedThemes.push(th.id);
@@ -1045,7 +1095,7 @@ function createApp() {
     saveData.equippedTheme = th.id;
     persistSave(true);
     audio.playPatronSelect();
-    showToast(`已换上烤盘皮肤：${th.name}`, { icon: 'icon_ribbon' });
+    showToast(`已换上烤盘主题：${th.name}`, { icon: 'icon_ribbon' });
     return true;
   };
 
@@ -1053,30 +1103,46 @@ function createApp() {
     app.activeCompendiumTab = tab === 'recipes' ? 'recipes' : 'catcakes';
     app.activeModal = 'compendium';
     app.modalScrollY = 0;
+    app.uiAnim.modalOpenTimer = 0;
+    app.uiAnim.tabSwitchTimer = 1;
     audio.playPatronSelect();
     syncAudioMood();
   };
 
   app.setCompendiumTab = function setCompendiumTab(tab) {
-    app.activeCompendiumTab = tab === 'recipes' ? 'recipes' : 'catcakes';
+    const next = tab === 'recipes' ? 'recipes' : 'catcakes';
+    if (app.activeCompendiumTab !== next) {
+      app.uiAnim.tabSwitchTimer = 0;
+    }
+    app.activeCompendiumTab = next;
     app.modalScrollY = 0;
     audio.playPatronSelect();
   };
 
+  app.selectCompendiumTier = function selectCompendiumTier(tier) {
+    const t = clamp(Math.floor(Number(tier) || 1), 1, CATCAKES.length);
+    app.selectedCompendiumTier = t;
+    audio.playPatronSelect();
+    return t;
+  };
+
   app.openLeaderboard = function openLeaderboard(boardType = 'stars') {
-    const bt = boardType === 'score' ? 'score' : 'stars';
+    const bt = boardType === 'score' ? 'score' : boardType === 'friends' ? 'friends' : 'stars';
     app.leaderboardBoardType = bt;
     app.activeModal = 'leaderboard';
     app.modalScrollY = 0;
+    app.uiAnim.modalOpenTimer = 0;
+    app.uiAnim.tabSwitchTimer = 1;
     audio.playPatronSelect();
     syncAudioMood();
     fetchLeaderboard(bt);
   };
 
   app.setLeaderboardBoardType = function setLeaderboardBoardType(boardType) {
-    const bt = boardType === 'score' ? 'score' : 'stars';
+    const bt = boardType === 'score' ? 'score' : boardType === 'friends' ? 'friends' : 'stars';
     if (app.leaderboardBoardType !== bt) {
       app.modalScrollY = 0;
+      app.uiAnim.tabSwitchTimer = 0;
       audio.playPatronSelect();
     }
     fetchLeaderboard(bt);
@@ -1148,10 +1214,13 @@ function createApp() {
   function openLevelPreviewInternal(levelId) {
     const lvl = getLevelById(levelId);
     if (!lvl) return false;
+    const lockInfo = isLevelUnlocked(lvl.id, saveData.levelStars);
+    if (!lockInfo.unlocked) return false;
     app.selectedChapter = lvl.chapter;
     app.previewLevelId = lvl.id;
     app.activeModal = 'level_preview';
     app.modalScrollY = 0;
+    app.uiAnim.modalOpenTimer = 0;
     audio.playPatronSelect();
     syncAudioMood();
     return true;
@@ -1185,6 +1254,8 @@ function createApp() {
 
     app.activeModal = modalName;
     app.modalScrollY = 0;
+    app.uiAnim.modalOpenTimer = 0;
+    app.uiAnim.tabSwitchTimer = 1;
     if (modalName === 'leaderboard') {
       fetchLeaderboard(app.leaderboardBoardType);
     }
@@ -2641,6 +2712,7 @@ function createApp() {
     app.activeTutorialStep = null;
     app.tutorialSkipRect = null;
     app.activeModal = 'level_result';
+    app.uiAnim.modalOpenTimer = 0;
     autoServeTimer = 0;
 
     if (settlement.cleared) {
@@ -2657,6 +2729,25 @@ function createApp() {
   }
 
   function tickVisualTimers(dt) {
+    if (app.uiAnim) {
+      if (app.uiAnim.modalOpenTimer < 1) {
+        app.uiAnim.modalOpenTimer = Math.min(1, app.uiAnim.modalOpenTimer + dt / 0.22);
+      }
+      if (app.uiAnim.tabSwitchTimer < 1) {
+        app.uiAnim.tabSwitchTimer = Math.min(1, app.uiAnim.tabSwitchTimer + dt / 0.18);
+      }
+      if (app.uiAnim.chapterFadeTimer < 1) {
+        app.uiAnim.chapterFadeTimer = Math.min(1, app.uiAnim.chapterFadeTimer + dt / 0.28);
+      }
+      const bgmTarget = audio && audio.bgmEnabled && audio.bgmTrack !== 'off' ? 1 : 0;
+      const sfxTarget = audio && audio.sfxEnabled ? 1 : 0;
+      const toggleStep = Math.min(1, dt * 14);
+      app.uiAnim.bgmSwitchPos += (bgmTarget - app.uiAnim.bgmSwitchPos) * toggleStep;
+      app.uiAnim.sfxSwitchPos += (sfxTarget - app.uiAnim.sfxSwitchPos) * toggleStep;
+      if (Math.abs(bgmTarget - app.uiAnim.bgmSwitchPos) < 0.01) app.uiAnim.bgmSwitchPos = bgmTarget;
+      if (Math.abs(sfxTarget - app.uiAnim.sfxSwitchPos) < 0.01) app.uiAnim.sfxSwitchPos = sfxTarget;
+    }
+
     if (app.toastCurrent) {
       app.toastCurrent.timer = Math.max(0, app.toastCurrent.timer - dt);
       if (app.toastCurrent.timer <= 0) app.toastCurrent = null;
@@ -2953,6 +3044,11 @@ function createApp() {
     pointerState.isModalScroll = false;
     pointerState.startScrollY = app.modalScrollY || 0;
 
+    const downHit = hits.findAt(x, y);
+    if (app.uiAnim) {
+      app.uiAnim.pressedHitId = downHit ? downHit.id : null;
+    }
+
     if (app.activeModal !== null) {
       if (app.modalScrollRect && app.modalMaxScroll > 0 && pointInRect(x, y, app.modalScrollRect)) {
         pointerState.isModalScroll = true;
@@ -2969,12 +3065,11 @@ function createApp() {
         pointerState.downOnTutorialSkip = true;
         return;
       }
-      const hit = hits.findAt(x, y);
-      if (hit && hit.meta && typeof hit.meta.slotIdx === 'number') {
-        pointerState.downTraySlot = hit.meta.slotIdx;
+      if (downHit && downHit.meta && typeof downHit.meta.slotIdx === 'number') {
+        pointerState.downTraySlot = downHit.meta.slotIdx;
         return;
       }
-      if (!hit && isPointInsideBoardStage(x, y)) {
+      if (!downHit && isPointInsideBoardStage(x, y)) {
         pointerState.downOnBoard = true;
         pointerState.downBoardCell = app.currentBoardLayout
           ? BoardRenderer.hitTestBoardCell(app.currentBoardLayout, app.gridState, x, y)
@@ -2994,6 +3089,9 @@ function createApp() {
     const dx = x - pointerState.startX;
     const dy = y - pointerState.startY;
     const dist = Math.hypot(dx, dy);
+    if (dist >= 10 && app.uiAnim && app.uiAnim.pressedHitId) {
+      app.uiAnim.pressedHitId = null;
+    }
 
     if (app.activeModal !== null) {
       if (pointerState.isModalScroll && dist >= 8) {
@@ -3025,6 +3123,7 @@ function createApp() {
   }
 
   function handlePointerUp(pt) {
+    if (app.uiAnim) app.uiAnim.pressedHitId = null;
     if (!pt || typeof pt !== 'object' || !pointerState.active || destroyed) return;
     const x = Number(pt.x);
     const y = Number(pt.y);

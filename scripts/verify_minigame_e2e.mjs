@@ -344,12 +344,12 @@ async function runSelfTest(cliOpts = {}) {
       }));
       assertEq(meta.version, '0.9.0', 'debug version');
       assert(meta.sameRef, '__game must alias __HOSHI_DEBUG__');
-      assertEq(st.assetsLoaded, 30, 'assetsLoaded');
-      assertEq(st.assetsTotal, 30, 'assetsTotal');
+      assertEq(st.assetsLoaded, 69, 'assetsLoaded');
+      assertEq(st.assetsTotal, 69, 'assetsTotal');
       const constsMod = await ctx.requireBundledModule('./src/constants.js');
       assertEq(typeof constsMod.getCatcakePrice, 'function', 'requireBundledModule must preserve exported JS functions');
       assertEq(constsMod.getCatcakePrice(1, 1), 35, 'getCatcakePrice(1, 1) must equal 35');
-      const b = await ctx.checkBounds('ST-01_390x844', { expectedAssetsTotal: 30 });
+      const b = await ctx.checkBounds('ST-01_390x844', { expectedAssetsTotal: 69 });
       assert(b.hitsChecked >= 4, 'expected interactive hits on lobby');
     });
 
@@ -677,7 +677,11 @@ async function runSelfTest(cliOpts = {}) {
       const hs = await ctx.getHarnessState();
       assert(hs.userInfoTapCount >= 1, 'userInfoTapCount incremented');
       assert(hs.sharePreview && hs.sharePreview.title.includes('一起做猫饼'), 'v2 share title');
-      assertEq(hs.sharePreview.imageUrl, 'assets/title_hero_v2.jpg', 'v2 share imageUrl');
+      assertEq(
+        hs.sharePreview.imageUrl,
+        'assets/ui_v090/08_首屏主视觉与结算辅助件/01_首屏纯主视觉底图_title_hero_v2.webp',
+        'v2 share imageUrl'
+      );
       assertEq(ctx.cdp.errors.length, 0, `expected 0 CDP errors, got ${JSON.stringify(ctx.cdp.errors)}`);
     });
   } finally {

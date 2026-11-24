@@ -2514,6 +2514,30 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
     createImage() {
       return new Image();
     },
+    loadFont(fontPath) {
+      try {
+        let clean = String(fontPath || '');
+        while (clean.startsWith('/')) clean = clean.slice(1);
+        if (!clean) return '';
+        const fam = 'KissaRound';
+        window.__WX_HARNESS__.loadedFonts = window.__WX_HARNESS__.loadedFonts || [];
+        if (!window.__WX_HARNESS__.loadedFonts.includes(clean)) {
+          window.__WX_HARNESS__.loadedFonts.push(clean);
+          if (typeof FontFace === 'function' && document.fonts) {
+            const url = '/' + clean.split('/').map((s) => encodeURIComponent(s)).join('/');
+            const ff = new FontFace(fam, 'url("' + url + '")');
+            ff.load().then((loaded) => {
+              try {
+                document.fonts.add(loaded);
+              } catch (_) {}
+            }).catch(() => {});
+          }
+        }
+        return fam;
+      } catch (_) {
+        return '';
+      }
+    },
     getStorageSync(k) {
       return localStorage.getItem('wx_' + k) || '';
     },
@@ -2836,7 +2860,7 @@ ${shimScript}
   wx.showShareMenu({ withShareTicket: true, menus: ['shareAppMessage', 'shareTimeline'] });
   wx.onShareAppMessage(() => ({
     title: '一起做猫饼 · 治愈猫咪甜品屋',
-    imageUrl: 'assets/title_hero_v2.jpg'
+    imageUrl: 'assets/ui_v090/08_首屏主视觉与结算辅助件/01_首屏纯主视觉底图_title_hero_v2.webp'
   }));
   wx.setUserCloudStorage({
     KVDataList: [
@@ -2925,8 +2949,8 @@ ${shimScript}
     showCount: 0,
     hideCount: 0,
     cloudStatus: wx.cloud ? 'synced' : 'local_only',
-    assetsLoaded: 30,
-    assetsTotal: 30,
+    assetsLoaded: 69,
+    assetsTotal: 69,
     hits: [],
     boardLayout: null,
     grid: { rows: 4, cols: 4, cells: [] }
@@ -3349,6 +3373,9 @@ export function startHarnessServer({ minigameDir = DEFAULT_MINIGAME_DIR } = {}) 
     '.jpeg': 'image/jpeg',
     '.webp': 'image/webp',
     '.svg': 'image/svg+xml',
+    '.ttf': 'font/ttf',
+    '.otf': 'font/otf',
+    '.woff2': 'font/woff2',
     '.css': 'text/css; charset=utf-8',
     '.js': 'application/javascript; charset=utf-8',
     '.json': 'application/json; charset=utf-8'

@@ -64,7 +64,9 @@ const KNOWN_PATRON_INPUTS = new Set([
   'patron_mugi'
 ]);
 
-const DEFAULT_SHARE_IMAGE_URL = (ASSET_PATHS && ASSET_PATHS.hero) || 'assets/title_hero_v2.jpg';
+const DEFAULT_SHARE_IMAGE_URL =
+  (ASSET_PATHS && ASSET_PATHS.hero) ||
+  'assets/ui_v090/08_首屏主视觉与结算辅助件/01_首屏纯主视觉底图_title_hero_v2.webp';
 const DEFAULT_APP_SHARE_TITLE = `${GAME_TITLE} · 治愈猫咪甜品屋`;
 const DEFAULT_TIMELINE_SHARE_TITLE = `${GAME_TITLE} · 烤猫饼上菜闯关小游戏`;
 const DEFAULT_TRIGGER_SHARE_TITLE = `${GAME_TITLE} · 来烤香喷喷的猫咪甜点吧！`;

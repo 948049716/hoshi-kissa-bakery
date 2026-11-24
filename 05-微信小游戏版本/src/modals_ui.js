@@ -1,13 +1,14 @@
 /**
  * Canvas 2D Storybook Interactive Modals & 6-Step Non-Blocking Spotlight Tutorial Overlay
- * for Hoshi Kissa Bakery v2.0 (WeChat Mini Game Edition).
+ * for Hoshi Kissa Bakery v0.9.0 (WeChat Mini Game Edition).
  *
  * Strictly enforces:
  * - Zero HSL color strings (strictly hex/rgb/rgba for iOS WeChat Canvas safety)
- * - Zero native Unicode emoji / star / dingbat characters (100% atlas & vector icons)
+ * - Zero native Unicode emoji / star / dingbat characters (100% WebP sprites & crisp vector icons)
  * - Immediate hits.clear() when activeModal !== null (zero background/backdrop hitbox overlap)
- * - Zero-scroll responsive grids on Shop (all 4 tabs) & Compendium (both tabs) across 375x667, 390x844, 1280x760
- * - Pure Node.js stub-canvas (ctx === null) geometry & HitRegistry parity
+ * - Faithful reproduction of v0.9.0 Design Sheets 04–11 (wood plaque, awning, segmented bars,
+ *   medals, switches, illustrated help cards, smooth pop-in & tab fade/slide transitions)
+ * - Deterministic resting HitRegistry geometry on 375x667, 390x844, 1280x760 & Node stub-canvas
  */
 'use strict';
 
@@ -17,12 +18,14 @@ const {
   SHOP_DEVICES,
   PATRONS,
   BOARD_THEME_LIST,
+  SERVE_COMBO_MULTS,
   TUTORIAL_STEPS,
   ACHIEVEMENTS,
   normalizePatronId,
   getChefRank
 } = require('./constants');
 const {
+  CHAPTERS,
   RECIPES,
   RECIPE_LIST,
   getLevelById,
@@ -35,7 +38,8 @@ const BoardRenderer = require('./board_renderer');
 const {
   getSafeCtx,
   drawRedDot,
-  drawLockIcon
+  drawLockIcon,
+  drawCircularWoodButton
 } = require('./screens_ui');
 
 function clamp(v, lo, hi) {
@@ -43,11 +47,49 @@ function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v;
 }
 
+function easeOutCubic(t) {
+  const x = clamp(t, 0, 1);
+  return 1 - Math.pow(1 - x, 3);
+}
+
+function easeOutBack(t) {
+  const x = clamp(t, 0, 1);
+  const c1 = 1.35;
+  const c3 = c1 + 1;
+  return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
+}
+
+function formatNum(n) {
+  const v = Math.max(0, Math.floor(Number(n) || 0));
+  return v.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
 function formatClockMMSS(sec) {
   const s = Math.max(0, Math.ceil(Number(sec) || 0));
   const mm = Math.floor(s / 60);
   const ss = s % 60;
   return `${mm < 10 ? '0' + mm : String(mm)}:${ss < 10 ? '0' + ss : String(ss)}`;
+}
+
+function getChapterName(chapterNum) {
+  const found = CHAPTERS.find((ch) => ch.chapter === chapterNum);
+  return found ? found.name : '街角星夜店';
+}
+
+function getSprite(sprites, key) {
+  if (!sprites || !key) return null;
+  if (sprites.byId && sprites.byId[key]) return sprites.byId[key];
+  if (sprites.ui && sprites.ui[key]) return sprites.ui[key];
+  if (sprites.patrons && sprites.patrons[key]) return sprites.patrons[key];
+  if (sprites.tools && sprites.tools[key]) return sprites.tools[key];
+  if (sprites.devices && sprites.devices[key]) return sprites.devices[key];
+  if (sprites.tiles && sprites.tiles[key]) return sprites.tiles[key];
+  if (sprites.customers && sprites.customers[key]) return sprites.customers[key];
+  return null;
+}
+
+function isPressed(app, hitId) {
+  return Boolean(app && app.uiAnim && app.uiAnim.pressedHitId === hitId);
 }
 
 function appendRoundRectSubpath(ctx, x, y, w, h, r) {
@@ -64,7 +106,28 @@ function appendRoundRectSubpath(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-function renderModalFrame(ctx, metrics, app, maxW, desiredH, dismissOnOutside) {
+function getModalAnim(app) {
+  const uiAnim = (app && app.uiAnim) || null;
+  const openT = uiAnim && Number.isFinite(uiAnim.modalOpenTimer) ? clamp(uiAnim.modalOpenTimer, 0, 1) : 1;
+  const tabT = uiAnim && Number.isFinite(uiAnim.tabSwitchTimer) ? clamp(uiAnim.tabSwitchTimer, 0, 1) : 1;
+  return {
+    openT,
+    scale: openT >= 0.999 ? 1 : 0.93 + 0.07 * easeOutBack(openT),
+    scrimAlpha: openT >= 0.999 ? 1 : 0.35 + 0.65 * easeOutCubic(openT),
+    tabAlpha: tabT >= 0.999 ? 1 : 0.45 + 0.55 * easeOutCubic(tabT),
+    tabOffsetY: tabT >= 0.999 ? 0 : Math.round((1 - easeOutCubic(tabT)) * 5)
+  };
+}
+
+/**
+ * Draws the shared v0.9.0 modal backdrop + spring-animated wood/parchment frame,
+ * optional red-cream scalloped awning (Design 06 & 09), floating wooden title plaque,
+ * optional dark espresso subtitle plate (Design 04 & 10), and overlapping circular close button.
+ *
+ * All layout coordinates and HitRegistry registrations remain at deterministic resting positions
+ * while the visual canvas transform handles smooth spring scale pop-in!
+ */
+function beginModalFrame(ctx, metrics, app, opts = {}) {
   const c = getSafeCtx(ctx);
   const m = metrics && typeof metrics === 'object' ? metrics : {};
   const width = Math.max(320, Number(m.width) || 390);
@@ -76,34 +139,144 @@ function renderModalFrame(ctx, metrics, app, maxW, desiredH, dismissOnOutside) {
       ? m.menuRect
       : null;
 
-  const topBound = mr ? Math.max(Math.round(mr.bottom) + 6, safeTop + 8) : Math.max(12, safeTop + 8);
-  const botBound = height - Math.max(10, safeBottom + 8);
+  const topBound = mr ? Math.max(Math.round(mr.bottom) + 8, safeTop + 10) : Math.max(14, safeTop + 10);
+  const botBound = height - Math.max(12, safeBottom + 10);
+  const anim = getModalAnim(app);
 
+  // Full-screen warm night scrim with smooth fade-in
   c.save();
   try {
-    c.fillStyle = 'rgba(18, 10, 6, 0.72)';
+    c.fillStyle = `rgba(18, 22, 42, ${(0.66 * anim.scrimAlpha).toFixed(3)})`;
     c.fillRect(0, 0, width, height);
   } finally {
     c.restore();
   }
 
-  const w = Math.min(maxW, width - 20);
-  const availH = Math.max(200, botBound - topBound);
+  const maxW = Number(opts.maxW) || 440;
+  const desiredH = Number(opts.desiredH) || 520;
+  const extraTopHeadroom = Number(opts.extraTopHeadroom) || 14;
+  const hasAwning = Boolean(opts.awning);
+  const hasPlaque = opts.plaque !== false;
+  const title = String(opts.title || '');
+  const subtitle = String(opts.subtitle || '');
+
+  const w = Math.min(maxW, width - 22);
+  const availH = Math.max(220, botBound - topBound - extraTopHeadroom);
   const h = Math.min(desiredH, availH);
   const x = Math.round((width - w) * 0.5);
-  const y = Math.round(topBound + (availH - h) * 0.5);
-
-  UI.drawWoodBoard(c, x, y, w, h, 16, true);
-  const pad = 8;
-  UI.drawParchmentSheet(c, x + pad, y + pad, w - pad * 2, h - pad * 2, 11);
+  const y = Math.round(topBound + extraTopHeadroom + (availH - h) * 0.5);
 
   app.activeModalFrame = {
     x,
     y,
     w,
     h,
-    dismissOnOutside: Boolean(dismissOnOutside)
+    dismissOnOutside: Boolean(opts.dismissOnOutside)
   };
+
+  // Start modal visual transform scope (closed via endModalFrame)
+  c.save();
+  if (anim.scale !== 1) {
+    const cx = x + w * 0.5;
+    const cy = y + h * 0.5;
+    c.translate(cx, cy);
+    c.scale(anim.scale, anim.scale);
+    c.translate(-cx, -cy);
+  }
+
+  // Outer warm wood frame
+  UI.drawWoodBoard(c, x, y, w, h, 18, Boolean(opts.withRivets));
+
+  // Optional red/cream scalloped awning (Design 06 & 09)
+  let awningDrop = 0;
+  if (hasAwning) {
+    const awningH = Math.min(34, Math.max(24, Math.round(h * 0.062)));
+    UI.drawAwningHeader(c, x - 3, y + 2, w + 6, awningH, 9);
+    awningDrop = awningH - 4;
+  }
+
+  // Inner cream parchment sheet
+  const padX = 9;
+  const topInset = Number(opts.sheetTopInset);
+  const sheetTop = Number.isFinite(topInset)
+    ? y + topInset
+    : y + (hasAwning ? awningDrop + 32 : subtitle ? 44 : 16);
+  const sheetBotPad = Number.isFinite(opts.sheetBottomPad) ? opts.sheetBottomPad : 11;
+  const sheetX = x + padX;
+  const sheetW = w - padX * 2;
+  const sheetH = Math.max(120, y + h - sheetBotPad - sheetTop);
+
+  if (opts.drawParchment !== false) {
+    UI.drawParchmentSheet(c, sheetX, sheetTop, sheetW, sheetH, 12);
+    // Subtle storybook bottom-right parchment corner curl accent
+    c.save();
+    try {
+      const curl = 14;
+      const cx0 = sheetX + sheetW - curl;
+      const cy0 = sheetTop + sheetH - curl;
+      c.beginPath();
+      c.moveTo(cx0, sheetTop + sheetH);
+      c.quadraticCurveTo(cx0 + 3, cy0 + 3, sheetX + sheetW, cy0);
+      c.lineTo(sheetX + sheetW, sheetTop + sheetH - 4);
+      c.quadraticCurveTo(sheetX + sheetW, sheetTop + sheetH, sheetX + sheetW - 4, sheetTop + sheetH);
+      c.closePath();
+      c.fillStyle = 'rgba(138, 86, 52, 0.16)';
+      c.fill();
+    } finally {
+      c.restore();
+    }
+  }
+
+  // Floating centered wooden title plaque (Designs 04, 06, 07, 08, 09, 10, 11)
+  if (hasPlaque && title) {
+    const plaqueW = Math.min(w - 68, Math.max(156, Math.round(w * 0.56)));
+    const plaqueH = 40;
+    const plaqueX = Math.round(x + (w - plaqueW) * 0.5);
+    const plaqueY = Math.max(topBound + 1, y - 16);
+
+    if (subtitle) {
+      const subW = Math.min(w - 50, plaqueW + 8);
+      const subH = 22;
+      const subX = Math.round(x + (w - subW) * 0.5);
+      const subY = plaqueY + plaqueH - 6;
+      UI.drawKissaCard(c, subX, subY, subW, subH, {
+        tone: 'wood',
+        topCol: '#6B4229',
+        botCol: '#52301C',
+        borderColor: '#4A2B1A',
+        radius: 9,
+        lineWidth: 2.2
+      });
+      UI.drawOutlinedText(c, subtitle, subX + subW * 0.5, subY + subH * 0.5 + 1.5, {
+        size: 11.2,
+        minSize: 8.8,
+        weight: 800,
+        fill: '#FFF3DC',
+        stroke: '#3D2214',
+        strokeWidth: 2.2,
+        shadowOffsetY: 0,
+        maxWidth: subW - 14
+      });
+    }
+
+    UI.drawWoodBoard(c, plaqueX, plaqueY, plaqueW, plaqueH, 13, false);
+    UI.drawOutlinedText(c, title, plaqueX + plaqueW * 0.5, plaqueY + plaqueH * 0.5 + 1, {
+      size: 20,
+      minSize: 14,
+      weight: 900,
+      fill: '#FFE27D',
+      stroke: '#5A3928',
+      strokeWidth: 4.0,
+      shadowOffsetY: 1.5,
+      maxWidth: plaqueW - 22
+    });
+  }
+
+  // Safe inner content area
+  const ix = sheetX + 10;
+  const iw = sheetW - 20;
+  const iy = sheetTop + (hasPlaque && !hasAwning && !subtitle ? 22 : subtitle ? 18 : 10);
+  const ih = Math.max(100, sheetTop + sheetH - 10 - iy);
 
   return {
     width,
@@ -112,292 +285,523 @@ function renderModalFrame(ctx, metrics, app, maxW, desiredH, dismissOnOutside) {
     cardY: y,
     cardW: w,
     cardH: h,
-    ix: x + pad + 9,
-    iy: y + pad + 9,
-    iw: w - (pad + 9) * 2,
-    ih: h - (pad + 9) * 2,
+    sheetX,
+    sheetY: sheetTop,
+    sheetW,
+    sheetH,
+    ix,
+    iy,
+    iw,
+    ih,
     topBound,
-    botBound
+    botBound,
+    awningDrop,
+    anim
   };
 }
 
-function drawModalHeader(ctx, f, sprites, iconKey, title, subtitle = '', rightReserve = 38) {
+function endModalFrame(ctx) {
   const c = getSafeCtx(ctx);
-  let tx = f.ix;
-  if (iconKey) {
-    const icS = subtitle ? 28 : 24;
-    const icY = subtitle ? f.iy + 15 : f.iy + 14;
-    if (UI.drawUiIcon(c, sprites || {}, iconKey, f.ix + icS * 0.5, icY, icS)) {
-      tx = f.ix + icS + 6;
-    }
-  }
-  const availW = Math.max(60, f.ix + f.iw - rightReserve - tx);
-  if (subtitle) {
-    UI.drawFitText(c, title, tx, f.iy + 9, availW, 15, 11, 900, '#4A2C2A', 'left', 'middle');
-    UI.drawFitText(c, subtitle, tx, f.iy + 24, availW, 10, 8.2, 700, '#884A18', 'left', 'middle');
-  } else {
-    UI.drawFitText(c, title, tx, f.iy + 14, availW, 15.5, 11.5, 900, '#4A2C2A', 'left', 'middle');
-  }
+  c.restore();
 }
 
 function drawCloseButton(ctx, f, hits, app, onCloseOverride = null) {
   const c = getSafeCtx(ctx);
-  const bw = 30;
-  const bh = 28;
-  const bx = f.ix + f.iw - bw;
-  const by = f.iy;
-  UI.drawPillButton(c, bx, by, bw, bh, {
-    style: 'wood',
+  const sz = 34;
+  const r = sz * 0.5;
+  const bx = Math.min(f.width - sz - 4, Math.round(f.cardX + f.cardW - sz * 0.72));
+  const by = Math.max(f.topBound + 2, Math.round(f.cardY - 10));
+  drawCircularWoodButton(c, bx + r, by + r, r, {
     icon: 'icon_close',
     sprites: app.sprites || {},
-    iconSize: 18,
-    radius: 9,
-    fallbackText: '关'
+    iconSize: 16,
+    pressed: isPressed(app, 'modal_close')
   });
-  hits.add('modal_close', bx, by, bw, bh, () => {
+  hits.add('modal_close', bx, by, sz, sz, () => {
     if (typeof onCloseOverride === 'function') onCloseOverride();
     else app.closeModal();
   });
 }
 
+function drawSectionRibbonTag(ctx, x, y, text) {
+  const c = getSafeCtx(ctx);
+  const w = Math.max(66, text.length * 14 + 18);
+  const h = 21;
+  UI.drawTagBadge(c, x, y, w, h, text, 'wood', 10.6);
+  return { w, h };
+}
+
+function drawFolderTabs(ctx, x, y, w, h, tabs, activeId, hits, app, onSelect, opts = {}) {
+  const c = getSafeCtx(ctx);
+  const gap = Number(opts.gap) || 5;
+  const count = tabs.length;
+  const tabW = Math.floor((w - gap * (count - 1)) / Math.max(1, count));
+
+  for (let i = 0; i < count; i++) {
+    const t = tabs[i];
+    const tx = x + i * (tabW + gap);
+    const active = activeId === t.id;
+    const hitId = t.hitId || `tab_${t.id}`;
+    const pressed = isPressed(app, hitId);
+    const dy = pressed ? 1.5 : 0;
+
+    c.save();
+    try {
+      const r = 10;
+      const th = active ? h + 3 : h;
+      const ty = (active ? y - 2 : y + 1) + dy;
+      c.beginPath();
+      c.moveTo(tx + r, ty);
+      c.lineTo(tx + tabW - r, ty);
+      c.quadraticCurveTo(tx + tabW, ty, tx + tabW, ty + r);
+      c.lineTo(tx + tabW, ty + th);
+      c.lineTo(tx, ty + th);
+      c.lineTo(tx, ty + r);
+      c.quadraticCurveTo(tx, ty, tx + r, ty);
+      c.closePath();
+
+      const g = c.createLinearGradient(tx, ty, tx, ty + th);
+      if (active) {
+        g.addColorStop(0, '#FFE382');
+        g.addColorStop(1, '#F5B332');
+      } else {
+        g.addColorStop(0, '#A86E44');
+        g.addColorStop(1, '#7A4C2E');
+      }
+      c.fillStyle = g;
+      c.fill();
+      c.lineWidth = 2.2;
+      c.strokeStyle = '#5A3928';
+      c.stroke();
+
+      UI.drawOutlinedText(c, t.label, tx + tabW * 0.5, ty + th * 0.52, {
+        size: Number(opts.fontSize) || (count >= 4 ? 11.4 : 12.6),
+        minSize: 8.6,
+        weight: 800,
+        fill: active ? '#5A3928' : '#FFF4E0',
+        stroke: active ? '' : '#4A2B1A',
+        strokeWidth: active ? 0 : 2.2,
+        shadowOffsetY: 0,
+        maxWidth: tabW - 8
+      });
+
+      if (t.redDot) {
+        drawRedDot(c, tx + tabW - 7, ty + 7, 4.3);
+      }
+    } finally {
+      c.restore();
+    }
+
+    const idCopy = t.id;
+    hits.add(hitId, tx, y, tabW, h, () => onSelect(idCopy));
+  }
+}
+
+/* ======================== 04. 关卡备战弹窗 (LevelPreviewModal) ======================== */
+
 function renderLevelPreviewModal(ctx, metrics, app, hits, nowSec) {
   const c = getSafeCtx(ctx);
-  const f = renderModalFrame(c, metrics, app, 444, 424, true);
   const sprites = app.sprites || {};
   const saveData = app.saveData || {};
-  const lvl = getLevelById(app.previewLevelId || saveData.highestUnlockedLevel || '1-1') || getLevelById('1-1');
+  const lvl =
+    getLevelById(app.previewLevelId || saveData.highestUnlockedLevel || '1-1') ||
+    getLevelById('1-1');
+  const chapName = getChapterName(lvl.chapter);
 
-  drawModalHeader(c, f, sprites, 'serve_bell', `第 ${lvl.id} 关 · ${lvl.name}`, lvl.desc || '', 38);
-  drawCloseButton(c, f, hits, app);
-
-  // Row 1: Shaped Board Miniature + Target & Recipe Info Card
-  const row1Y = f.iy + 36;
-  const row1H = Math.min(142, Math.max(116, Math.floor(f.ih * 0.37)));
-  const thumbW = Math.min(136, Math.floor(f.iw * 0.40));
-  const thumbRect = { x: f.ix, y: row1Y, w: thumbW, h: row1H };
-
-  UI.drawKissaCard(c, thumbRect.x, thumbRect.y, thumbRect.w, thumbRect.h, {
-    tone: 'soft',
-    radius: 11
+  const f = beginModalFrame(c, metrics, app, {
+    maxW: 430,
+    desiredH: 540,
+    dismissOnOutside: true,
+    title: '关卡备战',
+    subtitle: `第 ${lvl.id} 关 · ${chapName}`,
+    sheetTopInset: 38,
+    sheetBottomPad: 12
   });
-  BoardRenderer.renderBoardStage(
-    c,
-    { x: thumbRect.x + 4, y: thumbRect.y + 4, w: thumbRect.w - 8, h: thumbRect.h - 8 },
-    lvl,
-    null,
-    app.equippedTheme,
-    sprites,
-    null,
-    nowSec,
-    { thumbnail: true, minCellSize: 15, maxCellSize: 26 }
-  );
 
-  const metaX = thumbRect.x + thumbRect.w + 8;
-  const metaW = Math.max(120, f.ix + f.iw - metaX);
-  UI.drawKissaCard(c, metaX, row1Y, metaW, row1H, { tone: 'cream', radius: 11 });
+  try {
+    drawCloseButton(c, f, hits, app);
 
-  UI.drawUiIcon(c, sprites, 'icon_hourglass', metaX + 14, row1Y + 18, 14);
-  UI.drawFitText(
-    c,
-    `营业时长：${lvl.durationSec} 秒`,
-    metaX + 24,
-    row1Y + 18,
-    metaW - 30,
-    11.0,
-    9.0,
-    800,
-    '#4A2C2A',
-    'left',
-    'middle'
-  );
+    const compact = f.ih < 410;
+    const ctaH = compact ? 42 : 48;
+    const ctaY = f.iy + f.ih - ctaH;
+    const gap = compact ? 7 : 10;
 
-  // 1~3 Star target line
-  const starY = row1Y + 42;
-  for (let s = 0; s < 3; s++) {
-    const segW = (metaW - 14) / 3;
-    const sx = metaX + 7 + s * segW;
-    UI.drawStarIcon(c, sx + 6, starY, 5.2, true);
-    UI.drawFitText(
-      c,
-      String(lvl.stars[s]),
-      sx + 14,
-      starY + 0.5,
-      segW - 16,
-      10.0,
-      7.8,
-      800,
-      '#6E463B',
-      'left',
-      'middle'
-    );
-  }
-
-  // Compute max recipe tier & special cells
-  let maxTier = 2;
-  for (let i = 0; i < lvl.allowedRecipes.length; i++) {
-    const rec = RECIPES[lvl.allowedRecipes[i]];
-    if (rec && Array.isArray(rec.slots)) {
-      for (let k = 0; k < rec.slots.length; k++) {
-        if (rec.slots[k].tier > maxTier) maxTier = rec.slots[k].tier;
-      }
-    }
-  }
-  const matJoined = lvl.matrix.join('');
-  const tags = [`C1~C${maxTier}`];
-  if (matJoined.includes('M')) tags.push('抹茶格');
-  if (matJoined.includes('G')) tags.push('镀金格');
-  if (matJoined.includes('B')) tags.push('草莓格');
-  if (matJoined.includes('I')) tags.push('破冰');
-  if ((lvl.vipQuota || 0) > 0) tags.push(`VIP×${lvl.vipQuota}`);
-
-  UI.drawFitText(
-    c,
-    `本关特色：${tags.join(' · ')}`,
-    metaX + 10,
-    row1Y + 67,
-    metaW - 18,
-    10.0,
-    8.0,
-    700,
-    '#7A5438',
-    'left',
-    'middle'
-  );
-
-  // Sample customer portraits
-  const custPreview = ['cust_ragdoll', lvl.chapter >= 2 ? 'cust_silver' : 'cust_orange'];
-  if ((lvl.urgentRate || 0) > 0) custPreview.push('cust_fox');
-  if ((lvl.vipQuota || 0) > 0) custPreview.push('cust_critic');
-  for (let i = 0; i < Math.min(4, custPreview.length); i++) {
-    UI.drawCustomerPortrait(
-      c,
-      sprites,
-      custPreview[i],
-      metaX + 18 + i * 26,
-      row1Y + 94,
-      22,
-      { circular: true, isVip: custPreview[i] === 'cust_critic', isUrgent: custPreview[i] === 'cust_fox' }
-    );
-  }
-
-  const bestScore = (saveData.levelBestScores && saveData.levelBestScores[lvl.id]) || 0;
-  const prevStars = (saveData.levelStars && saveData.levelStars[lvl.id]) || 0;
-  UI.drawFitText(
-    c,
-    bestScore > 0 ? `历史最佳：${bestScore} 分（${prevStars}星）` : '历史最佳：尚未挑战',
-    metaX + 10,
-    row1Y + row1H - 14,
-    metaW - 18,
-    9.8,
-    8.0,
-    800,
-    '#884A18',
-    'left',
-    'middle'
-  );
-
-  // Row 2: 3 Chef Patron Selector Cards
-  const patLabelY = row1Y + row1H + 12;
-  UI.drawFitText(c, '选择出战搭档：', f.ix, patLabelY, f.iw, 11.0, 9.0, 900, '#4A2C2A', 'left', 'middle');
-
-  const ctaH = 44;
-  const ctaY = f.iy + f.ih - ctaH;
-
-  const patCardY = patLabelY + 11;
-  const patSummaryH = 26;
-  const patCardH = Math.max(54, Math.min(72, ctaY - 8 - patSummaryH - 6 - patCardY));
-  const patGap = 6;
-  const patW = Math.floor((f.iw - patGap * 2) / 3);
-  const selectedPatronId = normalizePatronId(saveData.selectedPatron);
-  const unlockedPatrons = Array.isArray(saveData.unlockedPatrons) ? saveData.unlockedPatrons : ['mikan'];
-
-  for (let i = 0; i < PATRONS.length; i++) {
-    const p = PATRONS[i];
-    const px = f.ix + i * (patW + patGap);
-    const owned = unlockedPatrons.includes(p.id);
-    const active = selectedPatronId === p.id;
-
-    UI.drawKissaCard(c, px, patCardY, patW, patCardH, {
-      tone: active ? 'selected' : owned ? 'cream' : 'soft',
-      borderColor: active ? '#DF921A' : owned ? '#B98E58' : '#A8937C',
-      radius: 10
+    // --- Section 1: 1/2/3 Star Target Box + Top-Right Time Pill (Design 04) ---
+    const starBoxY = f.iy + 8;
+    const starBoxH = compact ? 76 : 90;
+    UI.drawKissaCard(c, f.ix, starBoxY, f.iw, starBoxH, {
+      tone: 'recess',
+      borderColor: '#C5A982',
+      radius: 12,
+      lineWidth: 1.8
     });
 
-    UI.drawUiIcon(c, sprites, p.id, px + 20, patCardY + patCardH * 0.5, Math.min(34, patCardH - 12), owned ? 1 : 0.45);
-    if (!owned) {
-      drawLockIcon(c, px + 20, patCardY + patCardH * 0.68, 11);
+    const colW = (f.iw - 14) / 3;
+    const starLabels = ['1星', '2星', '3星'];
+    for (let s = 0; s < 3; s++) {
+      const colX = f.ix + 7 + s * colW;
+      const cx = colX + colW * 0.5;
+      if (s > 0) {
+        c.save();
+        try {
+          c.strokeStyle = 'rgba(138, 86, 52, 0.24)';
+          c.lineWidth = 1.2;
+          c.beginPath();
+          c.moveTo(colX, starBoxY + 14);
+          c.lineTo(colX, starBoxY + starBoxH - 18);
+          c.stroke();
+        } finally {
+          c.restore();
+        }
+      }
+
+      UI.drawOutlinedText(c, starLabels[s], cx, starBoxY + 15, {
+        size: 12.2,
+        minSize: 9.5,
+        weight: 800,
+        fill: '#FFE27D',
+        stroke: '#5A3928',
+        strokeWidth: 2.8,
+        shadowOffsetY: 0
+      });
+
+      const starSz = compact ? 13 : 15;
+      const starGap = starSz * 0.92;
+      const startStarX = cx - (s * starGap) * 0.5;
+      for (let k = 0; k <= s; k++) {
+        UI.drawStarIcon(c, startStarX + k * starGap, starBoxY + (compact ? 35 : 39), starSz * 0.48, true, sprites);
+      }
+
+      const scoreText = formatNum(lvl.stars[s]);
+      UI.drawStarIcon(c, cx - 22, starBoxY + (compact ? 56 : 63), 5.6, true, sprites);
+      UI.drawFitText(
+        c,
+        scoreText,
+        cx - 12,
+        starBoxY + (compact ? 56.5 : 63.5),
+        colW - 22,
+        compact ? 12.2 : 13.4,
+        9.2,
+        900,
+        '#5A3928',
+        'left',
+        'middle'
+      );
     }
 
-    const ptx = px + 38;
-    const ptw = Math.max(36, px + patW - 5 - ptx);
+    // Best score subtle footer inside bottom of star card
+    const bestScore = (saveData.levelBestScores && saveData.levelBestScores[lvl.id]) || 0;
+    const prevStars = (saveData.levelStars && saveData.levelStars[lvl.id]) || 0;
+    if (!compact) {
+      UI.drawFitText(
+        c,
+        bestScore > 0 ? `历史最佳：${formatNum(bestScore)} 分（${prevStars}星）` : `关卡名称：${lvl.name}`,
+        f.ix + f.iw * 0.5,
+        starBoxY + starBoxH - 9,
+        f.iw - 20,
+        9.4,
+        7.8,
+        700,
+        '#8A5A32',
+        'center',
+        'middle'
+      );
+    }
+
+    // Top-right overlapping wood time badge ("限时 01:30")
+    const timeBadgeW = 54;
+    const timeBadgeH = 32;
+    const timeBadgeX = f.ix + f.iw - timeBadgeW + 6;
+    const timeBadgeY = starBoxY - 17;
+    UI.drawKissaCard(c, timeBadgeX, timeBadgeY, timeBadgeW, timeBadgeH, {
+      tone: 'wood',
+      topCol: '#9B653E',
+      botCol: '#73482B',
+      borderColor: '#5A3928',
+      radius: 9,
+      lineWidth: 2.2
+    });
+    UI.drawOutlinedText(c, '限时', timeBadgeX + timeBadgeW * 0.5, timeBadgeY + 10, {
+      size: 9.4,
+      weight: 800,
+      fill: '#FFE27D',
+      stroke: '#4A2B1A',
+      strokeWidth: 2.0,
+      shadowOffsetY: 0
+    });
+    UI.drawOutlinedText(c, formatClockMMSS(lvl.durationSec), timeBadgeX + timeBadgeW * 0.5, timeBadgeY + 23, {
+      size: 11.0,
+      minSize: 8.8,
+      weight: 900,
+      fill: '#FFF8EC',
+      stroke: '#4A2B1A',
+      strokeWidth: 2.2,
+      shadowOffsetY: 0,
+      maxWidth: timeBadgeW - 6
+    });
+
+    // --- Section 2: 本关特色 (Feature Tiles + Mini Board Preview) ---
+    const featY = starBoxY + starBoxH + gap + 6;
+    const featH = compact ? 92 : 112;
+    UI.drawKissaCard(c, f.ix, featY, f.iw, featH, {
+      tone: 'recess',
+      topCol: '#FBF1DD',
+      botCol: '#F3E3C4',
+      borderColor: '#D6BE99',
+      radius: 12,
+      lineWidth: 1.6
+    });
+    drawSectionRibbonTag(c, f.ix + 8, featY - 10, '本关特色');
+
+    const matJoined = Array.isArray(lvl.matrix) ? lvl.matrix.join('') : '';
+    const featureItems = [];
+    if (matJoined.includes('X')) featureItems.push({ icon: 'tile_obstacle', label: '障碍格' });
+    if (matJoined.includes('I')) featureItems.push({ icon: 'tile_ice', label: '冰封格' });
+    if (matJoined.includes('M')) featureItems.push({ icon: 'flavor_matcha', label: '抹茶格' });
+    if (matJoined.includes('B')) featureItems.push({ icon: 'flavor_berry', label: '草莓格' });
+    if (matJoined.includes('G')) featureItems.push({ icon: 'flavor_gold', label: '镀金格' });
+    if ((lvl.vipQuota || 0) > 0) featureItems.push({ icon: 'cust_vip_cat', label: `VIP×${lvl.vipQuota}` });
+    if ((lvl.urgentRate || 0) > 0 && featureItems.length < 3) {
+      featureItems.push({ icon: 'icon_urgent_flame', label: '急单热潮' });
+    }
+    // Always fill up to 3 rich cards (including board miniature when fewer special features exist)
+    const showMiniBoard = featureItems.length < 3;
+    const displayCards = featureItems.slice(0, showMiniBoard ? 2 : 3);
+    if (showMiniBoard) {
+      displayCards.unshift({ kind: 'mini_board', label: '异形烤盘' });
+    }
+    if (displayCards.length < 3) {
+      let maxTier = 2;
+      for (let i = 0; i < lvl.allowedRecipes.length; i++) {
+        const rec = RECIPES[lvl.allowedRecipes[i]];
+        if (rec && Array.isArray(rec.slots)) {
+          for (let k = 0; k < rec.slots.length; k++) {
+            if (rec.slots[k].tier > maxTier) maxTier = rec.slots[k].tier;
+          }
+        }
+      }
+      displayCards.push({ icon: `C${maxTier}`, label: `最高C${maxTier}猫饼` });
+    }
+
+    const tileCount = displayCards.length;
+    const tileGap = 10;
+    const tileSize = Math.min(compact ? 52 : 64, Math.floor((f.iw - 28 - tileGap * (tileCount - 1)) / tileCount));
+    const totalRowW = tileCount * tileSize + (tileCount - 1) * tileGap;
+    const rowStartX = Math.round(f.ix + (f.iw - totalRowW) * 0.5);
+    const tileTopY = featY + (compact ? 16 : 20);
+
+    for (let i = 0; i < tileCount; i++) {
+      const it = displayCards[i];
+      const tx = rowStartX + i * (tileSize + tileGap);
+      UI.drawKissaCard(c, tx, tileTopY, tileSize, tileSize, {
+        tone: 'cream',
+        borderColor: '#5A3928',
+        radius: 12,
+        lineWidth: 2.2
+      });
+
+      if (it.kind === 'mini_board') {
+        BoardRenderer.renderBoardStage(
+          c,
+          { x: tx + 4, y: tileTopY + 4, w: tileSize - 8, h: tileSize - 8 },
+          lvl,
+          null,
+          app.equippedTheme,
+          sprites,
+          null,
+          nowSec,
+          { thumbnail: true, minCellSize: 8, maxCellSize: 16 }
+        );
+      } else {
+        UI.drawUiIcon(c, sprites, it.icon, tx + tileSize * 0.5, tileTopY + tileSize * 0.5, tileSize * 0.72);
+      }
+
+      UI.drawFitText(
+        c,
+        it.label,
+        tx + tileSize * 0.5,
+        tileTopY + tileSize + (compact ? 12 : 14),
+        tileSize + 14,
+        compact ? 10.2 : 11.4,
+        8.2,
+        800,
+        '#5A3928',
+        'center',
+        'middle'
+      );
+    }
+
+    // --- Section 3: 出战配置 (Selectable 3 Patrons + Starting Tools Preview) ---
+    const cfgY = featY + featH + gap + 6;
+    const cfgH = Math.max(96, ctaY - gap - cfgY);
+    UI.drawKissaCard(c, f.ix, cfgY, f.iw, cfgH, {
+      tone: 'recess',
+      topCol: '#FBF1DD',
+      botCol: '#F3E3C4',
+      borderColor: '#D6BE99',
+      radius: 12,
+      lineWidth: 1.6
+    });
+    drawSectionRibbonTag(c, f.ix + 8, cfgY - 10, '出战配置');
+
+    const selectedPatronId = normalizePatronId(saveData.selectedPatron);
+    const unlockedPatrons = Array.isArray(saveData.unlockedPatrons) ? saveData.unlockedPatrons : ['mikan'];
+
+    const toolsRowH = compact ? 24 : 28;
+    const patCardY = cfgY + 14;
+    const patCardH = Math.max(52, cfgH - 14 - toolsRowH - 10);
+    const patGap = 6;
+    const patW = Math.floor((f.iw - 16 - patGap * 2) / 3);
+
+    for (let i = 0; i < PATRONS.length; i++) {
+      const p = PATRONS[i];
+      const px = f.ix + 8 + i * (patW + patGap);
+      const owned = unlockedPatrons.includes(p.id);
+      const active = selectedPatronId === p.id;
+
+      UI.drawKissaCard(c, px, patCardY, patW, patCardH, {
+        tone: active ? 'selected' : owned ? 'cream' : 'soft',
+        selected: active,
+        locked: !owned,
+        radius: 10
+      });
+
+      const avSz = Math.min(54, Math.max(36, Math.round(patCardH * 0.56)));
+      UI.drawUiIcon(c, sprites, p.id, px + patW * 0.5, patCardY + (patCardH - 28) * 0.5 + 3, avSz, owned ? 1 : 0.45);
+      if (!owned) {
+        drawLockIcon(c, px + patW - 12, patCardY + 12, 11, { sprites });
+      }
+
+      UI.drawFitText(
+        c,
+        p.name,
+        px + patW * 0.5,
+        patCardY + patCardH - (compact ? 19 : 21),
+        patW - 8,
+        10.8,
+        8.2,
+        900,
+        owned ? '#5A3928' : '#7D6E62',
+        'center',
+        'middle'
+      );
+      UI.drawFitText(
+        c,
+        !owned ? `${p.cost}星解锁` : active ? p.skillName : '点击出战',
+        px + patW * 0.5,
+        patCardY + patCardH - 8,
+        patW - 8,
+        8.8,
+        7.2,
+        700,
+        active ? '#B85A08' : '#754C36',
+        'center',
+        'middle'
+      );
+
+      const pidCopy = p.id;
+      hits.add(`preview_patron_${pidCopy}`, px, patCardY, patW, patCardH, () =>
+        app.selectPatronInPreview(pidCopy)
+      );
+    }
+
+    // Starting tools strip inside 出战配置 (移位叉×N + 升阶勺×M)
+    const devToolsLv = clamp(
+      Math.floor(Number(saveData.deviceUpgrades && saveData.deviceUpgrades.dev_tools) || 0),
+      0,
+      3
+    );
+    const startTools = (SHOP_DEVICES[3] && SHOP_DEVICES[3].startTools && SHOP_DEVICES[3].startTools[devToolsLv]) || {
+      fork: 1,
+      spoon: 0
+    };
+    const tStripY = patCardY + patCardH + 5;
+    const tHalfW = Math.floor((f.iw - 22) / 2);
+
+    // Fork pill
+    UI.drawKissaCard(c, f.ix + 8, tStripY, tHalfW, toolsRowH, {
+      tone: 'cream',
+      borderColor: '#9E7958',
+      radius: 8,
+      lineWidth: 1.5
+    });
+    UI.drawUiIcon(c, sprites, 'tool_fork', f.ix + 21, tStripY + toolsRowH * 0.5, toolsRowH - 6);
     UI.drawFitText(
       c,
-      p.name,
-      ptx,
-      patCardY + patCardH * 0.35,
-      ptw,
-      10.5,
+      `移位叉 ×${startTools.fork}`,
+      f.ix + 34,
+      tStripY + toolsRowH * 0.5 + 0.5,
+      tHalfW - 30,
+      10.4,
       8.2,
-      900,
-      owned ? '#4A2C2A' : '#7D6A58',
+      800,
+      '#5A3928',
       'left',
       'middle'
     );
+
+    // Spoon pill
+    const spX = f.ix + 8 + tHalfW + 6;
+    UI.drawKissaCard(c, spX, tStripY, tHalfW, toolsRowH, {
+      tone: 'cream',
+      borderColor: '#9E7958',
+      radius: 8,
+      lineWidth: 1.5
+    });
+    UI.drawUiIcon(c, sprites, 'tool_spoon', spX + 13, tStripY + toolsRowH * 0.5, toolsRowH - 6);
     UI.drawFitText(
       c,
-      !owned ? `小铺 ${p.cost}星` : active ? '出战中' : p.shortPassive,
-      ptx,
-      patCardY + patCardH * 0.68,
-      ptw,
-      9.2,
-      7.5,
+      `升阶勺 ×${startTools.spoon}`,
+      spX + 26,
+      tStripY + toolsRowH * 0.5 + 0.5,
+      tHalfW - 30,
+      10.4,
+      8.2,
       800,
-      active ? '#B85A08' : '#7A5438',
+      '#5A3928',
       'left',
       'middle'
     );
 
-    const pidCopy = p.id;
-    hits.add(`preview_patron_${pidCopy}`, px, patCardY, patW, patCardH, () =>
-      app.selectPatronInPreview(pidCopy)
-    );
+    // --- Footer Primary 3D CTA Button ("开始营业") ---
+    const ctaW = Math.min(246, f.iw - 12);
+    const ctaX = Math.round(f.ix + (f.iw - ctaW) * 0.5);
+    UI.drawPillButton(c, ctaX, ctaY, ctaW, ctaH, {
+      variant: 'primary',
+      label: '开始营业',
+      fontSize: 18,
+      radius: ctaH * 0.5,
+      pressed: isPressed(app, 'preview_start_btn')
+    });
+    const startId = lvl.id;
+    hits.add('preview_start_btn', ctaX, ctaY, ctaW, ctaH, () => app.startLevel(startId));
+  } finally {
+    endModalFrame(c);
   }
+}
 
-  // Row 3: Active Patron Passive & Skill Summary Strip
-  const activePatron = PATRONS.find((p) => p.id === selectedPatronId) || PATRONS[0];
-  const sumY = patCardY + patCardH + 6;
-  UI.drawKissaCard(c, f.ix, sumY, f.iw, patSummaryH, { tone: 'amber', radius: 8 });
-  UI.drawFitText(
-    c,
-    `${activePatron.name}：${activePatron.shortPassive} · 招牌技【${activePatron.skillName}】`,
-    f.ix + f.iw * 0.5,
-    sumY + patSummaryH * 0.5 + 0.5,
-    f.iw - 14,
-    9.8,
-    8.0,
-    800,
-    '#5A341E',
-    'center',
-    'middle'
-  );
+/* ======================== 05. 关卡结算弹窗 (LevelResultModal) ======================== */
 
-  // Footer Start CTA
-  UI.drawPillButton(c, f.ix, ctaY, f.iw, ctaH, {
-    style: 'cta',
-    icon: 'serve_bell',
-    sprites,
-    iconSize: 20,
-    text: `开始营业（${lvl.durationSec} 秒）`,
-    fontSize: 13.8,
-    radius: 12
-  });
-  const startId = lvl.id;
-  hits.add('preview_start_btn', f.ix, ctaY, f.iw, ctaH, () => app.startLevel(startId));
+function drawSparkleStar(ctx, cx, cy, size, alpha = 1) {
+  ctx.save();
+  try {
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#FFFDF5';
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - size);
+    ctx.quadraticCurveTo(cx + size * 0.22, cy - size * 0.22, cx + size, cy);
+    ctx.quadraticCurveTo(cx + size * 0.22, cy + size * 0.22, cx, cy + size);
+    ctx.quadraticCurveTo(cx - size * 0.22, cy + size * 0.22, cx - size, cy);
+    ctx.quadraticCurveTo(cx - size * 0.22, cy - size * 0.22, cx, cy - size);
+    ctx.closePath();
+    ctx.fill();
+  } finally {
+    ctx.restore();
+  }
 }
 
 function renderLevelResultModal(ctx, metrics, app, hits) {
   const c = getSafeCtx(ctx);
-  const f = renderModalFrame(c, metrics, app, 444, 428, false);
   const sprites = app.sprites || {};
   const saveData = app.saveData || {};
   const res = app.lastResult || {
@@ -417,224 +821,352 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
     isNewBest: false,
     elapsedRevealSec: 1.0
   };
+  const lvl = getLevelById(res.levelId || '1-1') || getLevelById('1-1');
+  const chapName = getChapterName(lvl.chapter);
 
-  drawModalHeader(
-    c,
-    f,
-    sprites,
-    res.cleared ? 'icon_trophy' : 'serve_bell',
-    `打烊结算 · 第 ${res.levelId} 关`,
-    '',
-    38
-  );
-  drawCloseButton(c, f, hits, app, () => app.closeModal());
-
-  // 1. Star Medallion Stage
-  const stageY = f.iy + 34;
-  const stageH = 74;
-  UI.drawKissaCard(c, f.ix, stageY, f.iw, stageH, {
-    tone: res.cleared ? 'selected' : 'soft',
-    radius: 12
+  const f = beginModalFrame(c, metrics, app, {
+    maxW: 420,
+    desiredH: 520,
+    extraTopHeadroom: 32,
+    dismissOnOutside: false,
+    plaque: false,
+    withRivets: false,
+    sheetTopInset: 36,
+    sheetBottomPad: 86
   });
 
-  const revealT = Number.isFinite(res.elapsedRevealSec) ? res.elapsedRevealSec : 1.0;
-  for (let s = 1; s <= 3; s++) {
-    const earned = s <= (res.starsEarned || 0);
-    const localT = clamp((revealT - (s - 1) * 0.16) / 0.22, 0, 1);
-    const popScale = earned ? (localT < 1 ? 0.35 + 0.95 * Math.sin(localT * Math.PI * 0.65) : 1.0) : 0.92;
-    UI.drawStarIcon(
-      c,
-      f.ix + f.iw * 0.5 + (s - 2) * 52,
-      stageY + 26,
-      18 * popScale,
-      earned && localT > 0.05
-    );
-  }
-
-  const headline =
-    res.starsEarned >= 3
-      ? '三星完美出餐 · 满堂喝彩！'
-      : res.cleared
-      ? '营业达标 · 顺利过关！'
-      : '未达 1 星目标 · 再接再厉';
-  UI.drawFitText(
-    c,
-    headline,
-    f.ix + f.iw * 0.5,
-    stageY + 58,
-    f.iw - 20,
-    12.2,
-    9.5,
-    900,
-    res.cleared ? '#7A3E10' : '#6E4E3A',
-    'center',
-    'middle'
-  );
-
-  // 2. Pure Serve Score & Run Stats Card
-  const scoreY = stageY + stageH + 8;
-  const scoreH = 78;
-  UI.drawKissaCard(c, f.ix, scoreY, f.iw, scoreH, { tone: 'cream', radius: 11 });
-
-  UI.drawFitText(
-    c,
-    `纯上菜总分：${res.score || 0}`,
-    f.ix + 14,
-    scoreY + 25,
-    f.iw - (res.isNewBest ? 88 : 28),
-    15.0,
-    11.5,
-    900,
-    '#4A2C2A',
-    'left',
-    'middle'
-  );
-  if (res.isNewBest && (res.score || 0) > 0) {
-    UI.drawTagBadge(c, f.ix + f.iw - 68, scoreY + 15, 56, 20, '新纪录', 'berry', 9.2);
-  }
-
-  UI.drawFitText(
-    c,
-    `服务顾客 ${res.ordersServed || 0} 位 · 最高连击 ${res.maxCombo || 0} 连 · VIP ${res.vipServed || 0} 位`,
-    f.ix + 14,
-    scoreY + 55,
-    f.iw - 28,
-    10.6,
-    8.5,
-    700,
-    '#6E463B',
-    'left',
-    'middle'
-  );
-
-  // 3. Stardust Settlement Breakdown Card
-  const dustY = scoreY + scoreH + 8;
-  const btnH = 42;
-  const btnY = f.iy + f.ih - btnH;
-  const dustH = Math.max(72, btnY - 10 - dustY);
-
-  UI.drawKissaCard(c, f.ix, dustY, f.iw, dustH, { tone: 'amber', radius: 11 });
-  UI.drawUiIcon(c, sprites, 'icon_stardust', f.ix + 20, dustY + 22, 20);
-  UI.drawFitText(
-    c,
-    `星尘入账：+${res.totalDustAward || 0}`,
-    f.ix + 34,
-    dustY + 22,
-    f.iw - 130,
-    13.2,
-    10.5,
-    900,
-    '#5A341E',
-    'left',
-    'middle'
-  );
-  UI.drawFitText(
-    c,
-    `当前持有 ${saveData.bankStardust || 0}`,
-    f.ix + f.iw - 12,
-    dustY + 22,
-    108,
-    10.0,
-    8.2,
-    800,
-    '#7A4818',
-    'right',
-    'middle'
-  );
-
-  const parts = [];
-  if (res.cleared) {
-    if (res.isReplayDecay || (res.newStarsDelta || 0) === 0) {
-      parts.push('重温营业奖励（首星突破奖已领）');
+  try {
+    // 1. Arching 3 Large Stars above top border with staggered pop animation (Design 05)
+    const revealT = Number.isFinite(res.elapsedRevealSec) ? res.elapsedRevealSec : 1.0;
+    const starConfigs = [
+      { idx: 1, dx: -56, dy: -6, r: 24, rot: -0.18 },
+      { idx: 2, dx: 0, dy: -18, r: 29, rot: 0 },
+      { idx: 3, dx: 56, dy: -6, r: 24, rot: 0.18 }
+    ];
+    for (let i = 0; i < starConfigs.length; i++) {
+      const sc = starConfigs[i];
+      const earned = sc.idx <= (res.starsEarned || 0);
+      const localT = clamp((revealT - (sc.idx - 1) * 0.16) / 0.24, 0, 1);
+      const pop = earned ? (localT < 1 ? 0.35 + 0.65 * easeOutBack(localT) : 1) : 0.9;
+      const sx = f.cardX + f.cardW * 0.5 + sc.dx;
+      const sy = f.cardY + sc.dy;
+      c.save();
+      try {
+        c.translate(sx, sy);
+        c.rotate(sc.rot);
+        UI.drawStarIcon(c, 0, 0, sc.r * pop, earned && localT > 0.05, sprites);
+      } finally {
+        c.restore();
+      }
+      if (earned && localT > 0.5) {
+        drawSparkleStar(c, sx + sc.r * 0.72, sy - sc.r * 0.55, 5.5, 0.9);
+      }
     }
-    if (res.firstStarDustAward > 0) parts.push(`首星突破 +${res.firstStarDustAward}`);
-    if (res.clearDustAward > 0) parts.push(`过关基础 +${res.clearDustAward}`);
-    if (res.vipDustAward > 0) parts.push(`VIP红包 +${res.vipDustAward}`);
-    if (res.threeStarBonusDust > 0) parts.push(`三星奖 +${res.threeStarBonusDust}`);
-  } else {
-    const streak =
-      Number(res.failStreak) ||
-      (saveData.levelFailStreaks && Number(saveData.levelFailStreaks[res.levelId])) ||
-      0;
-    const hasSoftPity = Boolean(res.softPityNextRun || streak >= 2);
-    if ((res.consolationDust || 0) > 0) {
-      parts.push(`营业安慰奖 +${res.consolationDust}`);
-    }
-    if ((res.vipDustAward || 0) > 0) {
-      parts.push(`VIP慰问 +${res.vipDustAward}`);
-    }
-    if (hasSoftPity) {
-      parts.push('下局小蜜柑将为你预充 40% 技能能量！');
-    } else if ((res.consolationDust || 0) > 0) {
-      parts.push('前往小铺升级猫饼菜价可大幅提分');
+
+    // 2. Festive Ribbon Banner across top ("营业大成功！" / "顺利过关！" / "继续加油！")
+    const ribW = Math.min(f.cardW + 18, f.width - 14);
+    const ribH = 62;
+    const ribX = Math.round(f.cardX + (f.cardW - ribW) * 0.5);
+    const ribY = f.cardY + 1;
+    const ribImg = getSprite(sprites, 'result_ribbon');
+    if (ribImg) {
+      UI.drawContainImage(c, ribImg, ribX + ribW * 0.5, ribY + ribH * 0.5, ribW, ribH);
     } else {
-      parts.push('完成至少 1 单顾客上菜即可获得营业星尘');
+      UI.drawKissaCard(c, ribX + 16, ribY + 8, ribW - 32, 42, {
+        tone: 'wood',
+        topCol: '#E66844',
+        botCol: '#C5462B',
+        borderColor: '#5A3928',
+        radius: 12
+      });
     }
+
+    const ribbonTitle =
+      (res.starsEarned || 0) >= 3
+        ? '营业大成功！'
+        : res.cleared
+        ? '顺利过关！'
+        : '继续加油！';
+    UI.drawOutlinedText(c, ribbonTitle, f.cardX + f.cardW * 0.5, ribY + ribH * 0.45, {
+      size: 23,
+      minSize: 16,
+      weight: 900,
+      fill: '#FFF4C8',
+      stroke: '#5A3928',
+      strokeWidth: 4.5,
+      shadowOffsetY: 1.8,
+      maxWidth: ribW - 76
+    });
+
+    // Subtle top-right close button (stays strictly below capsule & never overlaps ribbon center)
+    drawCloseButton(c, f, hits, app, () => app.closeModal());
+
+    // 3. Level Subtitle ("第 1-5 关 · 街角星夜店")
+    const subY = f.sheetY + 34;
+    UI.drawFitText(
+      c,
+      `第 ${lvl.id} 关 · ${chapName}`,
+      f.ix + f.iw * 0.5,
+      subY,
+      f.iw - 12,
+      14.5,
+      11.0,
+      900,
+      '#5A3928',
+      'center',
+      'middle'
+    );
+
+    // 4. Score Hero Box + Cheering Patron Portrait (Design 05)
+    const heroY = subY + 16;
+    const heroH = Math.min(92, Math.max(74, Math.floor(f.sheetH * 0.28)));
+    UI.drawKissaCard(c, f.ix, heroY, f.iw, heroH, {
+      tone: 'recess',
+      topCol: '#F7E7C8',
+      botCol: '#EED6AE',
+      borderColor: '#C5A982',
+      radius: 12,
+      lineWidth: 1.8
+    });
+
+    // Top-left overlapping badge ("新纪录" or status)
+    if (res.isNewBest && (res.score || 0) > 0) {
+      UI.drawTagBadge(c, f.ix + 8, heroY - 9, 64, 21, '新纪录', 'urgent', 10.5);
+    } else if (res.cleared) {
+      UI.drawTagBadge(c, f.ix + 8, heroY - 9, 68, 21, '营业达标', 'green', 10.0);
+    } else {
+      UI.drawTagBadge(c, f.ix + 8, heroY - 9, 76, 21, '未达1星线', 'wood', 9.8);
+    }
+
+    // Animated counting score
+    const countT = easeOutCubic(clamp(revealT / 0.72, 0, 1));
+    const shownScore = Math.round((res.score || 0) * countT);
+    const patronSz = Math.min(heroH + 6, 86);
+    const scoreAreaW = Math.max(100, f.iw - patronSz - 16);
+    UI.drawOutlinedText(c, formatNum(shownScore), f.ix + 14 + scoreAreaW * 0.45, heroY + heroH * 0.56, {
+      size: 36,
+      minSize: 22,
+      weight: 900,
+      fill: '#C48120',
+      stroke: '#5A3928',
+      strokeWidth: 2.2,
+      shadowOffsetY: 1.0,
+      maxWidth: scoreAreaW - 8
+    });
+
+    const activePatronId = normalizePatronId(saveData.selectedPatron);
+    UI.drawUiIcon(
+      c,
+      sprites,
+      activePatronId,
+      f.ix + f.iw - patronSz * 0.52 - 4,
+      heroY + heroH * 0.52,
+      patronSz
+    );
+
+    // 5. Inner Detailed Stats Sheet (Double warm-brown frame, 3 rows, Design 05)
+    const statsY = heroY + heroH + 10;
+    const statsH = Math.max(106, f.sheetY + f.sheetH - 12 - statsY);
+    UI.drawKissaCard(c, f.ix, statsY, f.iw, statsH, {
+      tone: 'cream',
+      borderColor: '#5A3928',
+      radius: 13,
+      lineWidth: 2.6
+    });
+
+    const maxCombo = Math.max(0, Math.floor(Number(res.maxCombo) || 0));
+    const comboIdx = Math.min(Math.max(0, maxCombo - 1), SERVE_COMBO_MULTS.length - 1);
+    const comboMult = maxCombo >= 2 ? SERVE_COMBO_MULTS[comboIdx] : 1.0;
+
+    // Breakdown sub-note for stardust / soft-pity
+    const parts = [];
+    if (res.cleared) {
+      if (res.firstStarDustAward > 0) parts.push(`首星+${res.firstStarDustAward}`);
+      if (res.clearDustAward > 0) parts.push(`过关+${res.clearDustAward}`);
+      if (res.vipDustAward > 0) parts.push(`VIP+${res.vipDustAward}`);
+      if (res.threeStarBonusDust > 0) parts.push(`三星+${res.threeStarBonusDust}`);
+      if (parts.length === 0) parts.push(`服务 ${res.ordersServed || 0} 位顾客 · 当前持有 ${formatNum(saveData.bankStardust || 0)}`);
+    } else {
+      const streak =
+        Number(res.failStreak) ||
+        (saveData.levelFailStreaks && Number(saveData.levelFailStreaks[res.levelId])) ||
+        0;
+      if ((res.consolationDust || 0) > 0) parts.push(`营业安慰+${res.consolationDust}`);
+      if (Boolean(res.softPityNextRun || streak >= 2)) {
+        parts.push('下局开场预充 40% 技能能量');
+      } else {
+        parts.push('升级猫饼菜价可大幅提分');
+      }
+    }
+
+    const hasSubNote = statsH >= 122;
+    const rowBlockH = hasSubNote ? statsH - 22 : statsH - 8;
+    const rowH = rowBlockH / 3;
+    const statRows = [
+      { label: '上菜总得分', val: formatNum(res.score || 0), type: 'score' },
+      {
+        label: '最高上菜连击',
+        val: maxCombo > 0 ? `${maxCombo}连` : '0连',
+        extra: maxCombo >= 2 ? ` ×${comboMult.toFixed(2)}` : '',
+        type: 'combo'
+      },
+      { label: '星尘币奖励', val: `+${formatNum(res.totalDustAward || 0)}`, type: 'dust' }
+    ];
+
+    for (let i = 0; i < statRows.length; i++) {
+      const row = statRows[i];
+      const ry = statsY + 4 + i * rowH;
+      const rCy = ry + rowH * 0.5;
+      if (i > 0) {
+        c.save();
+        try {
+          c.strokeStyle = 'rgba(138, 86, 52, 0.25)';
+          c.lineWidth = 1.2;
+          c.beginPath();
+          c.moveTo(f.ix + 12, ry);
+          c.lineTo(f.ix + f.iw - 12, ry);
+          c.stroke();
+        } finally {
+          c.restore();
+        }
+      }
+
+      UI.drawFitText(c, row.label, f.ix + 14, rCy, f.iw * 0.48, 13.0, 10.0, 800, '#5A3928', 'left', 'middle');
+
+      if (row.type === 'combo' && row.extra) {
+        UI.drawFitText(
+          c,
+          row.extra,
+          f.ix + f.iw - 14,
+          rCy,
+          64,
+          13.0,
+          10.0,
+          900,
+          '#5A3928',
+          'right',
+          'middle'
+        );
+        UI.drawOutlinedText(c, row.val, f.ix + f.iw - 66, rCy, {
+          size: 13.5,
+          minSize: 10,
+          weight: 900,
+          fill: '#FFB838',
+          stroke: '#5A3928',
+          strokeWidth: 2.6,
+          shadowOffsetY: 0,
+          align: 'right'
+        });
+      } else if (row.type === 'dust') {
+        UI.drawFitText(
+          c,
+          row.val,
+          f.ix + f.iw - 14,
+          rCy,
+          76,
+          14.0,
+          10.5,
+          900,
+          '#5A3928',
+          'right',
+          'middle'
+        );
+        const valApproxW = Math.min(62, row.val.length * 9.2 + 8);
+        UI.drawStarIcon(c, f.ix + f.iw - 14 - valApproxW - 8, rCy, 7.2, true, sprites);
+      } else {
+        UI.drawFitText(
+          c,
+          row.val,
+          f.ix + f.iw - 14,
+          rCy,
+          110,
+          14.0,
+          10.5,
+          900,
+          '#5A3928',
+          'right',
+          'middle'
+        );
+      }
+    }
+
+    if (hasSubNote) {
+      UI.drawFitText(
+        c,
+        parts.join(' · '),
+        f.ix + f.iw * 0.5,
+        statsY + statsH - 11,
+        f.iw - 20,
+        9.4,
+        7.6,
+        700,
+        '#8A5A32',
+        'center',
+        'middle'
+      );
+    }
+
+    // 6. Bottom Action Area inside the wood base (zero overlap, preserves all 3 required hit IDs!)
+    const nextId = getNextLevelId(res.levelId);
+    const nextUnlocked = Boolean(res.cleared && nextId && isLevelUnlocked(nextId, saveData.levelStars).unlocked);
+    const barTop = f.sheetY + f.sheetH + 8;
+    const primaryH = 38;
+    const btnGap = 10;
+    const halfW = Math.floor((f.sheetW - btnGap) / 2);
+
+    // Left: 星夜小铺 (result_shop_btn)
+    UI.drawPillButton(c, f.sheetX, barTop, halfW, primaryH, {
+      variant: 'wood',
+      icon: 'icon_shop',
+      sprites,
+      iconSize: 17,
+      label: '星夜小铺',
+      fontSize: 13.2,
+      radius: primaryH * 0.5,
+      pressed: isPressed(app, 'result_shop_btn')
+    });
+    if (typeof app.hasAffordableShopItem === 'function' && app.hasAffordableShopItem()) {
+      drawRedDot(c, f.sheetX + halfW - 10, barTop + 8, 4.6);
+    }
+    hits.add('result_shop_btn', f.sheetX, barTop, halfW, primaryH, () => app.openShopFromResult());
+
+    // Right: 下一关 X-Y / 返回大厅 (result_next_btn)
+    const nextX = f.sheetX + halfW + btnGap;
+    UI.drawPillButton(c, nextX, barTop, halfW, primaryH, {
+      variant: nextUnlocked ? 'primary' : 'wood',
+      label: res.cleared && nextId ? `下一关 ${nextId}` : '返回大厅',
+      fontSize: 13.6,
+      radius: primaryH * 0.5,
+      pressed: isPressed(app, 'result_next_btn')
+    });
+    hits.add('result_next_btn', nextX, barTop, halfW, primaryH, () => app.onResultNext());
+
+    // Bottom centered compact pill: 重玩本关 / 再试一次 (result_retry_btn) — stays safely inside modal wood frame!
+    const retryW = Math.min(138, f.sheetW - 24);
+    const retryH = 26;
+    const retryX = Math.round(f.cardX + (f.cardW - retryW) * 0.5);
+    const retryY = barTop + primaryH + 6;
+    UI.drawPillButton(c, retryX, retryY, retryW, retryH, {
+      variant: res.cleared ? 'dark' : 'primary',
+      icon: 'icon_restart',
+      sprites,
+      iconSize: 13,
+      label: res.cleared ? '重玩本关' : '再试一次',
+      fontSize: 11.4,
+      radius: 13,
+      pressed: isPressed(app, 'result_retry_btn')
+    });
+    hits.add('result_retry_btn', retryX, retryY, retryW, retryH, () => app.startLevel(res.levelId));
+  } finally {
+    endModalFrame(c);
   }
-
-  UI.drawWrappedText(
-    c,
-    parts.join(' · '),
-    f.ix + 14,
-    dustY + 44,
-    f.iw - 28,
-    15,
-    UI.fontStr(9.8, 700),
-    '#6E463B',
-    'left',
-    2
-  );
-
-  // 4. Bottom 3-Button Row
-  const gap = 8;
-  const bw = Math.floor((f.iw - gap * 2) / 3);
-  const nextId = getNextLevelId(res.levelId);
-  const nextUnlocked = Boolean(res.cleared && nextId && isLevelUnlocked(nextId, saveData.levelStars).unlocked);
-
-  UI.drawPillButton(c, f.ix, btnY, bw, btnH, {
-    style: res.cleared ? 'wood' : 'cta',
-    icon: 'icon_restart',
-    sprites,
-    iconSize: 17,
-    text: res.cleared ? '重玩' : '再试一次',
-    fontSize: 11.8,
-    radius: 11
-  });
-  hits.add('result_retry_btn', f.ix, btnY, bw, btnH, () => app.startLevel(res.levelId));
-
-  const shopBtnX = f.ix + bw + gap;
-  UI.drawPillButton(c, shopBtnX, btnY, bw, btnH, {
-    style: 'walnut',
-    icon: 'icon_shop',
-    sprites,
-    iconSize: 17,
-    text: '小铺',
-    fontSize: 11.8,
-    radius: 11
-  });
-  if (typeof app.hasAffordableShopItem === 'function' && app.hasAffordableShopItem()) {
-    drawRedDot(c, shopBtnX + bw - 8, btnY + 8, 4.8);
-  }
-  hits.add('result_shop_btn', shopBtnX, btnY, bw, btnH, () => app.openShopFromResult());
-
-  const nextBtnX = shopBtnX + bw + gap;
-  UI.drawPillButton(c, nextBtnX, btnY, bw, btnH, {
-    style: nextUnlocked ? 'cta' : 'wood',
-    icon: nextUnlocked ? 'icon_arrow' : 'icon_home',
-    sprites,
-    iconSize: 17,
-    text: res.cleared && nextId ? '下一关' : '返回大厅',
-    fontSize: 11.8,
-    radius: 11
-  });
-  hits.add('result_next_btn', nextBtnX, btnY, bw, btnH, () => app.onResultNext());
 }
 
-function setupAdaptiveGridScroll(app, ix, iw, bodyY, bodyH, rows, gy, minRowH) {
-  const safeRows = Math.max(1, rows);
-  const rawCh = Math.floor((bodyH - gy * (safeRows - 1)) / safeRows);
-  const ch = Math.max(minRowH, rawCh);
-  const contentH = safeRows * ch + Math.max(0, safeRows - 1) * gy;
+/* ======================== Scroll Helpers ======================== */
+
+function setupListScroll(app, ix, iw, bodyY, bodyH, itemCount, itemH, gap) {
+  const count = Math.max(0, itemCount);
+  const contentH = count > 0 ? count * itemH + (count - 1) * gap : 0;
   const maxScroll = Math.max(0, contentH - bodyH);
   const scrollY = maxScroll > 0 ? clamp(Number(app.modalScrollY) || 0, 0, maxScroll) : 0;
   if (maxScroll > 0) {
@@ -644,1286 +1176,1667 @@ function setupAdaptiveGridScroll(app, ix, iw, bodyY, bodyH, rows, gy, minRowH) {
     app.modalScrollRect = null;
     app.modalMaxScroll = 0;
   }
-  return { ch, scrollY, maxScroll };
+  return { scrollY, maxScroll, contentH };
 }
 
 function addScrollClippedHit(hits, id, x, y, w, h, scrollY, bodyY, bodyH, onClick) {
-  if (scrollY === 0 && y >= bodyY - 1 && y + h <= bodyY + bodyH + 1) {
-    hits.add(id, x, y, w, h, onClick);
-    return;
-  }
   const screenY = y - scrollY;
   const visTop = Math.max(bodyY, screenY);
   const visBot = Math.min(bodyY + bodyH, screenY + h);
-  if (visBot - visTop >= 12) {
+  if (visBot - visTop >= 14) {
     hits.add(id, x, visTop, w, visBot - visTop, onClick);
   }
 }
 
+/* ======================== 06 & 09. 星夜小铺 / 烤盘主题弹窗 (ShopModal) ======================== */
+
 function renderShopModal(ctx, metrics, app, hits) {
   const c = getSafeCtx(ctx);
-  const f = renderModalFrame(c, metrics, app, 660, 568, true);
   const sprites = app.sprites || {};
   const saveData = app.saveData || {};
   const bank = Math.max(0, Math.floor(Number(saveData.bankStardust) || 0));
-
-  drawModalHeader(c, f, sprites, 'icon_shop', '吃茶小铺', '', 120);
-  UI.drawCurrencyChip(
-    c,
-    f.ix + f.iw - 114,
-    f.iy + 1,
-    78,
-    26,
-    sprites,
-    'icon_stardust',
-    String(bank),
-    { style: 'wood', fontSize: 11.2 }
-  );
-  drawCloseButton(c, f, hits, app);
-
-  // 4 Shop Category Tabs
-  const tabs = [
-    { id: 'catcakes', label: '猫饼研发' },
-    { id: 'devices', label: '后厨设备' },
-    { id: 'patrons', label: '搭档' },
-    { id: 'themes', label: '皮肤' }
-  ];
   const activeTab = app.activeShopTab || 'catcakes';
-  const tabY = f.iy + 34;
-  const tabH = 28;
-  const tabGap = 5;
-  const tabW = Math.floor((f.iw - tabGap * 3) / 4);
 
-  for (let i = 0; i < tabs.length; i++) {
-    const t = tabs[i];
-    const tx = f.ix + i * (tabW + tabGap);
-    const isAct = activeTab === t.id;
-    UI.drawPillButton(c, tx, tabY, tabW, tabH, {
-      style: isAct ? 'active' : 'wood',
-      text: t.label,
-      fontSize: 10.8,
-      radius: 9
+  const f = beginModalFrame(c, metrics, app, {
+    maxW: 452,
+    desiredH: 576,
+    dismissOnOutside: true,
+    awning: true,
+    title: activeTab === 'themes' ? '烤盘主题' : '星夜小铺',
+    sheetTopInset: 66,
+    sheetBottomPad: 12
+  });
+
+  try {
+    drawCloseButton(c, f, hits, app);
+
+    // 4 Folder Tabs seamlessly docked to top edge of cream parchment (Design 06)
+    const tabY = f.sheetY - 27;
+    const tabH = 29;
+    const tabs = [
+      { id: 'catcakes', hitId: 'shop_tab_catcakes', label: '猫饼升级', redDot: app.hasAffordableShopTab && app.hasAffordableShopTab('catcakes') },
+      { id: 'devices', hitId: 'shop_tab_devices', label: '店面设备', redDot: app.hasAffordableShopTab && app.hasAffordableShopTab('devices') },
+      { id: 'patrons', hitId: 'shop_tab_patrons', label: '看板店员', redDot: app.hasAffordableShopTab && app.hasAffordableShopTab('patrons') },
+      { id: 'themes', hitId: 'shop_tab_themes', label: '棋盘主题', redDot: app.hasAffordableShopTab && app.hasAffordableShopTab('themes') }
+    ];
+    drawFolderTabs(c, f.sheetX + 6, tabY, f.sheetW - 12, tabH, tabs, activeTab, hits, app, (tabId) =>
+      app.setShopTab(tabId)
+    );
+
+    // Compact balance strip at top of parchment so player sees stardust live while buying
+    const balBarY = f.sheetY + 8;
+    const balBarH = 24;
+    const chipW = 92;
+    UI.drawFitText(
+      c,
+      activeTab === 'catcakes'
+        ? '永久提升各阶猫饼上菜基础分'
+        : activeTab === 'devices'
+        ? '后厨设备升级全关卡永久生效'
+        : activeTab === 'patrons'
+        ? '解锁看板店员获得专属技能'
+        : '随心切换局内烘焙烤盘外观',
+      f.ix,
+      balBarY + balBarH * 0.5,
+      f.iw - chipW - 8,
+      10.4,
+      8.2,
+      700,
+      '#8A5A32',
+      'left',
+      'middle'
+    );
+    UI.drawCurrencyChip(c, f.ix + f.iw - chipW, balBarY, chipW, balBarH, sprites, 'icon_star_coin', formatNum(bank), {
+      fontSize: 11.4
     });
-    if (typeof app.hasAffordableShopTab === 'function' && app.hasAffordableShopTab(t.id)) {
-      drawRedDot(c, tx + tabW - 7, tabY + 7, 4.4);
+
+    const footerH = 20;
+    const footerY = f.sheetY + f.sheetH - footerH - 4;
+    const bodyY = balBarY + balBarH + 6;
+    const bodyH = Math.max(180, footerY - 6 - bodyY);
+    app.modalScrollRect = null;
+    app.modalMaxScroll = 0;
+
+    // Tab switch fade + gentle upward glide
+    const anim = f.anim;
+
+    if (activeTab === 'catcakes') {
+      const cardGap = 8;
+      // Fit 4 full cards comfortably on 390x844 so C1..C4 are always visible at scroll=0
+      const cardH = clamp(Math.floor((bodyH - cardGap * 3) / 4.25), 72, 86);
+      const { scrollY, maxScroll, contentH } = setupListScroll(
+        app,
+        f.ix,
+        f.iw,
+        bodyY,
+        bodyH,
+        CATCAKES.length,
+        cardH,
+        cardGap
+      );
+      const listW = f.iw - (maxScroll > 0 ? 10 : 0);
+
+      c.save();
+      try {
+        c.beginPath();
+        c.rect(f.ix - 2, bodyY, f.iw + 4, bodyH);
+        c.clip();
+        c.globalAlpha *= anim.tabAlpha;
+        c.translate(0, -scrollY + anim.tabOffsetY);
+
+        for (let i = 0; i < CATCAKES.length; i++) {
+          const cake = CATCAKES[i];
+          const cy = bodyY + i * (cardH + cardGap);
+          const isUnlocked =
+            typeof app.isCatcakeUnlocked === 'function'
+              ? app.isCatcakeUnlocked(cake)
+              : isLevelUnlocked(cake.unlockLevel, saveData.levelStars).unlocked;
+          const rawLv = saveData.catcakeLevels && saveData.catcakeLevels[cake.tier];
+          const lv = clamp(Math.floor(Number(rawLv) || 0), 0, 4);
+          const isMax = lv >= 4;
+          const cost = isMax ? 0 : cake.upgradeCosts[lv];
+          const canBuy = isUnlocked && !isMax && bank >= cost;
+          const curP = getCatcakePrice(cake.tier, lv);
+
+          UI.drawKissaCard(c, f.ix, cy, listW, cardH, {
+            tone: isMax ? 'equipped' : 'cream',
+            locked: !isUnlocked,
+            radius: 13
+          });
+
+          // Left thumbnail slot
+          const slotS = Math.min(58, cardH - 16);
+          const slotX = f.ix + 8;
+          const slotY = Math.round(cy + (cardH - slotS) * 0.5);
+          UI.drawKissaCard(c, slotX, slotY, slotS, slotS, {
+            tone: 'recess',
+            locked: !isUnlocked,
+            borderColor: isUnlocked ? '#D5BD98' : '#9B9084',
+            radius: 10,
+            lineWidth: 1.5
+          });
+          UI.drawCatcakeSprite(c, sprites, cake.tier, slotX + slotS * 0.5, slotY + slotS * 0.5, slotS * 0.78, {
+            happy: isUnlocked && isMax,
+            silhouette: false,
+            alpha: isUnlocked ? 1 : 0.62
+          });
+          if (!isUnlocked) {
+            drawLockIcon(c, slotX + slotS - 9, slotY + slotS - 9, 13, { sprites });
+          }
+
+          // Right action button (Design 06)
+          const btnW = Math.min(82, Math.max(70, Math.round(listW * 0.25)));
+          const btnH = 34;
+          const btnX = f.ix + listW - 8 - btnW;
+          const btnY = Math.round(cy + (cardH - btnH) * 0.5);
+          const hitId = `shop_buy_catcake_${cake.tier}`;
+
+          UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
+            variant: !isUnlocked ? 'disabled' : isMax ? 'equipped' : canBuy ? 'primary' : 'wood',
+            disabled: !isUnlocked || (!isMax && !canBuy),
+            icon: !isUnlocked ? 'icon_lock' : isMax ? '' : 'icon_star_coin',
+            sprites,
+            iconSize: 15,
+            label: !isUnlocked ? '未解锁' : isMax ? '已满级' : String(cost),
+            fontSize: !isUnlocked || isMax ? 11.4 : 13.6,
+            radius: 12,
+            pressed: isPressed(app, hitId)
+          });
+
+          const tierCopy = cake.tier;
+          addScrollClippedHit(hits, hitId, btnX, btnY, btnW, btnH, scrollY, bodyY, bodyH, () =>
+            app.buyCatcakeUpgrade(tierCopy)
+          );
+
+          // Middle info column: Name + Lv badge + 4-segment bar + boost text
+          const tx = slotX + slotS + 9;
+          const tw = Math.max(72, btnX - 8 - tx);
+
+          UI.drawFitText(
+            c,
+            cake.name,
+            tx,
+            cy + Math.round(cardH * 0.25),
+            tw,
+            13.2,
+            10.0,
+            900,
+            isUnlocked ? '#5A3928' : '#6A5E53',
+            'left',
+            'middle'
+          );
+
+          const lvY = cy + Math.round(cardH * 0.53);
+          const lvPillW = 46;
+          UI.drawTagBadge(
+            c,
+            tx,
+            lvY - 8.5,
+            lvPillW,
+            17,
+            isUnlocked ? `Lv.${lv}/4` : '未解锁',
+            isUnlocked ? 'wood' : 'soft',
+            8.8
+          );
+          const barX = tx + lvPillW + 6;
+          const barW = Math.max(46, Math.min(82, tw - lvPillW - 6));
+          UI.drawSegmentedBar(c, barX, lvY - 6.5, barW, 13, isUnlocked ? lv : 0, 4);
+
+          const subCopy = !isUnlocked
+            ? `到达第 ${cake.unlockLevel} 关解锁研发`
+            : isMax
+            ? `已满级 · 菜价 ${curP} 分 (+60%)`
+            : `得分 +${lv * 15}% → +${(lv + 1) * 15}%（${curP}分）`;
+          UI.drawFitText(
+            c,
+            subCopy,
+            tx,
+            cy + Math.round(cardH * 0.81),
+            tw,
+            9.8,
+            7.8,
+            700,
+            isUnlocked ? '#754C36' : '#7A6F63',
+            'left',
+            'middle'
+          );
+        }
+      } finally {
+        c.restore();
+      }
+
+      if (maxScroll > 0) {
+        UI.drawScrollBar(
+          c,
+          f.ix + f.iw - 6,
+          bodyY + 2,
+          5,
+          bodyH - 4,
+          scrollY / maxScroll,
+          bodyH / Math.max(bodyH, contentH)
+        );
+      }
+
+      UI.drawFitText(
+        c,
+        '升级猫饼可永久提升所有关卡的上菜基础分',
+        f.ix + f.iw * 0.5,
+        footerY + footerH * 0.5,
+        f.iw - 8,
+        10.2,
+        8.2,
+        700,
+        '#754C36',
+        'center',
+        'middle'
+      );
+      return;
     }
-    const tabIdCopy = t.id;
-    hits.add(`shop_tab_${tabIdCopy}`, tx, tabY, tabW, tabH, () => app.setShopTab(tabIdCopy));
-  }
 
-  const bodyY = tabY + tabH + 6;
-  const bodyH = Math.max(240, f.iy + f.ih - bodyY);
-  app.modalScrollRect = null;
-  app.modalMaxScroll = 0;
+    if (activeTab === 'devices') {
+      const cardGap = 8;
+      const cardH = clamp(Math.floor((bodyH - cardGap * (SHOP_DEVICES.length - 1)) / SHOP_DEVICES.length), 74, 92);
+      const { scrollY, maxScroll, contentH } = setupListScroll(
+        app,
+        f.ix,
+        f.iw,
+        bodyY,
+        bodyH,
+        SHOP_DEVICES.length,
+        cardH,
+        cardGap
+      );
+      const listW = f.iw - (maxScroll > 0 ? 10 : 0);
 
-  if (activeTab === 'catcakes') {
-    const cols = 2;
-    const rows = Math.ceil((CATCAKES.length + 1) / cols);
-    const gx = 6;
-    const gy = 6;
-    const { ch, scrollY, maxScroll } = setupAdaptiveGridScroll(
+      c.save();
+      try {
+        c.beginPath();
+        c.rect(f.ix - 2, bodyY, f.iw + 4, bodyH);
+        c.clip();
+        c.globalAlpha *= anim.tabAlpha;
+        c.translate(0, -scrollY + anim.tabOffsetY);
+
+        for (let i = 0; i < SHOP_DEVICES.length; i++) {
+          const dev = SHOP_DEVICES[i];
+          const cy = bodyY + i * (cardH + cardGap);
+          const rawLv = saveData.deviceUpgrades && saveData.deviceUpgrades[dev.id];
+          const lv = clamp(Math.floor(Number(rawLv) || 0), 0, dev.maxLv);
+          const isMax = lv >= dev.maxLv;
+          const cost = isMax ? 0 : dev.costs[lv];
+          const canBuy = !isMax && bank >= cost;
+
+          UI.drawKissaCard(c, f.ix, cy, listW, cardH, {
+            tone: isMax ? 'equipped' : 'cream',
+            radius: 13
+          });
+
+          const slotS = Math.min(58, cardH - 16);
+          const slotX = f.ix + 8;
+          const slotY = Math.round(cy + (cardH - slotS) * 0.5);
+          UI.drawKissaCard(c, slotX, slotY, slotS, slotS, {
+            tone: 'recess',
+            borderColor: '#D5BD98',
+            radius: 10,
+            lineWidth: 1.5
+          });
+          UI.drawUiIcon(c, sprites, dev.icon, slotX + slotS * 0.5, slotY + slotS * 0.5, slotS * 0.78);
+
+          const btnW = Math.min(82, Math.max(70, Math.round(listW * 0.25)));
+          const btnH = 34;
+          const btnX = f.ix + listW - 8 - btnW;
+          const btnY = Math.round(cy + (cardH - btnH) * 0.5);
+          const hitId = `shop_buy_${dev.id}`;
+
+          UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
+            variant: isMax ? 'equipped' : canBuy ? 'primary' : 'wood',
+            disabled: !isMax && !canBuy,
+            icon: isMax ? '' : 'icon_star_coin',
+            sprites,
+            iconSize: 15,
+            label: isMax ? '已满级' : String(cost),
+            fontSize: isMax ? 11.4 : 13.6,
+            radius: 12,
+            pressed: isPressed(app, hitId)
+          });
+
+          const devIdCopy = dev.id;
+          addScrollClippedHit(hits, hitId, btnX, btnY, btnW, btnH, scrollY, bodyY, bodyH, () =>
+            app.buyDeviceUpgrade(devIdCopy)
+          );
+
+          const tx = slotX + slotS + 9;
+          const tw = Math.max(72, btnX - 8 - tx);
+
+          UI.drawFitText(c, dev.name, tx, cy + Math.round(cardH * 0.24), tw, 13.0, 9.8, 900, '#5A3928', 'left', 'middle');
+
+          const lvY = cy + Math.round(cardH * 0.50);
+          const lvPillW = 46;
+          UI.drawTagBadge(c, tx, lvY - 8, lvPillW, 16, `Lv.${lv}/${dev.maxLv}`, 'wood', 8.6);
+          const barX = tx + lvPillW + 6;
+          const barW = Math.max(46, Math.min(80, tw - lvPillW - 6));
+          UI.drawSegmentedBar(c, barX, lvY - 6, barW, 12, lv, dev.maxLv);
+
+          UI.drawFitText(
+            c,
+            dev.getDesc(lv),
+            tx,
+            cy + Math.round(cardH * 0.80),
+            tw,
+            9.6,
+            7.6,
+            700,
+            '#754C36',
+            'left',
+            'middle'
+          );
+        }
+      } finally {
+        c.restore();
+      }
+
+      if (maxScroll > 0) {
+        UI.drawScrollBar(c, f.ix + f.iw - 6, bodyY + 2, 5, bodyH - 4, scrollY / maxScroll, bodyH / Math.max(bodyH, contentH));
+      }
+      UI.drawFitText(
+        c,
+        '店面设备永久强化托盘、揉面、耐性与初始厨具',
+        f.ix + f.iw * 0.5,
+        footerY + footerH * 0.5,
+        f.iw - 8,
+        10.0,
+        8.0,
+        700,
+        '#754C36',
+        'center',
+        'middle'
+      );
+      return;
+    }
+
+    if (activeTab === 'patrons') {
+      const cardGap = 10;
+      const cardH = clamp(Math.floor((bodyH - cardGap * (PATRONS.length - 1)) / PATRONS.length), 88, 110);
+      const { scrollY, maxScroll, contentH } = setupListScroll(
+        app,
+        f.ix,
+        f.iw,
+        bodyY,
+        bodyH,
+        PATRONS.length,
+        cardH,
+        cardGap
+      );
+      const listW = f.iw - (maxScroll > 0 ? 10 : 0);
+      const unlocked = Array.isArray(saveData.unlockedPatrons) ? saveData.unlockedPatrons : ['mikan'];
+      const selected = normalizePatronId(saveData.selectedPatron);
+
+      c.save();
+      try {
+        c.beginPath();
+        c.rect(f.ix - 2, bodyY, f.iw + 4, bodyH);
+        c.clip();
+        c.globalAlpha *= anim.tabAlpha;
+        c.translate(0, -scrollY + anim.tabOffsetY);
+
+        for (let i = 0; i < PATRONS.length; i++) {
+          const p = PATRONS[i];
+          const cy = bodyY + i * (cardH + cardGap);
+          const owned = unlocked.includes(p.id);
+          const isSelected = owned && selected === p.id;
+          const canBuy = !owned && bank >= p.cost;
+
+          UI.drawKissaCard(c, f.ix, cy, listW, cardH, {
+            tone: isSelected ? 'selected' : 'cream',
+            selected: isSelected,
+            radius: 13
+          });
+
+          const avS = Math.min(64, cardH - 16);
+          const avX = f.ix + 8;
+          const avY = Math.round(cy + (cardH - avS) * 0.5);
+          UI.drawKissaCard(c, avX, avY, avS, avS, {
+            tone: 'recess',
+            borderColor: isSelected ? '#F5B841' : '#D5BD98',
+            radius: 12,
+            lineWidth: 1.6
+          });
+          UI.drawUiIcon(c, sprites, p.id, avX + avS * 0.5, avY + avS * 0.5, avS * 0.86);
+
+          const btnW = Math.min(86, Math.max(74, Math.round(listW * 0.25)));
+          const btnH = 34;
+          const btnX = f.ix + listW - 8 - btnW;
+          const btnY = Math.round(cy + (cardH - btnH) * 0.5);
+
+          const tx = avX + avS + 9;
+          const tw = Math.max(72, btnX - 8 - tx);
+
+          UI.drawFitText(c, `${p.name} · ${p.skillName}`, tx, cy + 22, tw, 12.6, 9.6, 900, '#5A3928', 'left', 'middle');
+          UI.drawWrappedText(
+            c,
+            p.passiveDesc,
+            tx,
+            cy + 36,
+            tw,
+            14,
+            UI.fontStr(9.6, 700),
+            '#754C36',
+            'left',
+            3
+          );
+
+          const pidCopy = p.id;
+          if (!owned) {
+            const hitId = `shop_buy_patron_${pidCopy}`;
+            UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
+              variant: canBuy ? 'primary' : 'wood',
+              disabled: !canBuy,
+              icon: 'icon_star_coin',
+              sprites,
+              iconSize: 15,
+              label: String(p.cost),
+              fontSize: 13.4,
+              radius: 12,
+              pressed: isPressed(app, hitId)
+            });
+            addScrollClippedHit(hits, hitId, btnX, btnY, btnW, btnH, scrollY, bodyY, bodyH, () =>
+              app.buyPatron(pidCopy)
+            );
+          } else {
+            const hitId = `shop_equip_patron_${pidCopy}`;
+            UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
+              variant: isSelected ? 'equipped' : 'wood',
+              label: isSelected ? '出战中' : '切换出战',
+              fontSize: 11.4,
+              radius: 12,
+              pressed: isPressed(app, hitId)
+            });
+            addScrollClippedHit(hits, hitId, btnX, btnY, btnW, btnH, scrollY, bodyY, bodyH, () =>
+              app.equipPatron(pidCopy)
+            );
+          }
+        }
+      } finally {
+        c.restore();
+      }
+
+      if (maxScroll > 0) {
+        UI.drawScrollBar(c, f.ix + f.iw - 6, bodyY + 2, 5, bodyH - 4, scrollY / maxScroll, bodyH / Math.max(bodyH, contentH));
+      }
+      UI.drawFitText(
+        c,
+        '看板店员可随时切换，出战生效专属被动与招牌技',
+        f.ix + f.iw * 0.5,
+        footerY + footerH * 0.5,
+        f.iw - 8,
+        10.0,
+        8.0,
+        700,
+        '#754C36',
+        'center',
+        'middle'
+      );
+      return;
+    }
+
+    // --- Tab 4: 棋盘主题 (Design 09 BoardThemeModal) ---
+    const cardGap = 10;
+    const cardH = clamp(Math.floor((bodyH - cardGap * (BOARD_THEME_LIST.length - 1)) / BOARD_THEME_LIST.length), 88, 108);
+    const { scrollY, maxScroll, contentH } = setupListScroll(
       app,
       f.ix,
       f.iw,
       bodyY,
       bodyH,
-      rows,
-      gy,
-      68
+      BOARD_THEME_LIST.length,
+      cardH,
+      cardGap
     );
-    const gridW = f.iw - (maxScroll > 0 ? 6 : 0);
+    const listW = f.iw - (maxScroll > 0 ? 10 : 0);
+    const unlockedThemes = Array.isArray(saveData.unlockedThemes) ? saveData.unlockedThemes : ['amber'];
+    const equippedId = saveData.equippedTheme || 'amber';
+
+    c.save();
+    try {
+      c.beginPath();
+      c.rect(f.ix - 2, bodyY, f.iw + 4, bodyH);
+      c.clip();
+      c.globalAlpha *= anim.tabAlpha;
+      c.translate(0, -scrollY + anim.tabOffsetY);
+
+      for (let i = 0; i < BOARD_THEME_LIST.length; i++) {
+        const th = BOARD_THEME_LIST[i];
+        const cy = bodyY + i * (cardH + cardGap);
+        const owned = unlockedThemes.includes(th.id);
+        const isEquipped = owned && equippedId === th.id;
+        const canBuy = !owned && bank >= th.cost;
+
+        UI.drawKissaCard(c, f.ix, cy, listW, cardH, {
+          tone: isEquipped ? 'selected' : 'cream',
+          selected: isEquipped,
+          radius: 13
+        });
+
+        const swS = Math.min(68, cardH - 18);
+        const swX = f.ix + 10;
+        const swY = Math.round(cy + (cardH - swS) * 0.5);
+        UI.drawThemeSwatch(c, swX, swY, swS, swS, th.id, sprites);
+
+        const btnW = Math.min(84, Math.max(72, Math.round(listW * 0.25)));
+        const btnH = 34;
+        const btnX = f.ix + listW - 10 - btnW;
+        const btnY = Math.round(cy + (cardH - btnH) * 0.5);
+
+        const tx = swX + swS + 10;
+        const tw = Math.max(72, btnX - 8 - tx);
+        UI.drawFitText(c, th.name, tx, cy + Math.round(cardH * 0.34), tw, 13.8, 10.4, 900, '#5A3928', 'left', 'middle');
+        UI.drawFitText(c, th.desc, tx, cy + Math.round(cardH * 0.68), tw, 10.2, 8.2, 700, '#754C36', 'left', 'middle');
+
+        const tidCopy = th.id;
+        if (!owned) {
+          const hitId = `shop_buy_theme_${tidCopy}`;
+          UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
+            variant: canBuy ? 'primary' : 'wood',
+            disabled: !canBuy,
+            icon: 'icon_star_coin',
+            sprites,
+            iconSize: 15,
+            label: String(th.cost),
+            fontSize: 13.6,
+            radius: 12,
+            pressed: isPressed(app, hitId)
+          });
+          addScrollClippedHit(hits, hitId, btnX, btnY, btnW, btnH, scrollY, bodyY, bodyH, () =>
+            app.buyTheme(tidCopy)
+          );
+        } else {
+          const hitId = `shop_equip_theme_${tidCopy}`;
+          UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
+            variant: isEquipped ? 'equipped' : 'wood',
+            label: isEquipped ? '使用中' : '切换主题',
+            fontSize: 11.4,
+            radius: 12,
+            pressed: isPressed(app, hitId)
+          });
+          addScrollClippedHit(hits, hitId, btnX, btnY, btnW, btnH, scrollY, bodyY, bodyH, () =>
+            app.equipTheme(tidCopy)
+          );
+        }
+      }
+    } finally {
+      c.restore();
+    }
+
+    if (maxScroll > 0) {
+      UI.drawScrollBar(c, f.ix + f.iw - 6, bodyY + 2, 5, bodyH - 4, scrollY / maxScroll, bodyH / Math.max(bodyH, contentH));
+    }
+    UI.drawFitText(
+      c,
+      '解锁主题后可随时切换局内烤盘外观',
+      f.ix + f.iw * 0.5,
+      footerY + footerH * 0.5,
+      f.iw - 8,
+      10.2,
+      8.2,
+      700,
+      '#754C36',
+      'center',
+      'middle'
+    );
+  } finally {
+    endModalFrame(c);
+  }
+}
+
+/* ======================== 07. 星夜图鉴弹窗 (CompendiumModal) ======================== */
+
+function renderCompendiumModal(ctx, metrics, app, hits) {
+  const c = getSafeCtx(ctx);
+  const sprites = app.sprites || {};
+  const saveData = app.saveData || {};
+  const activeTab = app.activeCompendiumTab || 'catcakes';
+
+  const f = beginModalFrame(c, metrics, app, {
+    maxW: 452,
+    desiredH: 572,
+    dismissOnOutside: true,
+    title: '星夜图鉴',
+    sheetTopInset: 66,
+    sheetBottomPad: 12
+  });
+
+  try {
+    drawCloseButton(c, f, hits, app);
+
+    // Count collected items
+    let unlockedCakes = 0;
+    for (let i = 0; i < CATCAKES.length; i++) {
+      if (isLevelUnlocked(CATCAKES[i].unlockLevel, saveData.levelStars).unlocked) unlockedCakes++;
+    }
+    let unlockedRecipes = 0;
+    for (let i = 0; i < RECIPE_LIST.length; i++) {
+      if (isLevelUnlocked(RECIPE_LIST[i].unlockLevel, saveData.levelStars).unlocked) unlockedRecipes++;
+    }
+
+    // 2 Folder Tabs + Right-side "已收集 X/7" counter pill (Design 07)
+    const tabY = f.sheetY - 27;
+    const tabH = 29;
+    const countW = 68;
+    const tabsW = f.sheetW - 18 - countW;
+    drawFolderTabs(
+      c,
+      f.sheetX + 6,
+      tabY,
+      tabsW,
+      tabH,
+      [
+        { id: 'catcakes', hitId: 'compendium_tab_catcakes', label: '猫饼图鉴' },
+        { id: 'recipes', hitId: 'compendium_tab_recipes', label: '套餐配方' }
+      ],
+      activeTab,
+      hits,
+      app,
+      (tabId) => app.setCompendiumTab(tabId)
+    );
+
+    const cntX = f.sheetX + f.sheetW - 6 - countW;
+    UI.drawKissaCard(c, cntX, tabY - 1, countW, tabH - 1, {
+      tone: 'wood',
+      topCol: '#7B4E31',
+      botCol: '#5B3822',
+      borderColor: '#4A2B1A',
+      radius: 9,
+      lineWidth: 2.0
+    });
+    UI.drawOutlinedText(c, '已收集', cntX + countW * 0.5, tabY + 8, {
+      size: 8.6,
+      weight: 700,
+      fill: '#FFE5AA',
+      stroke: '#3D2214',
+      strokeWidth: 1.6,
+      shadowOffsetY: 0
+    });
+    UI.drawOutlinedText(
+      c,
+      activeTab === 'catcakes' ? `${unlockedCakes}/${CATCAKES.length}` : `${unlockedRecipes}/${RECIPE_LIST.length}`,
+      cntX + countW * 0.5,
+      tabY + 20,
+      {
+        size: 10.6,
+        weight: 900,
+        fill: '#FFF8EC',
+        stroke: '#3D2214',
+        strokeWidth: 1.8,
+        shadowOffsetY: 0
+      }
+    );
+
+    const bodyY = f.sheetY + 10;
+    const bodyH = Math.max(200, f.sheetY + f.sheetH - 10 - bodyY);
+    const anim = f.anim;
+    app.modalScrollRect = null;
+    app.modalMaxScroll = 0;
+
+    if (activeTab === 'catcakes') {
+      // Exact Design 07 layout: 3-column grid (C1–C7 + Honor slot) + bottom detail strip!
+      const detailH = 58;
+      const gridWrapH = Math.max(150, bodyH - detailH - 8);
+      UI.drawKissaCard(c, f.ix, bodyY, f.iw, gridWrapH, {
+        tone: 'recess',
+        borderColor: '#DEC9A6',
+        radius: 12,
+        lineWidth: 1.5
+      });
+
+      const pad = 8;
+      const cols = 3;
+      const rows = 3;
+      const gx = 7;
+      const gy = 7;
+      const cw = Math.floor((f.iw - pad * 2 - gx * (cols - 1)) / cols);
+      const ch = Math.floor((gridWrapH - pad * 2 - gy * (rows - 1)) / rows);
+      const selectedTier = clamp(Math.floor(Number(app.selectedCompendiumTier) || 1), 1, CATCAKES.length);
+
+      c.save();
+      try {
+        c.globalAlpha *= anim.tabAlpha;
+        c.translate(0, anim.tabOffsetY);
+
+        for (let i = 0; i < CATCAKES.length; i++) {
+          const cake = CATCAKES[i];
+          const col = i % cols;
+          const row = Math.floor(i / cols);
+          const cx = f.ix + pad + col * (cw + gx);
+          const cy = bodyY + pad + row * (ch + gy);
+          const unlocked = isLevelUnlocked(cake.unlockLevel, saveData.levelStars).unlocked;
+          const isSel = selectedTier === cake.tier;
+
+          UI.drawKissaCard(c, cx, cy, cw, ch, {
+            tone: isSel ? 'selected' : 'cream',
+            selected: isSel,
+            locked: !unlocked,
+            radius: 11
+          });
+
+          // Top-left C1..C7 badge
+          UI.drawTagBadge(c, cx + 4, cy + 4, 26, 15, cake.id, isSel ? 'amber' : 'wood', 8.5);
+
+          const spS = Math.min(cw - 16, ch - 30);
+          const spCy = cy + 16 + (ch - 32) * 0.5;
+          if (unlocked) {
+            const lv = clamp(Math.floor(Number(saveData.catcakeLevels && saveData.catcakeLevels[cake.tier]) || 0), 0, 4);
+            UI.drawCatcakeSprite(c, sprites, cake.tier, cx + cw * 0.5, spCy, spS, {
+              happy: lv >= 2
+            });
+          } else {
+            // Silhouette + "?" + top-right lock icon (Design 07 C7)
+            UI.drawCatcakeSprite(c, sprites, cake.tier, cx + cw * 0.5, spCy, spS, {
+              silhouette: true
+            });
+            UI.drawOutlinedText(c, '?', cx + cw * 0.5, spCy + 1, {
+              size: Math.max(15, Math.round(spS * 0.45)),
+              weight: 900,
+              fill: '#EFE4D0',
+              stroke: '#4A3A2E',
+              strokeWidth: 2.2,
+              shadowOffsetY: 0
+            });
+            drawLockIcon(c, cx + cw - 12, cy + 12, 13, { sprites });
+          }
+
+          UI.drawFitText(
+            c,
+            unlocked ? cake.name : '未解锁',
+            cx + cw * 0.5,
+            cy + ch - 10,
+            cw - 8,
+            10.2,
+            7.8,
+            900,
+            unlocked ? '#5A3928' : '#6A5E53',
+            'center',
+            'middle'
+          );
+
+          const tCopy = cake.tier;
+          hits.add(`compendium_cake_${tCopy}`, cx, cy, cw, ch, () => {
+            if (typeof app.selectCompendiumTier === 'function') app.selectCompendiumTier(tCopy);
+          });
+        }
+
+        // Slot 8 & 9 span: Chef Honor Rank & Achievement mini-badge
+        const achX = f.ix + pad + 1 * (cw + gx);
+        const achY = bodyY + pad + 2 * (ch + gy);
+        const achW = cw * 2 + gx;
+        let achDone = 0;
+        for (let i = 0; i < ACHIEVEMENTS.length; i++) {
+          if (ACHIEVEMENTS[i].check(saveData)) achDone++;
+        }
+        UI.drawKissaCard(c, achX, achY, achW, ch, {
+          tone: 'amber',
+          borderColor: '#C59A5A',
+          radius: 11,
+          lineWidth: 1.8
+        });
+        UI.drawUiIcon(c, sprites, 'medal_gold', achX + 26, achY + ch * 0.5, Math.min(34, ch - 18));
+        UI.drawFitText(c, getChefRank(saveData), achX + 48, achY + ch * 0.36, achW - 56, 12.2, 9.2, 900, '#5A3928', 'left', 'middle');
+        UI.drawFitText(
+          c,
+          `荣誉勋章 ${achDone}/${ACHIEVEMENTS.length} · 总星 ${computeTotalStars(saveData.levelStars)}/90`,
+          achX + 48,
+          achY + ch * 0.68,
+          achW - 56,
+          9.6,
+          7.6,
+          700,
+          '#754C36',
+          'left',
+          'middle'
+        );
+      } finally {
+        c.restore();
+      }
+
+      // Bottom Selected Detail Strip (Exact Design 07 bottom bar)
+      const selCake = CATCAKES[selectedTier - 1] || CATCAKES[0];
+      const selUnlocked = isLevelUnlocked(selCake.unlockLevel, saveData.levelStars).unlocked;
+      const selLv = clamp(Math.floor(Number(saveData.catcakeLevels && saveData.catcakeLevels[selCake.tier]) || 0), 0, 4);
+      const selPrice = getCatcakePrice(selCake.tier, selLv);
+      const detY = bodyY + gridWrapH + 8;
+
+      UI.drawKissaCard(c, f.ix, detY, f.iw, detailH, {
+        tone: 'recess',
+        borderColor: '#C5A982',
+        radius: 11,
+        lineWidth: 1.8
+      });
+      UI.drawTagBadge(c, f.ix + 10, detY + 8, 30, 18, selCake.id, 'wood', 9.8);
+      UI.drawFitText(
+        c,
+        selUnlocked
+          ? `${selCake.name} · 基础分 ${selPrice}${selLv > 0 ? ' (Lv.' + selLv + ')' : ''}`
+          : `${selCake.name} · 未解锁`,
+        f.ix + 46,
+        detY + 17,
+        f.iw - 56,
+        12.4,
+        9.4,
+        900,
+        '#5A3928',
+        'left',
+        'middle'
+      );
+      UI.drawFitText(
+        c,
+        selUnlocked
+          ? selCake.desc
+          : `推进至第 ${selCake.unlockLevel} 关即可解锁烘焙该阶猫饼。`,
+        f.ix + 12,
+        detY + 41,
+        f.iw - 24,
+        10.0,
+        8.0,
+        700,
+        '#754C36',
+        'left',
+        'middle'
+      );
+      return;
+    }
+
+    // --- Tab 2: 24 道套餐配方 (3-col Scrollable Grid + Warm Scrollbar) ---
+    const cols = 3;
+    const rows = Math.max(1, Math.ceil(RECIPE_LIST.length / cols));
+    const gx = 6;
+    const gy = 6;
+    const rowH = 64;
+    const { scrollY, maxScroll, contentH } = setupListScroll(app, f.ix, f.iw, bodyY, bodyH, rows, rowH, gy);
+    const gridW = f.iw - (maxScroll > 0 ? 10 : 0);
     const cw = Math.floor((gridW - gx * (cols - 1)) / cols);
 
     c.save();
     try {
-      if (maxScroll > 0) {
-        c.beginPath();
-        c.rect(f.ix, bodyY, f.iw, bodyH);
-        c.clip();
-        c.translate(0, -scrollY);
-      }
+      c.beginPath();
+      c.rect(f.ix - 2, bodyY, f.iw + 4, bodyH);
+      c.clip();
+      c.globalAlpha *= anim.tabAlpha;
+      c.translate(0, -scrollY + anim.tabOffsetY);
 
-      for (let i = 0; i < CATCAKES.length; i++) {
-        const cake = CATCAKES[i];
+      for (let i = 0; i < RECIPE_LIST.length; i++) {
+        const r = RECIPE_LIST[i];
         const col = i % cols;
         const row = Math.floor(i / cols);
         const cx = f.ix + col * (cw + gx);
-        const cy = bodyY + row * (ch + gy);
+        const cy = bodyY + row * (rowH + gy);
+        if (cy + rowH < bodyY + scrollY - 8 || cy > bodyY + scrollY + bodyH + 8) continue;
 
-        const isUnlocked =
-          typeof app.isCatcakeUnlocked === 'function'
-            ? app.isCatcakeUnlocked(cake)
-            : isLevelUnlocked(cake.unlockLevel, saveData.levelStars).unlocked;
-        const rawLv = saveData.catcakeLevels && saveData.catcakeLevels[cake.tier];
-        const lv = clamp(Math.floor(Number(rawLv) || 0), 0, 4);
-        const isMax = lv >= 4;
-        const cost = isMax ? 0 : cake.upgradeCosts[lv];
-        const canBuy = isUnlocked && !isMax && bank >= cost;
-        const curP = getCatcakePrice(cake.tier, lv);
-        const nextP = isMax ? curP : getCatcakePrice(cake.tier, lv + 1);
-
-        UI.drawKissaCard(c, cx, cy, cw, ch, {
-          tone: !isUnlocked ? 'soft' : isMax ? 'equipped' : canBuy ? 'cream' : 'soft',
-          radius: 10
+        const unlocked = isLevelUnlocked(r.unlockLevel, saveData.levelStars).unlocked;
+        UI.drawKissaCard(c, cx, cy, cw, rowH, {
+          tone: 'cream',
+          locked: !unlocked,
+          radius: 9,
+          lineWidth: 1.8
         });
 
-        const iconS = Math.min(38, ch - 36);
-        UI.drawCatcakeSprite(c, sprites, cake.tier, cx + 22, cy + (ch - 26) * 0.5 + 2, iconS, {
-          happy: isUnlocked && isMax,
-          silhouette: !isUnlocked
-        });
-        if (!isUnlocked) {
-          drawLockIcon(c, cx + 22, cy + (ch - 26) * 0.5 + 10, 11.5);
-        }
-
-        const tx = cx + 42;
-        const tw = Math.max(48, cx + cw - 6 - tx);
         UI.drawFitText(
           c,
-          `${cake.name}`,
-          tx,
-          cy + 15,
-          tw,
-          10.6,
-          8.2,
-          900,
-          isUnlocked ? '#4A2C2A' : '#7D6A58',
-          'left',
-          'middle'
-        );
-        UI.drawFitText(
-          c,
-          `Lv.${lv}/4 · 菜价 ${curP}${isMax ? '' : ' -> ' + nextP}`,
-          tx,
-          cy + 33,
-          tw,
+          r.name,
+          cx + cw * 0.5,
+          cy + 11,
+          cw - 8,
           9.4,
           7.4,
-          700,
-          '#7A5438',
-          'left',
-          'middle'
-        );
-
-        const btnH = Math.min(24, Math.max(20, Math.floor(ch * 0.25)));
-        const btnY = cy + ch - btnH - 5;
-        const btnX = cx + 6;
-        const btnW = cw - 12;
-        UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
-          style: !isUnlocked ? 'card' : isMax ? 'equipped' : canBuy ? 'cta' : 'wood',
-          disabled: !isUnlocked || (!isMax && !canBuy),
-          icon: !isUnlocked || isMax ? '' : 'icon_stardust',
-          sprites,
-          iconSize: 13,
-          text: !isUnlocked ? `${cake.unlockLevel} 解锁` : isMax ? '已满级' : `${cost} 升级`,
-          fontSize: 9.8,
-          radius: 8
-        });
-        const tierCopy = cake.tier;
-        addScrollClippedHit(
-          hits,
-          `shop_buy_catcake_${tierCopy}`,
-          btnX,
-          btnY,
-          btnW,
-          btnH,
-          scrollY,
-          bodyY,
-          bodyH,
-          () => app.buyCatcakeUpgrade(tierCopy)
-        );
-      }
-
-      // Summary slot showing total R&D progress
-      const sIdx = CATCAKES.length;
-      const sCol = sIdx % cols;
-      const sRow = Math.floor(sIdx / cols);
-      const sx = f.ix + sCol * (cw + gx);
-      const sy = bodyY + sRow * (ch + gy);
-      let totalCakeLv = 0;
-      const maxCakeLv = CATCAKES.length * 4;
-      for (let t = 1; t <= CATCAKES.length; t++) {
-        totalCakeLv += clamp(Math.floor(Number(saveData.catcakeLevels && saveData.catcakeLevels[t]) || 0), 0, 4);
-      }
-      UI.drawKissaCard(c, sx, sy, cw, ch, { tone: 'amber', radius: 10 });
-      UI.drawFitText(c, '研发加成总览', sx + cw * 0.5, sy + ch * 0.34, cw - 14, 11.0, 8.8, 900, '#5A341E', 'center', 'middle');
-      UI.drawFitText(c, `已升 ${totalCakeLv} / ${maxCakeLv} 级`, sx + cw * 0.5, sy + ch * 0.62, cw - 14, 10.2, 8.2, 800, '#7A4818', 'center', 'middle');
-      UI.drawFitText(c, '每级单品菜价 +15%', sx + cw * 0.5, sy + ch * 0.82, cw - 14, 9.0, 7.5, 700, '#8A5A28', 'center', 'middle');
-    } finally {
-      c.restore();
-    }
-    return;
-  }
-
-  if (activeTab === 'devices') {
-    const cols = 1;
-    const rows = Math.max(1, SHOP_DEVICES.length);
-    const gx = 8;
-    const gy = 6;
-    const { ch, scrollY, maxScroll } = setupAdaptiveGridScroll(
-      app,
-      f.ix,
-      f.iw,
-      bodyY,
-      bodyH,
-      rows,
-      gy,
-      68
-    );
-    const cw = Math.floor((f.iw - (maxScroll > 0 ? 6 : 0) - gx * (cols - 1)) / cols);
-
-    c.save();
-    try {
-      if (maxScroll > 0) {
-        c.beginPath();
-        c.rect(f.ix, bodyY, f.iw, bodyH);
-        c.clip();
-        c.translate(0, -scrollY);
-      }
-
-      for (let i = 0; i < SHOP_DEVICES.length; i++) {
-        const dev = SHOP_DEVICES[i];
-        const col = i % cols;
-        const row = Math.floor(i / cols);
-        const cx = f.ix + col * (cw + gx);
-        const cy = bodyY + row * (ch + gy);
-
-        const rawLv = saveData.deviceUpgrades && saveData.deviceUpgrades[dev.id];
-        const lv = clamp(Math.floor(Number(rawLv) || 0), 0, dev.maxLv);
-        const isMax = lv >= dev.maxLv;
-        const cost = isMax ? 0 : dev.costs[lv];
-        const canBuy = !isMax && bank >= cost;
-
-        UI.drawKissaCard(c, cx, cy, cw, ch, {
-          tone: isMax ? 'equipped' : 'cream',
-          radius: 11
-        });
-
-        UI.drawUiIcon(c, sprites, dev.icon, cx + 26, cy + ch * 0.5, 30);
-
-        const btnW = 86;
-        const btnH = Math.min(30, ch - 18);
-        const btnX = cx + cw - 8 - btnW;
-        const btnY = Math.round(cy + (ch - btnH) * 0.5);
-
-        const tx = cx + 48;
-        const tw = Math.max(60, btnX - 8 - tx);
-        UI.drawFitText(
-          c,
-          `${dev.name}  Lv.${lv}/${dev.maxLv}`,
-          tx,
-          cy + ch * 0.33,
-          tw,
-          11.8,
-          9.2,
           900,
-          '#4A2C2A',
-          'left',
+          unlocked ? '#5A3928' : '#70655B',
+          'center',
           'middle'
         );
-        UI.drawWrappedText(
-          c,
-          dev.getDesc(lv),
-          tx,
-          cy + ch * 0.52,
-          tw,
-          13.5,
-          UI.fontStr(9.4, 700),
-          '#6E463B',
-          'left',
-          2
-        );
 
-        UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
-          style: isMax ? 'equipped' : canBuy ? 'cta' : 'wood',
-          disabled: !isMax && !canBuy,
-          icon: isMax ? '' : 'icon_stardust',
-          sprites,
-          iconSize: 14,
-          text: isMax ? '已满级' : `${cost} 升级`,
-          fontSize: 10.2,
-          radius: 9
-        });
-        const devIdCopy = dev.id;
-        addScrollClippedHit(
-          hits,
-          `shop_buy_${devIdCopy}`,
-          btnX,
-          btnY,
-          btnW,
-          btnH,
-          scrollY,
-          bodyY,
-          bodyH,
-          () => app.buyDeviceUpgrade(devIdCopy)
-        );
-      }
-    } finally {
-      c.restore();
-    }
-    return;
-  }
+        const slotCnt = r.slots.length;
+        const iconS = Math.min(20, Math.max(15, Math.floor((cw - 14) / Math.max(2, slotCnt))));
+        const stepX = iconS + 3;
+        const startX = cx + cw * 0.5 - ((slotCnt - 1) * stepX) * 0.5;
+        const iconY = cy + 33;
 
-  if (activeTab === 'patrons') {
-    const cols = 1;
-    const rows = Math.max(1, PATRONS.length);
-    const gx = 8;
-    const gy = 7;
-    const { ch, scrollY, maxScroll } = setupAdaptiveGridScroll(
-      app,
-      f.ix,
-      f.iw,
-      bodyY,
-      bodyH,
-      rows,
-      gy,
-      74
-    );
-    const cw = Math.floor((f.iw - (maxScroll > 0 ? 6 : 0) - gx * (cols - 1)) / cols);
-    const unlocked = Array.isArray(saveData.unlockedPatrons) ? saveData.unlockedPatrons : ['mikan'];
-    const selected = normalizePatronId(saveData.selectedPatron);
-
-    c.save();
-    try {
-      if (maxScroll > 0) {
-        c.beginPath();
-        c.rect(f.ix, bodyY, f.iw, bodyH);
-        c.clip();
-        c.translate(0, -scrollY);
-      }
-
-      for (let i = 0; i < PATRONS.length; i++) {
-        const p = PATRONS[i];
-        const cx = f.ix;
-        const cy = bodyY + i * (ch + gy);
-        const owned = unlocked.includes(p.id);
-        const isSelected = owned && selected === p.id;
-        const canBuy = !owned && bank >= p.cost;
-
-        UI.drawKissaCard(c, cx, cy, cw, ch, {
-          tone: isSelected ? 'selected' : owned ? 'cream' : 'soft',
-          radius: 12
-        });
-
-        const avatarS = Math.min(54, ch - 20);
-        UI.drawUiIcon(
-          c,
-          sprites,
-          p.id,
-          cx + 34,
-          cy + ch * 0.5,
-          avatarS
-        );
-
-        const btnW = 92;
-        const btnH = 30;
-        const btnX = cx + cw - 10 - btnW;
-        const btnY = Math.round(cy + (ch - btnH) * 0.5);
-
-        const tx = cx + 66;
-        const tw = Math.max(60, btnX - 8 - tx);
-        UI.drawFitText(
-          c,
-          `${p.name} · 【${p.skillName}】`,
-          tx,
-          cy + 24,
-          tw,
-          11.8,
-          9.2,
-          900,
-          '#4A2C2A',
-          'left',
-          'middle'
-        );
-        UI.drawWrappedText(
-          c,
-          p.passiveDesc,
-          tx,
-          cy + 40,
-          tw,
-          14,
-          UI.fontStr(9.4, 700),
-          '#6E463B',
-          'left',
-          3
-        );
-
-        const pidCopy = p.id;
-        if (!owned) {
-          UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
-            style: canBuy ? 'cta' : 'wood',
-            disabled: !canBuy,
-            icon: 'icon_stardust',
-            sprites,
-            iconSize: 14,
-            text: `${p.cost} 邀请`,
-            fontSize: 10.4,
-            radius: 9
+        for (let s = 0; s < slotCnt; s++) {
+          const sl = r.slots[s];
+          UI.drawCatcakeSprite(c, sprites, sl.tier, startX + s * stepX, iconY, iconS, {
+            flavor: sl.flavor !== 'any' ? sl.flavor : 'plain',
+            showFlavorBadge: sl.flavor !== 'any',
+            alpha: unlocked ? 1 : 0.6
           });
-          addScrollClippedHit(
-            hits,
-            `shop_buy_patron_${pidCopy}`,
-            btnX,
-            btnY,
-            btnW,
-            btnH,
-            scrollY,
-            bodyY,
-            bodyH,
-            () => app.buyPatron(pidCopy)
-          );
-        } else {
-          UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
-            style: isSelected ? 'equipped' : 'walnut',
-            text: isSelected ? '出战中' : '切换出战',
-            fontSize: 10.4,
-            radius: 9
-          });
-          addScrollClippedHit(
-            hits,
-            `shop_equip_patron_${pidCopy}`,
-            btnX,
-            btnY,
-            btnW,
-            btnH,
-            scrollY,
-            bodyY,
-            bodyH,
-            () => app.equipPatron(pidCopy)
-          );
         }
-      }
-    } finally {
-      c.restore();
-    }
-    return;
-  }
 
-  // activeTab === 'themes'
-  const cols = 1;
-  const rows = Math.max(1, BOARD_THEME_LIST.length);
-  const gx = 8;
-  const gy = 7;
-  const { ch, scrollY, maxScroll } = setupAdaptiveGridScroll(
-    app,
-    f.ix,
-    f.iw,
-    bodyY,
-    bodyH,
-    rows,
-    gy,
-    74
-  );
-  const cw = Math.floor((f.iw - (maxScroll > 0 ? 6 : 0) - gx * (cols - 1)) / cols);
-  const unlockedThemes = Array.isArray(saveData.unlockedThemes) ? saveData.unlockedThemes : ['amber'];
-  const equippedId = saveData.equippedTheme || 'amber';
-
-  c.save();
-  try {
-    if (maxScroll > 0) {
-      c.beginPath();
-      c.rect(f.ix, bodyY, f.iw, bodyH);
-      c.clip();
-      c.translate(0, -scrollY);
-    }
-
-    for (let i = 0; i < BOARD_THEME_LIST.length; i++) {
-      const th = BOARD_THEME_LIST[i];
-      const cx = f.ix;
-      const cy = bodyY + i * (ch + gy);
-      const owned = unlockedThemes.includes(th.id);
-      const isEquipped = owned && equippedId === th.id;
-      const canBuy = !owned && bank >= th.cost;
-
-      UI.drawKissaCard(c, cx, cy, cw, ch, {
-        tone: isEquipped ? 'selected' : owned ? 'cream' : 'soft',
-        radius: 12
-      });
-
-      const btnW = 92;
-      const btnH = 30;
-      const btnX = cx + cw - 10 - btnW;
-      const btnY = Math.round(cy + (ch - btnH) * 0.5);
-
-      UI.drawThemeSwatch(c, cx + 10, cy + 14, 58, ch - 28, th.id);
-      const tx = cx + 76;
-      const tw = Math.max(60, btnX - 8 - tx);
-      UI.drawFitText(c, th.name, tx, cy + 26, tw, 12.0, 9.5, 900, '#4A2C2A', 'left', 'middle');
-      UI.drawWrappedText(c, th.desc, tx, cy + 44, tw, 14, UI.fontStr(9.4, 700), '#6E463B', 'left', 3);
-
-      const tidCopy = th.id;
-      if (!owned) {
-        UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
-          style: canBuy ? 'cta' : 'wood',
-          disabled: !canBuy,
-          icon: 'icon_stardust',
-          sprites,
-          iconSize: 14,
-          text: `${th.cost} 解锁`,
-          fontSize: 10.4,
-          radius: 9
-        });
-        addScrollClippedHit(
-          hits,
-          `shop_buy_theme_${tidCopy}`,
-          btnX,
-          btnY,
-          btnW,
-          btnH,
-          scrollY,
-          bodyY,
-          bodyH,
-          () => app.buyTheme(tidCopy)
-        );
-      } else {
-        UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
-          style: isEquipped ? 'equipped' : 'walnut',
-          text: isEquipped ? '使用中' : '装备皮肤',
-          fontSize: 10.4,
-          radius: 9
-        });
-        addScrollClippedHit(
-          hits,
-          `shop_equip_theme_${tidCopy}`,
-          btnX,
-          btnY,
-          btnW,
-          btnH,
-          scrollY,
-          bodyY,
-          bodyH,
-          () => app.equipTheme(tidCopy)
-        );
-      }
-    }
-  } finally {
-    c.restore();
-  }
-}
-
-function renderCompendiumModal(ctx, metrics, app, hits) {
-  const c = getSafeCtx(ctx);
-  const f = renderModalFrame(c, metrics, app, 660, 568, true);
-  const sprites = app.sprites || {};
-  const saveData = app.saveData || {};
-
-  drawModalHeader(
-    c,
-    f,
-    sprites,
-    'icon_book',
-    '吃茶图鉴',
-    `${CATCAKES.length} 阶手绘猫饼与 ${RECIPE_LIST.length} 道甜品套餐配方`,
-    38
-  );
-  drawCloseButton(c, f, hits, app);
-
-  const tabY = f.iy + 34;
-  const tabH = 28;
-  const tabGap = 6;
-  const tabW = Math.floor((f.iw - tabGap) / 2);
-  const activeTab = app.activeCompendiumTab || 'catcakes';
-
-  UI.drawPillButton(c, f.ix, tabY, tabW, tabH, {
-    style: activeTab === 'catcakes' ? 'active' : 'wood',
-    icon: 'C1',
-    sprites,
-    iconSize: 17,
-    text: `${CATCAKES.length} 阶猫饼`,
-    fontSize: 11.2,
-    radius: 9
-  });
-  hits.add('compendium_tab_catcakes', f.ix, tabY, tabW, tabH, () => app.setCompendiumTab('catcakes'));
-
-  UI.drawPillButton(c, f.ix + tabW + tabGap, tabY, tabW, tabH, {
-    style: activeTab === 'recipes' ? 'active' : 'wood',
-    icon: 'serve_bell',
-    sprites,
-    iconSize: 17,
-    text: `${RECIPE_LIST.length} 道菜谱`,
-    fontSize: 11.2,
-    radius: 9
-  });
-  hits.add('compendium_tab_recipes', f.ix + tabW + tabGap, tabY, tabW, tabH, () =>
-    app.setCompendiumTab('recipes')
-  );
-
-  const bodyY = tabY + tabH + 6;
-  const bodyH = Math.max(240, f.iy + f.ih - bodyY);
-  app.modalScrollRect = null;
-  app.modalMaxScroll = 0;
-
-  if (activeTab === 'catcakes') {
-    const cols = 2;
-    const rows = Math.ceil((CATCAKES.length + 1) / cols);
-    const gx = 6;
-    const gy = 6;
-    const { ch, scrollY, maxScroll } = setupAdaptiveGridScroll(
-      app,
-      f.ix,
-      f.iw,
-      bodyY,
-      bodyH,
-      rows,
-      gy,
-      68
-    );
-    const cw = Math.floor((f.iw - (maxScroll > 0 ? 6 : 0) - gx * (cols - 1)) / cols);
-
-    c.save();
-    try {
-      if (maxScroll > 0) {
-        c.beginPath();
-        c.rect(f.ix, bodyY, f.iw, bodyH);
-        c.clip();
-        c.translate(0, -scrollY);
-      }
-
-      for (let i = 0; i < CATCAKES.length; i++) {
-        const cake = CATCAKES[i];
-        const col = i % cols;
-        const row = Math.floor(i / cols);
-        const cx = f.ix + col * (cw + gx);
-        const cy = bodyY + row * (ch + gy);
-        const unlocked = isLevelUnlocked(cake.unlockLevel, saveData.levelStars).unlocked;
-        const lv = clamp(Math.floor(Number(saveData.catcakeLevels && saveData.catcakeLevels[cake.tier]) || 0), 0, 4);
-        const price = getCatcakePrice(cake.tier, lv);
-
-        UI.drawKissaCard(c, cx, cy, cw, ch, {
-          tone: unlocked ? 'cream' : 'soft',
-          radius: 10
-        });
-
-        UI.drawCatcakeSprite(c, sprites, cake.tier, cx + 25, cy + ch * 0.46, Math.min(42, ch - 20), {
-          silhouette: !unlocked,
-          happy: unlocked && lv >= 2
-        });
-
-        const tx = cx + 48;
-        const tw = Math.max(48, cx + cw - 6 - tx);
         UI.drawFitText(
           c,
-          unlocked ? `${cake.id} ${cake.name}` : `${cake.id} 未解锁猫饼`,
-          tx,
-          cy + 18,
-          tw,
-          10.8,
-          8.2,
-          900,
-          unlocked ? '#4A2C2A' : '#7D6A58',
-          'left',
-          'middle'
-        );
-        UI.drawFitText(
-          c,
-          `菜价 ${price} · 解锁 ${cake.unlockLevel}`,
-          tx,
-          cy + 36,
-          tw,
-          9.2,
-          7.5,
+          `×${r.comboMult.toFixed(2)} · ${r.baseScoreLv0}分`,
+          cx + cw * 0.5,
+          cy + rowH - 10,
+          cw - 6,
+          8.6,
+          7.0,
           800,
-          '#884A18',
-          'left',
-          'middle'
-        );
-        if (ch >= 74) {
-          UI.drawWrappedText(
-            c,
-            unlocked ? cake.desc : `推进至第 ${cake.unlockLevel} 关即可烘焙该猫饼`,
-            tx,
-            cy + 50,
-            tw,
-            12.5,
-            UI.fontStr(8.6, 700),
-            '#6E463B',
-            'left',
-            3
-          );
-        }
-      }
-
-      // Summary card: Achievements & Chef Honor Summary
-      const sIdx = CATCAKES.length;
-      const sCol = sIdx % cols;
-      const sRow = Math.floor(sIdx / cols);
-      const sx = f.ix + sCol * (cw + gx);
-      const sy = bodyY + sRow * (ch + gy);
-      let achDone = 0;
-      for (let i = 0; i < ACHIEVEMENTS.length; i++) {
-        if (ACHIEVEMENTS[i].check(saveData)) achDone++;
-      }
-      UI.drawKissaCard(c, sx, sy, cw, ch, { tone: 'amber', radius: 10 });
-      UI.drawUiIcon(c, sprites, 'icon_trophy', sx + cw * 0.5, sy + 24, 22);
-      UI.drawFitText(
-        c,
-        getChefRank(saveData),
-        sx + cw * 0.5,
-        sy + ch * 0.54,
-        cw - 12,
-        11.0,
-        8.5,
-        900,
-        '#4A2C2A',
-        'center',
-        'middle'
-      );
-      UI.drawFitText(
-        c,
-        `荣誉勋章 ${achDone}/${ACHIEVEMENTS.length}`,
-        sx + cw * 0.5,
-        sy + ch * 0.78,
-        cw - 12,
-        9.4,
-        7.8,
-        800,
-        '#7A4818',
-        'center',
-        'middle'
-      );
-    } finally {
-      c.restore();
-    }
-    return;
-  }
-
-  // Adaptive 24+ Recipes Matrix (3 cols, zero-scroll on standard viewports, scrollable when expanded)
-  const cols = 3;
-  const rows = Math.max(1, Math.ceil(RECIPE_LIST.length / cols));
-  const gx = 5;
-  const gy = 4;
-  const { ch, scrollY, maxScroll } = setupAdaptiveGridScroll(
-    app,
-    f.ix,
-    f.iw,
-    bodyY,
-    bodyH,
-    rows,
-    gy,
-    50
-  );
-  const cw = Math.floor((f.iw - (maxScroll > 0 ? 6 : 0) - gx * (cols - 1)) / cols);
-
-  c.save();
-  try {
-    if (maxScroll > 0) {
-      c.beginPath();
-      c.rect(f.ix, bodyY, f.iw, bodyH);
-      c.clip();
-      c.translate(0, -scrollY);
-    }
-
-    for (let i = 0; i < RECIPE_LIST.length; i++) {
-      const r = RECIPE_LIST[i];
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      const cx = f.ix + col * (cw + gx);
-      const cy = bodyY + row * (ch + gy);
-      if (maxScroll > 0 && (cy + ch < bodyY + scrollY || cy > bodyY + scrollY + bodyH)) continue;
-
-      const unlocked = isLevelUnlocked(r.unlockLevel, saveData.levelStars).unlocked;
-
-      UI.drawKissaCard(c, cx, cy, cw, ch, {
-        tone: unlocked ? 'cream' : 'soft',
-        radius: 8
-      });
-
-      UI.drawFitText(
-        c,
-        r.name,
-        cx + cw * 0.5,
-        cy + 10,
-        cw - 8,
-        9.4,
-        7.4,
-        900,
-        unlocked ? '#4A2C2A' : '#7D6A58',
-        'center',
-        'middle'
-      );
-
-      const slotCnt = r.slots.length;
-      const iconS = Math.min(19, Math.max(14, ch - 30));
-      const stepX = iconS + 4;
-      const startX = cx + cw * 0.5 - ((slotCnt - 1) * stepX) * 0.5;
-      const iconY = cy + ch * 0.52;
-
-      for (let s = 0; s < slotCnt; s++) {
-        const sl = r.slots[s];
-        UI.drawCatcakeSprite(c, sprites, sl.tier, startX + s * stepX, iconY, iconS, {
-          flavor: sl.flavor !== 'any' ? sl.flavor : 'plain',
-          showFlavorBadge: sl.flavor !== 'any',
-          alpha: unlocked ? 1 : 0.65
-        });
-      }
-
-      UI.drawFitText(
-        c,
-        `×${r.comboMult.toFixed(2)} · ${r.baseScoreLv0}分`,
-        cx + cw * 0.5,
-        cy + ch - 8,
-        cw - 6,
-        8.4,
-        6.8,
-        800,
-        '#884A18',
-        'center',
-        'middle'
-      );
-    }
-  } finally {
-    c.restore();
-  }
-}
-
-function renderLeaderboardModal(ctx, metrics, app, hits) {
-  const c = getSafeCtx(ctx);
-  const f = renderModalFrame(c, metrics, app, 640, 568, true);
-  const sprites = app.sprites || {};
-  const saveData = app.saveData || {};
-  const profile = (saveData && saveData.playerProfile) || {};
-
-  drawModalHeader(c, f, sprites, 'icon_trophy', '星夜营业榜', '', 38);
-  drawCloseButton(c, f, hits, app);
-
-  // 1. Chef ID & Authorization Card
-  const cardY = f.iy + 32;
-  const cardH = 48;
-  UI.drawKissaCard(c, f.ix, cardY, f.iw, cardH, { tone: 'cream', radius: 11 });
-
-  const avPreset = normalizePatronId(profile.avatarPreset || saveData.selectedPatron);
-  const avX = f.ix + 6;
-  const avY = cardY + 5;
-  const avS = 38;
-  UI.drawPillButton(c, avX, avY, avS, avS, {
-    style: 'card',
-    icon: avPreset,
-    sprites,
-    iconSize: 28,
-    radius: 10
-  });
-  hits.add('leaderboard_avatar_btn', avX, avY, avS, avS, () => app.cycleProfileAvatar());
-
-  const authW = 92;
-  const authH = 28;
-  const authX = f.ix + f.iw - 8 - authW;
-  const authY = Math.round(cardY + (cardH - authH) * 0.5);
-  UI.drawPillButton(c, authX, authY, authW, authH, {
-    style: profile.authorized ? 'equipped' : 'walnut',
-    text: profile.authorized ? '已同步名片' : '授权头像昵称',
-    fontSize: 9.6,
-    radius: 9
-  });
-  app.userInfoBtnRect = { x: authX, y: authY, w: authW, h: authH };
-  hits.add('leaderboard_auth_btn', authX, authY, authW, authH, () => app.onTapLeaderboardAuth());
-
-  const infoX = avX + avS + 8;
-  const infoW = Math.max(60, authX - 8 - infoX);
-  const dispName = profile.nickName || '星夜店长';
-  const syncLabel =
-    app.cloudStatus === 'synced'
-      ? '云端实时榜'
-      : app.cloudStatus === 'syncing'
-      ? '云端同步中'
-      : '本地挑战榜';
-  UI.drawFitText(c, dispName, infoX, cardY + 17, infoW, 11.8, 9.2, 900, '#4A2C2A', 'left', 'middle');
-  UI.drawFitText(
-    c,
-    `${getChefRank(saveData)} · ${syncLabel}`,
-    infoX,
-    cardY + 34,
-    infoW,
-    9.5,
-    7.8,
-    700,
-    '#7A5438',
-    'left',
-    'middle'
-  );
-
-  // 2. Dual Leaderboard Tabs
-  const boardType = app.leaderboardBoardType === 'score' ? 'score' : 'stars';
-  const tabY = cardY + cardH + 6;
-  const tabH = 28;
-  const tabGap = 6;
-  const tabW = Math.floor((f.iw - tabGap) / 2);
-
-  UI.drawPillButton(c, f.ix, tabY, tabW, tabH, {
-    style: boardType === 'stars' ? 'active' : 'wood',
-    icon: 'icon_stardust',
-    sprites,
-    iconSize: 16,
-    text: '总星数进度榜',
-    fontSize: 11.0,
-    radius: 9
-  });
-  hits.add('leaderboard_tab_stars', f.ix, tabY, tabW, tabH, () =>
-    app.setLeaderboardBoardType('stars')
-  );
-
-  UI.drawPillButton(c, f.ix + tabW + tabGap, tabY, tabW, tabH, {
-    style: boardType === 'score' ? 'active' : 'wood',
-    icon: 'icon_trophy',
-    sprites,
-    iconSize: 16,
-    text: '累计营业榜',
-    fontSize: 11.0,
-    radius: 9
-  });
-  hits.add('leaderboard_tab_score', f.ix + tabW + tabGap, tabY, tabW, tabH, () =>
-    app.setLeaderboardBoardType('score')
-  );
-
-  // 3. Top List + Pinned myRank Footer
-  const footerH = 34;
-  const footerY = f.iy + f.ih - footerH;
-  const listY = tabY + tabH + 6;
-  const listH = Math.max(120, footerY - 6 - listY);
-
-  const lb = app.leaderboardData || { list: [], myRank: null };
-  const rows = Array.isArray(lb.list) ? lb.list : [];
-  const rowH = 38;
-  const rowGap = 4;
-  const contentH = Math.max(0, rows.length * (rowH + rowGap) - rowGap);
-  const maxScroll = Math.max(0, contentH - listH);
-  const scrollY = clamp(Number(app.modalScrollY) || 0, 0, maxScroll);
-  app.modalMaxScroll = maxScroll;
-  app.modalScrollRect = { x: f.ix, y: listY, w: f.iw, h: listH };
-
-  c.save();
-  try {
-    c.beginPath();
-    c.rect(f.ix, listY, f.iw, listH);
-    c.clip();
-    c.translate(0, -scrollY);
-
-    if (rows.length === 0) {
-      UI.drawFitText(
-        c,
-        app.leaderboardLoading ? '正在读取榜单数据...' : '暂无排行记录，通关后自动上榜',
-        f.ix + f.iw * 0.5,
-        listY + listH * 0.5,
-        f.iw - 20,
-        11.0,
-        9.0,
-        700,
-        '#7A5438',
-        'center',
-        'middle'
-      );
-    }
-
-    for (let i = 0; i < rows.length; i++) {
-      const r = rows[i];
-      const ry = listY + i * (rowH + rowGap);
-      if (ry + rowH < listY + scrollY || ry > listY + scrollY + listH) continue;
-
-      const rank = r.rank || i + 1;
-      UI.drawKissaCard(c, f.ix, ry, f.iw - (maxScroll > 0 ? 8 : 0), rowH, {
-        tone: r.isMe ? 'selected' : rank <= 3 ? 'amber' : 'cream',
-        radius: 9
-      });
-
-      if (rank <= 3) {
-        UI.drawUiIcon(c, sprites, `icon_medal_${rank}`, f.ix + 18, ry + rowH * 0.5, 22);
-      } else {
-        UI.drawFitText(
-          c,
-          `#${rank}`,
-          f.ix + 18,
-          ry + rowH * 0.5,
-          28,
-          10.8,
-          8.5,
-          900,
-          '#6E463B',
+          '#8A5220',
           'center',
           'middle'
         );
       }
+    } finally {
+      c.restore();
+    }
 
-      const rowAvatar = normalizePatronId(r.avatarPreset || 'mikan');
-      UI.drawUiIcon(c, sprites, rowAvatar, f.ix + 46, ry + rowH * 0.5, 24);
-
-      const rightColW = 122;
-      const nameX = f.ix + 64;
-      const nameW = Math.max(54, f.iw - rightColW - 72);
-      const tagSuffix = r.isMe ? '（我）' : r.isNpc ? ' [陪练]' : '';
-      UI.drawFitText(
-        c,
-        `${r.nickName || '星夜店长'}${tagSuffix}`,
-        nameX,
-        ry + rowH * 0.5,
-        nameW,
-        10.6,
-        8.2,
-        800,
-        '#4A2C2A',
-        'left',
-        'middle'
-      );
-
-      const rStars = Math.max(0, Math.floor(Number(r.totalStars) || 0));
-      const rScore = Math.max(0, Math.floor(Number(r.totalCumulativeScore) || 0));
-      const rightEdge = f.ix + f.iw - (maxScroll > 0 ? 16 : 10);
-
-      if (boardType === 'stars') {
-        UI.drawStarIcon(c, rightEdge - 98, ry + rowH * 0.5, 5.4, true);
-        UI.drawFitText(
-          c,
-          `${rStars} 星 (${rScore})`,
-          rightEdge,
-          ry + rowH * 0.5 + 0.5,
-          90,
-          10.2,
-          8.0,
-          900,
-          '#5A341E',
-          'right',
-          'middle'
-        );
-      } else {
-        UI.drawFitText(
-          c,
-          `${rScore} 分 (${rStars}星)`,
-          rightEdge,
-          ry + rowH * 0.5 + 0.5,
-          114,
-          10.2,
-          8.0,
-          900,
-          '#5A341E',
-          'right',
-          'middle'
-        );
-      }
+    if (maxScroll > 0) {
+      UI.drawScrollBar(c, f.ix + f.iw - 6, bodyY + 2, 5, bodyH - 4, scrollY / maxScroll, bodyH / Math.max(bodyH, contentH));
     }
   } finally {
-    c.restore();
+    endModalFrame(c);
   }
-
-  // Pinned myRank Footer
-  const myStars = computeTotalStars(saveData.levelStars);
-  const myScore =
-    (saveData.lifetimeStats && saveData.lifetimeStats.totalCumulativeScore) || 0;
-  UI.drawKissaCard(c, f.ix, footerY, f.iw, footerH, { tone: 'amber', radius: 9 });
-  UI.drawFitText(
-    c,
-    `我的排名：${lb.myRank ? '第 ' + lb.myRank + ' 名' : '未上榜'}`,
-    f.ix + 12,
-    footerY + footerH * 0.5,
-    f.iw * 0.52,
-    10.8,
-    8.5,
-    900,
-    '#4A2C2A',
-    'left',
-    'middle'
-  );
-  UI.drawStarIcon(c, f.ix + f.iw - 114, footerY + footerH * 0.5, 5.4, true);
-  UI.drawFitText(
-    c,
-    `${myStars} 星 · ${myScore} 分`,
-    f.ix + f.iw - 10,
-    footerY + footerH * 0.5 + 0.5,
-    98,
-    10.2,
-    8.0,
-    800,
-    '#5A341E',
-    'right',
-    'middle'
-  );
 }
+
+/* ======================== 08. 猫饼排行榜弹窗 (LeaderboardModal) ======================== */
+
+function renderLeaderboardModal(ctx, metrics, app, hits) {
+  const c = getSafeCtx(ctx);
+  const sprites = app.sprites || {};
+  const saveData = app.saveData || {};
+  const profile = (saveData && saveData.playerProfile) || {};
+  const boardType =
+    app.leaderboardBoardType === 'score'
+      ? 'score'
+      : app.leaderboardBoardType === 'friends'
+      ? 'friends'
+      : 'stars';
+
+  const f = beginModalFrame(c, metrics, app, {
+    maxW: 452,
+    desiredH: 576,
+    dismissOnOutside: true,
+    title: '猫饼排行榜',
+    sheetTopInset: 66,
+    sheetBottomPad: 12
+  });
+
+  try {
+    drawCloseButton(c, f, hits, app);
+
+    // 3 Folder Tabs: 全服总星榜 (default) | 累计营业榜 | 微信好友榜 (正在开发中)
+    const tabY = f.sheetY - 27;
+    const tabH = 29;
+    drawFolderTabs(
+      c,
+      f.sheetX + 6,
+      tabY,
+      f.sheetW - 12,
+      tabH,
+      [
+        { id: 'stars', hitId: 'leaderboard_tab_stars', label: '全服总星榜' },
+        { id: 'score', hitId: 'leaderboard_tab_score', label: '累计营业榜' },
+        { id: 'friends', hitId: 'leaderboard_tab_friends', label: '微信好友榜' }
+      ],
+      boardType,
+      hits,
+      app,
+      (tabId) => app.setLeaderboardBoardType(tabId),
+      { fontSize: 11.4 }
+    );
+
+    // Compact Chef Identity & WeChat Auth Strip (preserves leaderboard_avatar_btn & leaderboard_auth_btn!)
+    const profY = f.sheetY + 8;
+    const profH = 42;
+    UI.drawKissaCard(c, f.ix, profY, f.iw, profH, {
+      tone: 'recess',
+      borderColor: '#C9AE86',
+      radius: 11,
+      lineWidth: 1.6
+    });
+
+    const avPreset = normalizePatronId(profile.avatarPreset || saveData.selectedPatron);
+    const avS = 32;
+    const avX = f.ix + 6;
+    const avY = profY + 5;
+    UI.drawPillButton(c, avX, avY, avS, avS, {
+      variant: 'card',
+      icon: avPreset,
+      sprites,
+      iconSize: 24,
+      radius: 16,
+      pressed: isPressed(app, 'leaderboard_avatar_btn')
+    });
+    hits.add('leaderboard_avatar_btn', avX, avY, avS, avS, () => app.cycleProfileAvatar());
+
+    const authW = 88;
+    const authH = 26;
+    const authX = f.ix + f.iw - 6 - authW;
+    const authY = Math.round(profY + (profH - authH) * 0.5);
+    UI.drawPillButton(c, authX, authY, authW, authH, {
+      variant: profile.authorized ? 'equipped' : 'wood',
+      label: profile.authorized ? '已同步名片' : '授权头像昵称',
+      fontSize: 9.8,
+      radius: 10,
+      pressed: isPressed(app, 'leaderboard_auth_btn')
+    });
+    app.userInfoBtnRect = { x: authX, y: authY, w: authW, h: authH };
+    hits.add('leaderboard_auth_btn', authX, authY, authW, authH, () => app.onTapLeaderboardAuth());
+
+    const infoX = avX + avS + 8;
+    const infoW = Math.max(60, authX - 8 - infoX);
+    const dispName = profile.nickName || '星夜店长';
+    const syncLabel =
+      app.cloudStatus === 'synced'
+        ? '云端实时榜'
+        : app.cloudStatus === 'syncing'
+        ? '云端同步中'
+        : '本地挑战榜';
+    UI.drawFitText(c, dispName, infoX, profY + 15, infoW, 11.8, 9.2, 900, '#5A3928', 'left', 'middle');
+    UI.drawUiIcon(
+      c,
+      sprites,
+      app.cloudStatus === 'synced' ? 'icon_cloud_sync' : 'icon_star_coin',
+      infoX + 6,
+      profY + 31,
+      12
+    );
+    UI.drawFitText(
+      c,
+      `${getChefRank(saveData)} · ${syncLabel}`,
+      infoX + 15,
+      profY + 31,
+      infoW - 15,
+      9.2,
+      7.6,
+      700,
+      '#754C36',
+      'left',
+      'middle'
+    );
+
+    // Pinned Golden Self Row Footer (Exact Design 08 golden bottom bar!)
+    const footerH = 48;
+    const footerY = f.sheetY + f.sheetH - footerH - 8;
+    const listY = profY + profH + 7;
+    const listH = Math.max(120, footerY - 7 - listY);
+    const anim = f.anim;
+
+    const lb = app.leaderboardData || { list: [], myRank: null };
+
+    if (boardType === 'friends') {
+      // User Decision #2: 微信好友榜 shows clean "正在开发中" placeholder card
+      c.save();
+      try {
+        c.globalAlpha *= anim.tabAlpha;
+        c.translate(0, anim.tabOffsetY);
+
+        UI.drawKissaCard(c, f.ix, listY, f.iw, listH, {
+          tone: 'cream',
+          borderColor: '#C9AE86',
+          radius: 13,
+          lineWidth: 2.0
+        });
+        const midX = f.ix + f.iw * 0.5;
+        const midY = listY + listH * 0.5;
+        UI.drawUiIcon(c, sprites, 'patron_mikan', midX - 24, midY - 34, 58);
+        UI.drawUiIcon(c, sprites, 'icon_cloud_sync', midX + 26, midY - 30, 36);
+        UI.drawTagBadge(c, midX - 44, midY + 4, 88, 22, '功能筹备中', 'amber', 10.6);
+        UI.drawFitText(
+          c,
+          '微信好友榜正在开发中',
+          midX,
+          midY + 38,
+          f.iw - 28,
+          15.5,
+          12.0,
+          900,
+          '#5A3928',
+          'center',
+          'middle'
+        );
+        UI.drawWrappedText(
+          c,
+          '开放数据域好友榜单即将上线！当前可先在「全服总星榜」与「累计营业榜」中冲榜角逐星夜烘焙大师。',
+          midX,
+          midY + 56,
+          f.iw - 44,
+          16,
+          UI.fontStr(10.6, 700),
+          '#754C36',
+          'center',
+          3
+        );
+      } finally {
+        c.restore();
+      }
+    } else {
+      // Full Design 08 Leaderboard Rows with Gold / Silver / Bronze Medals & Row Fills!
+      const rows = Array.isArray(lb.list) ? lb.list : [];
+      const rowH = 50;
+      const rowGap = 6;
+      const { scrollY, maxScroll, contentH } = setupListScroll(app, f.ix, f.iw, listY, listH, rows.length, rowH, rowGap);
+      const listW = f.iw - (maxScroll > 0 ? 10 : 0);
+
+      // Decorative fallback avatars for diverse leaderboard entries
+      const avatarRing = ['patron_mikan', 'cust_lop_bunny', 'cust_shiba', 'cust_fox', 'cust_ragdoll', 'patron_luna', 'patron_mugi'];
+
+      c.save();
+      try {
+        c.beginPath();
+        c.rect(f.ix - 2, listY, f.iw + 4, listH);
+        c.clip();
+        c.globalAlpha *= anim.tabAlpha;
+        c.translate(0, -scrollY + anim.tabOffsetY);
+
+        if (rows.length === 0) {
+          UI.drawFitText(
+            c,
+            app.leaderboardLoading ? '正在读取榜单数据...' : '暂无排行记录，通关后自动上榜',
+            f.ix + f.iw * 0.5,
+            listY + listH * 0.5,
+            f.iw - 20,
+            12.0,
+            9.5,
+            700,
+            '#754C36',
+            'center',
+            'middle'
+          );
+        }
+
+        for (let i = 0; i < rows.length; i++) {
+          const r = rows[i];
+          const ry = listY + i * (rowH + rowGap);
+          if (ry + rowH < listY + scrollY - 8 || ry > listY + scrollY + listH + 8) continue;
+
+          const rank = r.rank || i + 1;
+          const rowTone =
+            rank === 1
+              ? 'goldRow'
+              : rank === 2
+              ? 'silverRow'
+              : rank === 3
+              ? 'bronzeRow'
+              : r.isMe
+              ? 'selected'
+              : 'cream';
+          UI.drawKissaCard(c, f.ix, ry, listW, rowH, {
+            tone: rowTone,
+            radius: 12,
+            lineWidth: 2.1
+          });
+
+          // Rank Medal (1/2/3 WebP) or Bold Rank Number
+          const rankCx = f.ix + 22;
+          if (rank === 1 || rank === 2 || rank === 3) {
+            const medalKey = rank === 1 ? 'medal_gold' : rank === 2 ? 'medal_silver' : 'medal_bronze';
+            UI.drawUiIcon(c, sprites, medalKey, rankCx, ry + rowH * 0.5, 32);
+          } else {
+            UI.drawFitText(c, String(rank), rankCx, ry + rowH * 0.5 + 0.5, 30, 15.5, 11.0, 900, '#5A3928', 'center', 'middle');
+          }
+
+          // Portrait Avatar in soft circular frame
+          const avCx = f.ix + 58;
+          const avCy = ry + rowH * 0.5;
+          c.save();
+          try {
+            c.beginPath();
+            c.arc(avCx, avCy, 17, 0, Math.PI * 2);
+            c.fillStyle = '#FFF8EC';
+            c.fill();
+            c.lineWidth = 1.8;
+            c.strokeStyle = '#5A3928';
+            c.stroke();
+          } finally {
+            c.restore();
+          }
+          const avatarKey = r.avatarPreset
+            ? normalizePatronId(r.avatarPreset)
+            : avatarRing[i % avatarRing.length];
+          UI.drawUiIcon(c, sprites, avatarKey, avCx, avCy, 28);
+
+          const rStars = Math.max(0, Math.floor(Number(r.totalStars) || 0));
+          const rScore = Math.max(0, Math.floor(Number(r.totalCumulativeScore) || 0));
+
+          const valColW = 84;
+          const nameX = f.ix + 82;
+          const nameW = Math.max(60, f.ix + listW - valColW - 10 - nameX);
+          const tagSuffix = r.isMe ? '（我）' : '';
+
+          UI.drawFitText(
+            c,
+            `${r.nickName || '星夜店长'}${tagSuffix}`,
+            nameX,
+            ry + rowH * 0.34,
+            nameW,
+            12.8,
+            9.6,
+            900,
+            '#5A3928',
+            'left',
+            'middle'
+          );
+          UI.drawStarIcon(c, nameX + 6, ry + rowH * 0.70, 5.8, true, sprites);
+          UI.drawFitText(
+            c,
+            `${rStars}/90`,
+            nameX + 16,
+            ry + rowH * 0.71,
+            nameW - 18,
+            10.8,
+            8.6,
+            800,
+            '#754C36',
+            'left',
+            'middle'
+          );
+
+          // Right bold numeric value (emphasizing primary metric while keeping both clean)
+          const rightVal = boardType === 'score' ? formatNum(rScore) : formatNum(rScore);
+          UI.drawFitText(
+            c,
+            rightVal,
+            f.ix + listW - 10,
+            ry + rowH * 0.5 + 0.5,
+            valColW,
+            15.0,
+            10.5,
+            900,
+            '#5A3928',
+            'right',
+            'middle'
+          );
+        }
+      } finally {
+        c.restore();
+      }
+
+      if (maxScroll > 0) {
+        UI.drawScrollBar(c, f.ix + f.iw - 6, listY + 2, 5, listH - 4, scrollY / maxScroll, listH / Math.max(listH, contentH));
+      }
+    }
+
+    // Pinned Golden Self Row Footer (Design 08)
+    const myStars = computeTotalStars(saveData.levelStars);
+    const myScore = (saveData.lifetimeStats && saveData.lifetimeStats.totalCumulativeScore) || 0;
+    UI.drawKissaCard(c, f.ix, footerY, f.iw, footerH, {
+      tone: 'myRankRow',
+      radius: 12,
+      lineWidth: 2.3
+    });
+
+    const myRankText = lb.myRank ? String(lb.myRank) : '--';
+    UI.drawFitText(c, myRankText, f.ix + 22, footerY + footerH * 0.5, 32, 15.5, 11.0, 900, '#5A3928', 'center', 'middle');
+
+    const myAvCx = f.ix + 58;
+    const myAvCy = footerY + footerH * 0.5;
+    c.save();
+    try {
+      c.beginPath();
+      c.arc(myAvCx, myAvCy, 16.5, 0, Math.PI * 2);
+      c.fillStyle = '#FFF8EC';
+      c.fill();
+      c.lineWidth = 1.8;
+      c.strokeStyle = '#5A3928';
+      c.stroke();
+    } finally {
+      c.restore();
+    }
+    UI.drawUiIcon(c, sprites, avPreset, myAvCx, myAvCy, 27);
+
+    const myNameX = f.ix + 82;
+    const myNameW = Math.max(60, f.iw - 172);
+    UI.drawFitText(c, `我 (${dispName})`, myNameX, footerY + footerH * 0.34, myNameW, 12.6, 9.4, 900, '#5A3928', 'left', 'middle');
+    UI.drawStarIcon(c, myNameX + 6, footerY + footerH * 0.70, 5.8, true, sprites);
+    UI.drawFitText(c, `${myStars}/90`, myNameX + 16, footerY + footerH * 0.71, myNameW - 18, 10.8, 8.6, 800, '#5A3928', 'left', 'middle');
+
+    UI.drawFitText(
+      c,
+      formatNum(myScore),
+      f.ix + f.iw - 10,
+      footerY + footerH * 0.5 + 0.5,
+      82,
+      15.2,
+      10.8,
+      900,
+      '#5A3928',
+      'right',
+      'middle'
+    );
+  } finally {
+    endModalFrame(c);
+  }
+}
+
+/* ======================== 10. 局内暂停弹窗 (PauseModal) ======================== */
 
 function renderPauseModal(ctx, metrics, app, hits) {
   const c = getSafeCtx(ctx);
-  const f = renderModalFrame(c, metrics, app, 404, 348, false);
   const sprites = app.sprites || {};
   const orderState = app.orderState || {};
   const lvl = getLevelById(app.currentLevelId || orderState.levelId || '1-1') || getLevelById('1-1');
+  const chapName = getChapterName(lvl.chapter);
 
-  drawModalHeader(c, f, sprites, 'icon_pause', '营业暂停', '', 38);
-  drawCloseButton(c, f, hits, app);
-
-  const infoY = f.iy + 34;
-  const infoH = 44;
-  UI.drawKissaCard(c, f.ix, infoY, f.iw, infoH, { tone: 'amber', radius: 10 });
-  UI.drawFitText(
-    c,
-    `第 ${lvl.id} 关 · 剩余 ${formatClockMMSS(orderState.timeLeft || 0)} · 营业分 ${orderState.score || 0} / 1星 ${lvl.stars[0]}`,
-    f.ix + f.iw * 0.5,
-    infoY + infoH * 0.5,
-    f.iw - 18,
-    10.6,
-    8.2,
-    800,
-    '#4A2C2A',
-    'center',
-    'middle'
-  );
-
-  const resumeY = infoY + infoH + 10;
-  const resumeH = 42;
-  UI.drawPillButton(c, f.ix, resumeY, f.iw, resumeH, {
-    style: 'cta',
-    icon: 'serve_bell',
-    sprites,
-    iconSize: 19,
-    text: '继续营业',
-    fontSize: 13.2,
-    radius: 11
+  const f = beginModalFrame(c, metrics, app, {
+    maxW: 392,
+    desiredH: 468,
+    dismissOnOutside: false,
+    title: '营业暂停',
+    subtitle: `第 ${lvl.id} 关 · ${chapName}`,
+    sheetTopInset: 38,
+    sheetBottomPad: 12
   });
-  hits.add('pause_resume_btn', f.ix, resumeY, f.iw, resumeH, () => app.closeModal());
 
-  const gapX = 8;
-  const halfW = Math.floor((f.iw - gapX) / 2);
-  const rowH = 38;
+  try {
+    drawCloseButton(c, f, hits, app);
 
-  const row1Y = resumeY + resumeH + 8;
-  const trackInfo = app.audio && typeof app.audio.getTrackInfo === 'function'
-    ? app.audio.getTrackInfo()
-    : { label: '圆舞曲' };
-  const sfxOn = app.audio ? Boolean(app.audio.sfxEnabled) : true;
+    const compact = f.ih < 365;
+    // Live shift progress micro-strip
+    const statusY = f.iy + 6;
+    const statusH = 22;
+    UI.drawFitText(
+      c,
+      `剩余 ${formatClockMMSS(orderState.timeLeft || 0)} · 营业分 ${formatNum(orderState.score || 0)} / 1星 ${formatNum(lvl.stars[0])}`,
+      f.ix + f.iw * 0.5,
+      statusY + statusH * 0.5,
+      f.iw - 8,
+      10.4,
+      8.4,
+      800,
+      '#754C36',
+      'center',
+      'middle'
+    );
 
-  UI.drawPillButton(c, f.ix, row1Y, halfW, rowH, {
-    style: 'wood',
-    icon: 'icon_bgm',
-    sprites,
-    iconSize: 16,
-    text: trackInfo.label || '音乐',
-    fontSize: 10.8,
-    radius: 10
+    // Inner Cream Audio Switch Card (Exact Design 10!)
+    const cardY = statusY + statusH + 6;
+    const cardH = compact ? 92 : 108;
+    UI.drawKissaCard(c, f.ix, cardY, f.iw, cardH, {
+      tone: 'recess',
+      topCol: '#FBF1DD',
+      botCol: '#F2E2C4',
+      borderColor: '#C5A982',
+      radius: 14,
+      lineWidth: 1.8
+    });
+
+    const trackInfo =
+      app.audio && typeof app.audio.getTrackInfo === 'function'
+        ? app.audio.getTrackInfo()
+        : { key: 'waltz', label: '圆舞曲' };
+    const bgmOn = trackInfo.key !== 'off';
+    const sfxOn = app.audio ? Boolean(app.audio.sfxEnabled) : true;
+    const bgmPos = app.uiAnim && Number.isFinite(app.uiAnim.bgmSwitchPos) ? app.uiAnim.bgmSwitchPos : bgmOn ? 1 : 0;
+    const sfxPos = app.uiAnim && Number.isFinite(app.uiAnim.sfxSwitchPos) ? app.uiAnim.sfxSwitchPos : sfxOn ? 1 : 0;
+
+    const swW = 72;
+    const swH = 30;
+    const swX = f.ix + f.iw - 14 - swW;
+    const row1Cy = cardY + cardH * 0.27;
+    const row2Cy = cardY + cardH * 0.73;
+
+    // Horizontal hairline divider between BGM & SFX rows
+    c.save();
+    try {
+      c.strokeStyle = 'rgba(138, 86, 52, 0.24)';
+      c.lineWidth = 1.2;
+      c.beginPath();
+      c.moveTo(f.ix + 14, cardY + cardH * 0.5);
+      c.lineTo(f.ix + f.iw - 14, cardY + cardH * 0.5);
+      c.stroke();
+    } finally {
+      c.restore();
+    }
+
+    // Row 1: 背景音乐
+    UI.drawUiIcon(c, sprites, 'icon_music', f.ix + 28, row1Cy, 24);
+    UI.drawFitText(
+      c,
+      bgmOn ? `背景音乐 (${trackInfo.label || '开'})` : '背景音乐 (静音)',
+      f.ix + 48,
+      row1Cy + 0.5,
+      swX - (f.ix + 54),
+      13.6,
+      10.0,
+      900,
+      '#5A3928',
+      'left',
+      'middle'
+    );
+    UI.drawSwitchToggle(c, swX, Math.round(row1Cy - swH * 0.5), swW, swH, bgmOn, bgmPos);
+    hits.add('pause_bgm_btn', swX - 4, Math.round(row1Cy - swH * 0.5) - 2, swW + 8, swH + 4, () => app.cycleBgm());
+
+    // Row 2: 游戏音效
+    UI.drawUiIcon(c, sprites, 'icon_sfx', f.ix + 28, row2Cy, 24);
+    UI.drawFitText(
+      c,
+      '游戏音效',
+      f.ix + 48,
+      row2Cy + 0.5,
+      swX - (f.ix + 54),
+      13.6,
+      10.2,
+      900,
+      '#5A3928',
+      'left',
+      'middle'
+    );
+    UI.drawSwitchToggle(c, swX, Math.round(row2Cy - swH * 0.5), swW, swH, sfxOn, sfxPos);
+    hits.add('pause_sfx_btn', swX - 4, Math.round(row2Cy - swH * 0.5) - 2, swW + 8, swH + 4, () => app.toggleSfx());
+
+    // 3 Large Stacked 3D Buttons (Exact Design 10 Hierarchy!)
+    const secH = compact ? 30 : 32;
+    const secY = f.iy + f.ih - secH;
+    const stackTop = cardY + cardH + (compact ? 10 : 14);
+    const stackAvail = Math.max(120, secY - 10 - stackTop);
+    const btnGap = compact ? 8 : 10;
+    const btnH = clamp(Math.floor((stackAvail - btnGap * 2) / 3), 36, 46);
+    const btnW = Math.min(234, f.iw - 14);
+    const btnX = Math.round(f.ix + (f.iw - btnW) * 0.5);
+
+    const b1Y = stackTop;
+    UI.drawPillButton(c, btnX, b1Y, btnW, btnH, {
+      variant: 'primary',
+      label: '继续营业',
+      fontSize: 16.5,
+      radius: btnH * 0.5,
+      pressed: isPressed(app, 'pause_resume_btn')
+    });
+    hits.add('pause_resume_btn', btnX, b1Y, btnW, btnH, () => app.closeModal());
+
+    const b2Y = b1Y + btnH + btnGap;
+    UI.drawPillButton(c, btnX, b2Y, btnW, btnH, {
+      variant: 'wood',
+      label: '重新开始',
+      fontSize: 16.0,
+      radius: btnH * 0.5,
+      pressed: isPressed(app, 'pause_restart_btn')
+    });
+    hits.add('pause_restart_btn', btnX, b2Y, btnW, btnH, () => app.startLevel(lvl.id));
+
+    const b3Y = b2Y + btnH + btnGap;
+    UI.drawPillButton(c, btnX, b3Y, btnW, btnH, {
+      variant: 'dark',
+      label: '返回大厅',
+      fontSize: 16.0,
+      radius: btnH * 0.5,
+      pressed: isPressed(app, 'pause_lobby_btn')
+    });
+    hits.add('pause_lobby_btn', btnX, b3Y, btnW, btnH, () => app.onPauseReturnLobby());
+
+    // Compact secondary utility row preserving pause_help_btn & pause_compendium_btn
+    const secGap = 10;
+    const secW = Math.floor((btnW - secGap) / 2);
+    UI.drawPillButton(c, btnX, secY, secW, secH, {
+      variant: 'card',
+      icon: 'icon_help',
+      sprites,
+      iconSize: 14,
+      label: '玩法说明',
+      fontSize: 11.0,
+      radius: 12,
+      pressed: isPressed(app, 'pause_help_btn')
+    });
+    hits.add('pause_help_btn', btnX, secY, secW, secH, () => app.openModal('help'));
+
+    UI.drawPillButton(c, btnX + secW + secGap, secY, secW, secH, {
+      variant: 'card',
+      icon: 'icon_book',
+      sprites,
+      iconSize: 14,
+      label: '星夜图鉴',
+      fontSize: 11.0,
+      radius: 12,
+      pressed: isPressed(app, 'pause_compendium_btn')
+    });
+    hits.add('pause_compendium_btn', btnX + secW + secGap, secY, secW, secH, () => app.openCompendium('recipes'));
+  } finally {
+    endModalFrame(c);
+  }
+}
+
+/* ======================== 11. 玩法说明弹窗 (HelpModal) ======================== */
+
+function drawHelpIllustration(ctx, sprites, stepIdx, x, y, size) {
+  const c = getSafeCtx(ctx);
+  UI.drawKissaCard(c, x, y, size, size, {
+    tone: 'recess',
+    borderColor: '#D6BE99',
+    radius: 10,
+    lineWidth: 1.5
   });
-  hits.add('pause_bgm_btn', f.ix, row1Y, halfW, rowH, () => app.cycleBgm());
 
-  UI.drawPillButton(c, f.ix + halfW + gapX, row1Y, halfW, rowH, {
-    style: 'wood',
-    icon: 'icon_sfx',
-    sprites,
-    iconSize: 16,
-    text: sfxOn ? '音效: 开' : '音效: 关',
-    fontSize: 10.8,
-    radius: 10
-  });
-  hits.add('pause_sfx_btn', f.ix + halfW + gapX, row1Y, halfW, rowH, () => app.toggleSfx());
+  const cx = x + size * 0.5;
+  const cy = y + size * 0.5;
+  if (stepIdx === 0) {
+    // 1. Merge C1 + C1 -> C2 diagram (exact Design 11 card 1!)
+    const s = Math.round(size * 0.36);
+    UI.drawCatcakeSprite(c, sprites, 1, x + size * 0.28, y + size * 0.30, s);
+    UI.drawCatcakeSprite(c, sprites, 1, x + size * 0.28, y + size * 0.72, s);
+    UI.drawCatcakeSprite(c, sprites, 2, x + size * 0.74, cy, Math.round(size * 0.40));
+    c.save();
+    try {
+      c.strokeStyle = '#754C36';
+      c.lineWidth = 1.6;
+      c.beginPath();
+      c.moveTo(x + size * 0.45, y + size * 0.35);
+      c.lineTo(x + size * 0.54, cy - 3);
+      c.moveTo(x + size * 0.45, y + size * 0.67);
+      c.lineTo(x + size * 0.54, cy + 3);
+      c.stroke();
+    } finally {
+      c.restore();
+    }
+    return;
+  }
 
-  const row2Y = row1Y + rowH + 8;
-  UI.drawPillButton(c, f.ix, row2Y, halfW, rowH, {
-    style: 'walnut',
-    icon: 'icon_help',
-    sprites,
-    iconSize: 16,
-    text: '玩法说明',
-    fontSize: 10.8,
-    radius: 10
-  });
-  hits.add('pause_help_btn', f.ix, row2Y, halfW, rowH, () => app.openModal('help'));
+  if (stepIdx === 1) {
+    // 2. Dough knead icon (Design 11 card 2)
+    UI.drawUiIcon(c, sprites, 'knead_dough', cx, cy, size * 0.78);
+    return;
+  }
 
-  UI.drawPillButton(c, f.ix + halfW + gapX, row2Y, halfW, rowH, {
-    style: 'walnut',
-    icon: 'icon_book',
-    sprites,
-    iconSize: 16,
-    text: '猫饼图鉴',
-    fontSize: 10.8,
-    radius: 10
-  });
-  hits.add('pause_compendium_btn', f.ix + halfW + gapX, row2Y, halfW, rowH, () =>
-    app.openCompendium('recipes')
-  );
+  if (stepIdx === 2) {
+    // 3. Glowing servable catcake on serving plate (Design 11 card 3)
+    UI.drawUiIcon(c, sprites, 'serving_plate', cx, cy + size * 0.14, size * 0.76);
+    UI.drawCatcakeSprite(c, sprites, 1, cx, cy - size * 0.04, size * 0.52, { servable: true, happy: true });
+    return;
+  }
 
-  const row3Y = row2Y + rowH + 8;
-  UI.drawPillButton(c, f.ix, row3Y, halfW, rowH, {
-    style: 'wood',
-    icon: 'icon_restart',
-    sprites,
-    iconSize: 16,
-    text: '重开本关',
-    fontSize: 10.8,
-    radius: 10
-  });
-  hits.add('pause_restart_btn', f.ix, row3Y, halfW, rowH, () =>
-    app.startLevel(lvl.id)
-  );
-
-  UI.drawPillButton(c, f.ix + halfW + gapX, row3Y, halfW, rowH, {
-    style: 'danger',
-    icon: 'icon_home',
-    sprites,
-    iconSize: 16,
-    text: '返回选关',
-    fontSize: 10.8,
-    radius: 10
-  });
-  hits.add('pause_lobby_btn', f.ix + halfW + gapX, row3Y, halfW, rowH, () =>
-    app.onPauseReturnLobby()
-  );
+  // 4. Fever & Combo badge using our generated icon_fever_badge.webp (Design 11 card 4)
+  UI.drawUiIcon(c, sprites, 'icon_fever_badge', cx, cy - size * 0.08, size * 0.62);
+  UI.drawTagBadge(c, x + 5, y + size - 19, size - 10, 15, '星光热潮', 'purple', 8.0);
 }
 
 function renderHelpModal(ctx, metrics, app, hits) {
   const c = getSafeCtx(ctx);
-  const f = renderModalFrame(c, metrics, app, 540, 476, true);
   const sprites = app.sprites || {};
 
-  drawModalHeader(c, f, sprites, 'icon_help', '营业指南 · 一起做猫饼', '异形烘焙合成与实时甜点上菜法则', 38);
-  drawCloseButton(c, f, hits, app);
+  const f = beginModalFrame(c, metrics, app, {
+    maxW: 438,
+    desiredH: 560,
+    dismissOnOutside: true,
+    title: '玩法说明',
+    sheetTopInset: 34,
+    sheetBottomPad: 58
+  });
 
-  const cards = [
-    {
-      icon: 'btn_knead',
-      title: '1. 异形烤盘滑动与揉面补料',
-      body: '上下左右滑动使全盘猫饼同步滑移，同阶相邻合成为高一阶猫饼（单步不连合）；点击底部【揉面补料】可随时在空格烘出新面团。'
-    },
-    {
-      icon: 'serve_bell',
-      title: '2. 单击装盘、厨余冷却与移位叉',
-      body: '轻点亮暖金圈猫饼装进配餐托盘，凑齐需求即自动上菜！双击托盘槽位可丢入厨余篮（冷却 8 秒、断连击但 0 扣分）；移位叉可跨障挪移、互换或合并。'
-    },
-    {
-      icon: 'icon_stardust',
-      title: '3. 纯上菜唯一得分与连击热潮',
-      body: '盘内滑动、合成、补料、厨具与技能均得 0 分，唯独完成顾客整单上菜结算营业分！8 秒内连续上菜享最高 1.28 倍连击与 1.25 倍星光热潮。'
-    },
-    {
-      icon: 'tile_matcha',
-      title: '4. 风味染色、镀金王牌与正交破冰',
-      body: '停留在抹茶/草莓/镀金格自动染上风味（镀金永不降级且可万能顶替任意风味享 1.35 倍）；在冰封格正交相邻格合成或用移位叉点冰即可破冰！'
+  try {
+    drawCloseButton(c, f, hits, app);
+
+    const cards = [
+      {
+        title: '1. 滑动搓猫饼',
+        body: '上下左右滑动烤盘，合并相同猫饼升阶；停在抹茶/草莓/镀金格可染上专属风味！'
+      },
+      {
+        title: '2. 揉面补料与厨具',
+        body: '点击揉面补料随时往烤盘补充新猫饼；移位叉可跨障挪移破冰，升阶勺直升一阶。'
+      },
+      {
+        title: '3. 单击配餐上菜',
+        body: '单击发光猫饼装盘，凑齐套餐上菜得分！双击托盘可丢入8秒冷却厨余篮（0扣分）。'
+      },
+      {
+        title: '4. 连击与星光热潮',
+        body: '8秒内连续上菜叠最高1.28倍连击，攒满星光热潮享1.25倍全场加分！'
+      }
+    ];
+
+    const bodyY = f.sheetY + 18;
+    const bodyH = Math.max(220, f.sheetY + f.sheetH - 10 - bodyY);
+    const gap = 8;
+    const ch = Math.floor((bodyH - gap * (cards.length - 1)) / cards.length);
+
+    for (let i = 0; i < cards.length; i++) {
+      const it = cards[i];
+      const cy = bodyY + i * (ch + gap);
+      UI.drawKissaCard(c, f.ix, cy, f.iw, ch, {
+        tone: 'cream',
+        borderColor: '#5A3928',
+        radius: 13,
+        lineWidth: 2.2
+      });
+
+      const illuS = Math.min(62, ch - 14);
+      const illuX = f.ix + 8;
+      const illuY = Math.round(cy + (ch - illuS) * 0.5);
+      drawHelpIllustration(c, sprites, i, illuX, illuY, illuS);
+
+      const tx = illuX + illuS + 10;
+      const tw = Math.max(80, f.ix + f.iw - 10 - tx);
+      UI.drawFitText(c, it.title, tx, cy + Math.round(ch * 0.28), tw, 13.8, 10.2, 900, '#5A3928', 'left', 'middle');
+      UI.drawWrappedText(
+        c,
+        it.body,
+        tx,
+        cy + Math.round(ch * 0.45),
+        tw,
+        14.2,
+        UI.fontStr(10.0, 700),
+        '#754C36',
+        'left',
+        3
+      );
     }
-  ];
 
-  const bodyY = f.iy + 36;
-  const bodyH = Math.max(220, f.iy + f.ih - bodyY);
-  const gap = 7;
-  const ch = Math.floor((bodyH - gap * (cards.length - 1)) / cards.length);
-
-  for (let i = 0; i < cards.length; i++) {
-    const it = cards[i];
-    const cy = bodyY + i * (ch + gap);
-    UI.drawKissaCard(c, f.ix, cy, f.iw, ch, { tone: i === 2 ? 'amber' : 'cream', radius: 10 });
-    UI.drawUiIcon(c, sprites, it.icon, f.ix + 22, cy + ch * 0.5, 26);
-    const tx = f.ix + 42;
-    const tw = Math.max(80, f.iw - 52);
-    UI.drawFitText(c, it.title, tx, cy + 16, tw, 11.2, 9.0, 900, '#4A2C2A', 'left', 'middle');
-    UI.drawWrappedText(
-      c,
-      it.body,
-      tx,
-      cy + 30,
-      tw,
-      13.5,
-      UI.fontStr(9.3, 700),
-      '#6E463B',
-      'left',
-      4
-    );
+    // Bottom Honey-Gold 3D "我知道了" Button (Design 11)
+    const okW = Math.min(188, f.iw - 24);
+    const okH = 42;
+    const okX = Math.round(f.cardX + (f.cardW - okW) * 0.5);
+    const okY = f.sheetY + f.sheetH + 8;
+    UI.drawPillButton(c, okX, okY, okW, okH, {
+      variant: 'primary',
+      label: '我知道了',
+      fontSize: 16.5,
+      radius: okH * 0.5,
+      pressed: isPressed(app, 'help_ok_btn')
+    });
+    hits.add('help_ok_btn', okX, okY, okW, okH, () => app.closeModal());
+  } finally {
+    endModalFrame(c);
   }
 }
 
+/* ======================== 操作确认弹窗 (ConfirmModal) ======================== */
+
 function renderConfirmModal(ctx, metrics, app, hits) {
   const c = getSafeCtx(ctx);
-  const f = renderModalFrame(c, metrics, app, 384, 224, false);
-  const sprites = app.sprites || {};
   const cfg = app.confirmDialog || {
     title: '操作确认',
     message: '确认执行该操作吗？',
@@ -1931,43 +2844,59 @@ function renderConfirmModal(ctx, metrics, app, hits) {
     cancelText: '取消'
   };
 
-  drawModalHeader(c, f, sprites, 'icon_warn', cfg.title || '操作确认', '', 38);
-  drawCloseButton(c, f, hits, app, () => app.confirmCancel());
-
-  UI.drawWrappedText(
-    c,
-    cfg.message || '确认放弃当前营业进度并返回选关大厅吗？',
-    f.ix + 6,
-    f.iy + 46,
-    f.iw - 12,
-    18,
-    UI.fontStr(11.2, 700),
-    '#5A3A28',
-    'left',
-    4
-  );
-
-  const btnH = 40;
-  const btnY = f.iy + f.ih - btnH;
-  const gap = 10;
-  const bw = Math.floor((f.iw - gap) / 2);
-
-  UI.drawPillButton(c, f.ix, btnY, bw, btnH, {
-    style: 'wood',
-    text: cfg.cancelText || '取消',
-    fontSize: 12.0,
-    radius: 10
+  const f = beginModalFrame(c, metrics, app, {
+    maxW: 380,
+    desiredH: 236,
+    dismissOnOutside: false,
+    title: cfg.title || '操作确认',
+    sheetTopInset: 30,
+    sheetBottomPad: 12
   });
-  hits.add('confirm_cancel', f.ix, btnY, bw, btnH, () => app.confirmCancel());
 
-  UI.drawPillButton(c, f.ix + bw + gap, btnY, bw, btnH, {
-    style: 'cta',
-    text: cfg.confirmText || '确认',
-    fontSize: 12.0,
-    radius: 10
-  });
-  hits.add('confirm_accept', f.ix + bw + gap, btnY, bw, btnH, () => app.confirmAccept());
+  try {
+    drawCloseButton(c, f, hits, app, () => app.confirmCancel());
+
+    UI.drawWrappedText(
+      c,
+      cfg.message || '确认放弃当前营业进度并返回选关大厅吗？',
+      f.ix + f.iw * 0.5,
+      f.iy + 16,
+      f.iw - 16,
+      19,
+      UI.fontStr(12.2, 800),
+      '#5A3928',
+      'center',
+      4
+    );
+
+    const btnH = 40;
+    const btnY = f.iy + f.ih - btnH;
+    const gap = 10;
+    const bw = Math.floor((f.iw - gap) / 2);
+
+    UI.drawPillButton(c, f.ix, btnY, bw, btnH, {
+      variant: 'wood',
+      label: cfg.cancelText || '取消',
+      fontSize: 13.5,
+      radius: btnH * 0.5,
+      pressed: isPressed(app, 'confirm_cancel')
+    });
+    hits.add('confirm_cancel', f.ix, btnY, bw, btnH, () => app.confirmCancel());
+
+    UI.drawPillButton(c, f.ix + bw + gap, btnY, bw, btnH, {
+      variant: 'primary',
+      label: cfg.confirmText || '确认',
+      fontSize: 13.5,
+      radius: btnH * 0.5,
+      pressed: isPressed(app, 'confirm_accept')
+    });
+    hits.add('confirm_accept', f.ix + bw + gap, btnY, bw, btnH, () => app.confirmAccept());
+  } finally {
+    endModalFrame(c);
+  }
 }
+
+/* ======================== Modal Dispatcher ======================== */
 
 function renderActiveModal(ctx, metrics, app, hits, nowSec) {
   if (!app || !app.activeModal) {
@@ -2018,6 +2947,8 @@ function renderActiveModal(ctx, metrics, app, hits, nowSec) {
       break;
   }
 }
+
+/* ======================== 6-Step Non-Blocking Spotlight Tutorial ======================== */
 
 function collectTutorialSpotlights(step, app, hits) {
   const rects = [];
@@ -2131,17 +3062,17 @@ function renderTutorialOverlay(ctx, metrics, app, hits, nowSec) {
       const sp = spotlights[i];
       appendRoundRectSubpath(c, sp.x - 4, sp.y - 4, sp.w + 8, sp.h + 8, 10);
     }
-    c.fillStyle = 'rgba(16, 9, 5, 0.44)';
+    c.fillStyle = 'rgba(18, 22, 42, 0.46)';
     try {
       c.fill('evenodd');
     } catch (_) {
-      // Fallback when evenodd rule unsupported: soft corner vignette only
+      // Fallback when evenodd rule unsupported
     }
 
     for (let i = 0; i < spotlights.length; i++) {
       const sp = spotlights[i];
-      c.strokeStyle = `rgba(255, 220, 102, ${(0.72 + 0.26 * pulse).toFixed(3)})`;
-      c.lineWidth = 2.8;
+      c.strokeStyle = `rgba(255, 222, 112, ${(0.76 + 0.24 * pulse).toFixed(3)})`;
+      c.lineWidth = 3.0;
       UI.roundRectPath(c, sp.x - 4, sp.y - 4, sp.w + 8, sp.h + 8, 10);
       c.stroke();
     }
@@ -2149,7 +3080,7 @@ function renderTutorialOverlay(ctx, metrics, app, hits, nowSec) {
     c.restore();
   }
 
-  // Animated paw guide cue on primary spotlight
+  // Animated v0.9.0 golden paw guide cue on primary spotlight
   if (spotlights.length > 0) {
     const p0 = spotlights[0];
     const isSlide = step.id === 'intro_slide_1';
@@ -2158,33 +3089,33 @@ function renderTutorialOverlay(ctx, metrics, app, hits, nowSec) {
     UI.drawUiIcon(
       c,
       app.sprites || {},
-      'icon_paw_guide',
+      'icon_paw_marker',
       p0.x + p0.w * 0.5 + dx,
       p0.y + p0.h * 0.5 + dy + 10,
-      24
+      26
     );
   }
 
-  // Floating non-blocking instruction card
+  // Floating non-blocking v0.9.0 storybook instruction card
   const cardW = Math.min(352, width - 24);
-  const cardH = 82;
+  const cardH = 84;
   const cardX = Math.round((width - cardW) * 0.5);
   const cardY = chooseGuideCardY(topBound, botBound, cardH, spotlights);
 
-  UI.drawWoodBoard(c, cardX, cardY, cardW, cardH, 13, false);
-  UI.drawParchmentSheet(c, cardX + 5, cardY + 5, cardW - 10, cardH - 10, 9);
+  UI.drawWoodBoard(c, cardX, cardY, cardW, cardH, 14, false);
+  UI.drawParchmentSheet(c, cardX + 5, cardY + 5, cardW - 10, cardH - 10, 10);
 
-  UI.drawTagBadge(c, cardX + 12, cardY + 11, 82, 18, step.tag || '新手引导', 'amber', 8.8);
+  UI.drawTagBadge(c, cardX + 12, cardY + 11, 82, 19, step.tag || '新手引导', 'amber', 9.0);
   UI.drawFitText(
     c,
     step.title || '',
     cardX + 100,
-    cardY + 20,
+    cardY + 20.5,
     cardW - 166,
-    11.8,
+    12.0,
     9.5,
     900,
-    '#4A2C2A',
+    '#5A3928',
     'left',
     'middle'
   );
@@ -2194,10 +3125,10 @@ function renderTutorialOverlay(ctx, metrics, app, hits, nowSec) {
   const skipX = cardX + cardW - 12 - skipW;
   const skipY = cardY + 10;
   UI.drawPillButton(c, skipX, skipY, skipW, skipH, {
-    style: 'card',
-    text: '跳过',
-    fontSize: 9.2,
-    radius: 7
+    variant: 'card',
+    label: '跳过',
+    fontSize: 9.4,
+    radius: 8
   });
   app.tutorialSkipRect = { x: skipX, y: skipY, w: skipW, h: skipH };
 
@@ -2205,11 +3136,11 @@ function renderTutorialOverlay(ctx, metrics, app, hits, nowSec) {
     c,
     step.text || '',
     cardX + 14,
-    cardY + 36,
+    cardY + 37,
     cardW - 28,
     15,
     UI.fontStr(10.0, 700),
-    '#5A3A28',
+    '#5A3928',
     'left',
     2
   );

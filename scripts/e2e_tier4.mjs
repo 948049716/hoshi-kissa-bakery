@@ -1338,7 +1338,7 @@ export const TIER4_TESTS = [
     id: 'T4-08',
     tier: 4,
     features: ['F01', 'F10', 'F16'],
-    title: 'L3-8: Zero runtime/console exceptions, offline asset referential integrity (30/30), legacy purge & <2.5MB package',
+    title: 'L3-8: Zero runtime/console exceptions, offline asset referential integrity (69/69 WebP + font), legacy purge & <2.5MB package',
     viewport: { width: 390, height: 844, mobile: true, dpr: 2 },
     query: '?safeTop=47&safeBottom=34&capsule=1&cloud=0',
     run: async (ctx) => {
@@ -1347,12 +1347,13 @@ export const TIER4_TESTS = [
 
       const st = await ctx.getState();
       ctx.assertEq(st.cloudStatus, 'local_only', 'Offline ?cloud=0 enters local_only mode cleanly');
-      ctx.assertEq(st.assetsTotal, 30, 'Exact 30 post-cleanup runtime assets');
-      ctx.assertEq(st.assetsLoaded, 30, '100% of runtime assets loaded');
+      ctx.assertEq(st.assetsTotal, 69, 'Exact 69 v0.9.0 runtime WebP assets');
+      ctx.assertEq(st.assetsLoaded, 69, '100% of 69 runtime WebP assets loaded');
 
-      // Open offline leaderboard & compendium to ensure zero offline errors
+      // Open offline leaderboard (including friends tab) & compendium to ensure zero offline errors
       await ctx.clickHit('dock_leaderboard', { viaCdp: true });
       await ctx.clickHit('leaderboard_tab_score', { viaCdp: true });
+      await ctx.clickHit('leaderboard_tab_friends', { viaCdp: true });
       await ctx.clickHit('modal_close', { viaCdp: true });
       await ctx.clickHit('dock_compendium', { viaCdp: true });
       await ctx.clickHit('modal_close', { viaCdp: true });
@@ -1370,20 +1371,29 @@ export const TIER4_TESTS = [
       // Verify 100% of constants.ASSET_PATHS exist on disk
       const consts = await ctx.requireBundledModule('./src/constants.js');
       const assetRefs = collectStringLeafPaths(consts && consts.ASSET_PATHS);
-      ctx.assert(assetRefs.size >= 25, `ASSET_PATHS should reference runtime assets (found ${assetRefs.size})`);
+      ctx.assertEq(assetRefs.size, 69, `ASSET_PATHS should reference exact 69 v0.9.0 WebP assets (found ${assetRefs.size})`);
       for (const relPath of assetRefs) {
         const abs = path.join(ctx.minigameDir, relPath);
         ctx.assert(fs.existsSync(abs) && fs.statSync(abs).size > 0, `Missing referenced asset: ${relPath}`);
       }
 
-      // Verify exact 30 files in 05-微信小游戏版本/assets/ and zero legacy v1 physics/tier_1..9 leftovers
+      // Verify exact 69 WebPs + kissa_round.ttf in 05-微信小游戏版本/assets/ and zero legacy PNG/JPG leftovers
       const assetsDir = path.join(ctx.minigameDir, 'assets');
-      const assetFiles = fs.readdirSync(assetsDir).filter((f) => !f.startsWith('.'));
-      ctx.assertEq(assetFiles.length, 30, `Expected exact 30 files in assets/, got ${assetFiles.length}`);
-      const forbiddenAsset = assetFiles.find((f) =>
-        /^(tier_[1-9](_act|_int)?\.png|title_hero\.jpg|event_yarn_ball\.png|tool_shake\.png)$/i.test(f)
-      );
-      ctx.assert(!forbiddenAsset, `Legacy v1 asset must be deleted: ${forbiddenAsset}`);
+      const walkAssets = (dir, acc = []) => {
+        for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+          if (ent.name.startsWith('.')) continue;
+          const full = path.join(dir, ent.name);
+          if (ent.isDirectory()) walkAssets(full, acc);
+          else acc.push(path.relative(ctx.minigameDir, full).split(path.sep).join('/'));
+        }
+        return acc;
+      };
+      const allAssetFiles = walkAssets(assetsDir);
+      const webpFiles = allAssetFiles.filter((f) => f.endsWith('.webp'));
+      const legacyRaster = allAssetFiles.filter((f) => /\.(png|jpe?g)$/i.test(f));
+      ctx.assertEq(webpFiles.length, 69, `Expected exact 69 WebP files in assets/, got ${webpFiles.length}`);
+      ctx.assertEq(legacyRaster.length, 0, `Legacy PNG/JPG residue found in assets/: ${legacyRaster.join(', ')}`);
+      ctx.assert(allAssetFiles.includes('assets/fonts/kissa_round.ttf'), 'Missing assets/fonts/kissa_round.ttf');
 
       for (const legacySrc of ['physics.js', 'physics_shapes.js', 'jar_renderer.js']) {
         ctx.assert(

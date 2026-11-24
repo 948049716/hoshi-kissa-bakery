@@ -2596,26 +2596,48 @@ function serveOneCustomerOnLevel1(dbg) {
 }
 
 async function runSectionE() {
-  await runTest('UT-M01', '清理后旧版 65 文件零残留、30 运行时资产双射与 <2.5MB 包体门禁', () => {
+  await runTest('UT-M01', '清理后旧版 65 文件零残留、69 张 v0.9.0 WebP 双射、圆体子集字体与 <2.5MB 包体门禁', () => {
     const legacyPaths = buildExpected65DeletedPaths();
     assert.equal(legacyPaths.length, 65);
     const lingering = legacyPaths.filter((rel) => fs.existsSync(path.join(REPO_ROOT, rel)));
     assert.deepEqual(lingering, [], `Legacy v1 files still present: ${lingering.join(', ')}`);
 
     const constAssetSet = collectAssetPathsFromConstants(Constants.ASSET_PATHS);
-    assert.equal(constAssetSet.size, 30);
+    assert.equal(constAssetSet.size, 69);
+    assert.equal(Array.isArray(Constants.V090_ASSET_LIST) && Constants.V090_ASSET_LIST.length, 69);
 
-    const diskAssetFiles = fs
-      .readdirSync(ASSETS_DIR)
-      .filter((f) => !f.startsWith('.'))
-      .map((f) => `assets/${f}`)
+    const allDiskAssets = walkFilesExcludingCloud(ASSETS_DIR)
+      .map((f) => path.relative(MINIGAME_DIR, f.path).split(path.sep).join('/'))
+      .filter((rel) => !path.basename(rel).startsWith('.'))
       .sort();
-    assert.equal(diskAssetFiles.length, 30);
 
-    const onlyOnDisk = diskAssetFiles.filter((p) => !constAssetSet.has(p));
-    const onlyInConst = [...constAssetSet].filter((p) => !diskAssetFiles.includes(p));
+    // Zero legacy PNG/JPG residue inside assets/
+    const legacyRaster = allDiskAssets.filter((p) => /\.(png|jpe?g)$/i.test(p));
+    assert.deepEqual(legacyRaster, [], `Legacy PNG/JPG files left in assets/: ${legacyRaster.join(', ')}`);
+
+    // Exact 69 WebP bijection under assets/ui_v090/
+    const diskWebpFiles = allDiskAssets.filter((p) => p.endsWith('.webp')).sort();
+    assert.equal(diskWebpFiles.length, 69);
+    const onlyOnDisk = diskWebpFiles.filter((p) => !constAssetSet.has(p));
+    const onlyInConst = [...constAssetSet].filter((p) => !diskWebpFiles.includes(p));
     assert.deepEqual(onlyOnDisk, []);
     assert.deepEqual(onlyInConst, []);
+
+    // Valid subsetted TrueType font assets/fonts/kissa_round.ttf
+    const fontAbs = path.join(ASSETS_DIR, 'fonts', 'kissa_round.ttf');
+    assert.ok(fs.existsSync(fontAbs), 'Missing subsetted font assets/fonts/kissa_round.ttf');
+    const fontBuf = fs.readFileSync(fontAbs);
+    assert.ok(fontBuf.length > 50_000 && fontBuf.length < 600_000, `Unexpected kissa_round.ttf size: ${fontBuf.length}`);
+    assert.equal(fontBuf.readUInt32BE(0), 0x00010000, 'kissa_round.ttf must have valid TrueType sfnt header');
+
+    // Exact 13 lossless v0.9.0 design images in 01-游戏效果图/
+    const designDir = path.join(REPO_ROOT, '01-游戏效果图');
+    const designImgs = fs.readdirSync(designDir).filter((f) => /\.(jpe?g|png|webp)$/i.test(f));
+    assert.equal(designImgs.length, 13, `Expected 13 v0.9.0 design images in 01-游戏效果图/, got ${designImgs.length}`);
+    assert.ok(
+      designImgs.includes('01_标题首屏_TitleScreen（备用）.jpg'),
+      'Reserve title screen design image must be present and marked 备用'
+    );
 
     const bundleFiles = walkFilesExcludingCloud(MINIGAME_DIR);
     const totalBytes = bundleFiles.reduce((sum, f) => sum + f.size, 0);
@@ -2737,8 +2759,8 @@ async function runSectionE() {
 
         await env.flushAssets();
         let st = dbg.getState();
-        assert.equal(st.assetsTotal, 30);
-        assert.equal(st.assetsLoaded, 30);
+        assert.equal(st.assetsTotal, 69);
+        assert.equal(st.assetsLoaded, 69);
         assert.equal(st.screen, 'lobby');
         assert.equal(st.activeModal, null);
 
@@ -2793,12 +2815,12 @@ async function runSectionE() {
         }
         verifyHitsGeometry(st.hits, st.metrics, `${vp.label}:level_preview`);
 
-        // Shop modal across all 4 tabs
+        // Shop modal across all 4 tabs (single-column catcakes shows C1..C4 at top and scrolls to C7)
         dbg.openModal('shop');
         for (const [tabHit, expectedIds] of [
           [
             'shop_tab_catcakes',
-            ['modal_close', 'shop_buy_catcake_1', 'shop_buy_catcake_7']
+            ['modal_close', 'shop_buy_catcake_1', 'shop_buy_catcake_2', 'shop_buy_catcake_3']
           ],
           [
             'shop_tab_devices',
@@ -2821,18 +2843,30 @@ async function runSectionE() {
           verifyHitsGeometry(st.hits, st.metrics, `${vp.label}:tab_${tabHit}`);
         }
 
-        // Compendium & Dual Leaderboard modals
+        // Compendium & 3-Tab Leaderboard modals
         dbg.openModal('compendium');
         st = dbg.getState();
         assert.ok(st.hits.some((h) => h.id === 'compendium_tab_catcakes'));
         assert.ok(st.hits.some((h) => h.id === 'compendium_tab_recipes'));
+        assert.ok(st.hits.some((h) => h.id === 'compendium_cake_1'));
+        assert.ok(st.hits.some((h) => h.id === 'compendium_cake_7'));
         verifyHitsGeometry(st.hits, st.metrics, `${vp.label}:compendium`);
 
         dbg.openModal('leaderboard');
         st = dbg.getState();
         assert.ok(st.hits.some((h) => h.id === 'leaderboard_tab_stars'));
         assert.ok(st.hits.some((h) => h.id === 'leaderboard_tab_score'));
+        assert.ok(st.hits.some((h) => h.id === 'leaderboard_tab_friends'));
         verifyHitsGeometry(st.hits, st.metrics, `${vp.label}:leaderboard`);
+        dbg.clickHit('leaderboard_tab_friends');
+        st = dbg.getState();
+        assert.equal(st.leaderboardBoardType, 'friends');
+        verifyHitsGeometry(st.hits, st.metrics, `${vp.label}:leaderboard_friends`);
+
+        dbg.openModal('help');
+        st = dbg.getState();
+        assert.ok(st.hits.some((h) => h.id === 'help_ok_btn'));
+        verifyHitsGeometry(st.hits, st.metrics, `${vp.label}:help`);
         dbg.closeModal();
 
         // Play HUD

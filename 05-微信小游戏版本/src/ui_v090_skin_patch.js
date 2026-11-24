@@ -1,0 +1,1345 @@
+'use strict';
+
+/**
+ * 《一起做猫饼》v0.9.0 — 严格对齐 13 张定稿 UI 设计图与原 src/ui_draw.js 的无损换皮补丁与新增组件库
+ *
+ * 设计原则：
+ *   1. 不破坏原 ui_draw.js 里的微信兼容工具、HitRegistry、精灵渲染与安全几何逻辑；
+ *   2. 严格匹配原文件真实导出的 KISSA_THEME 键名与核心视觉函数签名，并完全兼容 style/tone/icon/sprites/mutedSlash 等参数；
+ *   3. 零 hsl()/hsla() 颜色字符串、零彩色 Unicode Emoji、全量 Node 无头 stub-ctx 安全护栏；
+ *   4. 在原 src/ui_draw.js 末尾仅需追加 2 行代码即可无损升级全站视觉并挂载 v0.9.0 新组件：
+ *        const { applyV090Skin } = require('./ui_v090_skin_patch');
+ *        applyV090Skin(module.exports);
+ */
+
+const V090_KISSA_THEME = {
+  ink: '#5A3928',        // 全站统一暖深棕描边与主字色
+  inkSoft: '#754C36',    // 次级暖棕文字
+  inkMuted: '#99735B',   // 说明/禁用浅棕文字
+  creamLight: '#FFF8EC', // 奶油羊皮纸主底板
+  creamMid: '#F7EAD2',   // 内嵌米白卡片底
+  creamDeep: '#F2E2C4',  // 凹槽底板 / 统计底
+  borderWarm: '#8A5634', // 烘焙暖木框色
+  brassLight: '#FFD466', // 蜂蜜金按钮亮部
+  brassMid: '#F5A623',   // 蜂蜜金按钮主色
+  brassDark: '#C87A1E'   // 蜂蜜金按钮 3D 厚度底边
+};
+
+const V090_EXT_COLORS = {
+  woodDark: '#6D432B',
+  woodMain: '#8A5634',
+  woodLight: '#A86F47',
+  woodDeep: '#593622',
+  awningRed: '#D95D48',
+  awningCream: '#FFF3DF',
+  urgentOrange: '#F27C38',
+  vipGold: '#F5B841',
+  feverStart: '#B56CF5',
+  feverEnd: '#F5B841',
+  patienceGreen: '#74C353',
+  patienceYellow: '#F5B841',
+  patienceRed: '#E85C5C',
+  priorityCyan: '#4BE8FF',
+  lockedCardBg: '#DFD6C7',
+  lockedBorder: '#8C8073',
+  modalScrim: 'rgba(18, 22, 42, 0.64)'
+};
+
+const CHAPTER_THEMES = {
+  amber: {
+    skyTop: '#1A213D',
+    skyMid: '#262F54',
+    skyBot: '#35406B',
+    pathColor: '#5B6285',
+    starColor: '#FFE599'
+  },
+  sakura: {
+    skyTop: '#3B2549',
+    skyMid: '#5E3B62',
+    skyBot: '#8D5870',
+    pathColor: '#F6E4CE',
+    starColor: '#FFD6E7'
+  },
+  moonlight: {
+    skyTop: '#161F45',
+    skyMid: '#25356B',
+    skyBot: '#3E5594',
+    pathColor: '#BFE4FF',
+    starColor: '#FFF2B2'
+  }
+};
+
+const DEFAULT_FALLBACK_FONT = 'PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif';
+let _customFontFamily = '';
+let _boundUi = null;
+
+function _isCtx(ctx) {
+  try {
+    return Boolean(
+      ctx &&
+        typeof ctx === 'object' &&
+        typeof ctx.save === 'function' &&
+        typeof ctx.restore === 'function' &&
+        typeof ctx.beginPath === 'function' &&
+        typeof ctx.closePath === 'function' &&
+        typeof ctx.fill === 'function' &&
+        typeof ctx.stroke === 'function'
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+function _num(v, fb = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fb;
+}
+
+function _clamp(v, lo, hi) {
+  const n = _num(v, lo);
+  return n < lo ? lo : n > hi ? hi : n;
+}
+
+function _linearGrad(ctx, x0, y0, x1, y1, fallbackColor) {
+  try {
+    if (typeof ctx.createLinearGradient === 'function') {
+      const g = ctx.createLinearGradient(x0, y0, x1, y1);
+      if (g && typeof g.addColorStop === 'function') return g;
+    }
+  } catch (_) {}
+  return fallbackColor;
+}
+
+function _addStop(grad, offset, color) {
+  try {
+    if (grad && typeof grad.addColorStop === 'function') {
+      grad.addColorStop(_clamp(offset, 0, 1), color);
+    }
+  } catch (_) {}
+}
+
+function _imgDims(img) {
+  if (!img || typeof img !== 'object') return null;
+  const w = _num(img.naturalWidth || img.width, 0);
+  const h = _num(img.naturalHeight || img.height, 0);
+  if (w > 0 && h > 0) return { w, h };
+  return null;
+}
+
+/**
+ * 启动时加载裁剪后的圆体 TTF（约 180~280KB），自动注入全站 fontStr()
+ * 保留系统字体回退以防微信好友榜生僻昵称变方块
+ */
+function initGameFont(fontPath = 'assets/fonts/kissa_round.ttf') {
+  if (_customFontFamily) return getFontFamily();
+  if (typeof wx !== 'undefined' && wx && typeof wx.loadFont === 'function') {
+    try {
+      const fam = wx.loadFont(fontPath);
+      if (typeof fam === 'string' && fam.trim()) {
+        _customFontFamily = fam.trim();
+      }
+    } catch (_) {
+      // 降级为系统圆体/无衬线字体
+    }
+  }
+  return getFontFamily();
+}
+
+function getFontFamily() {
+  return _customFontFamily ? `"${_customFontFamily}", ${DEFAULT_FALLBACK_FONT}` : DEFAULT_FALLBACK_FONT;
+}
+
+function fontStr(px, weight = 700) {
+  const safePx = Math.max(6, Math.min(120, _num(px, 14)));
+  const safeW = Math.max(100, Math.min(900, Math.round(_num(weight, 700))));
+  return `${safeW} ${safePx}px ${getFontFamily()}`;
+}
+
+/**
+ * 动态计算微信小游戏安全区布局参数（自动避让右上角胶囊与底部 Home Indicator）
+ * 同时兼容无头 E2E/Node 传入的 metrics 参数
+ */
+function getSafeLayout(screenW, screenH, metrics = null) {
+  const sw = Math.max(320, _num(screenW, 390));
+  const sh = Math.max(480, _num(screenH, 844));
+  let top = 20;
+  let capsuleTop = 10;
+  let capsuleBottom = 56;
+  let capsuleLeft = sw - 98;
+  let capsuleRight = sw - 8;
+  let safeBottom = 14;
+
+  if (metrics && typeof metrics === 'object') {
+    if (Number.isFinite(metrics.safeTop)) top = Math.max(8, metrics.safeTop);
+    if (Number.isFinite(metrics.safeBottom)) safeBottom = Math.max(8, metrics.safeBottom);
+    const mr = metrics.menuRect;
+    if (mr && typeof mr === 'object' && Number.isFinite(mr.bottom) && mr.bottom > 0) {
+      capsuleTop = Math.max(4, Math.round(_num(mr.top, top)));
+      capsuleBottom = Math.round(mr.bottom) + 8;
+      capsuleLeft = Math.floor(_num(mr.left, sw - 96)) - 8;
+      capsuleRight = Math.ceil(_num(mr.right, sw - 8));
+      return {
+        top,
+        capsuleTop,
+        capsuleBottom,
+        capsuleLeft,
+        capsuleRight,
+        safeBottom,
+        contentPaddingX: Math.round(sw * 0.035)
+      };
+    }
+  }
+
+  if (typeof wx !== 'undefined' && wx) {
+    try {
+      const sys = typeof wx.getWindowInfo === 'function'
+        ? wx.getWindowInfo()
+        : typeof wx.getSystemInfoSync === 'function'
+        ? wx.getSystemInfoSync()
+        : null;
+      if (sys && sys.safeArea) {
+        top = Math.max(10, _num(sys.safeArea.top, top));
+        safeBottom = Math.max(10, _num(sys.windowHeight, sh) - _num(sys.safeArea.bottom, sh));
+      }
+      if (typeof wx.getMenuButtonBoundingClientRect === 'function') {
+        const rect = wx.getMenuButtonBoundingClientRect();
+        if (rect && rect.bottom) {
+          capsuleTop = Math.max(4, Math.round(_num(rect.top, top)));
+          capsuleBottom = Math.round(rect.bottom) + 8;
+          capsuleLeft = Math.floor(_num(rect.left, sw - 96)) - 8;
+          capsuleRight = Math.ceil(_num(rect.right, sw - 8));
+        }
+      }
+    } catch (_) {
+      // 使用安全默认值
+    }
+  }
+
+  return {
+    top,
+    capsuleTop,
+    capsuleBottom,
+    capsuleLeft,
+    capsuleRight,
+    safeBottom,
+    contentPaddingX: Math.round(sw * 0.035)
+  };
+}
+
+function _roundRect(ctx, x, y, w, h, r = 12) {
+  const radii = Array.isArray(r) ? r : [r, r, r, r];
+  const [tl, tr, br, bl] = radii.map((v) => Math.max(0, Math.min(_num(v, 0), w / 2, h / 2)));
+  ctx.beginPath();
+  ctx.moveTo(x + tl, y);
+  ctx.lineTo(x + w - tr, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + tr);
+  ctx.lineTo(x + w, y + h - br);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - br, y + h);
+  ctx.lineTo(x + bl, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - bl);
+  ctx.lineTo(x, y + tl);
+  ctx.quadraticCurveTo(x, y, x + tl, y);
+  ctx.closePath();
+}
+
+/**
+ * 卡通圆角描边字（强制 lineJoin='round' + miterLimit=2 防描边毛刺）
+ * 支持 maxWidth 自动等比缩字防裁剪
+ */
+function drawOutlinedText(ctx, text, x, y, opts = {}) {
+  if (!_isCtx(ctx)) return;
+  const o = opts && typeof opts === 'object' ? opts : {};
+  const size = Math.max(7, _num(o.size, 20));
+  const minSize = Math.max(6, _num(o.minSize, Math.max(8, size * 0.68)));
+  const weight = _num(o.weight, 800);
+  const fill = o.fill || V090_KISSA_THEME.creamLight;
+  const stroke = o.stroke !== undefined ? o.stroke : V090_KISSA_THEME.ink;
+  const strokeWidth = Math.max(0, _num(o.strokeWidth, 3.4));
+  const shadowOffsetY = Math.max(0, _num(o.shadowOffsetY, 1.4));
+  const align = o.align || 'center';
+  const baseline = o.baseline || 'middle';
+  const maxWidth = _num(o.maxWidth, 0);
+
+  const str = String(text === null || text === undefined ? '' : text);
+  if (!str) return;
+
+  ctx.save();
+  try {
+    let finalSize = size;
+    ctx.font = fontStr(finalSize, weight);
+    if (maxWidth > 0 && typeof ctx.measureText === 'function') {
+      let measured = _num(ctx.measureText(str).width, 0);
+      while (measured > maxWidth && finalSize > minSize) {
+        finalSize = Math.max(minSize, finalSize - 0.8);
+        ctx.font = fontStr(finalSize, weight);
+        measured = _num(ctx.measureText(str).width, 0);
+      }
+    }
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.miterLimit = 2;
+
+    const scaledStroke = strokeWidth > 0 ? Math.max(1.2, strokeWidth * (finalSize / size)) : 0;
+    const canStroke = typeof ctx.strokeText === 'function';
+    const canFill = typeof ctx.fillText === 'function';
+
+    if (shadowOffsetY > 0 && scaledStroke > 0 && canStroke) {
+      ctx.strokeStyle = 'rgba(90, 57, 40, 0.30)';
+      ctx.lineWidth = scaledStroke;
+      if (maxWidth > 0) ctx.strokeText(str, x, y + shadowOffsetY, maxWidth);
+      else ctx.strokeText(str, x, y + shadowOffsetY);
+    }
+    if (scaledStroke > 0 && stroke && canStroke) {
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = scaledStroke;
+      if (maxWidth > 0) ctx.strokeText(str, x, y, maxWidth);
+      else ctx.strokeText(str, x, y);
+    }
+    if (canFill) {
+      ctx.fillStyle = fill;
+      if (maxWidth > 0) ctx.fillText(str, x, y, maxWidth);
+      else ctx.fillText(str, x, y);
+    }
+  } catch (_) {} finally {
+    ctx.restore();
+  }
+}
+
+/* ======================== 原有核心函数无损视觉升级 ======================== */
+
+/**
+ * 暖木相框底板（严格匹配原签名 drawWoodBoard(ctx, x, y, w, h, radius = 15, withRivets = true)）
+ */
+function drawWoodBoard(ctx, x, y, w, h, radius = 15, withRivets = true) {
+  if (!_isCtx(ctx)) return;
+  const sx = _num(x, 0);
+  const sy = _num(y, 0);
+  const sw = _num(w, 0);
+  const sh = _num(h, 0);
+  if (!(sw > 0 && sh > 0)) return;
+  const rad = Math.max(0, _num(radius, 15));
+
+  ctx.save();
+  try {
+    ctx.shadowColor = 'rgba(26, 20, 18, 0.38)';
+    ctx.shadowBlur = 14;
+    ctx.shadowOffsetY = 5;
+
+    const grad = _linearGrad(ctx, sx, sy, sx, sy + sh, V090_EXT_COLORS.woodMain);
+    _addStop(grad, 0, V090_EXT_COLORS.woodLight);
+    _addStop(grad, 0.16, V090_EXT_COLORS.woodMain);
+    _addStop(grad, 1, V090_EXT_COLORS.woodDark);
+    _roundRect(ctx, sx, sy, sw, sh, rad);
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    ctx.shadowColor = 'rgba(0, 0, 0, 0)';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.lineWidth = 3.2;
+    ctx.strokeStyle = V090_KISSA_THEME.ink;
+    ctx.stroke();
+
+    // 微妙木纹水平线（仅在大木框可见）
+    if (sw > 80 && sh > 60) {
+      ctx.save();
+      try {
+        _roundRect(ctx, sx + 3, sy + 3, sw - 6, sh - 6, Math.max(4, rad - 3));
+        if (typeof ctx.clip === 'function') ctx.clip();
+        ctx.strokeStyle = 'rgba(90, 57, 40, 0.14)';
+        ctx.lineWidth = 1.2;
+        const step = Math.max(22, Math.round(sh / 14));
+        for (let gy = sy + 16; gy < sy + sh - 12; gy += step) {
+          ctx.beginPath();
+          ctx.moveTo(sx + 6, gy);
+          ctx.lineTo(sx + sw - 6, gy);
+          ctx.stroke();
+        }
+      } finally {
+        ctx.restore();
+      }
+    }
+
+    // 内框暖光高光线
+    if (sw > 10 && sh > 10) {
+      _roundRect(ctx, sx + 3.5, sy + 3.5, sw - 7, sh - 7, Math.max(4, rad - 3.5));
+      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = 'rgba(255, 240, 212, 0.30)';
+      ctx.stroke();
+    }
+
+    if (withRivets && sw >= 64 && sh >= 48) {
+      const inset = 11;
+      const pts = [
+        [sx + inset, sy + inset],
+        [sx + sw - inset, sy + inset],
+        [sx + inset, sy + sh - inset],
+        [sx + sw - inset, sy + sh - inset]
+      ];
+      for (let i = 0; i < pts.length; i++) {
+        const rx = pts[i][0];
+        const ry = pts[i][1];
+        ctx.beginPath();
+        ctx.arc(rx, ry, 3.0, 0, Math.PI * 2);
+        ctx.fillStyle = '#FFE08A';
+        ctx.fill();
+        ctx.lineWidth = 1.4;
+        ctx.strokeStyle = V090_KISSA_THEME.ink;
+        ctx.stroke();
+      }
+    }
+  } catch (_) {} finally {
+    ctx.restore();
+  }
+}
+
+/**
+ * 奶油羊皮纸内板（严格匹配原签名）
+ */
+function drawParchmentSheet(
+  ctx,
+  x,
+  y,
+  w,
+  h,
+  radius = 11,
+  topCol = V090_KISSA_THEME.creamLight,
+  botCol = V090_KISSA_THEME.creamMid,
+  borderCol = V090_KISSA_THEME.ink,
+  lineWidth = 2.4
+) {
+  if (!_isCtx(ctx)) return;
+  const sx = _num(x, 0);
+  const sy = _num(y, 0);
+  const sw = _num(w, 0);
+  const sh = _num(h, 0);
+  if (!(sw > 0 && sh > 0)) return;
+  const rad = Math.max(0, _num(radius, 11));
+  const lw = Math.max(0, _num(lineWidth, 2.4));
+
+  ctx.save();
+  try {
+    const grad = _linearGrad(ctx, sx, sy, sx, sy + sh, topCol);
+    _addStop(grad, 0, topCol);
+    _addStop(grad, 1, botCol);
+    _roundRect(ctx, sx, sy, sw, sh, rad);
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    if (sw > 14 && sh > 14) {
+      _roundRect(ctx, sx + 2, sy + 2, sw - 4, sh - 4, Math.max(3, rad - 2));
+      ctx.lineWidth = 1.1;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.56)';
+      ctx.stroke();
+    }
+
+    if (lw > 0) {
+      _roundRect(ctx, sx, sy, sw, sh, rad);
+      ctx.lineWidth = lw;
+      ctx.strokeStyle = borderCol;
+      ctx.stroke();
+    }
+  } catch (_) {} finally {
+    ctx.restore();
+  }
+}
+
+/**
+ * 统一奶油卡片组件（严格兼容原 tone 与 v0.9.0 locked/selected/highlighted/金银铜行色）
+ */
+function drawKissaCard(ctx, x, y, w, h, opts = {}) {
+  if (!_isCtx(ctx)) return;
+  const sx = _num(x, 0);
+  const sy = _num(y, 0);
+  const sw = _num(w, 0);
+  const sh = _num(h, 0);
+  if (!(sw > 0 && sh > 0)) return;
+  const o = opts && typeof opts === 'object' ? opts : {};
+
+  const radius = Math.max(0, _num(o.radius, 12));
+  const tone = typeof o.tone === 'string' ? o.tone : 'cream';
+  const locked = Boolean(o.locked);
+  const isHi = Boolean(o.selected || o.highlighted || tone === 'selected');
+  const borderOverride = typeof o.borderColor === 'string' && o.borderColor ? o.borderColor : null;
+  const customFill = typeof o.fill === 'string' && o.fill ? o.fill : null;
+  const customLineW = Number.isFinite(o.lineWidth) ? o.lineWidth : null;
+
+  const TONE_MAP = {
+    cream: { top: '#FFFDF7', bot: '#F7EAD2', border: '#5A3928', lip: 'rgba(90, 57, 40, 0.14)' },
+    recess: { top: '#F5E7CE', bot: '#EEDAB8', border: '#C9AE86', lip: null },
+    selected: { top: '#FFF9DE', bot: '#FFE89E', border: '#F5B841', lip: 'rgba(200, 122, 30, 0.25)' },
+    equipped: { top: '#F4FBE8', bot: '#E0F1CB', border: '#5A7F2E', lip: 'rgba(72, 108, 36, 0.20)' },
+    amber: { top: '#FFF4CF', bot: '#FBE09B', border: '#A86F32', lip: 'rgba(138, 86, 52, 0.18)' },
+    soft: { top: '#F3E8D6', bot: '#E9DBC2', border: '#9E856B', lip: null },
+    wood: { top: '#945F3B', bot: '#6D432B', border: '#5A3928', lip: 'rgba(40, 22, 12, 0.28)' },
+    goldRow: { top: '#FFF1AE', bot: '#F9DC74', border: '#8A5634', lip: 'rgba(138, 86, 52, 0.18)' },
+    silverRow: { top: '#F1F4F8', bot: '#DCE2EC', border: '#6B7482', lip: 'rgba(60, 70, 88, 0.16)' },
+    bronzeRow: { top: '#F7DBBF', bot: '#E9B98B', border: '#8A5634', lip: 'rgba(120, 68, 36, 0.18)' },
+    myRankRow: { top: '#FFD35E', bot: '#F39E22', border: '#5A3928', lip: 'rgba(90, 57, 40, 0.28)' }
+  };
+  const pal = TONE_MAP[tone] || TONE_MAP.cream;
+
+  ctx.save();
+  try {
+    if (!locked && pal.lip) {
+      _roundRect(ctx, sx, sy + 2, sw, sh, radius);
+      ctx.fillStyle = pal.lip;
+      ctx.fill();
+    }
+
+    _roundRect(ctx, sx, sy, sw, sh, radius);
+    if (locked) {
+      ctx.fillStyle = V090_EXT_COLORS.lockedCardBg;
+    } else if (customFill) {
+      ctx.fillStyle = customFill;
+    } else {
+      const grad = _linearGrad(ctx, sx, sy, sx, sy + sh, pal.top);
+      _addStop(grad, 0, o.topCol || pal.top);
+      _addStop(grad, 1, o.botCol || pal.bot);
+      ctx.fillStyle = grad;
+    }
+    ctx.fill();
+
+    if (!locked && sw > 16 && sh > 16 && tone !== 'wood') {
+      _roundRect(ctx, sx + 1.5, sy + 1.5, sw - 3, sh - 3, Math.max(3, radius - 1.5));
+      ctx.lineWidth = 1.0;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.52)';
+      ctx.stroke();
+    }
+
+    _roundRect(ctx, sx, sy, sw, sh, radius);
+    if (isHi && !locked) {
+      ctx.shadowColor = 'rgba(245, 184, 65, 0.72)';
+      ctx.shadowBlur = 10;
+      ctx.lineWidth = customLineW !== null ? customLineW : 3.0;
+      ctx.strokeStyle = borderOverride || V090_EXT_COLORS.vipGold;
+    } else {
+      ctx.lineWidth = customLineW !== null ? customLineW : 2.2;
+      ctx.strokeStyle = borderOverride || (locked ? V090_EXT_COLORS.lockedBorder : pal.border);
+    }
+    if (ctx.lineWidth > 0) ctx.stroke();
+  } catch (_) {} finally {
+    ctx.restore();
+  }
+}
+
+/**
+ * 3D 果冻厚边按钮（严格兼容原 style/icon/sprites/mutedSlash/fallbackText 及 v0.9.0 variant/tone/label/subLabel）
+ */
+function drawPillButton(ctx, x, y, w, h, opts = {}) {
+  if (!_isCtx(ctx)) return;
+  const sx = _num(x, 0);
+  const sy = _num(y, 0);
+  const sw = _num(w, 0);
+  const sh = _num(h, 0);
+  if (!(sw > 0 && sh > 0)) return;
+  const o = opts && typeof opts === 'object' ? opts : {};
+
+  const caption = String(o.label || o.text || '');
+  const subLabel = String(o.subLabel || '');
+  const disabled = Boolean(o.disabled);
+  const pressAmt = o.pressed ? 1 : _clamp(_num(o.pressProgress, 0), 0, 1);
+  const radius = Math.min(sh / 2, _num(o.radius, Math.min(sh / 2, 18)));
+  const styleKey = disabled ? 'disabled' : String(o.variant || o.tone || o.style || 'primary');
+
+  const PRESETS = {
+    primary: { top: '#FFD86B', bot: '#F5A420', bevel: '#C67418', text: '#5A3928', stroke: '', outline: false },
+    cta: { top: '#FFD86B', bot: '#F5A420', bevel: '#C67418', text: '#5A3928', stroke: '', outline: false },
+    amber: { top: '#FFD86B', bot: '#F5A420', bevel: '#C67418', text: '#5A3928', stroke: '', outline: false },
+    gold: { top: '#FFE27D', bot: '#F5A623', bevel: '#C87A1E', text: '#5A3928', stroke: '', outline: false },
+    active: { top: '#FFE27D', bot: '#F5B538', bevel: '#C87A1E', text: '#5A3928', stroke: '', outline: false },
+    orange: { top: '#FFA45E', bot: '#F27C38', bevel: '#B84B14', text: '#FFF8EC', stroke: '#5A3928', outline: true },
+    green: { top: '#94C954', bot: '#72A639', bevel: '#4B7122', text: '#FFF8EC', stroke: '#3D591D', outline: true },
+    equipped: { top: '#8FB347', bot: '#6E9132', bevel: '#4B6620', text: '#FFF8EC', stroke: '#3D521B', outline: true },
+    secondary: { top: '#BE8150', bot: '#8A5634', bevel: '#5E361D', text: '#FFF8EC', stroke: '#5A3928', outline: true },
+    wood: { top: '#B87B4B', bot: '#8A5634', bevel: '#5E361D', text: '#FFF8EC', stroke: '#5A3928', outline: true },
+    walnut: { top: '#C48A55', bot: '#986036', bevel: '#663B1E', text: '#FFF8EC', stroke: '#5A3928', outline: true },
+    dark: { top: '#7E543C', bot: '#5B3A27', bevel: '#3B2316', text: '#F5E6D3', stroke: '#3B2316', outline: true },
+    muted: { top: '#845940', bot: '#69432E', bevel: '#4A2E1E', text: '#F5E6D3', stroke: '#3D2417', outline: true },
+    danger: { top: '#EE7360', bot: '#CF4D3D', bevel: '#8E2D22', text: '#FFF8EC', stroke: '#5A241E', outline: true },
+    card: { top: '#FFFDF6', bot: '#F3E4C8', bevel: '#C7AE8A', text: '#5A3928', stroke: '', outline: false },
+    cardSelected: { top: '#FFF5C8', bot: '#F8D470', bevel: '#C68820', text: '#5A3928', stroke: '', outline: false },
+    disabled: { top: '#BCB3A8', bot: '#9E948A', bevel: '#756C63', text: '#F2ECE5', stroke: '#5E564E', outline: false }
+  };
+
+  const pal = PRESETS[styleKey] || PRESETS.primary;
+  const maxBevel = disabled ? 2 : Math.min(5, Math.max(2.5, Math.round(sh * 0.11)));
+  const bevelH = Math.max(1.5, maxBevel * (1 - pressAmt * 0.65));
+  const dy = pressAmt * Math.min(2.5, maxBevel * 0.65);
+  const bodyH = Math.max(8, sh - maxBevel);
+  const fontSize = Math.max(9.5, _num(o.fontSize, Math.round(sh * 0.40)));
+  const textColor = typeof o.textColor === 'string' && o.textColor ? o.textColor : pal.text;
+
+  ctx.save();
+  try {
+    // 底部 3D 厚度边
+    _roundRect(ctx, sx, sy + dy + bevelH, sw, bodyH, radius);
+    ctx.fillStyle = pal.bevel;
+    ctx.fill();
+    ctx.lineWidth = 2.4;
+    ctx.strokeStyle = V090_KISSA_THEME.ink;
+    ctx.stroke();
+
+    // 主体渐变面
+    const grad = _linearGrad(ctx, sx, sy + dy, sx, sy + dy + bodyH, pal.top);
+    _addStop(grad, 0, pal.top);
+    _addStop(grad, 1, pal.bot);
+    _roundRect(ctx, sx, sy + dy, sw, bodyH, radius);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.lineWidth = 2.4;
+    ctx.strokeStyle = V090_KISSA_THEME.ink;
+    ctx.stroke();
+
+    // 顶部果冻柔光高光条
+    if (sw > 18 && bodyH > 14 && !disabled) {
+      const hlX = sx + Math.min(8, sw * 0.14);
+      const hlW = Math.max(4, sw - Math.min(16, sw * 0.28));
+      const hlH = Math.max(3, Math.min(7, bodyH * 0.24));
+      _roundRect(ctx, hlX, sy + dy + 2.5, hlW, hlH, hlH * 0.5);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.36)';
+      ctx.fill();
+    }
+
+    const cx = sx + sw * 0.5;
+    const cy = sy + dy + bodyH * 0.5;
+    const iconKey = typeof o.icon === 'string' ? o.icon : '';
+    const sprites = o.sprites || null;
+    const drawIconFn = _boundUi && typeof _boundUi.drawUiIcon === 'function' ? _boundUi.drawUiIcon : null;
+    const iconSz = Math.min(bodyH - 4, _num(o.iconSize, Math.round(bodyH * 0.58)));
+
+    let drewIcon = false;
+    if (iconKey && sprites && drawIconFn) {
+      if (!caption && !subLabel) {
+        drewIcon = drawIconFn(ctx, sprites, iconKey, cx, cy, iconSz, disabled ? 0.55 : 1);
+      } else {
+        // Icon + Text horizontally centered as a group
+        ctx.font = fontStr(fontSize, 800);
+        const rawTextW = typeof ctx.measureText === 'function' ? _num(ctx.measureText(caption).width, caption.length * fontSize * 0.7) : caption.length * fontSize * 0.7;
+        const clampedTextW = Math.min(rawTextW, Math.max(16, sw - iconSz - 16));
+        const gap = 4;
+        const groupW = iconSz + gap + clampedTextW;
+        const startX = sx + Math.max(6, (sw - groupW) * 0.5);
+        const iconCx = startX + iconSz * 0.5;
+        drewIcon = drawIconFn(ctx, sprites, iconKey, iconCx, subLabel ? cy - bodyH * 0.13 : cy, iconSz, disabled ? 0.55 : 1);
+        if (drewIcon) {
+          const textX = startX + iconSz + gap;
+          const availTextW = Math.max(14, sx + sw - 6 - textX);
+          drawOutlinedText(ctx, caption, textX, subLabel ? cy - bodyH * 0.13 : cy + 0.5, {
+            size: fontSize,
+            weight: 800,
+            fill: textColor,
+            stroke: pal.outline ? pal.stroke : '',
+            strokeWidth: pal.outline ? 2.4 : 0,
+            shadowOffsetY: 0,
+            align: 'left',
+            baseline: 'middle',
+            maxWidth: availTextW
+          });
+        }
+      }
+    }
+
+    if (!drewIcon && !caption && o.fallbackText) {
+      drawOutlinedText(ctx, o.fallbackText, cx, cy + 0.5, {
+        size: Math.max(11, Math.round(bodyH * 0.50)),
+        weight: 800,
+        fill: textColor,
+        stroke: pal.outline ? pal.stroke : '',
+        strokeWidth: pal.outline ? 2.2 : 0,
+        shadowOffsetY: 0,
+        maxWidth: sw - 8
+      });
+    } else if (caption && !drewIcon) {
+      drawOutlinedText(ctx, caption, cx, subLabel ? cy - bodyH * 0.15 : cy + 0.5, {
+        size: fontSize,
+        weight: 800,
+        fill: textColor,
+        stroke: pal.outline ? pal.stroke : '',
+        strokeWidth: pal.outline ? 2.6 : 0,
+        shadowOffsetY: 0,
+        maxWidth: sw - 12
+      });
+    }
+
+    if (subLabel) {
+      drawOutlinedText(ctx, subLabel, cx, cy + bodyH * 0.25, {
+        size: Math.max(9.5, Math.round(fontSize * 0.66)),
+        weight: 700,
+        fill: textColor,
+        stroke: '',
+        strokeWidth: 0,
+        shadowOffsetY: 0,
+        maxWidth: sw - 14
+      });
+    }
+
+    if (o.mutedSlash) {
+      ctx.strokeStyle = '#E85C5C';
+      ctx.lineWidth = 2.6;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(sx + sw * 0.22, sy + dy + bodyH * 0.22);
+      ctx.lineTo(sx + sw * 0.78, sy + dy + bodyH * 0.78);
+      ctx.stroke();
+    }
+  } catch (_) {} finally {
+    ctx.restore();
+  }
+}
+
+/**
+ * 统一语义微标胶囊（兼容原 berry/sage/cocoa/soft/plum/frost 及 v0.9.0 amber/vip/urgent/red/green/wood/purple）
+ */
+function drawTagBadge(ctx, x, y, w, h, text, tone = 'amber', fontSize = 9.5, icon = '', sprites = null) {
+  if (!_isCtx(ctx)) return;
+  const sx = _num(x, 0);
+  const sy = _num(y, 0);
+  const sw = _num(w, 0);
+  const sh = _num(h, 0);
+  if (!(sw > 0 && sh > 0)) return;
+
+  const TONES = {
+    amber: { bg: '#F5B841', fg: '#5A3928', stroke: '' },
+    gold: { bg: '#F5B841', fg: '#5A3928', stroke: '' },
+    vip: { bg: '#F5B841', fg: '#5A3928', stroke: '' },
+    urgent: { bg: '#F27C38', fg: '#FFF8EC', stroke: '#5A3928' },
+    berry: { bg: '#F27C38', fg: '#FFF8EC', stroke: '#5A3928' },
+    red: { bg: '#E85C5C', fg: '#FFF8EC', stroke: '#5A3928' },
+    green: { bg: '#74C353', fg: '#FFF8EC', stroke: '#3B5924' },
+    sage: { bg: '#74C353', fg: '#FFF8EC', stroke: '#3B5924' },
+    wood: { bg: '#7B4F32', fg: '#FFF8EC', stroke: '#5A3928' },
+    cocoa: { bg: '#6D432B', fg: '#FFF8EC', stroke: '#5A3928' },
+    soft: { bg: '#EFE0C6', fg: '#5A3928', stroke: '' },
+    plum: { bg: '#9B6CF0', fg: '#FFF8EC', stroke: '#4A2B7A' },
+    purple: { bg: '#9B6CF0', fg: '#FFF8EC', stroke: '#4A2B7A' },
+    frost: { bg: '#D6F2FF', fg: '#205575', stroke: '' }
+  };
+  const pal = TONES[tone] || TONES.amber;
+  const safeText = String(text === null || text === undefined ? '' : text);
+
+  ctx.save();
+  try {
+    _roundRect(ctx, sx, sy, sw, sh, Math.min(sh / 2, 10));
+    ctx.fillStyle = pal.bg;
+    ctx.fill();
+    ctx.lineWidth = 1.8;
+    ctx.strokeStyle = V090_KISSA_THEME.ink;
+    ctx.stroke();
+
+    const drawIconFn = _boundUi && typeof _boundUi.drawUiIcon === 'function' ? _boundUi.drawUiIcon : null;
+    let drewIcon = false;
+    let icS = 0;
+    if (icon && sprites && drawIconFn) {
+      icS = Math.min(sh - 3, 13);
+      drewIcon = drawIconFn(ctx, sprites, icon, sx + 4 + icS * 0.5, sy + sh * 0.5, icS);
+    }
+
+    const tx = drewIcon ? sx + 6 + icS : sx + 4;
+    const tw = Math.max(10, sx + sw - 4 - tx);
+    drawOutlinedText(ctx, safeText, tx + tw * 0.5, sy + sh * 0.5 + 0.4, {
+      size: _num(fontSize, 9.5),
+      minSize: 7.2,
+      weight: 800,
+      fill: pal.fg,
+      stroke: pal.stroke,
+      strokeWidth: pal.stroke ? 1.8 : 0,
+      shadowOffsetY: 0,
+      maxWidth: tw
+    });
+  } catch (_) {} finally {
+    ctx.restore();
+  }
+}
+
+/**
+ * 暖深木货币胶囊（星尘币等）
+ */
+function drawCurrencyChip(ctx, x, y, w, h, sprites, iconKey, valText, opts = {}) {
+  if (!_isCtx(ctx)) return;
+  const sx = _num(x, 0);
+  const sy = _num(y, 0);
+  const sw = _num(w, 0);
+  const sh = _num(h, 0);
+  if (!(sw > 0 && sh > 0)) return;
+  const o = opts && typeof opts === 'object' ? opts : {};
+
+  ctx.save();
+  try {
+    const grad = _linearGrad(ctx, sx, sy, sx, sy + sh, '#7B4F32');
+    _addStop(grad, 0, '#805336');
+    _addStop(grad, 1, '#583724');
+    _roundRect(ctx, sx, sy, sw, sh, sh / 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.lineWidth = 2.2;
+    ctx.strokeStyle = '#3E2518';
+    ctx.stroke();
+
+    const cy = sy + sh * 0.5;
+    const iconSz = Math.min(sh - 3, Math.round(sh * 0.74));
+    const leftPad = _num(o.leftPad, 6);
+    const drawIconFn = _boundUi && typeof _boundUi.drawUiIcon === 'function' ? _boundUi.drawUiIcon : null;
+    let drewIcon = false;
+    if (sprites && iconKey && drawIconFn) {
+      drewIcon = drawIconFn(ctx, sprites, iconKey, sx + leftPad + iconSz * 0.5, cy, iconSz);
+    }
+
+    const textStart = drewIcon ? sx + leftPad + iconSz + 4 : sx + 8;
+    const availW = Math.max(16, sx + sw - 7 - textStart);
+    drawOutlinedText(ctx, String(valText === null || valText === undefined ? '' : valText), textStart + availW * 0.5, cy + 0.6, {
+      size: _num(o.fontSize, Math.max(11.5, Math.round(sh * 0.50))),
+      minSize: 8.5,
+      weight: 800,
+      fill: '#FFF8EC',
+      stroke: '#3E2518',
+      strokeWidth: 2.2,
+      shadowOffsetY: 0,
+      maxWidth: availW
+    });
+  } catch (_) {} finally {
+    ctx.restore();
+  }
+}
+
+/**
+ * 统一悬浮提示条 / Toast / 厨具提示横幅
+ */
+function drawNoticeBanner(ctx, x, y, w, h, opts = {}) {
+  if (!_isCtx(ctx)) return;
+  const sx = _num(x, 0);
+  const sy = _num(y, 0);
+  const sw = _num(w, 0);
+  const sh = _num(h, 0);
+  if (!(sw > 0 && sh > 0)) return;
+  const o = opts && typeof opts === 'object' ? opts : {};
+
+  const tone = typeof o.tone === 'string' ? o.tone : 'info';
+  const TONES = {
+    info: { bg: 'rgba(84, 52, 34, 0.94)', border: '#F5C45E', fg: '#FFF8EC', outline: true },
+    wood: { bg: 'rgba(84, 52, 34, 0.94)', border: '#5A3928', fg: '#FFF8EC', outline: true },
+    gold: { bg: '#FFE599', border: '#5A3928', fg: '#5A3928', outline: false },
+    event: { bg: 'rgba(104, 54, 24, 0.95)', border: '#FFE078', fg: '#FFF8EC', outline: true },
+    success: { bg: 'rgba(56, 108, 44, 0.94)', border: '#A6E088', fg: '#FFFDF5', outline: true },
+    warn: { bg: 'rgba(166, 56, 40, 0.95)', border: '#FFB49A', fg: '#FFF6F0', outline: true }
+  };
+  const pal = TONES[tone] || TONES.info;
+  const rad = Math.min(sh / 2, _num(o.radius, sh / 2));
+
+  ctx.save();
+  try {
+    _roundRect(ctx, sx, sy, sw, sh, rad);
+    ctx.fillStyle = pal.bg;
+    ctx.fill();
+    ctx.lineWidth = 2.0;
+    ctx.strokeStyle = o.borderColor || pal.border;
+    ctx.stroke();
+
+    const drawIconFn = _boundUi && typeof _boundUi.drawUiIcon === 'function' ? _boundUi.drawUiIcon : null;
+    let textLeft = sx + 10;
+    if (o.icon && o.sprites && drawIconFn) {
+      const icS = Math.min(sh - 4, _num(o.iconSize, 16));
+      if (drawIconFn(ctx, o.sprites, o.icon, sx + 8 + icS * 0.5, sy + sh * 0.5, icS)) {
+        textLeft = sx + 12 + icS;
+      }
+    }
+    const rightRes = _num(o.rightReserve, 10);
+    const availW = Math.max(20, sx + sw - rightRes - textLeft);
+    const align = o.align || (o.icon ? 'left' : 'center');
+    const tx = align === 'center' ? textLeft + availW * 0.5 : textLeft;
+
+    if (o.text) {
+      drawOutlinedText(ctx, o.text, tx, sy + sh * 0.5 + 0.5, {
+        size: _num(o.fontSize, Math.max(10.5, Math.round(sh * 0.45))),
+        minSize: 8.5,
+        weight: 800,
+        fill: o.textColor || pal.fg,
+        stroke: pal.outline ? '#3D2214' : '',
+        strokeWidth: pal.outline ? 2.0 : 0,
+        shadowOffsetY: 0,
+        align,
+        baseline: 'middle',
+        maxWidth: availW
+      });
+    }
+  } catch (_) {} finally {
+    ctx.restore();
+  }
+}
+
+/**
+ * 优先锁定顾客青蓝光环（对应设计图 03 左侧小狐狸头像光环）
+ */
+function drawPriorityTargetBadge(ctx, cx, cy, radius = 8, nowSec = 0, opts = {}) {
+  if (!_isCtx(ctx)) return;
+  const r = _num(radius, 8);
+  if (!(r > 0)) return;
+  const t = _num(nowSec, 0);
+  const pulse = 0.78 + 0.22 * Math.sin(t * 5.2);
+
+  ctx.save();
+  try {
+    ctx.strokeStyle = 'rgba(75, 232, 255, 0.36)';
+    ctx.lineWidth = Math.max(2.4, r * 0.22);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * (1.12 + 0.06 * pulse), 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = V090_EXT_COLORS.priorityCyan;
+    ctx.lineWidth = Math.max(2.0, r * 0.14);
+    ctx.shadowColor = V090_EXT_COLORS.priorityCyan;
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * (0.98 + 0.04 * pulse), 0, Math.PI * 2);
+    ctx.stroke();
+  } catch (_) {} finally {
+    ctx.restore();
+  }
+}
+
+/* ======================== v0.9.0 新增视觉组件 ======================== */
+
+/**
+ * 星夜小铺 / 烤盘主题弹窗红白条纹波浪雨棚（对应设计图 06 & 09）
+ */
+function drawAwningHeader(ctx, x, y, w, h, stripes = 9) {
+  if (!_isCtx(ctx)) return;
+  const sx0 = _num(x, 0);
+  const sy0 = _num(y, 0);
+  const sw0 = _num(w, 0);
+  const sh0 = _num(h, 0);
+  if (!(sw0 > 0 && sh0 > 0)) return;
+  const count = Math.max(3, Math.floor(_num(stripes, 9)));
+  const sw = sw0 / count;
+  const r = Math.min(sw * 0.5, sh0 * 0.42);
+
+  ctx.save();
+  try {
+    // 顶部木檐底影
+    ctx.shadowColor = 'rgba(30, 16, 10, 0.32)';
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetY = 3;
+    for (let i = 0; i < count; i++) {
+      const sx = sx0 + i * sw;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy0);
+      ctx.lineTo(sx + sw, sy0);
+      ctx.lineTo(sx + sw, sy0 + sh0 - r);
+      ctx.arc(sx + sw * 0.5, sy0 + sh0 - r, r, 0, Math.PI, false);
+      ctx.closePath();
+
+      const isRed = i % 2 === 0;
+      const g = _linearGrad(ctx, sx, sy0, sx, sy0 + sh0, isRed ? V090_EXT_COLORS.awningRed : V090_EXT_COLORS.awningCream);
+      _addStop(g, 0, isRed ? '#E36B55' : '#FFF8EC');
+      _addStop(g, 0.72, isRed ? V090_EXT_COLORS.awningRed : V090_EXT_COLORS.awningCream);
+      _addStop(g, 1, isRed ? '#BC4634' : '#EEDBC0');
+      ctx.fillStyle = g;
+      ctx.fill();
+
+      ctx.shadowColor = 'rgba(0, 0, 0, 0)';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+      ctx.lineWidth = 2.0;
+      ctx.strokeStyle = V090_KISSA_THEME.ink;
+      ctx.stroke();
+    }
+  } catch (_) {} finally {
+    ctx.restore();
+  }
+}
+
+/**
+ * 4 格（或 N 格）分段升级进度条（对应设计图 06 猫饼升级与店面设备）
+ */
+function drawSegmentedBar(ctx, x, y, w, h, current, max = 4) {
+  if (!_isCtx(ctx)) return;
+  const sx = _num(x, 0);
+  const sy = _num(y, 0);
+  const sw = _num(w, 0);
+  const sh = _num(h, 0);
+  if (!(sw > 0 && sh > 0)) return;
+  const segCount = Math.max(1, Math.floor(_num(max, 4)));
+  const cur = _clamp(Math.floor(_num(current, 0)), 0, segCount);
+
+  ctx.save();
+  try {
+    _roundRect(ctx, sx, sy, sw, sh, sh * 0.5);
+    ctx.fillStyle = '#D6CCBE';
+    ctx.fill();
+
+    const segW = sw / segCount;
+    ctx.save();
+    try {
+      _roundRect(ctx, sx, sy, sw, sh, sh * 0.5);
+      if (typeof ctx.clip === 'function') ctx.clip();
+      for (let i = 0; i < cur; i++) {
+        const grad = _linearGrad(ctx, sx, sy, sx, sy + sh, '#F5A623');
+        _addStop(grad, 0, '#FFE07D');
+        _addStop(grad, 1, '#F5A623');
+        ctx.fillStyle = grad;
+        ctx.fillRect(sx + i * segW, sy, segW, sh);
+      }
+      ctx.strokeStyle = V090_KISSA_THEME.ink;
+      ctx.lineWidth = 1.8;
+      for (let i = 1; i < segCount; i++) {
+        ctx.beginPath();
+        ctx.moveTo(sx + i * segW, sy);
+        ctx.lineTo(sx + i * segW, sy + sh);
+        ctx.stroke();
+      }
+    } finally {
+      ctx.restore();
+    }
+
+    _roundRect(ctx, sx, sy, sw, sh, sh * 0.5);
+    ctx.lineWidth = 2.0;
+    ctx.strokeStyle = V090_KISSA_THEME.ink;
+    ctx.stroke();
+  } catch (_) {} finally {
+    ctx.restore();
+  }
+}
+
+/**
+ * v0.9.0 暖木风格厨余篮冷却格（严格禁止黑色遮罩，对应设计图 03 右侧 6s 厨余篮）
+ */
+function drawCooldownCell(ctx, x, y, w, h, remainingSec, opts = {}) {
+  if (!_isCtx(ctx)) return;
+  const sx = _num(x, 0);
+  const sy = _num(y, 0);
+  const sw = _num(w, 0);
+  const sh = _num(h, 0);
+  if (!(sw > 0 && sh > 0)) return;
+  const o = opts && typeof opts === 'object' ? opts : {};
+
+  const rem = Math.max(0, _num(remainingSec, 0));
+  const isCooling = rem > 1e-6;
+  const forkReady = Boolean(o.forkTrashReady);
+  const trashImg = o.trashImg || null;
+  const clockImg = o.clockImg || null;
+  const label = forkReady ? '叉入销毁' : String(o.label || '厨余篮');
+  const wobbleRot = _num(o.rot, 0);
+
+  ctx.save();
+  try {
+    const grad = _linearGrad(ctx, sx, sy, sx, sy + sh, '#8A5634');
+    if (forkReady) {
+      _addStop(grad, 0, '#6BC97D');
+      _addStop(grad, 1, '#3A8F53');
+    } else if (isCooling) {
+      _addStop(grad, 0, '#8C6247');
+      _addStop(grad, 1, '#6C4731');
+    } else {
+      _addStop(grad, 0, '#B0774D');
+      _addStop(grad, 1, '#845232');
+    }
+
+    _roundRect(ctx, sx, sy, sw, sh, 10);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.lineWidth = forkReady ? 2.6 : 2.3;
+    ctx.strokeStyle = forkReady ? '#225934' : V090_KISSA_THEME.ink;
+    ctx.stroke();
+
+    if (forkReady && typeof ctx.setLineDash === 'function') {
+      ctx.strokeStyle = '#E8FFF0';
+      ctx.lineWidth = 1.6;
+      ctx.setLineDash([4, 3]);
+      _roundRect(ctx, sx + 2, sy + 2, sw - 4, sh - 4, 8);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    if (isCooling && !forkReady) {
+      drawOutlinedText(ctx, `${Math.ceil(rem)}s`, sx + sw * 0.5, sy + sh * 0.40, {
+        size: Math.max(12, Math.round(sh * 0.37)),
+        minSize: 10,
+        weight: 900,
+        fill: '#FFF8EC',
+        stroke: V090_KISSA_THEME.ink,
+        strokeWidth: 3.0,
+        shadowOffsetY: 1,
+        maxWidth: sw - 8
+      });
+      if (_imgDims(clockImg) && typeof ctx.drawImage === 'function') {
+        const csz = Math.max(12, Math.min(18, Math.round(Math.min(sw, sh) * 0.34)));
+        ctx.drawImage(clockImg, sx + sw - csz - 1, sy - 3, csz, csz);
+      }
+    } else if (_imgDims(trashImg) && typeof ctx.drawImage === 'function') {
+      const isz = Math.max(16, Math.round(Math.min(sw, sh) * 0.56));
+      ctx.save();
+      try {
+        ctx.translate(sx + sw * 0.5, sy + sh * 0.38);
+        if (wobbleRot) ctx.rotate(wobbleRot);
+        ctx.drawImage(trashImg, -isz * 0.5, -isz * 0.5, isz, isz);
+      } finally {
+        ctx.restore();
+      }
+    }
+
+    drawOutlinedText(ctx, label, sx + sw * 0.5, sy + sh * 0.80, {
+      size: Math.max(9.2, Math.round(sh * 0.21)),
+      minSize: 7.5,
+      weight: 800,
+      fill: '#FFF6E6',
+      stroke: V090_KISSA_THEME.ink,
+      strokeWidth: 2.0,
+      shadowOffsetY: 0,
+      maxWidth: sw - 6
+    });
+  } catch (_) {} finally {
+    ctx.restore();
+  }
+}
+
+/**
+ * 暂停弹窗奶油暖绿滑块开关（支持平滑过渡动画 animPos 0..1，对应设计图 10）
+ */
+function drawSwitchToggle(ctx, x, y, w, h, isOn, animPos = null) {
+  if (!_isCtx(ctx)) return;
+  const sx = _num(x, 0);
+  const sy = _num(y, 0);
+  const sw = _num(w, 0);
+  const sh = _num(h, 0);
+  if (!(sw > 0 && sh > 0)) return;
+
+  const t = animPos !== null && animPos !== undefined && Number.isFinite(Number(animPos))
+    ? _clamp(Number(animPos), 0, 1)
+    : isOn
+    ? 1
+    : 0;
+  const activeVisual = t >= 0.5;
+
+  // 插值背景色 (#A69A8E -> #8FB347)
+  const bgR = Math.round(166 + (143 - 166) * t);
+  const bgG = Math.round(154 + (179 - 154) * t);
+  const bgB = Math.round(142 + (71 - 142) * t);
+
+  ctx.save();
+  try {
+    _roundRect(ctx, sx, sy, sw, sh, sh / 2);
+    ctx.fillStyle = `rgb(${bgR}, ${bgG}, ${bgB})`;
+    ctx.fill();
+    ctx.lineWidth = 2.2;
+    ctx.strokeStyle = V090_KISSA_THEME.ink;
+    ctx.stroke();
+
+    const knobR = sh * 0.44;
+    const leftX = sx + knobR + 2.5;
+    const rightX = sx + sw - knobR - 2.5;
+    const knobX = leftX + (rightX - leftX) * t;
+    const cy = sy + sh * 0.5;
+
+    drawOutlinedText(ctx, activeVisual ? 'ON' : 'OFF', activeVisual ? sx + sw * 0.30 : sx + sw * 0.70, cy + 0.5, {
+      size: Math.max(9.5, Math.round(sh * 0.42)),
+      minSize: 8,
+      weight: 800,
+      fill: '#FFF8EC',
+      stroke: V090_KISSA_THEME.ink,
+      strokeWidth: 2.0,
+      shadowOffsetY: 0
+    });
+
+    // 圆形金色/灰米旋钮
+    const kGrad = _linearGrad(ctx, knobX, cy - knobR, knobX, cy + knobR, activeVisual ? '#F5B841' : '#D9CFC4');
+    _addStop(kGrad, 0, activeVisual ? '#FFE27A' : '#EDE5DC');
+    _addStop(kGrad, 1, activeVisual ? '#E89D24' : '#C7BCB0');
+    ctx.beginPath();
+    ctx.arc(knobX, cy, knobR, 0, Math.PI * 2);
+    ctx.fillStyle = kGrad;
+    ctx.fill();
+    ctx.lineWidth = 2.2;
+    ctx.strokeStyle = V090_KISSA_THEME.ink;
+    ctx.stroke();
+
+    drawOutlinedText(ctx, activeVisual ? '开' : '关', knobX, cy + 0.6, {
+      size: Math.max(9.5, Math.round(sh * 0.42)),
+      minSize: 8,
+      weight: 800,
+      fill: V090_KISSA_THEME.ink,
+      stroke: '',
+      strokeWidth: 0,
+      shadowOffsetY: 0
+    });
+  } catch (_) {} finally {
+    ctx.restore();
+  }
+}
+
+/**
+ * 优先锁定顾客青蓝呼吸四角锁框（对应设计图 03 左侧顾客）
+ */
+function drawPriorityLockFrame(ctx, x, y, w, h, nowSec = 0) {
+  if (!_isCtx(ctx)) return;
+  const sx = _num(x, 0);
+  const sy = _num(y, 0);
+  const sw = _num(w, 0);
+  const sh = _num(h, 0);
+  if (!(sw > 0 && sh > 0)) return;
+  const pulse = 0.72 + 0.28 * Math.sin(_num(nowSec, 0) * 5.2);
+  const corner = Math.min(13, sw * 0.16, sh * 0.18);
+
+  ctx.save();
+  try {
+    ctx.strokeStyle = V090_EXT_COLORS.priorityCyan;
+    ctx.globalAlpha = pulse;
+    ctx.lineWidth = 3.0;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.shadowColor = V090_EXT_COLORS.priorityCyan;
+    ctx.shadowBlur = 10;
+    const brackets = [
+      [[sx, sy + corner], [sx, sy], [sx + corner, sy]],
+      [[sx + sw - corner, sy], [sx + sw, sy], [sx + sw, sy + corner]],
+      [[sx + sw, sy + sh - corner], [sx + sw, sy + sh], [sx + sw - corner, sy + sh]],
+      [[sx + corner, sy + sh], [sx, sy + sh], [sx, sy + sh - corner]]
+    ];
+    for (let i = 0; i < brackets.length; i++) {
+      const pts = brackets[i];
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      ctx.lineTo(pts[1][0], pts[1][1]);
+      ctx.lineTo(pts[2][0], pts[2][1]);
+      ctx.stroke();
+    }
+  } catch (_) {} finally {
+    ctx.restore();
+  }
+}
+
+/**
+ * 右侧暖木滚动条（对应设计图 06 星夜小铺 & 08 排行榜）
+ */
+function drawScrollBar(ctx, x, y, w, h, scrollRatio, thumbRatio) {
+  if (!_isCtx(ctx)) return;
+  const tr = _clamp(_num(thumbRatio, 1), 0.08, 1);
+  if (tr >= 0.999) return;
+  const sx = _num(x, 0);
+  const sy = _num(y, 0);
+  const sw = Math.max(4, _num(w, 6));
+  const sh = _num(h, 0);
+  if (!(sh > 10)) return;
+
+  const thumbH = Math.max(24, sh * tr);
+  const thumbY = sy + (sh - thumbH) * _clamp(_num(scrollRatio, 0), 0, 1);
+
+  ctx.save();
+  try {
+    _roundRect(ctx, sx, sy, sw, sh, sw * 0.5);
+    ctx.fillStyle = 'rgba(138, 86, 52, 0.20)';
+    ctx.fill();
+    _roundRect(ctx, sx, thumbY, sw, thumbH, sw * 0.5);
+    ctx.fillStyle = V090_EXT_COLORS.woodMain;
+    ctx.fill();
+    ctx.lineWidth = 1.0;
+    ctx.strokeStyle = V090_KISSA_THEME.ink;
+    ctx.stroke();
+  } catch (_) {} finally {
+    ctx.restore();
+  }
+}
+
+/**
+ * 3 章节选关纯色星夜兜底底图（在手绘底图 WebP 尚未加载完成时无缝兜底）
+ */
+function drawChapterBackdrop(ctx, w, h, themeKey = 'amber') {
+  if (!_isCtx(ctx)) return;
+  const sw = Math.max(320, _num(w, 390));
+  const sh = Math.max(480, _num(h, 844));
+  const theme = CHAPTER_THEMES[themeKey] || CHAPTER_THEMES.amber;
+
+  ctx.save();
+  try {
+    const grad = _linearGrad(ctx, 0, 0, 0, sh, theme.skyMid);
+    _addStop(grad, 0, theme.skyTop);
+    _addStop(grad, 0.55, theme.skyMid);
+    _addStop(grad, 1, theme.skyBot);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, sw, sh);
+
+    ctx.fillStyle = theme.starColor;
+    for (let i = 0; i < 42; i++) {
+      const sx = ((i * 197.3) % 1) * sw;
+      const sy = ((i * 83.7) % 0.62) * sh;
+      const sr = i % 3 === 0 ? 2.0 : 1.1;
+      ctx.globalAlpha = 0.35 + ((i * 37) % 60) / 100;
+      ctx.beginPath();
+      ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } catch (_) {} finally {
+    ctx.restore();
+  }
+}
+
+/**
+ * 一键无损挂载到原 src/ui_draw.js 的 module.exports 上：
+ * 保留原文件全部底层工具与 HitRegistry，升级核心视觉函数并挂入 v0.9.0 新增组件。
+ */
+function applyV090Skin(uiExports) {
+  if (!uiExports || typeof uiExports !== 'object') return uiExports;
+  _boundUi = uiExports;
+
+  if (uiExports.KISSA_THEME && typeof uiExports.KISSA_THEME === 'object') {
+    Object.assign(uiExports.KISSA_THEME, V090_KISSA_THEME);
+  } else {
+    uiExports.KISSA_THEME = Object.assign({}, V090_KISSA_THEME);
+  }
+
+  // 无损替换已核对签名的核心视觉函数
+  uiExports.fontStr = fontStr;
+  uiExports.drawWoodBoard = drawWoodBoard;
+  uiExports.drawParchmentSheet = drawParchmentSheet;
+  uiExports.drawKissaCard = drawKissaCard;
+  uiExports.drawPillButton = drawPillButton;
+  uiExports.drawTagBadge = drawTagBadge;
+  uiExports.drawCurrencyChip = drawCurrencyChip;
+  uiExports.drawNoticeBanner = drawNoticeBanner;
+  uiExports.drawPriorityTargetBadge = drawPriorityTargetBadge;
+
+  // 挂载 v0.9.0 新增视觉组件与安全区/字体工具
+  uiExports.V090_EXT_COLORS = V090_EXT_COLORS;
+  uiExports.CHAPTER_THEMES = CHAPTER_THEMES;
+  uiExports.initGameFont = initGameFont;
+  uiExports.getFontFamily = getFontFamily;
+  uiExports.getSafeLayout = getSafeLayout;
+  uiExports.drawOutlinedText = drawOutlinedText;
+  uiExports.drawAwningHeader = drawAwningHeader;
+  uiExports.drawSegmentedBar = drawSegmentedBar;
+  uiExports.drawCooldownCell = drawCooldownCell;
+  uiExports.drawSwitchToggle = drawSwitchToggle;
+  uiExports.drawPriorityLockFrame = drawPriorityLockFrame;
+  uiExports.drawScrollBar = drawScrollBar;
+  uiExports.drawChapterBackdrop = drawChapterBackdrop;
+
+  return uiExports;
+}
+
+module.exports = {
+  V090_KISSA_THEME,
+  V090_EXT_COLORS,
+  CHAPTER_THEMES,
+  initGameFont,
+  getFontFamily,
+  fontStr,
+  getSafeLayout,
+  drawOutlinedText,
+  drawWoodBoard,
+  drawParchmentSheet,
+  drawKissaCard,
+  drawPillButton,
+  drawTagBadge,
+  drawCurrencyChip,
+  drawNoticeBanner,
+  drawPriorityTargetBadge,
+  drawAwningHeader,
+  drawSegmentedBar,
+  drawCooldownCell,
+  drawSwitchToggle,
+  drawPriorityLockFrame,
+  drawScrollBar,
+  drawChapterBackdrop,
+  applyV090Skin
+};

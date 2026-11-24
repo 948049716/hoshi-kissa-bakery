@@ -517,7 +517,9 @@ function isThemeCandidate(x) {
 function isSpritesCandidate(x) {
   if (!isPlainObj(x)) return false;
   return Boolean(
-    hasOwn(x, 'boardTilesAtlas') ||
+    hasOwn(x, 'byId') ||
+      hasOwn(x, 'customers') ||
+      hasOwn(x, 'boardTilesAtlas') ||
       hasOwn(x, 'board_tiles_atlas') ||
       hasOwn(x, 'customersAtlas') ||
       hasOwn(x, 'customers_atlas') ||
@@ -958,11 +960,32 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
     const preferredIdx = typeof rawPref === 'number' ? rawPref : null;
     const freezeActive = isPatienceFrozen(orderState, opts, appObj);
 
-    const gap = vertical ? (rh < 240 ? 4 : 8) : rw < 360 ? 5 : 7;
-    const cardW = vertical ? rw : Math.max(40, Math.floor((rw - gap * 2) / 3));
+    const gap = vertical ? (rh < 240 ? 4 : 8) : rw < 360 ? 6 : 8;
+    const cardW = vertical ? rw : Math.max(44, Math.floor((rw - gap * 2) / 3));
     const cardH = vertical ? Math.min(156, Math.max(44, Math.floor((rh - gap * 2) / 3))) : rh;
     const startX = vertical ? rx : rx + Math.max(0, Math.floor((rw - (cardW * 3 + gap * 2)) * 0.5));
     const seatRects = [];
+
+    // Warm wooden bakery counter ledge running cleanly beneath the 3 portrait seats (Design 03)
+    const counterH = Math.min(20, Math.max(14, Math.round(cardH * 0.16)));
+    const counterY = ry + cardH - counterH;
+    if (!vertical) {
+      ctx.save();
+      try {
+        const cg = safeLinearGradient(ctx, rx - 8, counterY, rx - 8, ry + cardH, '#D9A773');
+        safeAddColorStop(cg, 0, '#E3B680', '#E3B680');
+        safeAddColorStop(cg, 0.4, '#C9935B', '#C9935B');
+        safeAddColorStop(cg, 1, '#9E6A3A', '#9E6A3A');
+        ctx.fillStyle = cg;
+        UI.roundRectPath(ctx, rx - 4, counterY, rw + 8, counterH, 6);
+        ctx.fill();
+        ctx.lineWidth = 2.0;
+        ctx.strokeStyle = '#5A3928';
+        ctx.stroke();
+      } finally {
+        try { ctx.restore(); } catch (_) {}
+      }
+    }
 
     for (let i = 0; i < 3; i++) {
       const cardX = vertical ? startX : startX + i * (cardW + gap);
@@ -984,11 +1007,6 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
       );
 
       if (!seat) {
-        UI.drawKissaCard(ctx, cardX, cardY, cardW, cardH, {
-          tone: 'soft',
-          radius: 10
-        });
-
         // Angry walkout micro-animation on recently vacated seat
         let drewLeaving = false;
         const leavingList = getOwn(animState, 'leavingCustomers', null);
@@ -1007,9 +1025,9 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
                 sprites,
                 typeof rawLeaveId === 'string' && rawLeaveId ? rawLeaveId : 'cust_orange',
                 cardX + cardW * 0.5 + p * 22,
-                cardY + cardH * 0.45,
-                Math.min(34, cardH * 0.46),
-                { mood: 'angry', alpha }
+                cardY + cardH * 0.56,
+                Math.min(54, cardH * 0.54),
+                { circular: false, mood: 'angry', alpha }
               );
               drewLeaving = true;
               break;
@@ -1018,26 +1036,23 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
         }
 
         if (!drewLeaving) {
-          const icS = Math.min(15, Math.max(11, cardH * 0.16));
-          const hasIc = UI.drawUiIcon(
-            ctx,
-            sprites || {},
-            'icon_hourglass',
-            cardX + cardW * 0.5,
-            cardY + cardH * 0.40,
-            icS,
-            0.52
-          );
+          UI.drawKissaCard(ctx, cardX + 4, cardY + 8, cardW - 8, Math.max(28, cardH - counterH - 14), {
+            tone: 'soft',
+            radius: 12,
+            borderColor: 'rgba(90, 57, 40, 0.45)',
+            lineWidth: 1.6
+          });
+          UI.drawUiIcon(ctx, sprites || {}, 'icon_clock', cardX + cardW * 0.5, cardY + cardH * 0.34, 16, 0.65);
           UI.drawFitText(
             ctx,
             '候客中...',
             cardX + cardW * 0.5,
-            cardY + cardH * (hasIc ? 0.63 : 0.52),
-            Math.max(24, cardW - 12),
-            10.5,
-            8.5,
+            cardY + cardH * 0.56,
+            Math.max(24, cardW - 14),
+            10.2,
+            8.2,
             700,
-            '#8C6853',
+            '#754C36',
             'center',
             'middle'
           );
@@ -1071,140 +1086,63 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
         }
       }
 
-      const borderColor = isPreferred
-        ? '#2B84EA'
-        : isVip
-        ? '#D48B1C'
-        : isUrgent
-        ? '#D95E32'
-        : '#C59E68';
-
-      UI.drawKissaCard(ctx, cardX, cardY, cardW, cardH, {
-        tone: isVip ? 'amber' : 'cream',
-        borderColor,
-        lineWidth: isPreferred ? 2.5 : 1.8,
-        radius: 10
-      });
-
-      if (isPreferred) {
-        ctx.save();
-        try {
-          ctx.strokeStyle = 'rgba(43, 132, 234, 0.42)';
-          ctx.lineWidth = 2.4;
-          UI.roundRectPath(ctx, cardX - 1.5, cardY - 1.5, cardW + 3, cardH + 3, 11.5);
-          ctx.stroke();
-        } finally {
-          try {
-            ctx.restore();
-          } catch (_) {}
-        }
-        UI.drawPriorityTargetBadge(ctx, cardX + cardW - 10, cardY + 10, 6.5, nowSec);
-      }
-
-      // Header: customer portrait + name + VIP/Urgent tag
-      const portS = vertical
-        ? Math.min(42, Math.max(28, Math.round(cardH * 0.32)))
-        : Math.min(32, Math.max(24, Math.round(cardH * 0.29)));
       const mood = allMatched
         ? 'happy'
         : ratio < PATIENCE_TIP_BANDS.yellowThreshold
         ? 'anxious'
         : 'normal';
 
-      UI.drawCustomerPortrait(
-        ctx,
-        sprites,
-        custId,
-        cardX + 6 + portS * 0.5,
-        cardY + 5 + portS * 0.5,
-        portS,
-        { mood, isVip, isUrgent }
-      );
+      // 1. Cream Speech Bubble on top with downward tail pointing to customer portrait (Design 03)
+      const bubbleX = cardX + 2;
+      const bubbleY = cardY + 2;
+      const bubbleW = Math.max(36, cardW - 4);
+      const bubbleH = clamp(Math.round(cardH * 0.37), 34, 46);
+      const tailX = bubbleX + Math.round(bubbleW * (i === 0 ? 0.34 : i === 2 ? 0.66 : 0.42));
 
-      const tx = cardX + 9 + portS;
-      const rightRes = isPreferred ? 19 : 5;
-      const availTw = Math.max(18, cardX + cardW - tx - rightRes);
-      const safeRecipeName = toSafeText(getOwn(seat, 'recipeName', ''), '').trim();
-      const safeCustomerName = toSafeText(getOwn(seat, 'customerName', ''), '').trim();
-      const safeDefName = toSafeText(getOwn(custDef, 'name', ''), '').trim();
-      const titleStr = vertical
-        ? safeRecipeName || safeCustomerName || safeDefName || '食客点单'
-        : safeDefName || safeCustomerName || '食客';
+      ctx.save();
+      try {
+        const bg = safeLinearGradient(ctx, bubbleX, bubbleY, bubbleX, bubbleY + bubbleH, '#FFFDF7');
+        safeAddColorStop(bg, 0, '#FFFDF7', '#FFFDF7');
+        safeAddColorStop(bg, 1, '#F8EDD9', '#F8EDD9');
+        ctx.fillStyle = bg;
+        UI.roundRectPath(ctx, bubbleX, bubbleY, bubbleW, bubbleH, 10);
+        ctx.fill();
+        ctx.lineWidth = 2.0;
+        ctx.strokeStyle = '#5A3928';
+        ctx.stroke();
 
-      UI.drawFitText(
-        ctx,
-        titleStr,
-        tx,
-        cardY + (isVip || isUrgent || vertical ? 11.5 : 5 + portS * 0.5),
-        availTw,
-        vertical ? 11.5 : 10,
-        7.8,
-        800,
-        '#4A2C2A',
-        'left',
-        'middle'
-      );
-
-      if (isVip) {
-        UI.drawTagBadge(
-          ctx,
-          tx,
-          cardY + 19,
-          Math.min(availTw, 58),
-          13.5,
-          'VIP x1.5',
-          'amber',
-          7.6,
-          'icon_crown',
-          sprites
-        );
-      } else if (isUrgent) {
-        UI.drawTagBadge(
-          ctx,
-          tx,
-          cardY + 19,
-          Math.min(availTw, 58),
-          13.5,
-          '急 x1.25',
-          'berry',
-          7.6,
-          'icon_flame',
-          sprites
-        );
-      } else if (vertical) {
-        const subLabel = `${safeDefName || '常客'} · ${Math.ceil(curPat)}s`;
-        UI.drawFitText(
-          ctx,
-          subLabel,
-          tx,
-          cardY + 25,
-          availTw,
-          9.5,
-          7.8,
-          700,
-          '#7A553E',
-          'left',
-          'middle'
-        );
+        // Downward speech tail
+        ctx.beginPath();
+        ctx.moveTo(tailX - 5, bubbleY + bubbleH - 1.5);
+        ctx.lineTo(tailX - 1, bubbleY + bubbleH + 7);
+        ctx.lineTo(tailX + 5, bubbleY + bubbleH - 1.5);
+        ctx.closePath();
+        ctx.fillStyle = '#F9EFE0';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(tailX - 5, bubbleY + bubbleH - 1);
+        ctx.lineTo(tailX - 1, bubbleY + bubbleH + 7);
+        ctx.lineTo(tailX + 5, bubbleY + bubbleH - 1);
+        ctx.strokeStyle = '#5A3928';
+        ctx.lineWidth = 1.9;
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+      } finally {
+        try { ctx.restore(); } catch (_) {}
       }
 
-      // Order required Cat-Cakes row (1..3 slots)
+      // Order required Cat-Cakes inside Speech Bubble (1..3 slots)
       if (slots.length > 0) {
-        const chipGap = vertical ? 6 : 4;
-        const maxChip = vertical ? 36 : 31;
-        const minChip = vertical ? 24 : 21;
-        const chipS = clamp(
-          Math.floor((cardW - 12 - (slots.length - 1) * chipGap) / slots.length),
-          minChip,
-          maxChip
+        const chipGap = slots.length >= 3 ? 2 : 5;
+        const maxItemS = Math.min(bubbleH - 6, slots.length >= 3 ? 30 : 34);
+        const itemS = clamp(
+          Math.floor((bubbleW - 10 - (slots.length - 1) * chipGap) / slots.length),
+          18,
+          maxItemS
         );
-        const rowW = slots.length * chipS + (slots.length - 1) * chipGap;
-        const rowStartX = vertical
-          ? cardX + 8
-          : cardX + Math.max(4, Math.round((cardW - rowW) * 0.5));
-        const patBarTop = cardY + cardH - 11;
-        const idealChipY = cardY + 6 + portS + (vertical ? 6 : 4);
-        const chipY = Math.min(idealChipY, Math.max(cardY + 4, patBarTop - chipS - 3));
+        const totalW = slots.length * itemS + (slots.length - 1) * chipGap;
+        const rowStartX = Math.round(bubbleX + (bubbleW - totalW) * 0.5);
+        const itemCy = bubbleY + bubbleH * 0.5;
 
         for (let si = 0; si < slots.length; si++) {
           const rawSl = slots[si];
@@ -1212,103 +1150,154 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
           const slotTier = toSafeTier(getOwn(sl, 'tier', 1), 1);
           const rawSlotFlavor = getOwn(sl, 'flavor', 'any');
           const matched = isOrderSlotMatched(seat, sl, si);
-          const cxChip = rowStartX + si * (chipS + chipGap);
-
-          ctx.save();
-          try {
-            ctx.fillStyle = matched ? '#E8F8E2' : '#FFFDF6';
-            ctx.strokeStyle = matched ? '#439640' : '#C7A16E';
-            ctx.lineWidth = matched ? 1.6 : 1.3;
-            UI.roundRectPath(ctx, cxChip, chipY, chipS, chipS, 7);
-            ctx.fill();
-            ctx.stroke();
-          } finally {
-            try {
-              ctx.restore();
-            } catch (_) {}
-          }
-
+          const icx = rowStartX + si * (itemS + chipGap) + itemS * 0.5;
           const reqFlavor =
             typeof rawSlotFlavor === 'string' && rawSlotFlavor !== 'any' && rawSlotFlavor !== 'plain'
               ? rawSlotFlavor
               : null;
-          UI.drawCatcakeSprite(
-            ctx,
-            sprites,
-            slotTier,
-            cxChip + chipS * 0.5,
-            chipY + chipS * 0.5 - 1,
-            Math.max(12, chipS - 5),
-            {
-              happy: matched,
-              flavor: reqFlavor,
-              showFlavorBadge: Boolean(reqFlavor)
-            }
-          );
 
-          // Micro tier tag ('C1'..'C7') for instant numeric legibility
-          UI.drawFitText(
-            ctx,
-            `C${slotTier}`,
-            cxChip + 2.5,
-            chipY + chipS - 2,
-            chipS - 4,
-            7.6,
-            6.8,
-            900,
-            '#4A2C2A',
-            'left',
-            'bottom'
-          );
+          UI.drawCatcakeSprite(ctx, sprites, slotTier, icx, itemCy, itemS, {
+            happy: matched,
+            flavor: reqFlavor,
+            showFlavorBadge: Boolean(reqFlavor)
+          });
 
           if (matched) {
-            UI.drawCheckmarkBadge(ctx, cxChip + chipS - 4, chipY + 4, 4.8);
+            UI.drawCheckmarkBadge(ctx, icx + itemS * 0.30, itemCy + itemS * 0.28, Math.max(5.0, itemS * 0.20), {
+              sprites
+            });
           }
         }
       }
 
-      // Bottom Patience Progress Bar (green / yellow / red / icy-cyan frozen)
-      const barX = cardX + 6;
-      const barY = cardY + cardH - 9.5;
-      const barW = Math.max(16, cardW - 12);
-      const barH = 5.5;
+      // 2. Standalone Customer WebP Portrait standing behind the wooden counter
+      const portTop = bubbleY + bubbleH + 2;
+      const portBot = counterY + 2;
+      const portH = Math.max(36, portBot - portTop);
+      const portS = Math.min(cardW * 0.78, portH * 1.10);
+      const bob = Math.sin(nowSec * 2.6 + i * 1.4) * 1.2;
+      const portCx = cardX + cardW * 0.5;
+      const portCy = portBot - portS * 0.44 + bob;
+
+      // Cyan priority target halo behind preferred customer portrait (Design 03 left fox)
+      if (isPreferred && typeof UI.drawPriorityTargetBadge === 'function') {
+        UI.drawPriorityTargetBadge(ctx, portCx, portCy, portS * 0.52, nowSec);
+      }
+
+      UI.drawCustomerPortrait(ctx, sprites, custId, portCx, portCy, portS, {
+        circular: false,
+        mood,
+        isVip,
+        isUrgent
+      });
+
+      // 3. Semantic Badges: Urgent ('急单 ×1.25') or VIP ('VIP ×1.5' + crown) matching Design 03
+      if (isVip) {
+        const bw = Math.min(44, Math.round(cardW * 0.40));
+        const bh = 28;
+        const bx = cardX + cardW - bw - 1;
+        const by = portBot - bh - 2;
+        UI.drawKissaCard(ctx, bx, by, bw, bh, {
+          fill: '#F5B841',
+          borderColor: '#5A3928',
+          radius: 8,
+          lineWidth: 1.9
+        });
+        UI.drawUiIcon(ctx, sprites, 'icon_vip_crown', bx + bw * 0.5, by - 4, 15);
+        UI.drawOutlinedText(ctx, 'VIP', bx + bw * 0.5, by + 9.5, {
+          size: 9.8,
+          weight: 900,
+          fill: '#FFF8EC',
+          stroke: '#5A3928',
+          strokeWidth: 2.2,
+          shadowOffsetY: 0,
+          maxWidth: bw - 4
+        });
+        UI.drawOutlinedText(ctx, '×1.5', bx + bw * 0.5, by + 20.5, {
+          size: 8.8,
+          weight: 900,
+          fill: '#5A3928',
+          stroke: '',
+          strokeWidth: 0,
+          shadowOffsetY: 0,
+          maxWidth: bw - 4
+        });
+      } else if (isUrgent) {
+        const bw = Math.min(44, Math.round(cardW * 0.40));
+        const bh = 28;
+        const bx = cardX + 1;
+        const by = portBot - bh - 2;
+        UI.drawKissaCard(ctx, bx, by, bw, bh, {
+          fill: '#F27C38',
+          borderColor: '#5A3928',
+          radius: 8,
+          lineWidth: 1.9
+        });
+        UI.drawOutlinedText(ctx, '急单', bx + bw * 0.5, by + 9.5, {
+          size: 9.8,
+          weight: 900,
+          fill: '#FFF8EC',
+          stroke: '#5A3928',
+          strokeWidth: 2.2,
+          shadowOffsetY: 0,
+          maxWidth: bw - 4
+        });
+        UI.drawOutlinedText(ctx, '×1.25', bx + bw * 0.5, by + 20.5, {
+          size: 8.6,
+          weight: 900,
+          fill: '#FFE9B8',
+          stroke: '#5A3928',
+          strokeWidth: 1.8,
+          shadowOffsetY: 0,
+          maxWidth: bw - 4
+        });
+      }
+
+      // 4. Bottom 3-Band Patience Progress Bar tucked into wooden counter ledge (Design 03)
+      const barW = Math.max(26, cardW - 18);
+      const barH = 8.5;
+      const barX = Math.round(cardX + (cardW - barW) * 0.5);
+      const barY = Math.round(counterY + (counterH - barH) * 0.5);
 
       ctx.save();
       try {
-        ctx.fillStyle = '#DFCFB2';
-        UI.roundRectPath(ctx, barX, barY, barW, barH, 3);
+        ctx.fillStyle = '#6D432B';
+        UI.roundRectPath(ctx, barX, barY, barW, barH, barH * 0.5);
         ctx.fill();
 
         if (ratio > 0) {
-          const fillW = Math.max(4, barW * ratio);
-          const pg = safeLinearGradient(ctx, barX, barY, barX + barW, barY, '#5CC456');
+          const fillW = Math.max(5, (barW - 2) * ratio);
+          const pg = safeLinearGradient(ctx, barX, barY, barX + barW, barY, '#74C353');
           if (freezeActive) {
             safeAddColorStop(pg, 0, '#7CE8FF', '#7CE8FF');
-            safeAddColorStop(pg, 1, '#2BA4DC', '#2BA4DC');
+            safeAddColorStop(pg, 1, '#2FA8DF', '#2FA8DF');
           } else if (ratio >= PATIENCE_TIP_BANDS.greenThreshold) {
-            safeAddColorStop(pg, 0, '#5CC456', '#5CC456');
-            safeAddColorStop(pg, 1, '#3A9636', '#3A9636');
+            safeAddColorStop(pg, 0, '#8AD862', '#8AD862');
+            safeAddColorStop(pg, 1, '#58AE3B', '#58AE3B');
           } else if (ratio >= PATIENCE_TIP_BANDS.yellowThreshold) {
-            safeAddColorStop(pg, 0, '#F7C138', '#F7C138');
-            safeAddColorStop(pg, 1, '#DA8D16', '#DA8D16');
+            safeAddColorStop(pg, 0, '#FFD452', '#FFD452');
+            safeAddColorStop(pg, 1, '#E89B1E', '#E89B1E');
           } else {
-            safeAddColorStop(pg, 0, '#F25A49', '#F25A49');
-            safeAddColorStop(pg, 1, '#C62E24', '#C62E24');
-            ctx.globalAlpha *= 0.82 + 0.18 * Math.sin(nowSec * 12);
+            safeAddColorStop(pg, 0, '#F46E64', '#F46E64');
+            safeAddColorStop(pg, 1, '#D13B32', '#D13B32');
+            ctx.globalAlpha *= 0.80 + 0.20 * Math.sin(nowSec * 12);
           }
           ctx.fillStyle = pg;
-          UI.roundRectPath(ctx, barX, barY, fillW, barH, 3);
+          UI.roundRectPath(ctx, barX + 1, barY + 1, fillW, barH - 2, (barH - 2) * 0.5);
           ctx.fill();
         }
 
-        ctx.strokeStyle = freezeActive ? '#237CA8' : '#4A2C2A';
-        ctx.lineWidth = 1.1;
-        UI.roundRectPath(ctx, barX, barY, barW, barH, 3);
+        ctx.strokeStyle = freezeActive ? '#4BE8FF' : '#FFF4DC';
+        ctx.lineWidth = 1.4;
+        UI.roundRectPath(ctx, barX, barY, barW, barH, barH * 0.5);
         ctx.stroke();
       } finally {
-        try {
-          ctx.restore();
-        } catch (_) {}
+        try { ctx.restore(); } catch (_) {}
+      }
+
+      // 5. Cyan Breathing 4-Corner Priority Lock Frame (`UI.drawPriorityLockFrame`) on preferred seat
+      if (isPreferred && typeof UI.drawPriorityLockFrame === 'function') {
+        UI.drawPriorityLockFrame(ctx, cardX + 1, cardY + 1, cardW - 2, cardH - 2, nowSec);
       }
     }
 
@@ -1320,22 +1309,15 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
 }
 
 /**
- * Render the 3~4 slot wooden serving tray, wicker trash basket, and Combo + Starlight Fever strip.
- * Supports BOTH:
- *   - renderTrayStrip(ctx, rect, orderState, sprites, hits, nowSec, opts)
- *   - renderTrayStrip(ctx, rect, orderState, sprites, hits, appObj, nowSec, opts)
+ * Render the 3~4 slot wooden serving tray (`serving_plate.webp`), warm-wood `UI.drawCooldownCell()` trash basket,
+ * and orange-gold Combo + purple-gold Starlight Fever strip (Design 03).
  */
 function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = undefined, arg8 = undefined) {
   if (!isCanvasCtx(ctx)) return;
   try {
-    const { x: rx, y: ry, w: rw, h: rh } = extractRect(rect, 359, 60);
+    const { x: rx, y: ry, w: rw, h: rh } = extractRect(rect, 359, 68);
     const { appObj, nowSec, opts } = normalizeBarArgs(arg6, arg7, arg8);
 
-    const themeObj = resolveBoardTheme(
-      getOwn(opts, 'theme', null) ||
-        getOwn(appObj, 'equippedTheme', null) ||
-        getOwn(appObj, 'theme', null)
-    );
     const optAnim = getOwn(opts, 'animState', null);
     const appAnim = getOwn(appObj, 'animState', null);
     const animState =
@@ -1377,69 +1359,47 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
     const trayCap = rawCap >= 4 ? 4 : 3;
 
     const rawShowStatus = getOwn(opts, 'showStatusRow', undefined);
-    const showStatusRow = rawShowStatus !== undefined ? Boolean(rawShowStatus) : rh >= 50;
-    const statusH = showStatusRow ? Math.min(16, Math.max(13, Math.floor(rh * 0.27))) : 0;
-    const rowGap = showStatusRow ? 3 : 0;
-    const trayRowH = Math.max(24, rh - statusH - rowGap);
+    const showStatusRow = rawShowStatus !== undefined ? Boolean(rawShowStatus) : rh >= 52;
+    const statusH = showStatusRow ? Math.min(22, Math.max(16, Math.floor(rh * 0.30))) : 0;
+    const rowGap = showStatusRow ? 4 : 0;
+    const trayRowH = Math.max(30, rh - statusH - rowGap);
 
-    const trashW = Math.min(74, Math.max(52, Math.round(rw * 0.18)));
+    const trashW = Math.min(64, Math.max(50, Math.round(rw * 0.165)));
     const trashX = rx + rw - trashW;
-    const trashY = ry;
+    const trashY = ry + 1;
+    const trashH = Math.max(28, trayRowH - 2);
 
     const platterX = rx;
-    const platterW = Math.max(76, trashX - rx - 6);
+    const platterW = Math.max(110, trashX - rx - 6);
 
-    // 1. Wooden Serving Platter Surface
+    // 1. Dark Espresso Wooden Serving Counter Rail behind plates & trash (Design 03)
     ctx.save();
     try {
-      ctx.fillStyle = themeObj.trayBg || '#6E4221';
-      UI.roundRectPath(ctx, platterX, ry, platterW, trayRowH, 10);
+      const railG = safeLinearGradient(ctx, rx - 4, ry, rx - 4, ry + trayRowH, '#5C3C28');
+      safeAddColorStop(railG, 0, '#6B4730', '#6B4730');
+      safeAddColorStop(railG, 1, '#472D1E', '#472D1E');
+      ctx.fillStyle = railG;
+      UI.roundRectPath(ctx, rx - 3, ry, rw + 6, trayRowH, 11);
       ctx.fill();
-      ctx.strokeStyle = 'rgba(255, 240, 200, 0.28)';
-      ctx.lineWidth = 1.1;
-      UI.roundRectPath(ctx, platterX + 1.5, ry + 1.5, platterW - 3, trayRowH - 3, 8.5);
-      ctx.stroke();
-      ctx.strokeStyle = themeObj.trayBorder || '#432418';
-      ctx.lineWidth = 1.8;
-      UI.roundRectPath(ctx, platterX, ry, platterW, trayRowH, 10);
+      ctx.lineWidth = 2.0;
+      ctx.strokeStyle = '#382115';
       ctx.stroke();
     } finally {
-      try {
-        ctx.restore();
-      } catch (_) {}
+      try { ctx.restore(); } catch (_) {}
     }
 
-    const showLabel = platterW >= 248;
-    const labelW = showLabel ? 42 : 6;
-    if (showLabel) {
-      UI.drawFitText(
-        ctx,
-        '配餐盘',
-        platterX + 22,
-        ry + trayRowH * 0.5 + 0.5,
-        36,
-        10,
-        8.2,
-        800,
-        '#FFECC8',
-        'center',
-        'middle'
-      );
-    }
-
-    const slotsAreaX = platterX + labelW;
-    const slotsAreaW = Math.max(54, platterW - labelW - 6);
-    const slotGap = slotsAreaW < 150 ? 4 : 6;
-    const slotS = Math.max(
-      18,
-      Math.min(trayRowH - 4, Math.floor((slotsAreaW - (trayCap - 1) * slotGap) / trayCap))
-    );
+    // 3~4 Round Wooden Serving Plates (`serving_plate.webp`)
+    const plateImg =
+      (sprites && sprites.byId && sprites.byId.serving_plate) ||
+      (sprites && sprites.servingPlate) ||
+      null;
+    const slotGap = trayCap >= 4 ? 5 : 10;
+    const maxSlotW = Math.floor((platterW - 10 - (trayCap - 1) * slotGap) / trayCap);
+    const slotS = clamp(Math.min(maxSlotW, Math.round(trayRowH * 1.15)), 26, Math.max(28, trayRowH + 8));
+    const slotHitH = Math.min(trayRowH - 2, slotS);
     const totalSlotsW = trayCap * slotS + (trayCap - 1) * slotGap;
-    const startSlotX = Math.max(
-      platterX + 3,
-      Math.round(slotsAreaX + (slotsAreaW - totalSlotsW) * 0.5)
-    );
-    const slotY = Math.round(ry + (trayRowH - slotS) * 0.5);
+    const startSlotX = Math.round(platterX + (platterW - totalSlotsW) * 0.5);
+    const slotY = Math.round(ry + (trayRowH - slotHitH) * 0.5);
 
     const slotRects = [];
     let filledSlots = 0;
@@ -1449,7 +1409,7 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
       const rawTrayItem = getOwn(trayArr, i, null);
       const tile = isPlainObj(rawTrayItem) ? rawTrayItem : null;
       if (tile) filledSlots++;
-      safePush(slotRects, { x: sx, y: slotY, w: slotS, h: slotS, slotIdx: i });
+      safePush(slotRects, { x: sx, y: slotY, w: slotS, h: slotHitH, slotIdx: i });
 
       const slotIdxCopy = i;
       safeAddHit(
@@ -1458,32 +1418,47 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
         sx,
         slotY,
         slotS,
-        slotS,
+        slotHitH,
         () => onTapTraySlot(slotIdxCopy),
         { slotIdx: slotIdxCopy, occupied: Boolean(tile) }
       );
 
       const matched = tile ? isTrayIndexMatchedInSeats(orderState, i) : false;
+      const plateCx = sx + slotS * 0.5;
+      const plateCy = ry + trayRowH * 0.56;
 
-      ctx.save();
-      try {
-        ctx.fillStyle = matched ? '#FFF3BE' : themeObj.traySlotFill || 'rgba(255, 246, 224, 0.90)';
-        ctx.strokeStyle = matched ? '#DF9820' : themeObj.traySlotBorder || '#B98848';
-        ctx.lineWidth = matched ? 1.8 : 1.3;
-        UI.roundRectPath(ctx, sx, slotY, slotS, slotS, 7);
-        ctx.fill();
-        ctx.stroke();
-      } finally {
+      if (matched) {
+        ctx.save();
         try {
-          ctx.restore();
-        } catch (_) {}
+          ctx.fillStyle = 'rgba(255, 224, 108, 0.28)';
+          UI.fillEllipse(ctx, plateCx, plateCy, slotS * 0.52, trayRowH * 0.42);
+          ctx.fill();
+        } finally {
+          try { ctx.restore(); } catch (_) {}
+        }
+      }
+
+      if (plateImg && UI.isReadyImage(plateImg)) {
+        UI.drawContainImage(ctx, plateImg, plateCx, plateCy, slotS * 1.02, trayRowH * 0.94);
+      } else {
+        ctx.save();
+        try {
+          ctx.fillStyle = matched ? '#D69952' : '#A86E3E';
+          ctx.strokeStyle = '#5A3928';
+          ctx.lineWidth = 2.0;
+          UI.fillEllipse(ctx, plateCx, plateCy, slotS * 0.46, trayRowH * 0.34);
+          ctx.fill();
+          ctx.stroke();
+        } finally {
+          try { ctx.restore(); } catch (_) {}
+        }
       }
 
       if (tile) {
         let bounceDy = 0;
         const hintTimer = toSafeNum(getOwn(animState, 'trayHintTimer', 0), 0);
         if (getOwn(animState, 'trayHintSlot', -1) === i && hintTimer > 0) {
-          bounceDy = -Math.abs(Math.sin(hintTimer * 24)) * 3;
+          bounceDy = -Math.abs(Math.sin(hintTimer * 24)) * 3.5;
         }
         const tileTier = toSafeTier(getOwn(tile, 'tier', 1), 1);
         const rawTileFlv = getOwn(tile, 'flavor', 'plain');
@@ -1491,33 +1466,19 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
           ctx,
           sprites,
           tileTier,
-          sx + slotS * 0.5,
-          slotY + slotS * 0.5 + bounceDy,
-          Math.max(12, slotS - 4),
+          plateCx,
+          ry + trayRowH * 0.42 + bounceDy,
+          Math.max(18, Math.min(slotS * 0.72, trayRowH * 0.86)),
           {
             happy: matched,
             flavor: typeof rawTileFlv === 'string' ? rawTileFlv : 'plain',
             showFlavorBadge: true
           }
         );
-      } else {
-        UI.drawFitText(
-          ctx,
-          '空',
-          sx + slotS * 0.5,
-          slotY + slotS * 0.5 + 0.5,
-          slotS - 4,
-          8.5,
-          7,
-          700,
-          'rgba(120, 86, 54, 0.55)',
-          'center',
-          'middle'
-        );
       }
     }
 
-    // 2. Wicker Trash Basket Button (right side)
+    // 2. Warm-Wood Trash Basket Cell (`UI.drawCooldownCell`, strictly NO black overlay!)
     const isFullTray = filledSlots >= trayCap;
     const trashCooldown = Math.max(0, toSafeNum(getOwn(orderState, 'trashCooldown', 0), 0));
     const trashCooling = trashCooldown > 1e-6;
@@ -1533,87 +1494,30 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
       Boolean(animState && toSafeNum(getOwn(animState, 'trashWobbleTimer', 0), 0) > 0);
     const trashRot = shouldWobble ? Math.sin(nowSec * 13) * 0.11 : 0;
 
-    safeAddHit(hits, 'tray_trash_btn', trashX, trashY, trashW, trayRowH, () => onTapTrash(), {
+    safeAddHit(hits, 'tray_trash_btn', trashX, trashY, trashW, trashH, () => onTapTrash(), {
       isFullTray,
       trashCooldown,
       forkTrashReady
     });
 
-    UI.drawKissaCard(ctx, trashX, trashY, trashW, trayRowH, {
-      tone: forkTrashReady ? 'selected' : trashCooling ? 'soft' : isFullTray ? 'amber' : 'cream',
-      borderColor: forkTrashReady
-        ? '#36A868'
-        : trashCooling
-        ? '#9E8D7B'
-        : isFullTray
-        ? '#C97B1A'
-        : '#B98E58',
-      radius: 10
-    });
+    const trashImg =
+      (sprites && sprites.byId && sprites.byId.icon_trash) ||
+      (sprites && sprites.icon_trash) ||
+      null;
+    const clockImg =
+      (sprites && sprites.byId && sprites.byId.icon_clock) ||
+      (sprites && sprites.icon_clock) ||
+      null;
 
-    if (forkTrashReady) {
-      ctx.save();
-      try {
-        ctx.strokeStyle = 'rgba(54, 168, 104, 0.92)';
-        ctx.lineWidth = 2.0;
-        if (typeof ctx.setLineDash === 'function') ctx.setLineDash([4, 3]);
-        UI.roundRectPath(ctx, trashX + 1.5, trashY + 1.5, trashW - 3, trayRowH - 3, 8.5);
-        ctx.stroke();
-        if (typeof ctx.setLineDash === 'function') ctx.setLineDash([]);
-      } finally {
-        try {
-          ctx.restore();
-        } catch (_) {}
-      }
-    } else if (trashCooling) {
-      const cdMax = Math.max(0.5, toSafeNum(TRASH_CONFIG && TRASH_CONFIG.cooldownSec, 8.0));
-      const cdRatio = clamp(trashCooldown / cdMax, 0, 1);
-      ctx.save();
-      try {
-        ctx.fillStyle = 'rgba(52, 40, 32, 0.24)';
-        UI.roundRectPath(ctx, trashX + 1.5, trashY + 1.5, (trashW - 3) * cdRatio, trayRowH - 3, 8.5);
-        ctx.fill();
-      } finally {
-        try {
-          ctx.restore();
-        } catch (_) {}
-      }
+    if (typeof UI.drawCooldownCell === 'function') {
+      UI.drawCooldownCell(ctx, trashX, trashY, trashW, trashH, trashCooldown, {
+        trashImg,
+        clockImg,
+        label: '厨余篮',
+        forkTrashReady,
+        rot: trashRot
+      });
     }
-
-    const trashIcS = Math.min(22, Math.max(14, trayRowH - 8));
-    UI.drawUiIcon(
-      ctx,
-      sprites || {},
-      'btn_trash',
-      trashX + 4 + trashIcS * 0.5,
-      trashY + trayRowH * 0.5,
-      trashIcS,
-      trashCooling && !forkTrashReady ? 0.58 : 1,
-      trashRot
-    );
-
-    const trashTextX = trashX + 6 + trashIcS;
-    const trashTextW = Math.max(16, trashX + trashW - trashTextX - 3);
-    const trashLabel = forkTrashReady
-      ? '叉入销毁'
-      : trashCooling
-      ? `冷却${Math.ceil(trashCooldown)}s`
-      : isFullTray
-      ? '双击弃'
-      : '厨余';
-    UI.drawFitText(
-      ctx,
-      trashLabel,
-      trashTextX + trashTextW * 0.5,
-      trashY + trayRowH * 0.5 + 0.5,
-      trashTextW,
-      9.8,
-      7.2,
-      800,
-      forkTrashReady ? '#236E42' : trashCooling ? '#6B5848' : '#5A341E',
-      'center',
-      'middle'
-    );
 
     // Puff smoke rings on double-tap discard
     const puffTimer = toSafeNum(getOwn(animState, 'trashPuffTimer', 0), 0);
@@ -1622,29 +1526,27 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
       const p = clamp(1 - puffTimer / dur, 0, 1);
       ctx.save();
       try {
-        ctx.strokeStyle = `rgba(180, 168, 156, ${(1 - p) * 0.72})`;
-        ctx.lineWidth = 1.4;
+        ctx.strokeStyle = `rgba(255, 240, 214, ${(1 - p) * 0.78})`;
+        ctx.lineWidth = 1.6;
         for (let k = 0; k < 3; k++) {
           const pr = 3 + p * 8 + k * 2.2;
-          const px = trashX + 14 + (k - 1) * 5;
-          const py = trashY + 4 - p * 12 - k * 2;
+          const px = trashX + trashW * 0.5 + (k - 1) * 6;
+          const py = trashY + 6 - p * 12 - k * 2;
           ctx.beginPath();
           ctx.arc(px, py, pr, 0, Math.PI * 2);
           ctx.stroke();
         }
       } finally {
-        try {
-          ctx.restore();
-        } catch (_) {}
+        try { ctx.restore(); } catch (_) {}
       }
     }
 
-    // 3. Bottom Serve Combo + Starlight Fever Sub-Row
-    if (showStatusRow && statusH >= 10) {
+    // 3. Bottom Serve Combo + Purple-Gold Starlight Fever Bar (Design 03)
+    if (showStatusRow && statusH >= 12) {
       const statusY = ry + trayRowH + rowGap;
-      const comboW = Math.floor(rw * 0.46);
-      const feverW = rw - comboW - 6;
+      const comboW = Math.round(rw * 0.36);
       const feverX = rx + comboW + 6;
+      const feverW = Math.max(80, rw - comboW - 6);
 
       const comboCount = Math.max(0, Math.floor(toSafeNum(getOwn(orderState, 'comboCount', 0), 0)));
       const comboTimer = Math.max(0, toSafeNum(getOwn(orderState, 'comboTimer', 0), 0));
@@ -1655,64 +1557,60 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
       const multIdx = clamp(comboCount - 1, 0, multLen - 1);
       const comboMult = SERVE_COMBO_MULTS[multIdx] || 1.0;
 
-      // Combo capsule
+      // Orange-gold Combo Pill (with cute cat-ear glow peak when active)
       ctx.save();
       try {
-        ctx.fillStyle = comboBroken
-          ? 'rgba(110, 116, 126, 0.85)'
-          : comboActive
-          ? 'rgba(92, 44, 18, 0.90)'
-          : 'rgba(72, 44, 28, 0.62)';
-        ctx.strokeStyle = comboActive ? '#F5B841' : 'rgba(198, 159, 105, 0.65)';
-        ctx.lineWidth = 1.2;
+        if (comboActive) {
+          ctx.shadowColor = 'rgba(245, 184, 65, 0.55)';
+          ctx.shadowBlur = 8;
+        }
+        const cg = safeLinearGradient(ctx, rx, statusY, rx, statusY + statusH, '#F27C38');
+        if (comboBroken) {
+          safeAddColorStop(cg, 0, '#8A847D', '#8A847D');
+          safeAddColorStop(cg, 1, '#66605A', '#66605A');
+        } else if (comboActive) {
+          safeAddColorStop(cg, 0, '#FFD466', '#FFD466');
+          safeAddColorStop(cg, 1, '#F27C38', '#F27C38');
+        } else {
+          safeAddColorStop(cg, 0, '#8A5A3A', '#8A5A3A');
+          safeAddColorStop(cg, 1, '#633E26', '#633E26');
+        }
+        ctx.fillStyle = cg;
         UI.roundRectPath(ctx, rx, statusY, comboW, statusH, statusH * 0.5);
         ctx.fill();
+        ctx.shadowColor = 'rgba(0, 0, 0, 0)';
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = comboActive ? '#FFE885' : '#3D2417';
+        ctx.lineWidth = 1.8;
         ctx.stroke();
 
         if (comboActive) {
           const cRatio = clamp(comboTimer / comboWindow, 0, 1);
-          ctx.fillStyle = 'rgba(255, 198, 68, 0.32)';
-          UI.roundRectPath(ctx, rx + 2, statusY + statusH - 3.5, (comboW - 4) * cRatio, 2.2, 1.1);
+          ctx.fillStyle = 'rgba(255, 250, 210, 0.45)';
+          UI.roundRectPath(ctx, rx + 5, statusY + statusH - 3.6, Math.max(4, (comboW - 10) * cRatio), 2.2, 1.1);
           ctx.fill();
         }
       } finally {
-        try {
-          ctx.restore();
-        } catch (_) {}
+        try { ctx.restore(); } catch (_) {}
       }
 
-      const cIcS = Math.min(statusH - 2, 12);
-      const drewFlame = UI.drawUiIcon(
-        ctx,
-        sprites || {},
-        'icon_flame',
-        rx + 6 + cIcS * 0.5,
-        statusY + statusH * 0.5,
-        cIcS,
-        comboActive ? 1 : 0.55
-      );
-      const cTx = drewFlame ? rx + 8 + cIcS : rx + 6;
-      const cTw = Math.max(20, rx + comboW - cTx - 5);
       const comboText = comboActive
-        ? `${comboCount}连上菜 x${comboMult.toFixed(2)}`
+        ? `${comboCount}连 ×${comboMult.toFixed(2)}`
         : comboBroken
         ? '连击中断'
         : '连击待发';
-      UI.drawFitText(
-        ctx,
-        comboText,
-        cTx + cTw * 0.5,
-        statusY + statusH * 0.5 + 0.3,
-        cTw,
-        9.2,
-        7.4,
-        800,
-        comboActive ? '#FFF3C4' : '#E8D8BE',
-        'center',
-        'middle'
-      );
+      UI.drawOutlinedText(ctx, comboText, rx + comboW * 0.5, statusY + statusH * 0.5 + 0.4, {
+        size: comboActive ? 11.4 : 9.8,
+        minSize: 8.2,
+        weight: 900,
+        fill: comboActive ? '#FFF9E0' : '#EEDCC4',
+        stroke: '#5A3928',
+        strokeWidth: comboActive ? 2.4 : 1.8,
+        shadowOffsetY: 0,
+        maxWidth: comboW - 10
+      });
 
-      // Starlight Fever bar
+      // Purple-to-Gold Starlight Fever Bar (`#B56CF5 -> #F5B841`, Design 03)
       const feverTimer = Math.max(0, toSafeNum(getOwn(orderState, 'feverTimer', 0), 0));
       const feverActive = Boolean(getOwn(orderState, 'feverActive', false) || feverTimer > 0);
       const feverEnergy = clamp(toSafeNum(getOwn(orderState, 'feverEnergy', 0), 0), 0, 100);
@@ -1722,75 +1620,61 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
 
       ctx.save();
       try {
-        ctx.fillStyle = 'rgba(54, 32, 22, 0.76)';
+        ctx.fillStyle = '#4A2E24';
         UI.roundRectPath(ctx, feverX, statusY, feverW, statusH, statusH * 0.5);
         ctx.fill();
 
         if (fRatio > 0) {
-          const fg = safeLinearGradient(ctx, feverX, statusY, feverX + feverW, statusY, '#FFE066');
+          const fg = safeLinearGradient(ctx, feverX, statusY, feverX + feverW, statusY, '#B56CF5');
           if (feverActive) {
-            safeAddColorStop(fg, 0, '#FFE47A', '#FFE47A');
-            safeAddColorStop(fg, 1, '#FF98BE', '#FF98BE');
+            safeAddColorStop(fg, 0, '#C57BFF', '#C57BFF');
+            safeAddColorStop(fg, 0.55, '#F58BBF', '#F58BBF');
+            safeAddColorStop(fg, 1, '#FFE278', '#FFE278');
           } else {
-            safeAddColorStop(fg, 0, '#FFE066', '#FFE066');
-            safeAddColorStop(fg, 1, '#E69620', '#E69620');
+            safeAddColorStop(fg, 0, '#9B6CF0', '#9B6CF0');
+            safeAddColorStop(fg, 0.58, '#D27EE2', '#D27EE2');
+            safeAddColorStop(fg, 1, '#F5B841', '#F5B841');
           }
           ctx.fillStyle = fg;
           UI.roundRectPath(
             ctx,
-            feverX + 1.5,
-            statusY + 1.5,
-            Math.max(6, (feverW - 3) * fRatio),
-            statusH - 3,
-            (statusH - 3) * 0.5
+            feverX + 1.8,
+            statusY + 1.8,
+            Math.max(8, (feverW - 3.6) * fRatio),
+            statusH - 3.6,
+            (statusH - 3.6) * 0.5
           );
           ctx.fill();
         }
 
-        ctx.strokeStyle = feverActive ? '#FFF0A6' : '#C89B58';
-        ctx.lineWidth = 1.2;
+        ctx.strokeStyle = feverActive ? '#FFE885' : '#5A3928';
+        ctx.lineWidth = 2.0;
         UI.roundRectPath(ctx, feverX, statusY, feverW, statusH, statusH * 0.5);
         ctx.stroke();
       } finally {
-        try {
-          ctx.restore();
-        } catch (_) {}
+        try { ctx.restore(); } catch (_) {}
       }
 
-      const fIcS = Math.min(statusH - 2, 12);
-      const drewDust = UI.drawUiIcon(
-        ctx,
-        sprites || {},
-        'icon_stardust',
-        feverX + 6 + fIcS * 0.5,
-        statusY + statusH * 0.5,
-        fIcS
-      );
-      const fTx = drewDust ? feverX + 8 + fIcS : feverX + 6;
-      const fTw = Math.max(20, feverX + feverW - fTx - 5);
       const feverLabel = feverActive
-        ? `星光热潮 x${(FEVER_CONFIG.scoreMult || 1.25).toFixed(2)}`
-        : `星光热潮 ${Math.round(feverEnergy)}%`;
-      UI.drawFitText(
-        ctx,
-        feverLabel,
-        fTx + fTw * 0.5,
-        statusY + statusH * 0.5 + 0.3,
-        fTw,
-        9.2,
-        7.4,
-        800,
-        feverActive ? '#4A2C2A' : '#FFF6DC',
-        'center',
-        'middle'
-      );
+        ? `星光热潮 ×${(FEVER_CONFIG.scoreMult || 1.25).toFixed(2)}  ${Math.ceil(feverTimer)}s`
+        : `星光热潮   ${Math.round(feverEnergy)}%`;
+      UI.drawOutlinedText(ctx, feverLabel, feverX + feverW * 0.5, statusY + statusH * 0.5 + 0.5, {
+        size: 10.6,
+        minSize: 8.2,
+        weight: 900,
+        fill: '#FFF8EC',
+        stroke: '#5A3928',
+        strokeWidth: 2.2,
+        shadowOffsetY: 0,
+        maxWidth: feverW - 14
+      });
     }
 
     if (guideTargets) {
       safeSetProp(guideTargets, 'trayStrip', { x: rx, y: ry, w: rw, h: rh });
       safeSetProp(guideTargets, 'trayPlatter', { x: platterX, y: ry, w: platterW, h: trayRowH });
       safeSetProp(guideTargets, 'traySlots', slotRects);
-      safeSetProp(guideTargets, 'trashBtn', { x: trashX, y: trashY, w: trashW, h: trayRowH });
+      safeSetProp(guideTargets, 'trashBtn', { x: trashX, y: trashY, w: trashW, h: trashH });
     }
   } catch (_) {}
 }

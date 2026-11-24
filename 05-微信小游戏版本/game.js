@@ -4,6 +4,9 @@
  */
 'use strict';
 
+const UI = require('./src/ui_draw');
+UI.initGameFont('assets/fonts/kissa_round.ttf');
+
 const { createApp } = require('./src/game_app');
 
 createApp();

@@ -411,6 +411,16 @@ function resolveCustomersAtlas(sprites) {
   return isReadyImage(img) ? img : null;
 }
 
+function resolveByIdSprite(sprites, id) {
+  if (!sprites || typeof sprites !== 'object' || typeof id !== 'string' || !id) return null;
+  const byId = getOwnProp(sprites, 'byId', null);
+  const direct =
+    (byId && typeof byId === 'object' ? getOwnProp(byId, id, null) : null) ||
+    getOwnProp(sprites, id, null) ||
+    null;
+  return isReadyImage(direct) ? direct : null;
+}
+
 function resolveCatcakeImage(sprites, tier, happy = false) {
   if (!sprites || typeof sprites !== 'object') return null;
   const t = normalizeCatcakeTier(tier);
@@ -422,7 +432,7 @@ function resolveCatcakeImage(sprites, tier, happy = false) {
       (happyMap &&
         typeof happyMap === 'object' &&
         (getOwnProp(happyMap, String(t), null) || getOwnProp(happyMap, cKey, null))) ||
-      getOwnProp(sprites, `catcake_${t}_happy`, null) ||
+      resolveByIdSprite(sprites, `catcake_${t}_happy`) ||
       null;
     if (isReadyImage(hImg)) return hImg;
   }
@@ -431,7 +441,7 @@ function resolveCatcakeImage(sprites, tier, happy = false) {
     (baseMap &&
       typeof baseMap === 'object' &&
       (getOwnProp(baseMap, String(t), null) || getOwnProp(baseMap, cKey, null))) ||
-    getOwnProp(sprites, `catcake_${t}`, null) ||
+    resolveByIdSprite(sprites, `catcake_${t}`) ||
     null;
   return isReadyImage(bImg) ? bImg : null;
 }
@@ -440,16 +450,16 @@ const FONT_FAMILY = 'PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif'
 
 // Unified Starlight Kissa Palette Tokens
 const KISSA_THEME = {
-  ink: '#4A2C2A',
-  inkSoft: '#6E463B',
-  inkMuted: '#8C6853',
-  creamLight: '#FFFDF7',
-  creamMid: '#F8ECD4',
-  creamDeep: '#EDD7B0',
-  borderWarm: '#C69F69',
-  brassLight: '#FFE799',
-  brassMid: '#E4A83C',
-  brassDark: '#9A5B17'
+  ink: '#5A3928',
+  inkSoft: '#754C36',
+  inkMuted: '#99735B',
+  creamLight: '#FFF8EC',
+  creamMid: '#F7EAD2',
+  creamDeep: '#F2E2C4',
+  borderWarm: '#8A5634',
+  brassLight: '#FFD466',
+  brassMid: '#F5A623',
+  brassDark: '#C87A1E'
 };
 
 const MAX_FONT_PX = 256;
@@ -466,7 +476,11 @@ function fontStr(px, weight = 700) {
       : typeof weight === 'string' && weight.trim()
       ? weight.trim().slice(0, 32)
       : 700;
-  return `${safeWeight} ${safePx}px ${FONT_FAMILY}`;
+  const activeFam =
+    module.exports && typeof module.exports.getFontFamily === 'function'
+      ? module.exports.getFontFamily()
+      : FONT_FAMILY;
+  return `${safeWeight} ${safePx}px ${activeFam}`;
 }
 
 function sanitizeFontSpec(font) {
@@ -705,9 +719,245 @@ function drawContainImage(ctx, img, cx, cy, maxW, maxH) {
   return drawContainImageDims(ctx, img, dims, cx, cy, maxW, maxH);
 }
 
+const V090_ICON_ALIAS_MAP = {
+  // Dock & Shop / Compendium / Leaderboard / Theme
+  icon_shop: 'dock_shop',
+  dock_shop: 'dock_shop',
+  shop_sign: 'dock_shop',
+  icon_book: 'dock_compendium',
+  dock_compendium: 'dock_compendium',
+  icon_trophy: 'dock_rank',
+  dock_rank: 'dock_rank',
+  icon_ribbon: 'dock_theme',
+  dock_theme: 'dock_theme',
+  // HUD badges
+  icon_stardust: 'icon_star_coin',
+  icon_coin: 'icon_star_coin',
+  icon_star_coin: 'icon_star_coin',
+  icon_star_dim: 'icon_star_dim',
+  icon_crown: 'icon_vip_crown',
+  icon_vip_crown: 'icon_vip_crown',
+  icon_hourglass: 'icon_clock',
+  icon_clock: 'icon_clock',
+  icon_lock: 'icon_lock',
+  icon_bgm: 'icon_music',
+  icon_music: 'icon_music',
+  icon_sfx: 'icon_sfx',
+  icon_paw_guide: 'icon_paw_marker',
+  icon_paw_marker: 'icon_paw_marker',
+  icon_check: 'icon_check',
+  // Tools & Tray & Dough
+  tool_fork: 'tool_swap_fork',
+  tool_swap_fork: 'tool_swap_fork',
+  tool_spoon: 'tool_upgrade_spoon',
+  tool_upgrade_spoon: 'tool_upgrade_spoon',
+  btn_knead: 'knead_dough',
+  knead_dough: 'knead_dough',
+  tool_dough: 'knead_dough',
+  btn_trash: 'icon_trash',
+  icon_trash: 'icon_trash',
+  serve_bell: 'serving_plate',
+  serving_plate: 'serving_plate',
+  // Tiles & Flavors
+  tile_block: 'tile_obstacle',
+  tile_rock: 'tile_obstacle',
+  tile_obstacle: 'tile_obstacle',
+  tile_ice: 'tile_ice',
+  tile_matcha: 'flavor_matcha',
+  flavor_matcha: 'flavor_matcha',
+  tile_berry: 'flavor_berry',
+  tile_strawberry: 'flavor_berry',
+  flavor_berry: 'flavor_berry',
+  tile_gold: 'flavor_gold',
+  flavor_gold: 'flavor_gold',
+  // Devices & Themes
+  device_tray: 'device_tray',
+  device_flour: 'device_flour',
+  icon_sieve: 'device_flour',
+  device_teapot: 'device_teapot',
+  device_rack: 'device_rack',
+  icon_toolbox: 'device_rack',
+  theme_amber: 'theme_amber',
+  theme_sakura: 'theme_sakura',
+  theme_moonlight: 'theme_moonlight',
+  // Medals & Ribbon
+  icon_medal_1: 'medal_gold',
+  medal_gold: 'medal_gold',
+  icon_medal_2: 'medal_silver',
+  medal_silver: 'medal_silver',
+  icon_medal_3: 'medal_bronze',
+  medal_bronze: 'medal_bronze',
+  result_ribbon: 'result_ribbon',
+  // Patrons
+  mikan: 'patron_mikan',
+  chef_mikan: 'patron_mikan',
+  patron_mikan: 'patron_mikan',
+  mode_chef: 'patron_mikan',
+  luna: 'patron_luna',
+  patron_luna: 'patron_luna',
+  icon_moon: 'patron_luna',
+  mugi: 'patron_mugi',
+  patron_mugi: 'patron_mugi',
+  // Supplementary generated icons (10_补充素材/)
+  icon_avatar_default: 'icon_avatar_default',
+  icon_id_card: 'icon_avatar_default',
+  icon_flame: 'icon_urgent_flame',
+  icon_urgent_flame: 'icon_urgent_flame',
+  icon_fever_badge: 'icon_fever_badge',
+  icon_gift: 'icon_fever_badge',
+  icon_cloud: 'icon_cloud_sync',
+  icon_cloud_sync: 'icon_cloud_sync'
+};
+
+function drawCrispVectorControlIcon(ctx, iconKey, cx, cy, size, alpha = 1, rot = 0) {
+  if (!safeSave(ctx)) return false;
+  let ok = false;
+  try {
+    if (alpha < 1) ctx.globalAlpha *= alpha;
+    ctx.translate(cx, cy);
+    if (rot) ctx.rotate(rot);
+    const r = size * 0.38;
+
+    if (iconKey === 'icon_pause') {
+      const bw = Math.max(2.6, size * 0.19);
+      const bh = Math.max(7, size * 0.56);
+      const gap = Math.max(2.2, size * 0.14);
+      ctx.fillStyle = '#FFF8EC';
+      ctx.strokeStyle = '#5A3928';
+      ctx.lineWidth = Math.max(1.3, size * 0.08);
+      for (const dir of [-1, 1]) {
+        const rx = dir * (gap * 0.5 + bw * 0.5) - bw * 0.5;
+        roundRectPath(ctx, rx, -bh * 0.5, bw, bh, bw * 0.45);
+        ctx.fill();
+        ctx.stroke();
+      }
+      ok = true;
+    } else if (iconKey === 'icon_close') {
+      const arm = size * 0.28;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = '#5A3928';
+      ctx.lineWidth = Math.max(4.4, size * 0.28);
+      ctx.beginPath();
+      ctx.moveTo(-arm, -arm);
+      ctx.lineTo(arm, arm);
+      ctx.moveTo(arm, -arm);
+      ctx.lineTo(-arm, arm);
+      ctx.stroke();
+      ctx.strokeStyle = '#FFF8EC';
+      ctx.lineWidth = Math.max(2.4, size * 0.15);
+      ctx.beginPath();
+      ctx.moveTo(-arm, -arm);
+      ctx.lineTo(arm, arm);
+      ctx.moveTo(arm, -arm);
+      ctx.lineTo(-arm, arm);
+      ctx.stroke();
+      ok = true;
+    } else if (iconKey === 'icon_help') {
+      const drawOut = module.exports && typeof module.exports.drawOutlinedText === 'function' ? module.exports.drawOutlinedText : null;
+      if (drawOut) {
+        drawOut(ctx, '?', 0, 1, {
+          size: Math.max(12, Math.round(size * 0.85)),
+          weight: 900,
+          fill: '#FFF8EC',
+          stroke: '#5A3928',
+          strokeWidth: 2.6,
+          shadowOffsetY: 0
+        });
+      } else {
+        drawFitText(ctx, '?', 0, 1, size, size * 0.8, 10, 900, '#FFF8EC', 'center', 'middle');
+      }
+      ok = true;
+    } else if (iconKey === 'icon_home') {
+      ctx.fillStyle = '#FFF8EC';
+      ctx.strokeStyle = '#5A3928';
+      ctx.lineWidth = Math.max(1.4, size * 0.085);
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(0, -r * 0.92);
+      ctx.lineTo(r * 1.05, -r * 0.05);
+      ctx.lineTo(r * 0.72, -r * 0.05);
+      ctx.lineTo(r * 0.72, r * 0.88);
+      ctx.lineTo(-r * 0.72, r * 0.88);
+      ctx.lineTo(-r * 0.72, -r * 0.05);
+      ctx.lineTo(-r * 1.05, -r * 0.05);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ok = true;
+    } else if (iconKey === 'icon_restart') {
+      ctx.strokeStyle = '#FFF8EC';
+      ctx.lineWidth = Math.max(2.1, size * 0.13);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 0.78, -Math.PI * 0.8, Math.PI * 0.72, false);
+      ctx.stroke();
+      ctx.fillStyle = '#FFF8EC';
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.86, -r * 0.35);
+      ctx.lineTo(-r * 0.25, -r * 0.92);
+      ctx.lineTo(-r * 0.14, -r * 0.22);
+      ctx.closePath();
+      ctx.fill();
+      ok = true;
+    } else if (iconKey === 'icon_arrow') {
+      ctx.strokeStyle = '#5A3928';
+      ctx.lineWidth = Math.max(2.2, size * 0.16);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.4, -r * 0.75);
+      ctx.lineTo(r * 0.5, 0);
+      ctx.lineTo(-r * 0.4, r * 0.75);
+      ctx.stroke();
+      ok = true;
+    } else if (iconKey === 'icon_warn') {
+      ctx.fillStyle = '#FFD466';
+      ctx.strokeStyle = '#5A3928';
+      ctx.lineWidth = Math.max(1.4, size * 0.09);
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(0, -r * 0.95);
+      ctx.lineTo(r * 0.95, r * 0.82);
+      ctx.lineTo(-r * 0.95, r * 0.82);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#5A3928';
+      ctx.fillRect(-r * 0.12, -r * 0.34, r * 0.24, r * 0.62);
+      ctx.beginPath();
+      ctx.arc(0, r * 0.52, r * 0.14, 0, Math.PI * 2);
+      ctx.fill();
+      ok = true;
+    } else if (iconKey === 'icon_local_save') {
+      ctx.fillStyle = '#FFE599';
+      ctx.strokeStyle = '#5A3928';
+      ctx.lineWidth = Math.max(1.3, size * 0.085);
+      roundRectPath(ctx, -r * 0.82, -r * 0.82, r * 1.64, r * 1.64, r * 0.36);
+      ctx.fill();
+      ctx.stroke();
+      ctx.strokeStyle = '#5A3928';
+      ctx.lineWidth = Math.max(1.5, size * 0.10);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.38, 0);
+      ctx.lineTo(-r * 0.08, r * 0.34);
+      ctx.lineTo(r * 0.44, -r * 0.30);
+      ctx.stroke();
+      ok = true;
+    }
+  } catch (_) {
+    ok = false;
+  } finally {
+    safeRestore(ctx);
+  }
+  return ok;
+}
+
 /**
- * Draw a storybook illustrated icon from `sprites.uiAtlas`, `uiAtlas2`, `uiAtlas3`,
- * or standalone UI / tool / dessert sprites.
+ * Draw a storybook illustrated icon from v0.9.0 standalone WebP sprites (`sprites.byId`)
+ * with full backward compatibility for all legacy icon keys and crisp vector controls.
  */
 function drawUiIcon(ctx, sprites, iconKey, cx, cy, size, alpha = 1, rot = 0) {
   const safeSize = toSafeNum(size, 0);
@@ -726,32 +976,17 @@ function drawUiIcon(ctx, sprites, iconKey, cx, cy, size, alpha = 1, rot = 0) {
   const safeAlpha = Math.max(0, Math.min(1, toSafeNum(alpha, 1)));
   const safeRot = toSafeNum(rot, 0);
 
-  if (iconKey === 'icon_pause') {
-    if (!safeSave(ctx)) return false;
-    let okPause = false;
-    try {
-      if (safeAlpha < 1) ctx.globalAlpha *= safeAlpha;
-      ctx.translate(safeCx, safeCy);
-      if (safeRot) ctx.rotate(safeRot);
-      const bw = Math.max(2.6, safeSize * 0.19);
-      const bh = Math.max(7, safeSize * 0.56);
-      const gap = Math.max(2.2, safeSize * 0.14);
-      ctx.fillStyle = '#fff5cf';
-      ctx.strokeStyle = '#4A2C2A';
-      ctx.lineWidth = Math.max(1.2, safeSize * 0.075);
-      for (const dir of [-1, 1]) {
-        const rx = dir * (gap * 0.5 + bw * 0.5) - bw * 0.5;
-        roundRectPath(ctx, rx, -bh * 0.5, bw, bh, bw * 0.45);
-        ctx.fill();
-        ctx.stroke();
-      }
-      okPause = true;
-    } catch (_) {
-      okPause = false;
-    } finally {
-      safeRestore(ctx);
-    }
-    return okPause;
+  if (
+    iconKey === 'icon_pause' ||
+    iconKey === 'icon_close' ||
+    iconKey === 'icon_help' ||
+    iconKey === 'icon_home' ||
+    iconKey === 'icon_restart' ||
+    iconKey === 'icon_arrow' ||
+    iconKey === 'icon_warn' ||
+    iconKey === 'icon_local_save'
+  ) {
+    return drawCrispVectorControlIcon(ctx, iconKey, safeCx, safeCy, safeSize, safeAlpha, safeRot);
   }
 
   if (iconKey === 'badge_matcha' || iconKey === 'badge_berry' || iconKey === 'badge_gold') {
@@ -773,86 +1008,42 @@ function drawUiIcon(ctx, sprites, iconKey, cx, cy, size, alpha = 1, rot = 0) {
     });
   }
 
-  if (CUSTOMERS_ATLAS_RECTS && hasOwnProp(CUSTOMERS_ATLAS_RECTS, iconKey)) {
+  if (
+    (CUSTOMERS_ATLAS_RECTS && hasOwnProp(CUSTOMERS_ATLAS_RECTS, iconKey)) ||
+    iconKey === 'cust_orange_uncle' ||
+    iconKey === 'cust_scholar' ||
+    iconKey === 'cust_lop_bunny' ||
+    iconKey === 'cust_vip_cat'
+  ) {
     return drawCustomerPortrait(ctx, sprites, iconKey, safeCx, safeCy, safeSize, {
       circular: false,
       alpha: safeAlpha
     });
   }
 
-  if (BOARD_TILES_ATLAS_RECTS && hasOwnProp(BOARD_TILES_ATLAS_RECTS, iconKey)) {
-    const bRect = getOwnProp(BOARD_TILES_ATLAS_RECTS, iconKey, null);
-    const bAtlas = resolveBoardTilesAtlas(sprites);
-    if (bAtlas && bRect && safeSave(ctx)) {
-      let drew = false;
-      try {
-        if (safeAlpha < 1) ctx.globalAlpha *= safeAlpha;
-        ctx.translate(safeCx, safeCy);
-        if (safeRot) ctx.rotate(safeRot);
-        drew = safeDrawImage(
-          ctx,
-          bAtlas,
-          toSafeNum(getOwnProp(bRect, 'x', 0), 0),
-          toSafeNum(getOwnProp(bRect, 'y', 0), 0),
-          toSafeNum(getOwnProp(bRect, 'w', 0), 0),
-          toSafeNum(getOwnProp(bRect, 'h', 0), 0),
-          -safeSize * 0.5,
-          -safeSize * 0.5,
-          safeSize,
-          safeSize
-        );
-      } catch (_) {
-        drew = false;
-      } finally {
-        safeRestore(ctx);
-      }
-      if (drew) return true;
-    }
-    drawProceduralBoardTileIcon(ctx, iconKey, safeCx, safeCy, safeSize, safeAlpha, safeRot);
-    return true;
-  }
+  // 1. Direct v0.9.0 standalone WebP sprite lookup via alias map or exact key
+  const mappedId = hasOwnProp(V090_ICON_ALIAS_MAP, iconKey) ? V090_ICON_ALIAS_MAP[iconKey] : iconKey;
+  let standalone = resolveByIdSprite(sprites, mappedId) || resolveByIdSprite(sprites, iconKey);
 
-  // Standalone decorative / tool / patron / dessert sprites check
-  const toolsMap = getOwnProp(sprites, 'tools', null);
-  const patronsMap = getOwnProp(sprites, 'patrons', null);
-  const baseMap = getOwnProp(sprites, 'base', null);
-  let standalone = null;
-  if (iconKey === 'serve_bell') {
-    standalone = getOwnProp(sprites, 'serveBell', null) || getOwnProp(sprites, 'ui_serve_bell', null);
-  } else if (iconKey === 'shop_sign') {
-    standalone = getOwnProp(sprites, 'shopSign', null) || getOwnProp(sprites, 'icon_shop_sign', null);
-  } else if (iconKey === 'yarn_ball') {
-    standalone = getOwnProp(sprites, 'yarnBall', null);
-  } else if (iconKey === 'tool_shake') {
-    standalone = toolsMap && typeof toolsMap === 'object' ? getOwnProp(toolsMap, 'shake', null) : null;
-  } else if (iconKey === 'tool_spoon') {
-    standalone =
-      (toolsMap && typeof toolsMap === 'object' && getOwnProp(toolsMap, 'spoon', null)) ||
-      getOwnProp(sprites, 'toolSpoon', null) ||
-      getOwnProp(sprites, 'tool_spoon', null);
-  } else if (iconKey === 'tool_fork') {
-    standalone =
-      (toolsMap && typeof toolsMap === 'object' && getOwnProp(toolsMap, 'fork', null)) ||
-      getOwnProp(sprites, 'toolFork', null) ||
-      getOwnProp(sprites, 'tool_fork', null);
-  } else if (iconKey === 'mikan' || iconKey === 'chef_mikan') {
-    standalone =
-      (patronsMap && typeof patronsMap === 'object' && getOwnProp(patronsMap, 'mikan', null)) ||
-      getOwnProp(sprites, 'chefMikan', null) ||
-      getOwnProp(sprites, 'chef_mikan', null);
-  } else if (iconKey === 'luna' || iconKey === 'patron_luna') {
-    standalone =
-      (patronsMap && typeof patronsMap === 'object' && getOwnProp(patronsMap, 'luna', null)) ||
-      getOwnProp(sprites, 'patronLuna', null) ||
-      getOwnProp(sprites, 'patron_luna', null);
-  } else if (iconKey === 'mugi' || iconKey === 'patron_mugi') {
-    standalone =
-      (patronsMap && typeof patronsMap === 'object' && getOwnProp(patronsMap, 'mugi', null)) ||
-      getOwnProp(sprites, 'patronMugi', null) ||
-      getOwnProp(sprites, 'patron_mugi', null);
-  } else if (iconKey.startsWith('tier_')) {
-    const tNum = Number(iconKey.slice(5));
-    standalone = baseMap && typeof baseMap === 'object' ? getOwnProp(baseMap, String(tNum), null) : null;
+  // Also check nested legacy buckets (`sprites.tools`, `sprites.patrons`, `sprites.devices`, `sprites.themes`)
+  if (!standalone) {
+    const toolsMap = getOwnProp(sprites, 'tools', null);
+    const patronsMap = getOwnProp(sprites, 'patrons', null);
+    const baseMap = getOwnProp(sprites, 'base', null);
+    if (iconKey === 'tool_spoon' || iconKey === 'tool_upgrade_spoon') {
+      standalone = toolsMap && typeof toolsMap === 'object' ? getOwnProp(toolsMap, 'spoon', null) : null;
+    } else if (iconKey === 'tool_fork' || iconKey === 'tool_swap_fork') {
+      standalone = toolsMap && typeof toolsMap === 'object' ? getOwnProp(toolsMap, 'fork', null) : null;
+    } else if (iconKey === 'mikan' || iconKey === 'chef_mikan' || iconKey === 'patron_mikan') {
+      standalone = patronsMap && typeof patronsMap === 'object' ? getOwnProp(patronsMap, 'mikan', null) : null;
+    } else if (iconKey === 'luna' || iconKey === 'patron_luna') {
+      standalone = patronsMap && typeof patronsMap === 'object' ? getOwnProp(patronsMap, 'luna', null) : null;
+    } else if (iconKey === 'mugi' || iconKey === 'patron_mugi') {
+      standalone = patronsMap && typeof patronsMap === 'object' ? getOwnProp(patronsMap, 'mugi', null) : null;
+    } else if (iconKey.startsWith('tier_')) {
+      const tNum = Number(iconKey.slice(5));
+      standalone = baseMap && typeof baseMap === 'object' ? getOwnProp(baseMap, String(tNum), null) : null;
+    }
   }
 
   const standaloneDims = getReadyImageDims(standalone);
@@ -871,6 +1062,13 @@ function drawUiIcon(ctx, sprites, iconKey, cx, cy, size, alpha = 1, rot = 0) {
     if (drewStandalone) return true;
   }
 
+  // 2. Procedural fallback for board tile icons when sprite not yet loaded
+  if (BOARD_TILES_ATLAS_RECTS && hasOwnProp(BOARD_TILES_ATLAS_RECTS, iconKey)) {
+    drawProceduralBoardTileIcon(ctx, iconKey, safeCx, safeCy, safeSize, safeAlpha, safeRot);
+    return true;
+  }
+
+  // 3. Legacy atlas fallback (only if a caller explicitly supplies old atlas sprites in a unit test)
   let rect = UI_ATLAS_RECTS && hasOwnProp(UI_ATLAS_RECTS, iconKey) ? getOwnProp(UI_ATLAS_RECTS, iconKey, null) : null;
   let atlas = getOwnProp(sprites, 'uiAtlas', null) || getOwnProp(sprites, 'ui_atlas', null);
   if (!rect && UI_ATLAS_2_RECTS && hasOwnProp(UI_ATLAS_2_RECTS, iconKey)) {
@@ -1819,30 +2017,37 @@ function drawGoldenAura(ctx, x, y, r, nowSec, alpha = 1) {
   }
 }
 
-function drawThemeSwatch(ctx, x, y, w, h, themeId) {
+function drawThemeSwatch(ctx, x, y, w, h, themeId, sprites = null) {
   if (!isCanvasCtx(ctx)) return;
   const sx = toSafeNum(x, 0);
   const sy = toSafeNum(y, 0);
   const sw = toSafeNum(w, 0);
   const sh = toSafeNum(h, 0);
   if (!(sw > 0 && sh > 0)) return;
+  if (sprites && typeof sprites === 'object') {
+    const key = themeId === 'sakura' ? 'theme_sakura' : themeId === 'moonlight' ? 'theme_moonlight' : 'theme_amber';
+    const img = resolveByIdSprite(sprites, key);
+    if (img) {
+      if (drawContainImage(ctx, img, sx + sw * 0.5, sy + sh * 0.5, sw, sh)) return;
+    }
+  }
   if (!safeSave(ctx)) return;
   try {
     roundRectPath(ctx, sx, sy, sw, sh, 9);
     if (typeof ctx.clip === 'function') ctx.clip();
-    const g = safeLinearGradient(ctx, sx, sy, sx, sy + sh, '#326478');
+    const g = safeLinearGradient(ctx, sx, sy, sx, sy + sh, '#D99954');
     if (themeId === 'sakura') {
-      safeAddColorStop(g, 0, '#f8b7ce', '#f8b7ce');
-      safeAddColorStop(g, 0.65, '#8c4866', '#8c4866');
-      safeAddColorStop(g, 1, '#f5c3d6', '#f5c3d6');
+      safeAddColorStop(g, 0, '#FFE0EC', '#FFE0EC');
+      safeAddColorStop(g, 0.65, '#EBA9C0', '#EBA9C0');
+      safeAddColorStop(g, 1, '#F5C3D6', '#F5C3D6');
     } else if (themeId === 'moonlight') {
-      safeAddColorStop(g, 0, '#62c2ee', '#62c2ee');
-      safeAddColorStop(g, 0.65, '#14395c', '#14395c');
-      safeAddColorStop(g, 1, '#7de2ff', '#7de2ff');
+      safeAddColorStop(g, 0, '#7294CE', '#7294CE');
+      safeAddColorStop(g, 0.65, '#2E4474', '#2E4474');
+      safeAddColorStop(g, 1, '#5878B4', '#5878B4');
     } else {
-      safeAddColorStop(g, 0, '#326478', '#326478');
-      safeAddColorStop(g, 0.65, '#163b4a', '#163b4a');
-      safeAddColorStop(g, 1, '#c59b52', '#c59b52');
+      safeAddColorStop(g, 0, '#E8AE6A', '#E8AE6A');
+      safeAddColorStop(g, 0.65, '#C58644', '#C58644');
+      safeAddColorStop(g, 1, '#9E632B', '#9E632B');
     }
     ctx.fillStyle = g;
     if (typeof ctx.fillRect === 'function') {
@@ -1851,27 +2056,10 @@ function drawThemeSwatch(ctx, x, y, w, h, themeId) {
       roundRectPath(ctx, sx, sy, sw, sh, 0);
       ctx.fill();
     }
-
-    // Mini collar
-    if (sw > 10 && sh > 6) {
-      const cg = safeLinearGradient(ctx, sx + 5, sy + 4, sx + 5, sy + 11, '#ffe495');
-      if (themeId === 'sakura') {
-        safeAddColorStop(cg, 0, '#ffd8e6', '#ffd8e6');
-        safeAddColorStop(cg, 1, '#b05675', '#b05675');
-      } else if (themeId === 'moonlight') {
-        safeAddColorStop(cg, 0, '#e6f7ff', '#e6f7ff');
-        safeAddColorStop(cg, 1, '#48779c', '#48779c');
-      } else {
-        safeAddColorStop(cg, 0, '#ffe495', '#ffe495');
-        safeAddColorStop(cg, 1, '#a96d1e', '#a96d1e');
-      }
-      ctx.fillStyle = cg;
-      ctx.strokeStyle = '#4A2C2A';
-      ctx.lineWidth = 1.5;
-      roundRectPath(ctx, sx + 5, sy + 4, sw - 10, 7, 3.5);
-      ctx.fill();
-      ctx.stroke();
-    }
+    ctx.strokeStyle = '#5A3928';
+    ctx.lineWidth = 2;
+    roundRectPath(ctx, sx + 1, sy + 1, sw - 2, sh - 2, 8);
+    ctx.stroke();
   } catch (_) {} finally {
     safeRestore(ctx);
   }
@@ -2155,7 +2343,7 @@ function drawProceduralBoardTileIcon(ctx, iconKey, cx, cy, size, alpha = 1, rot 
 }
 
 /**
- * Draw circular flavor sticker badge ('matcha', 'berry', or 'gold') at exact 1:1 aspect ratio.
+ * Draw circular flavor sticker badge ('matcha', 'berry', or 'gold') using v0.9.0 WebP sprites.
  */
 function drawFlavorBadge(ctx, sprites, flavor, cx, cy, size, opts = {}) {
   const safeSize = toSafeNum(size, 0);
@@ -2169,35 +2357,25 @@ function drawFlavorBadge(ctx, sprites, flavor, cx, cy, size, opts = {}) {
   const alpha = Math.max(0, Math.min(1, toSafeNum(getOwnProp(safeOpts, 'alpha', 1), 1)));
   const rot = toSafeNum(getOwnProp(safeOpts, 'rot', 0), 0);
 
-  if (flv === 'matcha' || flv === 'gold') {
-    const bAtlas = resolveBoardTilesAtlas(sprites);
-    const base =
-      BOARD_TILES_ATLAS_RECTS && hasOwnProp(BOARD_TILES_ATLAS_RECTS, 'badge_flavor_set')
-        ? getOwnProp(BOARD_TILES_ATLAS_RECTS, 'badge_flavor_set', null)
-        : null;
-    if (bAtlas && base && safeSave(ctx)) {
-      let ok = false;
-      try {
-        // Exact 1:1 circular square sub-crop inside left [384..448] or right [448..512] half
-        const sx = toSafeNum(getOwnProp(base, 'x', 0), 0) + (flv === 'gold' ? 64 : 0);
-        const sy = toSafeNum(getOwnProp(base, 'y', 0), 0) + 32;
-        const sw = 64;
-        const sh = 64;
-        const dSize = safeSize * 1.22;
-        if (alpha < 1) ctx.globalAlpha *= alpha;
-        ctx.translate(safeCx, safeCy);
-        if (rot) ctx.rotate(rot);
-        ok = safeDrawImage(ctx, bAtlas, sx, sy, sw, sh, -dSize * 0.5, -dSize * 0.5, dSize, dSize);
-      } catch (_) {
-        ok = false;
-      } finally {
-        safeRestore(ctx);
-      }
-      if (ok) return true;
+  const webpKey = flv === 'matcha' ? 'flavor_matcha' : flv === 'berry' ? 'flavor_berry' : 'flavor_gold';
+  const webpImg = resolveByIdSprite(sprites, webpKey);
+  if (webpImg && safeSave(ctx)) {
+    let ok = false;
+    try {
+      const dSize = safeSize * 1.18;
+      if (alpha < 1) ctx.globalAlpha *= alpha;
+      ctx.translate(safeCx, safeCy);
+      if (rot) ctx.rotate(rot);
+      ok = drawContainImage(ctx, webpImg, 0, 0, dSize, dSize);
+    } catch (_) {
+      ok = false;
+    } finally {
+      safeRestore(ctx);
     }
+    if (ok) return true;
   }
 
-  // Storybook circular sticker rendering (used always for 'berry', and fallback for 'matcha'/'gold')
+  // Storybook circular sticker fallback when WebP is not loaded yet
   const r = safeSize * 0.48;
   if (!safeSave(ctx)) return false;
   let okVec = false;
@@ -2206,16 +2384,14 @@ function drawFlavorBadge(ctx, sprites, flavor, cx, cy, size, opts = {}) {
     ctx.translate(safeCx, safeCy);
     if (rot) ctx.rotate(rot);
 
-    // Cream sticker rim
     ctx.fillStyle = '#FFFDF7';
-    ctx.strokeStyle = '#4A2C2A';
+    ctx.strokeStyle = '#5A3928';
     ctx.lineWidth = Math.max(1.2, safeSize * 0.09);
     ctx.beginPath();
     ctx.arc(0, 0, r, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
-    // Soft pastel inner wash
     ctx.fillStyle = flv === 'matcha' ? '#DDF2CE' : flv === 'gold' ? '#FFF2BD' : '#FFE3EC';
     ctx.beginPath();
     ctx.arc(0, 0, r * 0.80, 0, Math.PI * 2);
@@ -2226,7 +2402,7 @@ function drawFlavorBadge(ctx, sprites, flavor, cx, cy, size, opts = {}) {
     } else if (flv === 'matcha') {
       ctx.rotate(-0.35);
       ctx.fillStyle = '#5D9942';
-      ctx.strokeStyle = '#4A2C2A';
+      ctx.strokeStyle = '#5A3928';
       ctx.lineWidth = Math.max(1.0, safeSize * 0.07);
       ctx.beginPath();
       ctx.moveTo(0, -r * 0.58);
@@ -2241,9 +2417,8 @@ function drawFlavorBadge(ctx, sprites, flavor, cx, cy, size, opts = {}) {
       ctx.lineTo(0, r * 0.42);
       ctx.stroke();
     } else {
-      // 'gold' 3-point star crown
       ctx.fillStyle = '#F5B82E';
-      ctx.strokeStyle = '#4A2C2A';
+      ctx.strokeStyle = '#5A3928';
       ctx.lineWidth = Math.max(1.0, safeSize * 0.07);
       ctx.beginPath();
       ctx.moveTo(-r * 0.48, r * 0.34);
@@ -2256,10 +2431,6 @@ function drawFlavorBadge(ctx, sprites, flavor, cx, cy, size, opts = {}) {
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = '#D94452';
-      ctx.beginPath();
-      ctx.arc(0, r * 0.12, Math.max(1.0, r * 0.13), 0, Math.PI * 2);
-      ctx.fill();
     }
     okVec = true;
   } catch (_) {
@@ -2272,7 +2443,7 @@ function drawFlavorBadge(ctx, sprites, flavor, cx, cy, size, opts = {}) {
 
 /**
  * Draw a board cell overlay ('tile_gold', 'tile_matcha', 'tile_berry', 'tile_block', 'tile_ice')
- * inside box (x, y, size, size).
+ * using v0.9.0 standalone WebP sprites inside box (x, y, size, size).
  */
 function drawBoardTileOverlay(ctx, sprites, tileKey, x, y, size, opts = {}) {
   const safeSize = toSafeNum(size, 0);
@@ -2283,25 +2454,37 @@ function drawBoardTileOverlay(ctx, sprites, tileKey, x, y, size, opts = {}) {
   const sy = toSafeNum(y, 0);
   const safeOpts = opts && typeof opts === 'object' ? opts : {};
   const alpha = Math.max(0, Math.min(1, toSafeNum(getOwnProp(safeOpts, 'alpha', 1), 1)));
-  const bAtlas = resolveBoardTilesAtlas(sprites);
-  const bRect = getOwnProp(BOARD_TILES_ATLAS_RECTS, tileKey, null);
 
-  if (bAtlas && bRect && safeSave(ctx)) {
+  const TILE_WEBP_MAP = {
+    tile_block: 'tile_obstacle',
+    tile_ice: 'tile_ice',
+    tile_matcha: 'flavor_matcha',
+    tile_berry: 'flavor_berry',
+    tile_gold: 'flavor_gold'
+  };
+  const mappedId = hasOwnProp(TILE_WEBP_MAP, tileKey) ? TILE_WEBP_MAP[tileKey] : null;
+  const webpImg = mappedId ? resolveByIdSprite(sprites, mappedId) : null;
+
+  if (webpImg && safeSave(ctx)) {
     let ok = false;
     try {
       ctx.globalAlpha *= alpha;
-      ok = safeDrawImage(
-        ctx,
-        bAtlas,
-        toSafeNum(getOwnProp(bRect, 'x', 0), 0),
-        toSafeNum(getOwnProp(bRect, 'y', 0), 0),
-        toSafeNum(getOwnProp(bRect, 'w', 0), 0),
-        toSafeNum(getOwnProp(bRect, 'h', 0), 0),
-        sx,
-        sy,
-        safeSize,
-        safeSize
-      );
+      if (tileKey === 'tile_gold') {
+        // Hollow warm gold border + corner gold emblem so catcake stays unobstructed
+        const pad = safeSize * 0.05;
+        const rad = Math.max(5, safeSize * 0.18);
+        ctx.strokeStyle = '#FFD466';
+        ctx.lineWidth = Math.max(2.0, safeSize * 0.055);
+        roundRectPath(ctx, sx + pad, sy + pad, safeSize - pad * 2, safeSize - pad * 2, rad);
+        ctx.stroke();
+        const embS = safeSize * 0.44;
+        ok = drawContainImage(ctx, webpImg, sx + safeSize * 0.5, sy + safeSize * 0.5, embS, embS);
+      } else if (tileKey === 'tile_matcha' || tileKey === 'tile_berry') {
+        const embS = safeSize * 0.56;
+        ok = drawContainImage(ctx, webpImg, sx + safeSize * 0.5, sy + safeSize * 0.5, embS, embS);
+      } else {
+        ok = safeDrawImage(ctx, webpImg, sx, sy, safeSize, safeSize);
+      }
     } catch (_) {
       ok = false;
     } finally {
@@ -2331,7 +2514,7 @@ function drawProceduralCatcakeBody(ctx, tier, size, happy, silhouette) {
   if (!(safeSize > 0)) return;
   const def = CATCAKE_MAP && hasOwnProp(CATCAKE_MAP, String(tier)) ? getOwnProp(CATCAKE_MAP, String(tier), null) : null;
   const baseCol = silhouette
-    ? '#5A3B32'
+    ? '#5A3928'
     : safeColor(def && getOwnProp(def, 'color', null), '#FFF3DC');
   const crumbCol = silhouette
     ? '#4A2C2A'
@@ -2341,7 +2524,7 @@ function drawProceduralCatcakeBody(ctx, tier, size, happy, silhouette) {
   // Pointed cat ears
   for (const dir of [-1, 1]) {
     ctx.fillStyle = baseCol;
-    ctx.strokeStyle = '#4A2C2A';
+    ctx.strokeStyle = '#5A3928';
     ctx.lineWidth = Math.max(1.3, safeSize * 0.036);
     ctx.beginPath();
     ctx.moveTo(dir * r * 0.30, -r * 0.62);
@@ -2367,14 +2550,14 @@ function drawProceduralCatcakeBody(ctx, tier, size, happy, silhouette) {
   safeAddColorStop(bg, 0, crumbCol, '#FFF9EE');
   safeAddColorStop(bg, 1, baseCol, '#FFF3DC');
   ctx.fillStyle = bg;
-  ctx.strokeStyle = '#4A2C2A';
+  ctx.strokeStyle = '#5A3928';
   ctx.lineWidth = Math.max(1.4, safeSize * 0.038);
   fillEllipse(ctx, 0, r * 0.08, r * 1.02, r * 0.88);
   ctx.fill();
   ctx.stroke();
 
   if (silhouette) {
-    drawFitText(ctx, '?', 0, r * 0.10, r * 1.2, Math.max(10, safeSize * 0.36), 8, 900, '#F8ECD4', 'center', 'middle');
+    drawFitText(ctx, '?', 0, r * 0.10, r * 1.2, Math.max(10, safeSize * 0.38), 8, 900, '#DFD6C7', 'center', 'middle');
     return;
   }
 
@@ -2401,7 +2584,7 @@ function drawProceduralCatcakeBody(ctx, tier, size, happy, silhouette) {
     ctx.stroke();
   } else if (tier === 7) {
     ctx.fillStyle = '#FFD859';
-    ctx.strokeStyle = '#4A2C2A';
+    ctx.strokeStyle = '#5A3928';
     ctx.lineWidth = Math.max(1.1, safeSize * 0.028);
     ctx.beginPath();
     ctx.moveTo(-r * 0.34, -r * 0.62);
@@ -2424,8 +2607,8 @@ function drawProceduralCatcakeBody(ctx, tier, size, happy, silhouette) {
   ctx.fill();
 
   // Eyes & smile
-  ctx.strokeStyle = '#4A2C2A';
-  ctx.fillStyle = '#4A2C2A';
+  ctx.strokeStyle = '#5A3928';
+  ctx.fillStyle = '#5A3928';
   ctx.lineWidth = Math.max(1.2, safeSize * 0.032);
   ctx.lineCap = 'round';
   if (happy) {
@@ -2486,7 +2669,7 @@ function drawCatcakeSprite(ctx, sprites, tier, cx, cy, size, opts = {}) {
     if (!silhouette) {
       const img = resolveCatcakeImage(sprites, t, happy);
       if (img) {
-        drewImg = safeDrawImage(ctx, img, -safeSize * 0.5, -safeSize * 0.5, safeSize, safeSize);
+        drewImg = drawContainImage(ctx, img, 0, 0, safeSize, safeSize);
       }
     }
     if (!drewImg) {
@@ -2515,15 +2698,30 @@ function drawCatcakeSprite(ctx, sprites, tier, cx, cy, size, opts = {}) {
   if (frozen) {
     const iceSize = safeSize * 1.04;
     drawBoardTileOverlay(ctx, sprites, 'tile_ice', safeCx - iceSize * 0.5, safeCy - iceSize * 0.5, iceSize, {
-      alpha: 0.58 * alpha
+      alpha: 0.62 * alpha
     });
   }
 
   return true;
 }
 
+const CUSTOMER_WEBP_ALIAS = {
+  cust_ragdoll: 'cust_ragdoll',
+  cust_orange: 'cust_orange_uncle',
+  cust_orange_uncle: 'cust_orange_uncle',
+  cust_silver: 'cust_scholar',
+  cust_scholar: 'cust_scholar',
+  cust_rabbit: 'cust_lop_bunny',
+  cust_lop_bunny: 'cust_lop_bunny',
+  cust_fox: 'cust_fox',
+  cust_raccoon: 'cust_raccoon',
+  cust_shiba: 'cust_shiba',
+  cust_critic: 'cust_vip_cat',
+  cust_vip_cat: 'cust_vip_cat'
+};
+
 /**
- * Render an animal customer portrait from customers_atlas.png with medallion frame and vector mood overlays.
+ * Render an animal customer portrait using v0.9.0 standalone WebP sprites (`02_顾客头像/`).
  */
 function drawCustomerPortrait(ctx, sprites, customerId, cx, cy, size, opts = {}) {
   const safeSize = toSafeNum(size, 0);
@@ -2531,10 +2729,6 @@ function drawCustomerPortrait(ctx, sprites, customerId, cx, cy, size, opts = {})
   const safeCx = toSafeNum(cx, 0);
   const safeCy = toSafeNum(cy, 0);
   const def = CUSTOMER_MAP && hasOwnProp(CUSTOMER_MAP, customerId) ? getOwnProp(CUSTOMER_MAP, customerId, null) : null;
-  const rect =
-    CUSTOMERS_ATLAS_RECTS && hasOwnProp(CUSTOMERS_ATLAS_RECTS, customerId)
-      ? getOwnProp(CUSTOMERS_ATLAS_RECTS, customerId, null)
-      : null;
 
   const safeOpts = opts && typeof opts === 'object' ? opts : {};
   const rawMood = getOwnProp(safeOpts, 'mood', 'normal');
@@ -2577,24 +2771,21 @@ function drawCustomerPortrait(ctx, sprites, customerId, cx, cy, size, opts = {})
           ctx.clip();
         }
 
-        const cAtlas = resolveCustomersAtlas(sprites);
+        const mappedCustId = hasOwnProp(CUSTOMER_WEBP_ALIAS, customerId)
+          ? CUSTOMER_WEBP_ALIAS[customerId]
+          : customerId;
+        const custMap = sprites && typeof sprites === 'object' ? getOwnProp(sprites, 'customers', null) : null;
+        const webpImg =
+          (custMap && typeof custMap === 'object' ? getOwnProp(custMap, customerId, null) : null) ||
+          resolveByIdSprite(sprites, mappedCustId) ||
+          resolveByIdSprite(sprites, customerId);
+
         let drewPortrait = false;
-        if (cAtlas && rect) {
-          drewPortrait = safeDrawImage(
-            ctx,
-            cAtlas,
-            toSafeNum(getOwnProp(rect, 'x', 0), 0),
-            toSafeNum(getOwnProp(rect, 'y', 0), 0),
-            toSafeNum(getOwnProp(rect, 'w', 0), 0),
-            toSafeNum(getOwnProp(rect, 'h', 0), 0),
-            -r,
-            -r,
-            safeSize,
-            safeSize
-          );
+        if (isReadyImage(webpImg)) {
+          drewPortrait = drawContainImage(ctx, webpImg, 0, 0, safeSize, safeSize);
         }
+
         if (!drewPortrait) {
-          // Cozy procedural animal customer bust fallback
           const furColors = {
             cust_ragdoll: '#FAF4EB',
             cust_orange: '#F09D46',
@@ -2607,11 +2798,11 @@ function drawCustomerPortrait(ctx, sprites, customerId, cx, cy, size, opts = {})
           };
           const fur = hasOwnProp(furColors, customerId) ? furColors[customerId] : '#F5E6CF';
           ctx.fillStyle = fur;
-          ctx.strokeStyle = '#4A2C2A';
+          ctx.strokeStyle = '#5A3928';
           ctx.lineWidth = Math.max(1.2, safeSize * 0.04);
           for (const dir of [-1, 1]) {
             ctx.beginPath();
-            if (customerId === 'cust_rabbit') {
+            if (customerId === 'cust_rabbit' || customerId === 'cust_lop_bunny') {
               fillEllipse(ctx, dir * r * 0.34, -r * 0.45, r * 0.16, r * 0.38);
             } else {
               ctx.moveTo(dir * r * 0.20, -r * 0.25);
@@ -2625,7 +2816,7 @@ function drawCustomerPortrait(ctx, sprites, customerId, cx, cy, size, opts = {})
           fillEllipse(ctx, 0, r * 0.14, r * 0.62, r * 0.54);
           ctx.fill();
           ctx.stroke();
-          ctx.fillStyle = '#4A2C2A';
+          ctx.fillStyle = '#5A3928';
           ctx.beginPath();
           ctx.arc(-r * 0.22, r * 0.10, Math.max(1.1, r * 0.08), 0, Math.PI * 2);
           ctx.arc(r * 0.22, r * 0.10, Math.max(1.1, r * 0.08), 0, Math.PI * 2);
@@ -2647,20 +2838,19 @@ function drawCustomerPortrait(ctx, sprites, customerId, cx, cy, size, opts = {})
     }
 
     if (circular) {
-      ctx.strokeStyle = isVip ? '#C98212' : isUrgent ? '#C95B2B' : '#8C6239';
-      ctx.lineWidth = Math.max(1.4, safeSize * 0.05);
+      ctx.strokeStyle = isVip ? '#C98212' : isUrgent ? '#C95B2B' : '#5A3928';
+      ctx.lineWidth = Math.max(1.6, safeSize * 0.05);
       ctx.beginPath();
-      ctx.arc(0, 0, Math.max(1, r - 0.7), 0, Math.PI * 2);
+      ctx.arc(0, 0, Math.max(1, r - 0.8), 0, Math.PI * 2);
       ctx.stroke();
     }
 
-    // Vector mood overlays (100% zero Unicode emoji)
     if (mood === 'anxious') {
       const sx = r * 0.62;
       const sy = -r * 0.48;
       const sr = Math.max(2.6, safeSize * 0.11);
       ctx.fillStyle = '#8BE0FF';
-      ctx.strokeStyle = '#4A2C2A';
+      ctx.strokeStyle = '#5A3928';
       ctx.lineWidth = 1.1;
       ctx.beginPath();
       ctx.moveTo(sx, sy - sr);
@@ -2678,7 +2868,7 @@ function drawCustomerPortrait(ctx, sprites, customerId, cx, cy, size, opts = {})
       const cyCloud = -r * 0.56;
       const cr = Math.max(3.2, safeSize * 0.12);
       ctx.fillStyle = '#636B7A';
-      ctx.strokeStyle = '#4A2C2A';
+      ctx.strokeStyle = '#5A3928';
       ctx.lineWidth = 1.1;
       ctx.beginPath();
       ctx.arc(cxCloud - cr * 0.55, cyCloud + cr * 0.1, cr * 0.65, 0, Math.PI * 2);
@@ -2697,7 +2887,7 @@ function drawCustomerPortrait(ctx, sprites, customerId, cx, cy, size, opts = {})
 }
 
 /**
- * Draw crisp emerald vector checkmark badge (replaces Unicode checkmark).
+ * Draw crisp emerald checkmark badge using v0.9.0 `icon_check.webp` when available.
  */
 function drawCheckmarkBadge(ctx, cx, cy, radius = 6, opts = {}) {
   const srad = toSafeNum(radius, 0);
@@ -2706,18 +2896,30 @@ function drawCheckmarkBadge(ctx, cx, cy, radius = 6, opts = {}) {
   const scy = toSafeNum(cy, 0);
   const safeOpts = opts && typeof opts === 'object' ? opts : {};
   const alpha = Math.max(0, Math.min(1, toSafeNum(getOwnProp(safeOpts, 'alpha', 1), 1)));
+  const sp = getOwnProp(safeOpts, 'sprites', null);
+  const checkImg = sp ? resolveByIdSprite(sp, 'icon_check') : null;
+
+  if (checkImg && safeSave(ctx)) {
+    try {
+      if (alpha < 1) ctx.globalAlpha *= alpha;
+      drawContainImage(ctx, checkImg, scx, scy, srad * 2.4, srad * 2.4);
+      return;
+    } catch (_) {} finally {
+      safeRestore(ctx);
+    }
+  }
 
   if (!safeSave(ctx)) return;
   try {
     if (alpha < 1) ctx.globalAlpha *= alpha;
     ctx.translate(scx, scy);
 
-    const g = safeLinearGradient(ctx, 0, -srad, 0, srad, '#5BC256');
-    safeAddColorStop(g, 0, '#5BC256', '#5BC256');
-    safeAddColorStop(g, 1, '#378E35', '#378E35');
+    const g = safeLinearGradient(ctx, 0, -srad, 0, srad, '#74C353');
+    safeAddColorStop(g, 0, '#7FD45E', '#7FD45E');
+    safeAddColorStop(g, 1, '#4E9A35', '#4E9A35');
     ctx.fillStyle = g;
-    ctx.strokeStyle = '#4A2C2A';
-    ctx.lineWidth = Math.max(1.1, srad * 0.22);
+    ctx.strokeStyle = '#5A3928';
+    ctx.lineWidth = Math.max(1.2, srad * 0.22);
     ctx.beginPath();
     ctx.arc(0, 0, srad, 0, Math.PI * 2);
     ctx.fill();
@@ -2738,7 +2940,7 @@ function drawCheckmarkBadge(ctx, cx, cy, radius = 6, opts = {}) {
 }
 
 /**
- * Draw sapphire-blue target lock emblem for preferred customer seat (replaces Unicode target symbol).
+ * Draw sapphire/cyan target lock emblem for preferred customer seat (upgraded by ui_v090_skin_patch).
  */
 function drawPriorityTargetBadge(ctx, cx, cy, radius = 8, nowSec = 0, opts = {}) {
   const srad = toSafeNum(radius, 0);
@@ -2754,52 +2956,18 @@ function drawPriorityTargetBadge(ctx, cx, cy, radius = 8, nowSec = 0, opts = {})
   try {
     if (alpha < 1) ctx.globalAlpha *= alpha;
     ctx.translate(scx, scy);
-
-    ctx.fillStyle = 'rgba(43, 132, 234, 0.30)';
+    ctx.strokeStyle = '#4BE8FF';
+    ctx.lineWidth = 2.4;
     ctx.beginPath();
-    ctx.arc(0, 0, srad * 1.28 * pulse, 0, Math.PI * 2);
-    ctx.fill();
-
-    const g = safeLinearGradient(ctx, 0, -srad, 0, srad, '#3B93F7');
-    safeAddColorStop(g, 0, '#3B93F7', '#3B93F7');
-    safeAddColorStop(g, 1, '#1E64C8', '#1E64C8');
-    ctx.fillStyle = g;
-    ctx.strokeStyle = '#4A2C2A';
-    ctx.lineWidth = Math.max(1.2, srad * 0.18);
-    ctx.beginPath();
-    ctx.arc(0, 0, srad, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.arc(0, 0, srad * pulse, 0, Math.PI * 2);
     ctx.stroke();
-
-    ctx.strokeStyle = '#FFFDF7';
-    ctx.lineWidth = Math.max(1.0, srad * 0.16);
-    ctx.beginPath();
-    ctx.arc(0, 0, srad * 0.56, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // 4 cardinal crosshair ticks
-    ctx.beginPath();
-    ctx.moveTo(0, -srad * 0.80);
-    ctx.lineTo(0, -srad * 0.36);
-    ctx.moveTo(0, srad * 0.36);
-    ctx.lineTo(0, srad * 0.80);
-    ctx.moveTo(-srad * 0.80, 0);
-    ctx.lineTo(-srad * 0.36, 0);
-    ctx.moveTo(srad * 0.36, 0);
-    ctx.lineTo(srad * 0.80, 0);
-    ctx.stroke();
-
-    ctx.fillStyle = '#FFE875';
-    ctx.beginPath();
-    ctx.arc(0, 0, Math.max(1.1, srad * 0.20), 0, Math.PI * 2);
-    ctx.fill();
   } catch (_) {} finally {
     safeRestore(ctx);
   }
 }
 
 /**
- * Draw 5-pointed star icon (filled golden star or unfilled slot) without Unicode star glyphs.
+ * Draw 5-pointed star icon (uses v0.9.0 `icon_star_coin.webp` / `icon_star_dim.webp` when `opts.sprites` passed).
  */
 function drawStarIcon(ctx, cx, cy, outerR, filled = true, opts = {}) {
   const sor = toSafeNum(outerR, 0);
@@ -2809,8 +2977,23 @@ function drawStarIcon(ctx, cx, cy, outerR, filled = true, opts = {}) {
   const safeOpts = opts && typeof opts === 'object' ? opts : {};
   const alpha = Math.max(0, Math.min(1, toSafeNum(getOwnProp(safeOpts, 'alpha', 1), 1)));
   const rot = toSafeNum(getOwnProp(safeOpts, 'rot', 0), 0);
+  const sp = getOwnProp(safeOpts, 'sprites', null);
+  const starImg = sp ? resolveByIdSprite(sp, filled ? 'icon_star_coin' : 'icon_star_dim') : null;
+
+  if (starImg && safeSave(ctx)) {
+    try {
+      if (alpha < 1) ctx.globalAlpha *= alpha;
+      ctx.translate(scx, scy);
+      if (rot) ctx.rotate(rot);
+      drawContainImage(ctx, starImg, 0, 0, sor * 2.25, sor * 2.25);
+      return;
+    } catch (_) {} finally {
+      safeRestore(ctx);
+    }
+  }
+
   const innerR = sor * 0.46;
-  const defLw = Math.max(1.2, sor * 0.16);
+  const defLw = Math.max(1.2, sor * 0.18);
   const lw = Math.max(0.1, toSafeNum(getOwnProp(safeOpts, 'lineWidth', defLw), defLw));
 
   if (!safeSave(ctx)) return;
@@ -2829,14 +3012,14 @@ function drawStarIcon(ctx, cx, cy, outerR, filled = true, opts = {}) {
     ctx.closePath();
 
     if (Boolean(filled)) {
-      const g = safeLinearGradient(ctx, 0, -sor, 0, sor, '#FFF3A1');
-      safeAddColorStop(g, 0, '#FFF3A1', '#FFF3A1');
-      safeAddColorStop(g, 1, '#EDA021', '#EDA021');
+      const g = safeLinearGradient(ctx, 0, -sor, 0, sor, '#FFE880');
+      safeAddColorStop(g, 0, '#FFE880', '#FFE880');
+      safeAddColorStop(g, 1, '#F5A623', '#F5A623');
       ctx.fillStyle = g;
-      ctx.strokeStyle = '#4A2C2A';
+      ctx.strokeStyle = '#5A3928';
     } else {
-      ctx.fillStyle = 'rgba(74, 44, 42, 0.20)';
-      ctx.strokeStyle = '#8C6853';
+      ctx.fillStyle = 'rgba(90, 57, 40, 0.36)';
+      ctx.strokeStyle = '#5A3928';
     }
     ctx.lineWidth = lw;
     ctx.lineJoin = 'round';
@@ -2993,4 +3176,7 @@ module.exports = {
   drawStarIcon,
   HitRegistry
 };
+
+const { applyV090Skin } = require('./ui_v090_skin_patch');
+applyV090Skin(module.exports);
 

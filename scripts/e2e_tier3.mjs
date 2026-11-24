@@ -2745,7 +2745,7 @@ export const TIER3_TESTS = [
     id: 'T3-18',
     tier: 3,
     features: ['F01', 'F14'],
-    title: 'v2 storybook assets (30/30) and procedural board themes (amber, sakura, moonlight) visual integrity',
+    title: 'v0.9.0 storybook WebP assets (69/69), kissa_round.ttf font & 3 board themes visual integrity',
     run: async (ctx) => {
       await ctx.setViewport(390, 844, true, 2, { safeTop: 47, safeBottom: 34, showCapsule: true });
       await ctx.resetGame({ clearCloud: true, clearLocal: true });
@@ -2762,32 +2762,21 @@ export const TIER3_TESTS = [
       });
 
       let st = await ctx.getState();
-      ctx.assertEq(st.assetsTotal, 30, 'Post-cleanup runtime assetsTotal === 30');
-      ctx.assertEq(st.assetsLoaded, 30, 'All 30 runtime assets loaded cleanly');
+      ctx.assertEq(st.assetsTotal, 69, 'v0.9.0 runtime assetsTotal === 69');
+      ctx.assertEq(st.assetsLoaded, 69, 'All 69 runtime WebP assets loaded cleanly');
 
-      // Verify v2 standalone catcakes, atlases, and hero dimensions on disk & in browser decoder
-      const catcake1Hdr = ctx.readPngHeader(path.join(ctx.minigameDir, 'assets', 'catcake_1.png'));
-      const catcake7HappyHdr = ctx.readPngHeader(path.join(ctx.minigameDir, 'assets', 'catcake_7_happy.png'));
-      const custAtlasHdr = ctx.readPngHeader(path.join(ctx.minigameDir, 'assets', 'customers_atlas.png'));
-      const boardAtlasHdr = ctx.readPngHeader(path.join(ctx.minigameDir, 'assets', 'board_tiles_atlas.png'));
-      const heroHdr = ctx.readJpegHeader(path.join(ctx.minigameDir, 'assets', 'title_hero_v2.jpg'));
+      const consts = await ctx.requireBundledModule('./src/constants.js');
+      const byId = new Map((consts.V090_ASSET_LIST || []).map((a) => [a.id, a.path]));
+      for (const reqId of ['catcake_1', 'catcake_7', 'cust_fox', 'flavor_gold', 'title_hero_v2', 'icon_fever_badge']) {
+        const rel = byId.get(reqId);
+        ctx.assert(Boolean(rel) && fs.existsSync(path.join(ctx.minigameDir, rel)), `Missing v0.9.0 asset ${reqId}: ${rel}`);
+      }
+      ctx.assert(
+        fs.existsSync(path.join(ctx.minigameDir, 'assets', 'fonts', 'kissa_round.ttf')),
+        'assets/fonts/kissa_round.ttf exists on disk'
+      );
 
-      ctx.assertEq(catcake1Hdr.width, 192, 'catcake_1.png width === 192');
-      ctx.assertEq(catcake7HappyHdr.height, 192, 'catcake_7_happy.png height === 192');
-      ctx.assertEq(custAtlasHdr.width, 1024, 'customers_atlas.png width === 1024');
-      ctx.assertEq(custAtlasHdr.height, 512, 'customers_atlas.png height === 512');
-      ctx.assertEq(boardAtlasHdr.width, 512, 'board_tiles_atlas.png width === 512');
-      ctx.assertEq(boardAtlasHdr.height, 256, 'board_tiles_atlas.png height === 256');
-      ctx.assertEq(heroHdr.width, 1280, 'title_hero_v2.jpg width === 1280');
-      ctx.assertEq(heroHdr.height, 720, 'title_hero_v2.jpg height === 720');
-
-      const tileGoldInspect = await ctx.inspectImagePixels('assets/board_tiles_atlas.png', [
-        { name: 'hollowCenter', x: 56, y: 56, w: 16, h: 16 },
-        { name: 'topBorder', x: 58, y: 8, w: 12, h: 32 }
-      ]);
-      ctx.assert(tileGoldInspect.naturalWidth === 512 && tileGoldInspect.naturalHeight === 256, 'board_tiles_atlas decoded');
-
-      // Unlock sakura (80) & moonlight (120) via dock_themes
+      // Unlock sakura (100) & moonlight (140) via dock_themes
       await ctx.clickHit('dock_themes');
       st = await ctx.getState();
       ctx.assertEq(st.activeModal, 'shop', 'dock_themes opens Shop modal');
@@ -2800,16 +2789,16 @@ export const TIER3_TESTS = [
       ctx.assertEq(saveThemes.bankStardust, 260, '500 - 100 - 140 === 260 stardust');
       ctx.assert(
         ['amber', 'sakura', 'moonlight'].every((t) => saveThemes.unlockedThemes.includes(t)),
-        'All 3 procedural themes unlocked'
+        'All 3 themes unlocked'
       );
 
-      // Render Compendium (both tabs) so all 14 catcake base/happy sprites & 24 recipes draw on Canvas
+      // Render Compendium (both tabs) so all 7 catcakes & 24 recipes draw on Canvas
       await ctx.clickHit('dock_compendium');
       await clickModalHit(ctx, 'compendium_tab_catcakes');
       await clickModalHit(ctx, 'compendium_tab_recipes');
       await ctx.clickHit('modal_close');
 
-      // Equip and render Lobby + 3-1 Gameplay (customers_atlas + board_tiles_atlas + particles) for each theme
+      // Equip and render Lobby + 3-1 Gameplay for each theme
       for (const themeId of ['amber', 'sakura', 'moonlight']) {
         await ctx.eval((tid) => globalThis.__HOSHI_DEBUG__.openModal('shop') || tid, themeId);
         await clickModalHit(ctx, 'shop_tab_themes');
@@ -2834,7 +2823,6 @@ export const TIER3_TESTS = [
       }
       ctx.assertEq((ctx.cdp.networkErrors || []).length, 0, 'Zero HTTP 404/500 network asset errors');
       ctx.assertEq(ctx.cdp.errors.length, 0, 'Zero console/runtime errors');
-      ctx.assert(fs.existsSync(path.join(ctx.minigameDir, 'assets', 'title_hero_v2.jpg')), 'title_hero_v2.jpg exists on disk');
     }
   }
 ];

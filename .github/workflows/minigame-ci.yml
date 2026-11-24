@@ -19,7 +19,7 @@ on:
           - upload
           - preview
       version:
-        description: '版本号 (留空则自动使用 1.0.<run_number>)'
+        description: '版本号 (留空则自动按 GAME_VERSION 生成 <MAJOR>.<MINOR>.<run_number>，如 0.9.<run_number>)'
         required: false
         default: ''
         type: string

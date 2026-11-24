@@ -4,17 +4,21 @@
  */
 'use strict';
 
+const { LEVEL_MAP, MAX_CAMPAIGN_STARS } = require('./levels_data');
+
 const STORAGE_KEY = 'hoshi_kissa_bakery_save_v1';
 const GAME_TITLE = '一起做猫饼';
+const GAME_VERSION = '0.9.0';
+const DEFAULT_INITIAL_STARDUST = 15;
 
 const CATCAKE_UPGRADE_COSTS = {
-  1: [20, 40, 70, 110],
-  2: [25, 50, 85, 130],
-  3: [35, 65, 105, 160],
-  4: [45, 85, 135, 200],
-  5: [60, 110, 170, 250],
-  6: [80, 140, 220, 320],
-  7: [100, 180, 280, 400]
+  1: [25, 50, 80, 120],
+  2: [30, 60, 95, 145],
+  3: [40, 75, 115, 175],
+  4: [50, 95, 145, 215],
+  5: [65, 120, 185, 270],
+  6: [85, 150, 235, 340],
+  7: [105, 185, 280, 385]
 };
 
 const CATCAKES = [
@@ -158,7 +162,7 @@ function getCatcakePrice(tier, upgradeLv = 0) {
   const lv = Number.isFinite(rawLv)
     ? Math.max(0, Math.min(4, Math.floor(rawLv)))
     : 0;
-  return Math.round(def.basePrice * (1 + 0.2 * lv));
+  return Math.round(def.basePrice * (1 + 0.15 * lv));
 }
 
 const FLAVORS = {
@@ -177,7 +181,7 @@ const FLAVORS = {
     id: 'matcha',
     name: '宇治抹茶',
     shortLabel: '抹茶',
-    mult: 1.35,
+    mult: 1.25,
     isWildcard: false,
     cellCode: 'M',
     tileIcon: 'tile_matcha',
@@ -188,7 +192,7 @@ const FLAVORS = {
     id: 'berry',
     name: '甜心草莓',
     shortLabel: '草莓',
-    mult: 1.35,
+    mult: 1.25,
     isWildcard: false,
     cellCode: 'B',
     tileIcon: 'tile_berry',
@@ -199,7 +203,7 @@ const FLAVORS = {
     id: 'gold',
     name: '星光金箔',
     shortLabel: '镀金',
-    mult: 1.50,
+    mult: 1.35,
     isWildcard: true,
     cellCode: 'G',
     tileIcon: 'tile_gold',
@@ -210,35 +214,41 @@ const FLAVORS = {
 
 const COMBO_SIZE_MULTS = {
   1: 1.00,
-  2: 1.18,
-  3: 1.35
+  2: 1.12,
+  3: 1.25
 };
 
-const SERVE_COMBO_MULTS = [1.00, 1.10, 1.22, 1.35, 1.50];
-const SERVE_COMBO_WINDOW_SEC = 10.0;
+const SERVE_COMBO_MULTS = [1.00, 1.06, 1.13, 1.20, 1.28];
+const SERVE_COMBO_WINDOW_SEC = 8.0;
 
 const PATIENCE_TIP_BANDS = {
-  greenThreshold: 0.55,
-  greenMult: 1.30,
+  greenThreshold: 0.60,
+  greenMult: 1.20,
   yellowThreshold: 0.25,
   yellowMult: 1.00,
-  redMult: 0.85
+  redMult: 0.80
 };
 
 const FEVER_CONFIG = {
   durationSec: 10.0,
-  scoreMult: 1.35,
+  scoreMult: 1.25,
   patienceDecayMult: 0.5,
-  gainNormal: 20,
-  gainGreen: 25,
-  gainVip: 35
+  gainNormal: 16,
+  gainGreen: 20,
+  gainVip: 30
+};
+
+const TRASH_CONFIG = {
+  cooldownSec: 8.0,
+  feverPenalty: 15,
+  resetCombo: true
 };
 
 const DEVICE_UPGRADE_COSTS = {
-  dev_tray: [60, 150],
-  dev_flour: [45, 95, 170],
-  dev_teapot: [50, 105, 185],
-  dev_tools: [40, 90, 160]
+  dev_tray: [75, 165],
+  dev_flour: [55, 110, 180],
+  dev_teapot: [60, 115, 190],
+  dev_tools: [50, 95, 155]
 };
 
 function getSafeDeviceDesc(ctx, fallbackIdx, maxLv, lv) {
@@ -320,12 +330,12 @@ const SHOP_DEVICES = [
       { fork: 2, spoon: 1 },
       { fork: 2, spoon: 2 }
     ],
-    desc: '增加每关开局免费携带的泡泡清格叉与升阶魔法勺数量',
+    desc: '增加每关开局免费携带的挑拣移位叉与升阶魔法勺数量',
     levelDescs: [
       '当前开局 叉1 勺0 · 下级：开局 叉1 勺1',
       '当前开局 叉1 勺1 · 下级：开局 叉2 勺1',
       '当前开局 叉2 勺1 · 下级：开局 叉2 勺2',
-      '已满级：每关开局免费自带 清格叉×2 · 升阶勺×2'
+      '已满级：每关开局免费自带 移位叉×2 · 升阶勺×2'
     ],
     getDesc(lv = 0) {
       return getSafeDeviceDesc(this, 3, 3, lv);
@@ -443,7 +453,7 @@ const CUSTOMERS = [
     bountyMult: 1.50,
     isUrgent: false,
     isVip: true,
-    rewardDustBonus: 5,
+    rewardDustBonus: 4,
     atlasCol: 3,
     atlasRow: 1,
     badgeText: 'VIP ×1.5',
@@ -451,7 +461,7 @@ const CUSTOMERS = [
     preferredFlavor: 'any',
     preferredMinTier: 5,
     preferredSlotCounts: [1, 2, 3],
-    desc: '星冠 VIP 美食评委，必点高阶或风味名点，完单额外赠 5 星尘红包。'
+    desc: '星冠 VIP 美食评委，必点高阶或风味名点，完单额外赠 4 星尘红包。'
   }
 ];
 
@@ -480,8 +490,8 @@ const BOARD_TILES_ATLAS_RECTS = {
 
 const PATRON_COSTS = {
   mikan: 0,
-  luna: 80,
-  mugi: 120
+  luna: 100,
+  mugi: 140
 };
 
 function normalizePatronId(rawId) {
@@ -526,7 +536,7 @@ const PATRONS = [
     idleLines: [
       '轻点亮金圈的猫饼装进托盘，凑齐套餐就自动上菜啦！',
       '急缺小面团时，随时点击下方揉面补料哦～',
-      '放错托盘别慌，双击托盘槽位就能倒进厨余篮！',
+      '放错托盘别慌，双击槽位可倒进厨余篮（注意 8 秒整理冷却哦）！',
       '我的安抚猫薄荷茶能帮焦急的客人稳住耐心哦～'
     ]
   },
@@ -602,7 +612,7 @@ const PATRONS = [
     idleLines: [
       '遇到冰封格别怕，在它上下左右相邻格合成就能震碎冰壳！',
       '我的元气烤炉暴击能全屏破冰，还送两颗镀金升阶猫饼！',
-      '保持 10 秒内连续出餐，3 连以上有我的额外 10% 加成哦！',
+      '保持 8 秒内连续出餐，3 连以上有我的额外 10% 加成哦！',
       '合出 5 阶以上大猫饼还能加快充能招牌技呢！'
     ]
   }
@@ -611,21 +621,21 @@ const PATRONS = [
 const TOOLS = {
   fork: {
     id: 'fork',
-    name: '泡泡清格叉',
-    shortName: '清格叉',
+    name: '挑拣移位叉',
+    shortName: '移位叉',
     icon: 'tool_fork',
-    cost: 15,
+    cost: 20,
     maxBuyPerLevel: 1,
     src: 'assets/tool_fork.png',
     shortcutKey: '1',
-    desc: '点选烤盘内任意一颗猫饼将其消除腾空位，或直接震碎冰封格冰壳'
+    desc: '跨障挪移猫饼并染色、异阶互换、同阶跨格合并破邻冰、单点破冰，或直投厨余篮销毁'
   },
   spoon: {
     id: 'spoon',
     name: '升阶魔法勺',
     shortName: '升阶勺',
     icon: 'tool_spoon',
-    cost: 20,
+    cost: 25,
     maxBuyPerLevel: 1,
     src: 'assets/tool_spoon.png',
     shortcutKey: '2',
@@ -635,9 +645,34 @@ const TOOLS = {
 
 const THEME_COSTS = {
   amber: 0,
-  sakura: 80,
-  moonlight: 120
+  sakura: 100,
+  moonlight: 140
 };
+
+function computeShopTotalCap() {
+  let sum = 0;
+  const cakeKeys = Object.keys(CATCAKE_UPGRADE_COSTS);
+  for (let i = 0; i < cakeKeys.length; i++) {
+    const arr = CATCAKE_UPGRADE_COSTS[cakeKeys[i]];
+    for (let j = 0; j < arr.length; j++) sum += arr[j];
+  }
+  const devKeys = Object.keys(DEVICE_UPGRADE_COSTS);
+  for (let i = 0; i < devKeys.length; i++) {
+    const arr = DEVICE_UPGRADE_COSTS[devKeys[i]];
+    for (let j = 0; j < arr.length; j++) sum += arr[j];
+  }
+  const patronKeys = Object.keys(PATRON_COSTS);
+  for (let i = 0; i < patronKeys.length; i++) {
+    sum += PATRON_COSTS[patronKeys[i]];
+  }
+  const themeKeys = Object.keys(THEME_COSTS);
+  for (let i = 0; i < themeKeys.length; i++) {
+    sum += THEME_COSTS[themeKeys[i]];
+  }
+  return sum;
+}
+
+const SHOP_TOTAL_CAP = computeShopTotalCap();
 
 const BOARD_THEMES = {
   amber: {
@@ -907,8 +942,8 @@ const TUTORIAL_STEPS = [
     icon: 'btn_trash',
     tag: '托盘技巧',
     title: '双击丢弃腾出托盘',
-    text: '放错或想换组合？双击托盘里的猫饼即可丢进厨余桶腾位（不扣分）！',
-    lines: ['快速双击托盘槽位即可将猫饼丢进厨余篮腾位，绝不扣减已有分数']
+    text: '放错猫饼可双击丢进厨余篮腾位（有 8s 整理冷却且会断连击，也可善用左下【移位叉】调位哦）！',
+    lines: ['双击托盘槽位可丢进厨余篮（8s 冷却并断连击），不扣已有分数；也可用【移位叉】调位']
   },
   {
     id: 'flavor_tile',
@@ -925,7 +960,7 @@ const TUTORIAL_STEPS = [
     icon: 'tile_matcha',
     tag: '风味烘焙格',
     title: '宇治抹茶洒粉染色',
-    text: '带绿叶的格子会为猫饼洒上抹茶粉！搭配抹茶订单可享 ×1.35 赏金！',
+    text: '带绿叶的格子会为猫饼洒上抹茶粉！搭配抹茶订单可享 ×1.25 赏金！',
     lines: ['猫饼停留在抹茶格或于此合成即染为抹茶风味，同阶跨风味依然可正常合并']
   },
   {
@@ -943,8 +978,8 @@ const TUTORIAL_STEPS = [
     icon: 'tile_ice',
     tag: '邻接破冰',
     title: '正交合成震碎冰壳',
-    text: '冰封猫饼被冻住啦！在它上下左右相邻格完成一次合成就能震碎冰壳！',
-    lines: ['在冰封格正上下左右 4 个相邻格完成合成（或用清格叉）即可破冰释放猫饼']
+    text: '冰封猫饼被冻住啦！在上下左右相邻格合成或用【移位叉】轻点即可震碎冰壳！',
+    lines: ['在冰封格正上下左右 4 个相邻格完成合成（或用移位叉轻点）即可破冰释放猫饼']
   }
 ];
 
@@ -963,11 +998,13 @@ Object.defineProperty(TUTORIAL_STEPS, 'intro_slide', {
   writable: false
 });
 
-const VALID_SAVE_LEVEL_ID_RE = /^(?:[123]-(?:[1-9]|10))$/;
+function isValidSaveLevelId(id) {
+  return typeof id === 'string' && Object.prototype.hasOwnProperty.call(LEVEL_MAP, id);
+}
 
 function getSafeSaveLevelStar(s, id) {
   if (!s || typeof s !== 'object' || Array.isArray(s)) return 0;
-  if (typeof id !== 'string' || !VALID_SAVE_LEVEL_ID_RE.test(id)) return 0;
+  if (!isValidSaveLevelId(id)) return 0;
   const levelStars = Object.prototype.hasOwnProperty.call(s, 'levelStars') ? s.levelStars : null;
   if (!levelStars || typeof levelStars !== 'object' || Array.isArray(levelStars)) return 0;
   if (!Object.prototype.hasOwnProperty.call(levelStars, id)) return 0;
@@ -990,7 +1027,7 @@ function sumSaveStars(s) {
   if (!s || typeof s !== 'object' || Array.isArray(s)) return 0;
   const ts = getSafeLifetimeStat(s, 'totalStars');
   if (ts > 0) {
-    return Math.min(90, Math.max(0, ts));
+    return Math.min(MAX_CAMPAIGN_STARS, Math.max(0, ts));
   }
   const levelStars = Object.prototype.hasOwnProperty.call(s, 'levelStars') ? s.levelStars : null;
   if (levelStars && typeof levelStars === 'object' && !Array.isArray(levelStars)) {
@@ -998,10 +1035,10 @@ function sumSaveStars(s) {
     const keys = Object.keys(levelStars);
     for (let i = 0; i < keys.length; i++) {
       const k = keys[i];
-      if (!VALID_SAVE_LEVEL_ID_RE.test(k)) continue;
+      if (!isValidSaveLevelId(k)) continue;
       sum += getSafeSaveLevelStar(s, k);
     }
-    return Math.min(90, sum);
+    return Math.min(MAX_CAMPAIGN_STARS, sum);
   }
   return 0;
 }
@@ -1076,8 +1113,8 @@ const ACHIEVEMENTS = [
     catcakeTier: 7,
     icon: 'icon_trophy',
     name: '全三星猫神宗师',
-    desc: '全部 30 关达成 90 星满星毕业',
-    check: (s) => sumSaveStars(s) >= 90
+    desc: `全部关卡达成 ${MAX_CAMPAIGN_STARS} 星满星毕业`,
+    check: (s) => sumSaveStars(s) >= MAX_CAMPAIGN_STARS
   }
 ];
 
@@ -1112,7 +1149,7 @@ function getChefRank(starsOrInput = 0, cumulativeScoreArg = null) {
         starsOrInput.totalStars !== null
       ) {
         const ts = toSafeNum(starsOrInput.totalStars);
-        resolvedStars = Number.isFinite(ts) && ts > 0 ? Math.min(90, Math.floor(ts)) : 0;
+        resolvedStars = Number.isFinite(ts) && ts > 0 ? Math.min(MAX_CAMPAIGN_STARS, Math.floor(ts)) : 0;
       }
       stars = resolvedStars !== null ? resolvedStars : sumSaveStars(starsOrInput);
 
@@ -1140,10 +1177,10 @@ function getChefRank(starsOrInput = 0, cumulativeScoreArg = null) {
     const rawNum = toSafeNum(starsOrInput);
     const num = Number.isFinite(rawNum) && rawNum > 0 ? rawNum : 0;
     if (cumulativeScoreArg !== null && cumulativeScoreArg !== undefined) {
-      stars = Math.min(90, Math.floor(num));
+      stars = Math.min(MAX_CAMPAIGN_STARS, Math.floor(num));
       const rawScoreArg = toSafeNum(cumulativeScoreArg);
       score = Number.isFinite(rawScoreArg) && rawScoreArg > 0 ? Math.floor(rawScoreArg) : 0;
-    } else if (num <= 90) {
+    } else if (num <= MAX_CAMPAIGN_STARS) {
       stars = Math.floor(num);
     } else {
       score = Math.floor(num);
@@ -1160,6 +1197,8 @@ function getChefRank(starsOrInput = 0, cumulativeScoreArg = null) {
 module.exports = {
   STORAGE_KEY,
   GAME_TITLE,
+  GAME_VERSION,
+  DEFAULT_INITIAL_STARDUST,
   CATCAKES,
   CATCAKE_MAP,
   CATCAKE_UPGRADE_COSTS,
@@ -1170,6 +1209,7 @@ module.exports = {
   SERVE_COMBO_WINDOW_SEC,
   PATIENCE_TIP_BANDS,
   FEVER_CONFIG,
+  TRASH_CONFIG,
   SHOP_DEVICES,
   DEVICE_UPGRADE_COSTS,
   CUSTOMERS,
@@ -1183,6 +1223,7 @@ module.exports = {
   BOARD_THEMES,
   BOARD_THEME_LIST,
   THEME_COSTS,
+  SHOP_TOTAL_CAP,
   ASSET_PATHS,
   UI_ATLAS_RECTS,
   UI_ATLAS_2_RECTS,

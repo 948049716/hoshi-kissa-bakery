@@ -6,11 +6,13 @@
 
 const {
   STORAGE_KEY,
+  DEFAULT_INITIAL_STARDUST,
   CATCAKE_UPGRADE_COSTS,
   DEVICE_UPGRADE_COSTS,
   PATRON_COSTS,
   normalizePatronId,
-  THEME_COSTS
+  THEME_COSTS,
+  SHOP_TOTAL_CAP
 } = require('./constants');
 
 const {
@@ -24,7 +26,6 @@ const {
 const SCHEMA_VERSION = 2;
 const MAX_OFFLINE_STARDUST_DELTA = 1500;
 const MAX_SAFE_STARDUST = 9999999;
-const SHOP_TOTAL_CAP = 5220;
 const MAX_CONSUMABLE_SPENT_STARDUST = MAX_SAFE_STARDUST - SHOP_TOTAL_CAP;
 const MAX_TOTAL_CUMULATIVE_SCORE = 3450000;
 const MAX_TIMESTAMP_MS = 9999999999999;
@@ -222,18 +223,33 @@ function computeHighestUnlockedLevel(levelStars) {
   return highest;
 }
 
+function isHigherSchemaRecord(raw) {
+  if (!isPlainRecord(raw)) return false;
+  if (hasOwn(raw, 'higherSchemaDetected') && Boolean(getOwn(raw, 'higherSchemaDetected'))) {
+    return true;
+  }
+  if (hasOwn(raw, 'schemaVersion')) {
+    const sv = toSafeNum(getOwn(raw, 'schemaVersion'));
+    if (Number.isFinite(sv) && sv > SCHEMA_VERSION) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function createDefaultSave() {
   return {
     schemaVersion: SCHEMA_VERSION,
     bgmTrack: 'waltz',
     sfxEnabled: true,
-    bankStardust: 30,
-    totalEarnedStardust: 30,
+    bankStardust: DEFAULT_INITIAL_STARDUST,
+    totalEarnedStardust: DEFAULT_INITIAL_STARDUST,
     lastSyncedEarnedStardust: 0,
     consumableSpentStardust: 0,
     migratedFromV1GiftPending: false,
     levelStars: {},
     levelBestScores: {},
+    levelFailStreaks: {},
     highestUnlockedLevel: '1-1',
     catcakeLevels: {
       '1': 0,
@@ -378,8 +394,24 @@ function computeSpentStardust(save) {
   return spent;
 }
 
+function sanitizeLevelFailStreaks(rawStreaks) {
+  const out = {};
+  if (!isPlainRecord(rawStreaks)) return out;
+  for (let i = 0; i < VALID_LEVEL_IDS.length; i++) {
+    const id = VALID_LEVEL_IDS[i];
+    if (!hasOwn(rawStreaks, id)) continue;
+    const cnt = clampSafeInt(getOwn(rawStreaks, id), 0, 999, 0);
+    if (cnt > 0) {
+      out[id] = cnt;
+    }
+  }
+  return out;
+}
+
 function normalizeV2Save(raw) {
   if (!isPlainRecord(raw)) return createDefaultSave();
+
+  const higherSchema = isHigherSchemaRecord(raw);
 
   const rawUnlockedPatrons = getOwn(raw, 'unlockedPatrons');
   const unlockedPatrons =
@@ -423,6 +455,7 @@ function normalizeV2Save(raw) {
     }
   }
 
+  const levelFailStreaks = sanitizeLevelFailStreaks(getOwn(raw, 'levelFailStreaks'));
   const highestUnlockedLevel = computeHighestUnlockedLevel(levelStars);
 
   const rawCc = getOwn(raw, 'catcakeLevels');
@@ -480,13 +513,14 @@ function normalizeV2Save(raw) {
     schemaVersion: SCHEMA_VERSION,
     bgmTrack,
     sfxEnabled,
-    bankStardust: 30,
-    totalEarnedStardust: 30,
+    bankStardust: DEFAULT_INITIAL_STARDUST,
+    totalEarnedStardust: DEFAULT_INITIAL_STARDUST,
     lastSyncedEarnedStardust: 0,
     consumableSpentStardust,
     migratedFromV1GiftPending,
     levelStars,
     levelBestScores,
+    levelFailStreaks,
     highestUnlockedLevel,
     catcakeLevels,
     deviceUpgrades,
@@ -510,6 +544,10 @@ function normalizeV2Save(raw) {
     updatedAt: hasOwn(raw, 'updatedAt') ? clampSafeInt(getOwn(raw, 'updatedAt'), 0, MAX_TIMESTAMP_MS, 0) : 0
   };
 
+  if (higherSchema) {
+    out.higherSchemaDetected = true;
+  }
+
   const spent = computeSpentStardust(out);
   const rawEarnedVal = getOwn(raw, 'totalEarnedStardust');
   const rawBankVal = getOwn(raw, 'bankStardust');
@@ -518,13 +556,13 @@ function normalizeV2Save(raw) {
 
   let totalEarnedStardust;
   if (hasExplicitEarned) {
-    const rawEarned = clampSafeInt(rawEarnedVal, 0, MAX_SAFE_STARDUST, 30);
-    totalEarnedStardust = Math.max(30, rawEarned, spent);
+    const rawEarned = clampSafeInt(rawEarnedVal, 0, MAX_SAFE_STARDUST, DEFAULT_INITIAL_STARDUST);
+    totalEarnedStardust = Math.max(DEFAULT_INITIAL_STARDUST, rawEarned, spent);
   } else if (hasExplicitBank) {
     const rawBank = clampSafeInt(rawBankVal, 0, MAX_SAFE_STARDUST, 0);
-    totalEarnedStardust = Math.max(30, rawBank + spent);
+    totalEarnedStardust = Math.max(DEFAULT_INITIAL_STARDUST, rawBank + spent);
   } else {
-    totalEarnedStardust = Math.max(30, 30 + spent);
+    totalEarnedStardust = Math.max(DEFAULT_INITIAL_STARDUST, DEFAULT_INITIAL_STARDUST + spent);
   }
 
   out.totalEarnedStardust = Math.min(MAX_SAFE_STARDUST, totalEarnedStardust);
@@ -608,12 +646,19 @@ function migrateV1ToV2(parsed) {
     : 0;
   const v1TotalEarned = Math.max(30, rawEarned, rawBank + v1Spent);
 
+  // Compensate exact v1 -> v0.9.0 price hikes on unlocked patrons/themes so bankStardust has zero deduction
   let migrationBonus = 0;
-  if (unlockedPatrons.includes('luna')) {
-    migrationBonus += 20;
+  for (let i = 0; i < unlockedPatrons.length; i++) {
+    const pid = unlockedPatrons[i];
+    if (hasOwn(PATRON_COSTS, pid) && hasOwn(V1_PATRON_COSTS, pid)) {
+      migrationBonus += Math.max(0, (PATRON_COSTS[pid] || 0) - (V1_PATRON_COSTS[pid] || 0));
+    }
   }
-  if (unlockedPatrons.includes('mugi')) {
-    migrationBonus += 20;
+  for (let i = 0; i < unlockedThemes.length; i++) {
+    const tid = unlockedThemes[i];
+    if (hasOwn(THEME_COSTS, tid) && hasOwn(V1_THEME_COSTS, tid)) {
+      migrationBonus += Math.max(0, (THEME_COSTS[tid] || 0) - (V1_THEME_COSTS[tid] || 0));
+    }
   }
   const isVeteran = bestChef > 0 || bestRush > 0 || bestZen > 0;
   if (isVeteran) {
@@ -685,7 +730,7 @@ function migrateV1ToV2(parsed) {
 }
 
 function normalizeSaveData(raw) {
-  if (!isPlainRecord(raw)) {
+  if (!isPlainRecord(raw) || Object.keys(raw).length === 0) {
     return createDefaultSave();
   }
   const sv = hasOwn(raw, 'schemaVersion') ? toSafeNum(getOwn(raw, 'schemaVersion')) : 0;
@@ -790,13 +835,14 @@ function isDefaultPlaceholderProfile(prof) {
 function isUntouchedDefaultSave(s) {
   return Boolean(
     s &&
-      s.totalEarnedStardust === 30 &&
+      s.totalEarnedStardust === DEFAULT_INITIAL_STARDUST &&
       computeSpentStardust(s) === 0 &&
       s.lifetimeStats.runsPlayed === 0 &&
       s.lifetimeStats.ordersServed === 0 &&
       s.lifetimeStats.vipServed === 0 &&
       s.lifetimeStats.totalStars === 0 &&
       s.lifetimeStats.totalCumulativeScore === 0 &&
+      (!isPlainRecord(s.levelFailStreaks) || Object.keys(s.levelFailStreaks).length === 0) &&
       !s.migratedFromV1GiftPending &&
       s.selectedPatron === 'mikan' &&
       s.equippedTheme === 'amber' &&
@@ -830,6 +876,11 @@ function mergeSaveData(localRaw, cloudRaw, cloudProfile = null) {
   }
 
   const cloud = normalizeSaveData(cloudRaw);
+  const higherSchema =
+    isHigherSchemaRecord(localRaw) ||
+    isHigherSchemaRecord(cloudRaw) ||
+    Boolean(local.higherSchemaDetected) ||
+    Boolean(cloud.higherSchemaDetected);
   const localUntouched = isUntouchedDefaultSave(local);
   const cloudUntouched = isUntouchedDefaultSave(cloud);
   const preferLocal =
@@ -840,6 +891,7 @@ function mergeSaveData(localRaw, cloudRaw, cloudProfile = null) {
 
   const levelStars = {};
   const levelBestScores = {};
+  const levelFailStreaks = {};
   for (let i = 0; i < VALID_LEVEL_IDS.length; i++) {
     const id = VALID_LEVEL_IDS[i];
     const s = Math.max(
@@ -853,6 +905,18 @@ function mergeSaveData(localRaw, cloudRaw, cloudProfile = null) {
       hasOwn(cloud.levelBestScores, id) ? cloud.levelBestScores[id] : 0
     );
     if (sc > 0) levelBestScores[id] = sc;
+
+    if (s === 0) {
+      const fs = hasOwn(latest.levelFailStreaks, id)
+        ? latest.levelFailStreaks[id]
+        : Math.max(
+            hasOwn(local.levelFailStreaks, id) ? local.levelFailStreaks[id] : 0,
+            hasOwn(cloud.levelFailStreaks, id) ? cloud.levelFailStreaks[id] : 0
+          );
+      if (fs > 0) {
+        levelFailStreaks[id] = fs;
+      }
+    }
   }
 
   const highestUnlockedLevel = computeHighestUnlockedLevel(levelStars);
@@ -920,7 +984,7 @@ function mergeSaveData(localRaw, cloudRaw, cloudProfile = null) {
     bgmTrack: latest.bgmTrack,
     sfxEnabled: latest.sfxEnabled,
     bankStardust: 0,
-    totalEarnedStardust: 30,
+    totalEarnedStardust: DEFAULT_INITIAL_STARDUST,
     lastSyncedEarnedStardust: 0,
     consumableSpentStardust: clampSafeInt(
       Math.max(local.consumableSpentStardust || 0, cloud.consumableSpentStardust || 0),
@@ -931,6 +995,7 @@ function mergeSaveData(localRaw, cloudRaw, cloudProfile = null) {
     migratedFromV1GiftPending,
     levelStars,
     levelBestScores,
+    levelFailStreaks,
     highestUnlockedLevel,
     catcakeLevels,
     deviceUpgrades,
@@ -955,27 +1020,31 @@ function mergeSaveData(localRaw, cloudRaw, cloudProfile = null) {
     updatedAt: Math.max(local.updatedAt || 0, cloud.updatedAt || 0, Date.now())
   };
 
+  if (higherSchema) {
+    merged.higherSchemaDetected = true;
+  }
+
   const spent = computeSpentStardust(merged);
   const lSync = local.lastSyncedEarnedStardust || 0;
   const cSync = cloud.lastSyncedEarnedStardust || 0;
 
   const effLocal =
-    lSync >= 30 && local.totalEarnedStardust > lSync
+    lSync >= DEFAULT_INITIAL_STARDUST && local.totalEarnedStardust > lSync
       ? lSync + Math.min(MAX_OFFLINE_STARDUST_DELTA, local.totalEarnedStardust - lSync)
       : local.totalEarnedStardust;
   const effCloud =
-    cSync >= 30 && cloud.totalEarnedStardust > cSync
+    cSync >= DEFAULT_INITIAL_STARDUST && cloud.totalEarnedStardust > cSync
       ? cSync + Math.min(MAX_OFFLINE_STARDUST_DELTA, cloud.totalEarnedStardust - cSync)
       : cloud.totalEarnedStardust;
 
-  let additiveEarned = Math.max(30, effLocal, effCloud, spent);
+  let additiveEarned = Math.max(DEFAULT_INITIAL_STARDUST, effLocal, effCloud, spent);
 
-  if (lSync >= 30 && local.totalEarnedStardust > lSync && effCloud > lSync) {
+  if (lSync >= DEFAULT_INITIAL_STARDUST && local.totalEarnedStardust > lSync && effCloud > lSync) {
     const localDelta = Math.min(MAX_OFFLINE_STARDUST_DELTA, local.totalEarnedStardust - lSync);
     additiveEarned = Math.max(additiveEarned, effCloud + localDelta);
   }
 
-  if (cSync >= 30 && cloud.totalEarnedStardust > cSync && effLocal > cSync) {
+  if (cSync >= DEFAULT_INITIAL_STARDUST && cloud.totalEarnedStardust > cSync && effLocal > cSync) {
     const cloudDelta = Math.min(MAX_OFFLINE_STARDUST_DELTA, cloud.totalEarnedStardust - cSync);
     additiveEarned = Math.max(additiveEarned, effLocal + cloudDelta);
   }
@@ -1119,6 +1188,7 @@ function recordLevelSettlementToSave(
 
   const nextLevelStars = { ...base.levelStars };
   const nextLevelBestScores = { ...base.levelBestScores };
+  const nextLevelFailStreaks = { ...(base.levelFailStreaks || {}) };
 
   if (lvl) {
     const cap = getLevelScoreCap(lvl.id);
@@ -1148,6 +1218,13 @@ function recordLevelSettlementToSave(
     const mergedBest = Math.max(prevBest, cleanScore);
     if (mergedBest > 0) {
       nextLevelBestScores[lvl.id] = mergedBest;
+    }
+
+    if (cleanStars >= 1) {
+      delete nextLevelFailStreaks[lvl.id];
+    } else {
+      const prevStreak = hasOwn(nextLevelFailStreaks, lvl.id) ? nextLevelFailStreaks[lvl.id] : 0;
+      nextLevelFailStreaks[lvl.id] = Math.min(999, prevStreak + 1);
     }
   }
 
@@ -1187,6 +1264,7 @@ function recordLevelSettlementToSave(
     lastSyncedEarnedStardust: base.lastSyncedEarnedStardust,
     levelStars: nextLevelStars,
     levelBestScores: nextLevelBestScores,
+    levelFailStreaks: nextLevelFailStreaks,
     lifetimeStats: {
       runsPlayed: Math.min(999999, base.lifetimeStats.runsPlayed + runsDelta),
       ordersServed: Math.min(9999999, base.lifetimeStats.ordersServed + ordersDelta),
@@ -1204,8 +1282,11 @@ function recordLevelSettlementToSave(
 
 module.exports = {
   SCHEMA_VERSION,
+  SHOP_TOTAL_CAP,
+  DEFAULT_INITIAL_STARDUST,
   MAX_OFFLINE_STARDUST_DELTA,
   LEGACY_RUN_STORAGE_KEYS,
+  isHigherSchemaRecord,
   createDefaultSave,
   migrateV1ToV2,
   computeSpentStardust,

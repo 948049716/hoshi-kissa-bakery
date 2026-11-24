@@ -334,21 +334,21 @@ async function runSelfTest(cliOpts = {}) {
       cloudStore: serverHandle.cloudStore
     });
 
-    // ST-01: Boot /__self_test.html on 390x844, verify __HOSHI_DEBUG__ v2.0 contract, requireBundledModule & bounds
-    await check('ST-01', 'Boot /__self_test.html (390x844 dpr=2), __HOSHI_DEBUG__ v2.0 alias, requireBundledModule & capsule-safe bounds', async () => {
+    // ST-01: Boot /__self_test.html on 390x844, verify __HOSHI_DEBUG__ v0.9.0 contract, requireBundledModule & bounds
+    await check('ST-01', 'Boot /__self_test.html (390x844 dpr=2), __HOSHI_DEBUG__ v0.9.0 alias, requireBundledModule & capsule-safe bounds', async () => {
       await ctx.setViewport(390, 844, true, 2, { safeTop: 47, safeBottom: 34, showCapsule: true });
       const st = await ctx.navigate('?safeTop=47&safeBottom=34&capsule=1&cloud=1', '/__self_test.html');
       const meta = await ctx.eval(() => ({
         version: globalThis.__HOSHI_DEBUG__.version,
         sameRef: globalThis.__game === globalThis.__HOSHI_DEBUG__
       }));
-      assertEq(meta.version, '2.0', 'debug version');
+      assertEq(meta.version, '0.9.0', 'debug version');
       assert(meta.sameRef, '__game must alias __HOSHI_DEBUG__');
       assertEq(st.assetsLoaded, 30, 'assetsLoaded');
       assertEq(st.assetsTotal, 30, 'assetsTotal');
       const constsMod = await ctx.requireBundledModule('./src/constants.js');
       assertEq(typeof constsMod.getCatcakePrice, 'function', 'requireBundledModule must preserve exported JS functions');
-      assertEq(constsMod.getCatcakePrice(1, 1), 36, 'getCatcakePrice(1, 1) must equal 36');
+      assertEq(constsMod.getCatcakePrice(1, 1), 35, 'getCatcakePrice(1, 1) must equal 35');
       const b = await ctx.checkBounds('ST-01_390x844', { expectedAssetsTotal: 30 });
       assert(b.hitsChecked >= 4, 'expected interactive hits on lobby');
     });
@@ -516,7 +516,7 @@ async function runSelfTest(cliOpts = {}) {
       assert(hdr.bytes > 1024, 'screenshot bytes > 1024');
     });
 
-    // ST-08: v2 kissa_sync pull migration (UT-S01 -> 230 stardust)
+    // ST-08: v2 kissa_sync pull migration (UT-S01 -> 230 stardust, 430 totalEarnedStardust in v0.9.0)
     await check('ST-08', 'kissa_sync v1->v2 pull migration (UT-S01 exact 230 stardust)', async () => {
       await ctx.setCloudConfig({
         useBuiltInMock: true,
@@ -532,12 +532,12 @@ async function runSelfTest(cliOpts = {}) {
       const pullRes = await ctx.callCloud({ action: 'pull' });
       assert(pullRes.ok, 'pull ok');
       assertEq(pullRes.metaSave.schemaVersion, 2, 'migrated schemaVersion');
-      assertEq(pullRes.metaSave.totalEarnedStardust, 390, 'UT-S01 totalEarnedStardust');
+      assertEq(pullRes.metaSave.totalEarnedStardust, 430, 'UT-S01 totalEarnedStardust');
       assertEq(pullRes.metaSave.bankStardust, 230, 'UT-S01 bankStardust');
     });
 
-    // ST-09: kissa_sync push 5,220 shop audit, 35k cap & serves >= 1 anti-cheat
-    await check('ST-09', 'kissa_sync push 5,220 shop conservation, chapter cap clamp & serves>=1 anti-cheat', async () => {
+    // ST-09: kissa_sync push 5,650 shop audit, 35k cap & serves >= 1 anti-cheat
+    await check('ST-09', 'kissa_sync push 5,650 shop conservation, chapter cap clamp & serves>=1 anti-cheat', async () => {
       await ctx.setCloudConfig({ useBuiltInMock: true, reset: true });
       await ctx.callCloud({ action: 'pull' });
 
@@ -545,10 +545,10 @@ async function runSelfTest(cliOpts = {}) {
         action: 'push',
         metaSave: {
           schemaVersion: 2,
-          totalEarnedStardust: 5255,
-          lastSyncedEarnedStardust: 5255,
+          totalEarnedStardust: 5695,
+          lastSyncedEarnedStardust: 5695,
           bankStardust: 0,
-          consumableSpentStardust: 35,
+          consumableSpentStardust: 45,
           catcakeLevels: { 1: 4, 2: 4, 3: 4, 4: 4, 5: 4, 6: 4, 7: 4 },
           deviceUpgrades: { dev_tray: 2, dev_flour: 3, dev_teapot: 3, dev_tools: 3 },
           unlockedPatrons: ['mikan', 'luna', 'mugi'],
@@ -559,7 +559,7 @@ async function runSelfTest(cliOpts = {}) {
         runReport: { levelId: '1-2', score: 2500, serves: 0, durationSec: 90 }
       });
       assert(fullShopRes.ok, 'push ok');
-      assertEq(fullShopRes.metaSave.bankStardust, 0, '5220 shop + 35 consumable = 5255 exact 0 bank');
+      assertEq(fullShopRes.metaSave.bankStardust, 0, '5650 shop + 45 consumable = 5695 exact 0 bank');
       assertEq(fullShopRes.metaSave.levelBestScores['1-1'], 35000, 'Ch.1 score cap clamped to 35000');
       assert(!fullShopRes.metaSave.levelBestScores['1-2'], 'zero-serve score on 1-2 rejected');
       assert(fullShopRes.validationWarnings.includes('zero_serve_score_rejected'), 'zero_serve_score_rejected warning');
@@ -573,7 +573,7 @@ async function runSelfTest(cliOpts = {}) {
           new Promise((resolve) => {
             wx.cloud.callFunction({
               name: 'kissa_sync',
-              data: { action: 'push', metaSave: { schemaVersion: 2, bankStardust: 30, totalEarnedStardust: 30 } },
+              data: { action: 'push', metaSave: { schemaVersion: 2, bankStardust: 15, totalEarnedStardust: 15 } },
               success: () => resolve({ failed: false }),
               fail: (err) => resolve({ failed: true, msg: err.message || String(err) })
             });
@@ -583,7 +583,7 @@ async function runSelfTest(cliOpts = {}) {
 
       const retryRes = await ctx.callCloud({
         action: 'push',
-        metaSave: { schemaVersion: 2, bankStardust: 30, totalEarnedStardust: 30 }
+        metaSave: { schemaVersion: 2, bankStardust: 15, totalEarnedStardust: 15 }
       });
       assert(retryRes.ok && retryRes.revision >= 2, '2nd push succeeded with incremented revision');
 

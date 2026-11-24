@@ -1220,14 +1220,154 @@ async function runSectionA() {
     const k3 = GridEngine.kneadSpawn(gs, { c2Rate: 0.1, rng: fixedRng });
     assert.deepEqual(k3, { spawned: false, reason: 'board_full' });
   });
+
+  await runTest('UT-G12', '挑拣移位叉：单点破冰与直投厨余销毁 (applyForkAction shatter_ice & trash, 0 Spawns)', () => {
+    // 1) 1-step ice shatter on 'I' cell with G/M/B dye check
+    const gsIce = GridEngine.createGridState(
+      { matrix: ['I.M'] },
+      [
+        { r: 0, c: 0, tier: 4, flavor: 'plain', frozen: true },
+        { r: 0, c: 2, tier: 2, flavor: 'plain' }
+      ]
+    );
+    const beforeCount = countBoardTiles(gsIce);
+    const resIce = GridEngine.applyForkAction(gsIce, 0, 0);
+    assert.equal(resIce.applied, true);
+    assert.equal(resIce.mode, 'shatter_ice');
+    assert.equal(resIce.shatteredIce, true);
+    assert.equal(gsIce.cells[0][0].tile.frozenHp, 0);
+    assert.equal(gsIce.cells[0][0].tile.tier, 4);
+    assert.equal(countBoardTiles(gsIce), beforeCount);
+
+    // 2) Direct trash on non-frozen tile frees board slot with 0 spawns
+    const resTrash = GridEngine.applyForkAction(gsIce, 0, 2, undefined, undefined, { discardToTrash: true });
+    assert.equal(resTrash.applied, true);
+    assert.equal(resTrash.mode, 'trash');
+    assert.equal(resTrash.removed, true);
+    assert.equal(gsIce.cells[0][2].tile, null);
+    assert.equal(countBoardTiles(gsIce), beforeCount - 1);
+  });
+
+  await runTest('UT-G13', '挑拣移位叉：跨障挪移与落点染色 (applyForkAction move Across #/X/I + G/M/B Dye)', () => {
+    const gs = GridEngine.createGridState(
+      { matrix: ['.X#MG'] },
+      [
+        { r: 0, c: 0, tier: 3, flavor: 'plain' }
+      ]
+    );
+    // Move across X and # onto M -> dyed matcha, 0 spawns
+    const r1 = GridEngine.applyForkAction(gs, 0, 0, 0, 3);
+    assert.equal(r1.applied, true);
+    assert.equal(r1.mode, 'move');
+    assert.equal(gs.cells[0][0].tile, null);
+    assert.equal(gs.cells[0][3].tile.tier, 3);
+    assert.equal(gs.cells[0][3].tile.flavor, 'matcha');
+    assert.equal(countBoardTiles(gs), 1);
+
+    // Move onto G -> dyed gold; then move back to M -> gold never downgrades!
+    const r2 = GridEngine.applyForkAction(gs, 0, 3, 0, 4);
+    assert.equal(r2.applied, true);
+    assert.equal(r2.mode, 'move');
+    assert.equal(gs.cells[0][4].tile.flavor, 'gold');
+
+    const r3 = GridEngine.applyForkAction(gs, 0, 4, 0, 3);
+    assert.equal(r3.applied, true);
+    assert.equal(r3.mode, 'move');
+    assert.equal(gs.cells[0][3].tile.flavor, 'gold');
+  });
+
+  await runTest('UT-G14', '挑拣移位叉：跨格同阶合并、震碎邻冰与高阶充能 (applyForkAction merge + Ortho Ice + C5 Charge)', () => {
+    const gs = GridEngine.createGridState(
+      { matrix: ['.X.', '.I.', '..B'] },
+      [
+        { r: 0, c: 0, tier: 4, flavor: 'matcha' },
+        { r: 0, c: 2, tier: 4, flavor: 'plain' },
+        { r: 1, c: 1, tier: 3, flavor: 'plain', frozen: true },
+        { r: 2, c: 0, tier: 2, flavor: 'plain' },
+        { r: 2, c: 2, tier: 2, flavor: 'plain' }
+      ]
+    );
+    // Merge C2(2,0) into C2(2,2 on B) -> C3 berry, orthogonal to nothing frozen, newTier=3 (<5 -> skillChargeGain=0)
+    const lowMerge = GridEngine.applyForkAction(gs, 2, 0, 2, 2);
+    assert.equal(lowMerge.applied, true);
+    assert.equal(lowMerge.mode, 'merge');
+    assert.equal(lowMerge.newTier, 3);
+    assert.equal(lowMerge.skillChargeGain, 0);
+    assert.equal(gs.cells[2][0].tile, null);
+    assert.equal(gs.cells[2][2].tile.tier, 3);
+    assert.equal(gs.cells[2][2].tile.flavor, 'berry');
+
+    // Move C4(0,2) to (0,1)? Wait: (0,1) is X, so move C4(0,2) to (1,2) then merge C4(0,0) into (1,0) orthogonal to (1,1)!
+    assert.equal(GridEngine.applyForkAction(gs, 0, 2, 1, 0).mode, 'move');
+    const highMerge = GridEngine.applyForkAction(gs, 0, 0, 1, 0);
+    assert.equal(highMerge.applied, true);
+    assert.equal(highMerge.mode, 'merge');
+    assert.equal(highMerge.newTier, 5);
+    assert.equal(highMerge.skillChargeGain, 8);
+    assert.equal(highMerge.brokenIceCells.length, 1);
+    assert.equal(gs.cells[1][1].tile.frozenHp, 0);
+    assert.equal(gs.cells[0][0].tile, null);
+    assert.equal(gs.cells[1][0].tile.tier, 5);
+    assert.equal(gs.cells[1][0].tile.flavor, 'matcha');
+  });
+
+  await runTest('UT-G15', '挑拣移位叉：异阶/双C7互换与非法落点零副作用回滚 (applyForkAction swap & Atomic Rollback)', () => {
+    const gs = GridEngine.createGridState(
+      { matrix: ['M#GB', '.X.I'] },
+      [
+        { r: 0, c: 0, tier: 2, flavor: 'matcha' },
+        { r: 0, c: 2, tier: 5, flavor: 'plain' }, // dyed gold by G on init
+        { r: 0, c: 3, tier: 7, flavor: 'berry' },
+        { r: 1, c: 0, tier: 7, flavor: 'plain' },
+        { r: 1, c: 2, tier: 4, flavor: 'plain' },
+        { r: 1, c: 3, tier: 3, flavor: 'plain', frozen: true }
+      ]
+    );
+    // Heterogeneous swap 1: C2(0,0 on M) <-> C4(1,2 on .) -> C4 becomes matcha at (0,0), C2 stays matcha at (1,2)
+    const sw0 = GridEngine.applyForkAction(gs, 0, 0, 1, 2);
+    assert.equal(sw0.applied, true);
+    assert.equal(sw0.mode, 'swap');
+    assert.equal(gs.cells[0][0].tile.tier, 4);
+    assert.equal(gs.cells[0][0].tile.flavor, 'matcha');
+    assert.equal(gs.cells[1][2].tile.tier, 2);
+    assert.equal(gs.cells[1][2].tile.flavor, 'matcha');
+
+    // Heterogeneous swap 2: C4(0,0 on M) <-> C5_gold(0,2 on G) -> C4 becomes gold at (0,2), C5_gold stays gold on M!
+    const sw1 = GridEngine.applyForkAction(gs, 0, 0, 0, 2);
+    assert.equal(sw1.applied, true);
+    assert.equal(sw1.mode, 'swap');
+    assert.equal(gs.cells[0][0].tile.tier, 5);
+    assert.equal(gs.cells[0][0].tile.flavor, 'gold');
+    assert.equal(gs.cells[0][2].tile.tier, 4);
+    assert.equal(gs.cells[0][2].tile.flavor, 'gold');
+
+    // Dual max-tier C7 swap: C7(0,3 on B) <-> C7(1,0 on .) -> swaps cleanly instead of failing merge!
+    const swMax = GridEngine.applyForkAction(gs, 0, 3, 1, 0);
+    assert.equal(swMax.applied, true);
+    assert.equal(swMax.mode, 'swap');
+    assert.equal(gs.cells[1][0].tile.tier, 7);
+    assert.equal(gs.cells[1][0].tile.flavor, 'berry');
+    assert.equal(gs.cells[0][3].tile.tier, 7);
+    assert.equal(gs.cells[0][3].tile.flavor, 'berry'); // dyed berry by B cell!
+
+    // Invalid targets (#, X, frozen tile, same cell, OOB) MUST return applied: false with 0 mutation
+    const snap = JSON.stringify(gs.cells);
+    assert.equal(GridEngine.applyForkAction(gs, 0, 0, 0, 1).applied, false); // void #
+    assert.equal(GridEngine.applyForkAction(gs, 0, 0, 1, 1).applied, false); // block X
+    assert.equal(GridEngine.applyForkAction(gs, 0, 0, 1, 3).applied, false); // frozen destination
+    assert.equal(GridEngine.applyForkAction(gs, 1, 3, 1, 2).applied, false); // frozen source with destination
+    assert.equal(GridEngine.applyForkAction(gs, 0, 0, 0, 0).applied, false); // same cell
+    assert.equal(GridEngine.applyForkAction(gs, 0, 0, 9, 9).applied, false); // OOB
+    assert.equal(JSON.stringify(gs.cells), snap);
+  });
 }
 
 // ============================================================================
-// Section B — L1 `order_service.js` & Pure Serve-Only Iron Law (UT-O01 .. UT-O07)
+// Section B — L1 `order_service.js` & Pure Serve-Only Iron Law (UT-O01 .. UT-O09)
 // ============================================================================
 
 async function runSectionB() {
-  await runTest('UT-O01', '全局唯一得分铁律 (Global Pure Serve-Only Scoring Iron Law)', () => {
+  await runTest('UT-O01', '全局唯一得分铁律 (Global Pure Serve-Only Scoring Iron Law incl. All 5 Fork Modes)', () => {
     const gs = GridEngine.createGridState(Levels.getLevelById('3-1'));
     assert.equal(Object.prototype.hasOwnProperty.call(gs, 'score'), false);
 
@@ -1285,9 +1425,22 @@ async function runSectionB() {
     assert.equal(OrderService.discardTraySlot(os, 0).discarded, true);
     assert.equal(os.score, 0);
 
-    // Utensils: spoon upgrade + fork ice shatter
+    // Utensils: spoon upgrade + all 5 Relocate Fork modes (shatter_ice, trash, move, merge, swap)
     assert.equal(GridEngine.upgradeTileAt(gsIce, 0, 1).upgraded, true);
-    assert.equal(GridEngine.removeTileAt(gsIce, 2, 2, { allowShatterIce: true }).shatteredIce, true);
+    const gsFork5 = GridEngine.createGridState(
+      { matrix: ['I....'] },
+      [
+        { r: 0, c: 0, tier: 3, flavor: 'plain', frozen: true },
+        { r: 0, c: 1, tier: 2, flavor: 'plain' },
+        { r: 0, c: 2, tier: 2, flavor: 'plain' },
+        { r: 0, c: 3, tier: 4, flavor: 'plain' }
+      ]
+    );
+    assert.equal(GridEngine.applyForkAction(gsFork5, 0, 0).mode, 'shatter_ice');
+    assert.equal(GridEngine.applyForkAction(gsFork5, 0, 1, 0, 4).mode, 'move');
+    assert.equal(GridEngine.applyForkAction(gsFork5, 0, 4, 0, 2).mode, 'merge');
+    assert.equal(GridEngine.applyForkAction(gsFork5, 0, 2, 0, 3).mode, 'swap');
+    assert.equal(GridEngine.applyForkAction(gsFork5, 0, 3, undefined, undefined, { discardToTrash: true }).mode, 'trash');
     assert.equal(os.score, 0);
 
     // All 3 patron active skills
@@ -1339,7 +1492,7 @@ async function runSectionB() {
     assert.ok(os.score > 0);
   });
 
-  await runTest('UT-O03', '风味约束与镀金王牌 (Constrained Flavor & Gold Wildcard x1.50)', () => {
+  await runTest('UT-O03', '风味约束与镀金王牌 (Constrained Flavor & Gold Wildcard x1.35)', () => {
     const save = { ...SaveSync.createDefaultSave(), selectedPatron: 'none' };
     const os = OrderService.createOrderState('2-1', save, fixedRng);
     os.seats[0] = {
@@ -1364,8 +1517,8 @@ async function runSectionB() {
     assert.deepEqual(res.usedTrayIndices, [1]);
     assert.notEqual(os.tray[0], null);
     assert.equal(os.tray[0].flavor, 'plain');
-    assert.equal(res.scoreGain, 225);
-    assert.equal(os.score, 225);
+    assert.equal(res.scoreGain, 203); // round(150 * 1.35) = 203 in v0.9.0
+    assert.equal(os.score, 203);
   });
 
   await runTest('UT-O04', '保留普通消耗策略 (Conserve Gold Wildcard on any Slot: plain -> flavored -> gold)', () => {
@@ -1520,7 +1673,7 @@ async function runSectionB() {
     assert.equal(OrderService.matchTrayToCustomer(osBand).seatIdx, 0);
   });
 
-  await runTest('UT-O06', '上菜总公式数值校验 (Exact Formula === 816 & Unrounded itemSum Oracles)', () => {
+  await runTest('UT-O06', 'v0.9.0 上菜总公式数值校验 (Exact Formula === 598 & All 24 Recipe baseScoreLv0 Oracles)', () => {
     const order = {
       customerId: 'cust_fox',
       bountyMult: 1.25,
@@ -1543,9 +1696,11 @@ async function runSectionB() {
       devTrayLv: 0,
       feverActive: true
     };
-    assert.equal(OrderService.computeServeScore(order, usedTiles, scoreCtx), 816);
+    const expectedOracle = Math.round((81 + 150 * 1.25) * 1.12 * 1.20 * 1.06 * 1.25 * 1.25);
+    assert.equal(expectedOracle, 598);
+    assert.equal(OrderService.computeServeScore(order, usedTiles, scoreCtx), 598);
 
-    // Verify unrounded itemSum float precision oracles (R15===322, R16===687, R18===1891, R24===7571) + all 24 recipes
+    // Verify unrounded itemSum float precision oracles (R15===288, R16===616, R18===1778, R24===6750) + all 24 recipes
     const neutralCtx = {
       catcakeLevels: {},
       comboCount: 1,
@@ -1553,7 +1708,7 @@ async function runSectionB() {
       devTrayLv: 0,
       feverActive: false
     };
-    const expectedOracles = { R15: 322, R16: 687, R18: 1891, R24: 7571 };
+    const expectedOracles = { R15: 288, R16: 616, R18: 1778, R24: 6750 };
     for (const [rId, exactScore] of Object.entries(expectedOracles)) {
       const rec = Levels.RECIPES[rId];
       const tiles = rec.slots.map((s) => ({
@@ -1615,10 +1770,96 @@ async function runSectionB() {
     assert.equal(os.seats[0], null);
     assert.ok(os.seatCooldowns[0] >= 0.8);
   });
+
+  await runTest('UT-O08', '厨余篮 8.0s 冷却、断连击与扣减 15 热潮能量 (TRASH_CONFIG Cooldown & Zero Score Loss)', () => {
+    const os = OrderService.createOrderState('1-3', SaveSync.createDefaultSave(), fixedRng);
+    os.score = 620;
+    os.comboCount = 3;
+    os.comboTimer = 6.5;
+    os.feverEnergy = 40;
+    OrderService.tryPlaceToTray(os, { uid: 901, tier: 1, flavor: 'plain' });
+    OrderService.tryPlaceToTray(os, { uid: 902, tier: 2, flavor: 'plain' });
+
+    const d1 = OrderService.discardTraySlot(os, 0);
+    assert.equal(d1.discarded, true);
+    assert.equal(os.trashDiscards, 1);
+    assert.equal(os.trashCooldown, 8.0);
+    assert.equal(os.comboCount, 0);
+    assert.equal(os.comboTimer, 0);
+    assert.equal(os.feverEnergy, 25);
+    assert.equal(os.score, 620); // NEVER deducts earned score!
+
+    // Immediate 2nd discard blocked by 8.0s cooldown
+    const d2Blocked = OrderService.discardTraySlot(os, 1);
+    assert.equal(d2Blocked.discarded, false);
+    assert.equal(d2Blocked.reason, 'cooldown');
+    assert.ok(d2Blocked.cooldownLeft > 7.9);
+    assert.notEqual(os.tray[1], null);
+
+    // Advance 8.1s via stepCustomers -> cooldown expires -> 2nd discard succeeds
+    OrderService.stepCustomers(os, 8.1, { rng: fixedRng });
+    assert.equal(os.trashCooldown, 0);
+    const d2Ok = OrderService.discardTraySlot(os, 1);
+    assert.equal(d2Ok.discarded, true);
+    assert.equal(os.trashDiscards, 2);
+  });
+
+  await runTest('UT-O09', '同星级纯重刷星尘折半衰减与 modeOverrides 模式解耦校验', () => {
+    // 1) First 3-star clear on 1-1: firstStarDustAward (10+15+22=47) + clearDustAward (6) + threeStarBonusDust (4) = 57
+    const osFirst = OrderService.createOrderState('1-1', SaveSync.createDefaultSave(), fixedRng);
+    osFirst.score = 1800;
+    osFirst.ordersServed = 12;
+    const setFirst = OrderService.computeLevelSettlement('1-1', osFirst, {});
+    assert.equal(setFirst.cleared, true);
+    assert.equal(setFirst.starsEarned, 3);
+    assert.equal(setFirst.newStarsDelta, 3);
+    assert.equal(setFirst.isReplayDecay, false);
+    assert.equal(setFirst.firstStarDustAward, 47);
+    assert.equal(setFirst.clearDustAward, 6);
+    assert.equal(setFirst.threeStarBonusDust, 4);
+    assert.equal(setFirst.totalDustAward, 57);
+
+    // 2) Same-star 3-star replay on 1-1 (also testing polymorphic 2-arg call): 0 + ceil(6*0.5)=3 + 2 = 5
+    const setReplay = OrderService.computeLevelSettlement(osFirst, { '1-1': 3 });
+    assert.equal(setReplay.cleared, true);
+    assert.equal(setReplay.starsEarned, 3);
+    assert.equal(setReplay.newStarsDelta, 0);
+    assert.equal(setReplay.isReplayDecay, true);
+    assert.equal(setReplay.firstStarDustAward, 0);
+    assert.equal(setReplay.clearDustAward, 3);
+    assert.equal(setReplay.threeStarBonusDust, 2);
+    assert.equal(setReplay.totalDustAward, 5);
+
+    // 3) 3-10 same-star 3-star replay with 5 VIPs: ceil(14*0.5)=7 + 2 + 5*3 = 24
+    const osBoss = OrderService.createOrderState('3-10', SaveSync.createDefaultSave(), fixedRng);
+    osBoss.score = 90000;
+    osBoss.ordersServed = 18;
+    osBoss.vipServed = 5;
+    osBoss.vipBonusDustEarned = 20;
+    const setBossReplay = OrderService.computeLevelSettlement('3-10', osBoss, { '3-10': 3 });
+    assert.equal(setBossReplay.isReplayDecay, true);
+    assert.equal(setBossReplay.clearDustAward, 7);
+    assert.equal(setBossReplay.threeStarBonusDust, 2);
+    assert.equal(setBossReplay.vipDustAward, 15);
+    assert.equal(setBossReplay.totalDustAward, 24);
+
+    // 4) modeOverrides decoupling
+    const osCustom = OrderService.createOrderState('2-5', SaveSync.createDefaultSave(), fixedRng, {
+      durationSec: 180,
+      allowedRecipes: ['R15', 'R17'],
+      disableTutorial: true,
+      customModeTag: 'daily_challenge'
+    });
+    assert.equal(osCustom.durationSec, 180);
+    assert.equal(osCustom.timeLeft, 180);
+    assert.deepEqual(osCustom.allowedRecipes, ['R15', 'R17']);
+    assert.equal(osCustom.disableTutorial, true);
+    assert.equal(osCustom.customModeTag, 'daily_challenge');
+  });
 }
 
 // ============================================================================
-// Section C — L1 `save_sync.js`, `platform.js` & `kissa_sync` (UT-S01 .. UT-S03)
+// Section C — L1 `save_sync.js`, `platform.js` & `kissa_sync` (UT-S01 .. UT-S04)
 // ============================================================================
 
 async function runSectionC() {
@@ -1639,9 +1880,9 @@ async function runSectionC() {
     assert.equal(v2.selectedPatron, 'luna');
     assert.ok(v2.unlockedThemes.includes('sakura'));
     assert.equal(v2.equippedTheme, 'sakura');
-    assert.equal(SaveSync.computeSpentStardust(v2), 160);
-    assert.equal(v2.totalEarnedStardust, 390);
-    assert.equal(v2.bankStardust, 230);
+    assert.equal(SaveSync.computeSpentStardust(v2), 200); // luna (100) + sakura (100) in v0.9.0
+    assert.equal(v2.totalEarnedStardust, 430); // 50 + 270(v1Spent) + 60(priceDiffComp) + 50(veteranGift)
+    assert.equal(v2.bankStardust, 230); // zero deduction vs v1 balance + 130 refund + 50 gift!
     assert.equal(v2.migratedFromV1GiftPending, true);
 
     // Verify loadLocalSave purges legacy active_run keys and persists migrated v2 save
@@ -1687,16 +1928,16 @@ async function runSectionC() {
       schemaVersion: 2,
       totalEarnedStardust: 300,
       lastSyncedEarnedStardust: 300,
-      bankStardust: 220,
-      catcakeLevels: { 1: 1, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 }, // 20
-      deviceUpgrades: { dev_tray: 1, dev_flour: 0, dev_teapot: 0, dev_tools: 0 }, // 60
+      bankStardust: 200,
+      catcakeLevels: { 1: 1, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 }, // 25
+      deviceUpgrades: { dev_tray: 1, dev_flour: 0, dev_teapot: 0, dev_tools: 0 }, // 75
       updatedAt: 1500
     };
 
     const merged = SaveSync.mergeSaveData(localSave, cloudSave);
     assert.equal(merged.totalEarnedStardust, 345);
-    assert.equal(SaveSync.computeSpentStardust(merged), 80);
-    assert.equal(merged.bankStardust, 265);
+    assert.equal(SaveSync.computeSpentStardust(merged), 100);
+    assert.equal(merged.bankStardust, 245);
     assert.equal(merged.bankStardust, merged.totalEarnedStardust - SaveSync.computeSpentStardust(merged));
     assert.equal(merged.levelStars['1-1'], 3);
     assert.equal(merged.catcakeLevels[1], 1);
@@ -1711,14 +1952,30 @@ async function runSectionC() {
     };
     const clamped = SaveSync.mergeSaveData(inflatedLocal, cloudSave);
     assert.equal(clamped.totalEarnedStardust, 300 + SaveSync.MAX_OFFLINE_STARDUST_DELTA);
-    assert.equal(clamped.bankStardust, 1800 - 80);
+    assert.equal(clamped.bankStardust, 1800 - 100);
   });
 
-  await runTest('UT-S03', '云函数 kissa_sync 与 runBrowserMockCloud 守恒、反作弊与双榜一致性', async () => {
+  await runTest('UT-S03', '客户端↔云函数常量 100% 同构门禁、反作弊与双榜一致性', async () => {
     const cloudVm = loadCloudFunctionInMemory('openid_chef_01_A1B2');
     const { _internal, main: cloudMain } = cloudVm.exports;
 
-    assert.equal(_internal.SHOP_TOTAL_CAP, 5220);
+    // 100% Isomorphism Gate between client (constants.js + levels_data.js) and cloud (kissa_sync/index.js)
+    assert.equal(_internal.SCHEMA_VERSION, SaveSync.SCHEMA_VERSION);
+    assert.equal(_internal.DEFAULT_INITIAL_STARDUST, Constants.DEFAULT_INITIAL_STARDUST);
+    assert.equal(_internal.DEFAULT_INITIAL_STARDUST, 15);
+    assert.deepEqual(deepClone(_internal.CATCAKE_UPGRADE_COSTS), Constants.CATCAKE_UPGRADE_COSTS);
+    assert.deepEqual(deepClone(_internal.DEVICE_UPGRADE_COSTS), Constants.DEVICE_UPGRADE_COSTS);
+    assert.deepEqual(deepClone(_internal.PATRON_COSTS), Constants.PATRON_COSTS);
+    assert.deepEqual(deepClone(_internal.THEME_COSTS), Constants.THEME_COSTS);
+    assert.equal(_internal.SHOP_TOTAL_CAP, Constants.SHOP_TOTAL_CAP);
+    assert.equal(_internal.SHOP_TOTAL_CAP, 5650);
+    assert.equal(_internal.MAX_CAMPAIGN_STARS, Levels.MAX_CAMPAIGN_STARS);
+    assert.equal(_internal.MAX_CAMPAIGN_STARS, 90);
+    assert.deepEqual(
+      deepClone([..._internal.VALID_LEVEL_IDS]).sort(),
+      Levels.LEVELS.map((l) => l.id).sort()
+    );
+    assert.deepEqual(deepClone(_internal.CHAPTER_SCORE_CAPS), { 1: 35000, 2: 90000, 3: 220000 });
     assert.equal(_internal.migrateV1ToV2(v1Fixture).bankStardust, 230);
 
     // Clean mock cloud storage before testing Platform.runBrowserMockCloud
@@ -1731,21 +1988,23 @@ async function runSectionC() {
     assert.equal(pullMock.ok, true);
     assert.equal(pullCloud.metaSave.schemaVersion, 2);
     assert.equal(pullMock.metaSave.schemaVersion, 2);
+    assert.equal(pullCloud.metaSave.bankStardust, 15);
+    assert.equal(pullMock.metaSave.bankStardust, 15);
 
     // Anti-cheat: score > 0 with serves < 1 MUST be rejected & rolled back on both
     const cheatMeta = SaveSync.recordLevelSettlementToSave(
       SaveSync.createDefaultSave(),
       '1-1',
-      1500,
+      1800,
       3,
-      65,
+      57,
       { ordersServed: 0 }
     );
     const cheatPayload = {
       action: 'push',
       baseRevision: 1,
       metaSave: cheatMeta,
-      runReport: { levelId: '1-1', score: 1500, serves: 0, durationSec: 90 }
+      runReport: { levelId: '1-1', score: 1800, serves: 0, durationSec: 90 }
     };
     const cheatCloudRes = await cloudMain(cheatPayload);
     const cheatMockRes = await Platform.runBrowserMockCloud(cheatPayload);
@@ -1762,7 +2021,7 @@ async function runSectionC() {
     const overCapMeta = {
       ...SaveSync.createDefaultSave(),
       totalEarnedStardust: 400,
-      lastSyncedEarnedStardust: 30,
+      lastSyncedEarnedStardust: 15,
       levelStars: { '1-1': 3, '2-1': 3, '3-1': 3 },
       levelBestScores: { '1-1': 50000, '2-1': 120000, '3-1': 300000 },
       lifetimeStats: {
@@ -1813,29 +2072,146 @@ async function runSectionC() {
     assert.equal(Platform.getStorageJSON('__hoshi_browser_cloud_doc_v1__'), null);
     assert.equal(Platform.getStorageJSON('__hoshi_browser_cloud_doc_v2__'), null);
   });
+
+  await runTest('UT-S04', '高版本 schemaVersion 防覆盖写保护、连败 >=2 开局 +40% 充能保底与 requestRewardAction 桩位', async () => {
+    // 1) Client normalizeSaveData / mergeSaveData marks higherSchemaDetected when schemaVersion > 2
+    const futureRaw = {
+      schemaVersion: 3,
+      totalEarnedStardust: 500,
+      lastSyncedEarnedStardust: 500,
+      bankStardust: 500,
+      levelStars: { '1-1': 3 },
+      futureExpansionData: { endlessBestWave: 18 }
+    };
+    const normFuture = SaveSync.normalizeSaveData(futureRaw);
+    assert.equal(normFuture.higherSchemaDetected, true);
+    const mergedFuture = SaveSync.mergeSaveData(SaveSync.createDefaultSave(), futureRaw);
+    assert.equal(mergedFuture.higherSchemaDetected, true);
+
+    // 2) Cloud function & browser mock cloud both block overwrite when cloud doc has schemaVersion > 2
+    const cloudVm = loadCloudFunctionInMemory('openid_future_schema_03');
+    const { main: cloudMain } = cloudVm.exports;
+    cloudVm.docs.set(
+      'players',
+      new Map([
+        [
+          'openid_future_schema_03',
+          {
+            _id: 'openid_future_schema_03',
+            revision: 9,
+            metaSave: futureRaw
+          }
+        ]
+      ])
+    );
+    const pullFuture = await cloudMain({ action: 'pull' });
+    assert.equal(pullFuture.ok, true);
+    assert.equal(pullFuture.higherSchemaDetected, true);
+    // Original v3 field in DB must remain intact (not overwritten on pull)
+    assert.deepEqual(
+      cloudVm.docs.get('players').get('openid_future_schema_03').metaSave.futureExpansionData,
+      { endlessBestWave: 18 }
+    );
+    const pushFuture = await cloudMain({
+      action: 'push',
+      baseRevision: 9,
+      metaSave: SaveSync.createDefaultSave()
+    });
+    assert.equal(pushFuture.ok, false);
+    assert.equal(pushFuture.blocked, true);
+    assert.equal(pushFuture.reason, 'higher_schema_version_on_cloud');
+    assert.equal(pushFuture.higherSchemaDetected, true);
+
+    // Browser mock cloud parity for schemaVersion: 3
+    Platform.setStorageJSON('__hoshi_browser_cloud_doc_v1__', {
+      schemaVersion: 3,
+      revision: 4,
+      metaSave: futureRaw
+    });
+    const mockPullFuture = await Platform.runBrowserMockCloud({ action: 'pull' });
+    assert.equal(mockPullFuture.higherSchemaDetected, true);
+    const mockPushFuture = await Platform.runBrowserMockCloud({
+      action: 'push',
+      baseRevision: 4,
+      metaSave: SaveSync.createDefaultSave()
+    });
+    assert.equal(mockPushFuture.ok, false);
+    assert.equal(mockPushFuture.blocked, true);
+    assert.equal(mockPushFuture.reason, 'higher_schema_version_on_cloud');
+    Platform.removeStorage('__hoshi_browser_cloud_doc_v1__');
+
+    // 3) Reward action stub resolves cleanly
+    const rewardRes = await Platform.requestRewardAction('extra_fork');
+    assert.equal(rewardRes.rewarded, true);
+    assert.equal(rewardRes.scene, 'extra_fork');
+
+    // 4) Controller DDA Soft Pity: 2 consecutive failures on 1-4 -> 3rd attempt starts with skillEnergy === 40; clearing resets to 0
+    const env = bootMockApp();
+    try {
+      const { dbg } = env;
+      dbg.setSaveData({
+        ...SaveSync.createDefaultSave(),
+        levelStars: { '1-1': 3, '1-2': 3, '1-3': 3 }
+      });
+
+      // Attempt 1 fail
+      dbg.startLevel('1-4', { skipTutorial: true, rng: mulberry32(811) });
+      assert.equal(dbg.getState().skillEnergy, 0);
+      dbg.advanceTime(120);
+      assert.equal(dbg.getState().lastResult.cleared, false);
+      assert.equal(dbg.getSaveData().levelFailStreaks['1-4'], 1);
+
+      // Attempt 2 fail
+      dbg.closeModal();
+      dbg.startLevel('1-4', { skipTutorial: true, rng: mulberry32(812) });
+      assert.equal(dbg.getState().skillEnergy, 0);
+      dbg.advanceTime(120);
+      assert.equal(dbg.getState().lastResult.cleared, false);
+      assert.equal(dbg.getSaveData().levelFailStreaks['1-4'], 2);
+
+      // Attempt 3 -> soft pity kicks in with skillEnergy === 40!
+      dbg.closeModal();
+      dbg.startLevel('1-4', { skipTutorial: true, rng: mulberry32(813) });
+      assert.equal(dbg.getState().skillEnergy, 40);
+
+      // Record >= 1 star clear on 1-4 -> fail streak deleted -> next start has skillEnergy === 0
+      const clearedSave = SaveSync.recordLevelSettlementToSave(dbg.getSaveData(), '1-4', 1800, 1, 16, {
+        ordersServed: 8
+      });
+      assert.equal(clearedSave.levelFailStreaks['1-4'], undefined);
+      dbg.setSaveData(clearedSave);
+      dbg.startLevel('1-4', { skipTutorial: true, rng: mulberry32(814) });
+      assert.equal(dbg.getState().skillEnergy, 0);
+    } finally {
+      env.dispose();
+    }
+  });
 }
 
 // ============================================================================
-// Section D — L2 Static 30-Level Invariants (L2-1 .. L2-5)
+// Section D — L2 Static 30-Level Invariants (L2-1 .. L2-6)
 // ============================================================================
 
 async function runSectionD() {
-  await runTest('L2-1', '数量完备与章节门控 (3 Chapters x 10 Continuous Levels & Gate Thresholds)', () => {
+  await runTest('L2-1', '数量完备与章节门控 (3 Chapters x 10 Continuous Levels, MAX_CAMPAIGN_STARS=90 & Gate Thresholds)', () => {
     assert.equal(Levels.CHAPTERS.length, 3);
+    assert.equal(Levels.MAX_CAMPAIGN_STARS, Levels.LEVELS.length * 3);
+    assert.equal(Levels.MAX_CAMPAIGN_STARS, 90);
+
     assert.equal(Levels.CHAPTERS[0].unlockStars, 0);
     assert.equal(Levels.CHAPTERS[0].prevLevelReq, null);
-    assert.deepEqual(Levels.CHAPTERS[0].firstStarDust, [15, 20, 30]);
-    assert.equal(Levels.CHAPTERS[0].baseClearDust, 10);
+    assert.deepEqual(Levels.CHAPTERS[0].firstStarDust, [10, 15, 22]);
+    assert.equal(Levels.CHAPTERS[0].baseClearDust, 6);
 
     assert.equal(Levels.CHAPTERS[1].unlockStars, 18);
     assert.equal(Levels.CHAPTERS[1].prevLevelReq, '1-10');
-    assert.deepEqual(Levels.CHAPTERS[1].firstStarDust, [20, 25, 35]);
-    assert.equal(Levels.CHAPTERS[1].baseClearDust, 14);
+    assert.deepEqual(Levels.CHAPTERS[1].firstStarDust, [16, 22, 32]);
+    assert.equal(Levels.CHAPTERS[1].baseClearDust, 10);
 
     assert.equal(Levels.CHAPTERS[2].unlockStars, 40);
     assert.equal(Levels.CHAPTERS[2].prevLevelReq, '2-10');
-    assert.deepEqual(Levels.CHAPTERS[2].firstStarDust, [25, 35, 45]);
-    assert.equal(Levels.CHAPTERS[2].baseClearDust, 18);
+    assert.deepEqual(Levels.CHAPTERS[2].firstStarDust, [22, 30, 42]);
+    assert.equal(Levels.CHAPTERS[2].baseClearDust, 14);
 
     assert.equal(Levels.LEVELS.length, 30);
     const expectedIds = [];
@@ -2059,6 +2435,17 @@ async function runSectionD() {
       }
     }
   });
+
+  await runTest('L2-6', '云端反作弊安全裕度校验 (stars[2] * 2.5 <= CHAPTER_SCORE_CAPS)', () => {
+    const caps = { 1: 35000, 2: 90000, 3: 220000 };
+    for (const lvl of Levels.LEVELS) {
+      const cap = caps[lvl.chapter];
+      assert.ok(
+        lvl.stars[2] * 2.5 <= cap,
+        `${lvl.id}: stars[2]=${lvl.stars[2]} leaves insufficient headroom below chapter cap ${cap}`
+      );
+    }
+  });
 }
 
 // ============================================================================
@@ -2163,9 +2550,9 @@ function serveOneCustomerOnLevel1(dbg) {
   assert.ok(seatIdx >= 0, 'Expected at least one seated customer on 1-1');
   const targetOrder = st.seats[seatIdx];
 
-  // Clear tray first so slots match cleanly
+  // Clear tray first so slots match cleanly (bypassing 8s cooldown in test helper)
   for (let s = 0; s < st.trayCapacity; s++) {
-    if (st.tray[s]) dbg.doubleTapTray(s);
+    if (st.tray[s]) dbg.doubleTapTray(s, { ignoreCooldown: true });
   }
 
   // Lock target customer if not already preferred
@@ -2241,7 +2628,7 @@ async function runSectionE() {
     assert.deepEqual(externalAudio, []);
   });
 
-  await runTest('UT-M02', '全局铁律校验：5,220 星尘小铺总上限、0 hsl() 渐变色与 0 彩色 Emoji', () => {
+  await runTest('UT-M02', '全局铁律校验：5,650 星尘小铺总上限、0 hsl() 渐变色与 0 彩色 Emoji', () => {
     const catcakeSum = Object.values(Constants.CATCAKE_UPGRADE_COSTS)
       .flat()
       .reduce((a, b) => a + b, 0);
@@ -2251,11 +2638,12 @@ async function runSectionE() {
     const patronSum = Object.values(Constants.PATRON_COSTS).reduce((a, b) => a + b, 0);
     const themeSum = Object.values(Constants.THEME_COSTS).reduce((a, b) => a + b, 0);
 
-    assert.equal(catcakeSum, 3670);
-    assert.equal(deviceSum, 1150);
-    assert.equal(patronSum, 200);
-    assert.equal(themeSum, 200);
-    assert.equal(catcakeSum + deviceSum + patronSum + themeSum, 5220);
+    assert.equal(catcakeSum, 3920);
+    assert.equal(deviceSum, 1250);
+    assert.equal(patronSum, 240);
+    assert.equal(themeSum, 240);
+    assert.equal(catcakeSum + deviceSum + patronSum + themeSum, 5650);
+    assert.equal(Constants.SHOP_TOTAL_CAP, 5650);
 
     const hslRe = /\bhsla?\s*\(/i;
     const colorEmojiRe = /\p{Emoji_Presentation}|\p{Emoji}\uFE0F/u;
@@ -2345,7 +2733,7 @@ async function runSectionE() {
         const { dbg } = env;
         assert.ok(dbg && typeof dbg === 'object');
         assert.strictEqual(globalThis.__HOSHI_DEBUG__, globalThis.__game);
-        assert.equal(dbg.version, '2.0');
+        assert.equal(dbg.version, '0.9.0');
 
         await env.flushAssets();
         let st = dbg.getState();
@@ -2430,7 +2818,7 @@ async function runSectionE() {
           for (const id of expectedIds) {
             assert.ok(st.hits.some((h) => h.id === id), `${vp.label}:${tabHit} missing ${id}`);
           }
-          verifyHitsGeometry(st.hits, st.metrics, `${vp.label}:${tabHit}`);
+          verifyHitsGeometry(st.hits, st.metrics, `${vp.label}:tab_${tabHit}`);
         }
 
         // Compendium & Dual Leaderboard modals
@@ -2451,6 +2839,8 @@ async function runSectionE() {
         dbg.startLevel('1-1', { skipTutorial: true, rng: mulberry32(42) });
         st = dbg.getState();
         assert.equal(st.screen, 'playing');
+        assert.equal(st.trashCooldown, 0);
+        assert.equal(st.forkSourceCell, null);
         assert.ok(st.boardLayout && st.boardLayout.cellSize >= 46);
         for (const id of [
           'pause_btn',
@@ -2481,9 +2871,9 @@ async function runSectionE() {
       const { dbg } = env;
       const initSave = {
         ...SaveSync.createDefaultSave(),
-        totalEarnedStardust: 200,
-        lastSyncedEarnedStardust: 200,
-        bankStardust: 200,
+        totalEarnedStardust: 250,
+        lastSyncedEarnedStardust: 250,
+        bankStardust: 250,
         deviceUpgrades: { dev_tray: 0, dev_flour: 0, dev_teapot: 0, dev_tools: 1 } // fork:1, spoon:1
       };
       dbg.setSaveData(initSave);
@@ -2509,9 +2899,10 @@ async function runSectionE() {
       assert.equal(dbg.tapBoardCell(anyTilePos.r, anyTilePos.c).placed, true);
       assert.equal(dbg.getState().score, 0);
       assert.equal(dbg.doubleTapTray(0).discarded, true);
+      assert.equal(dbg.getState().trashCooldown, 8.0);
       assert.equal(dbg.getState().score, 0);
 
-      // Spoon, Fork, and Patron Skill all keep score === 0
+      // Spoon, 2-step Relocate Fork, and Patron Skill all keep score === 0
       dbg.knead();
       dbg.knead();
       const cellsWithTile = [];
@@ -2523,7 +2914,15 @@ async function runSectionE() {
       }
       dbg.useToolOnCell('spoon', cellsWithTile[0].r, cellsWithTile[0].c);
       assert.equal(dbg.getState().score, 0);
-      dbg.useToolOnCell('fork', cellsWithTile[1].r, cellsWithTile[1].c);
+      // 2-step fork: Step 1 locks source without consuming fork, Step 2 clickHit('tray_trash_btn') trashes directly even during 8s cooldown!
+      const step1Res = dbg.useToolOnCell('fork', cellsWithTile[1].r, cellsWithTile[1].c);
+      assert.equal(step1Res.armed, true);
+      assert.equal(step1Res.step, 2);
+      assert.equal(dbg.getState().toolCounts.fork, 1);
+      assert.deepEqual(dbg.getState().forkSourceCell, { r: cellsWithTile[1].r, c: cellsWithTile[1].c });
+      assert.equal(dbg.clickHit('tray_trash_btn'), true);
+      assert.equal(dbg.getState().toolCounts.fork, 0);
+      assert.equal(dbg.getState().forkSourceCell, null);
       assert.equal(dbg.getState().score, 0);
       dbg.castPatronSkill({ forceCharge: true });
       assert.equal(dbg.getState().score, 0);
@@ -2533,13 +2932,13 @@ async function runSectionE() {
       assert.ok(dbg.getState().ordersServed >= 1);
       assert.ok(dbg.getState().score > 0);
 
-      // Keep serving until reaching >= 750 (1 star on 1-1)
+      // Keep serving until reaching >= 850 (1 star on 1-1 in v0.9.0)
       let safety = 0;
-      while (dbg.getState().score < 750 && safety < 25) {
+      while (dbg.getState().score < 850 && safety < 30) {
         serveOneCustomerOnLevel1(dbg);
         safety++;
       }
-      assert.ok(dbg.getState().score >= 750);
+      assert.ok(dbg.getState().score >= 850);
 
       dbg.advanceTime(95);
       const resClear = dbg.getState();
@@ -2564,16 +2963,16 @@ async function runSectionE() {
       assert.equal(zeroServeRes.consolationDust, 0);
       assert.equal(zeroServeRes.totalDustAward, 0);
 
-      // 3) >= 1 serve but < star1 timeout -> consolationDust === Math.max(5, Math.floor((score / star1) * 8))
+      // 3) >= 1 serve but < star1 (850) timeout -> consolationDust === Math.max(1, Math.floor((score / 850) * 4))
       dbg.closeModal();
       dbg.startLevel('1-1', { skipTutorial: true, rng: mulberry32(999) });
       serveOneCustomerOnLevel1(dbg);
       const subStarScore = dbg.getState().score;
-      assert.ok(subStarScore > 0 && subStarScore < 750);
+      assert.ok(subStarScore > 0 && subStarScore < 850);
       dbg.advanceTime(95);
       const subStarRes = dbg.getState().lastResult;
       assert.equal(subStarRes.cleared, false);
-      assert.equal(subStarRes.consolationDust, Math.max(5, Math.floor((subStarRes.score / 750) * 8)));
+      assert.equal(subStarRes.consolationDust, Math.max(1, Math.floor((subStarRes.score / 850) * 4)));
     } finally {
       env.dispose();
     }
@@ -2593,22 +2992,22 @@ async function runSectionE() {
       // 1) 4-Tab Kissa Shop purchases
       dbg.openModal('shop');
       dbg.clickHit('shop_tab_catcakes');
-      assert.equal(dbg.clickHit('shop_buy_catcake_1'), true); // 20
+      assert.equal(dbg.clickHit('shop_buy_catcake_1'), true); // 25
       assert.equal(dbg.getSaveData().catcakeLevels['1'], 1);
-      assert.equal(Constants.getCatcakePrice(1, 1), 36);
+      assert.equal(Constants.getCatcakePrice(1, 1), 35); // round(30 * 1.15) = 35
 
       dbg.clickHit('shop_tab_devices');
-      assert.equal(dbg.clickHit('shop_buy_dev_tray'), true); // 60 -> trayCapacity 4
+      assert.equal(dbg.clickHit('shop_buy_dev_tray'), true); // 75 -> trayCapacity 4
       assert.equal(dbg.getSaveData().deviceUpgrades.dev_tray, 1);
 
       dbg.clickHit('shop_tab_patrons');
-      assert.equal(dbg.clickHit('shop_buy_patron_luna'), true); // 80
-      assert.equal(dbg.clickHit('shop_buy_patron_mugi'), true); // 120
+      assert.equal(dbg.clickHit('shop_buy_patron_luna'), true); // 100
+      assert.equal(dbg.clickHit('shop_buy_patron_mugi'), true); // 140
       assert.ok(dbg.getSaveData().unlockedPatrons.includes('luna'));
       assert.ok(dbg.getSaveData().unlockedPatrons.includes('mugi'));
 
       dbg.clickHit('shop_tab_themes');
-      assert.equal(dbg.clickHit('shop_buy_theme_sakura'), true); // 80
+      assert.equal(dbg.clickHit('shop_buy_theme_sakura'), true); // 100
       assert.equal(dbg.clickHit('shop_equip_theme_sakura'), true);
       assert.equal(dbg.getSaveData().equippedTheme, 'sakura');
       dbg.closeModal();
@@ -2618,23 +3017,23 @@ async function runSectionE() {
       assert.equal(dbg.getState().trayCapacity, 4);
       assert.deepEqual(dbg.getState().toolCounts, { fork: 1, spoon: 0 });
 
-      // 2) Emergency Utensils: spoon=0 -> emergency buy 1x for 20 stardust; 2nd emergency buy blocked
+      // 2) Emergency Utensils: spoon=0 -> emergency buy 1x for 25 stardust; 2nd emergency buy blocked
       const preConsumable = dbg.getSaveData().consumableSpentStardust;
       const spoonRes1 = dbg.useToolOnCell('spoon', 0, 0);
       assert.equal(spoonRes1.upgraded, true);
-      assert.equal(dbg.getSaveData().consumableSpentStardust, preConsumable + 20);
+      assert.equal(dbg.getSaveData().consumableSpentStardust, preConsumable + 25);
 
       const spoonRes2 = dbg.useToolOnCell('spoon', 0, 1);
       assert.equal(Boolean(spoonRes2 && spoonRes2.upgraded), false);
-      assert.equal(dbg.getSaveData().consumableSpentStardust, preConsumable + 20);
+      assert.equal(dbg.getSaveData().consumableSpentStardust, preConsumable + 25);
 
-      // Free fork (1 -> 0), then emergency fork (15 stardust), then 2nd emergency fork blocked
-      assert.equal(dbg.useToolOnCell('fork', 0, 0).removed, true);
+      // Free fork (1 -> 0 via 5-arg move/swap/merge or 'trash'), then emergency fork (20 stardust), then 2nd emergency fork blocked
+      assert.equal(dbg.useToolOnCell('fork', 0, 0, 0, 2).applied, true); // moves (0,0) -> empty (0,2)
       assert.equal(dbg.getState().toolCounts.fork, 0);
-      assert.equal(dbg.useToolOnCell('fork', 0, 1).removed, true);
-      assert.equal(dbg.getSaveData().consumableSpentStardust, preConsumable + 35);
-      const forkBlocked = dbg.useToolOnCell('fork', 1, 1);
-      assert.equal(Boolean(forkBlocked && forkBlocked.removed), false);
+      assert.equal(dbg.useToolOnCell('fork', 0, 1, 'trash').removed, true);
+      assert.equal(dbg.getSaveData().consumableSpentStardust, preConsumable + 45);
+      const forkBlocked = dbg.useToolOnCell('fork', 0, 2, 'trash');
+      assert.equal(Boolean(forkBlocked && forkBlocked.applied), false);
       const curSave = dbg.getSaveData();
       assert.equal(curSave.bankStardust, curSave.totalEarnedStardust - SaveSync.computeSpentStardust(curSave));
 
@@ -2945,14 +3344,14 @@ async function runSectionE() {
       assert.equal(dbg.getSaveData().consumableSpentStardust, 0);
       // Valid non-frozen tile (0,1) STILL succeeds because 1/level limit was NOT wasted!
       assert.equal(dbg.useToolOnCell('spoon', 0, 1).upgraded, true);
-      assert.equal(dbg.getSaveData().bankStardust, 80);
-      assert.equal(dbg.getSaveData().consumableSpentStardust, 20);
+      assert.equal(dbg.getSaveData().bankStardust, 75);
+      assert.equal(dbg.getSaveData().consumableSpentStardust, 25);
 
       // Pause modal blocks tool & tray discard mutations
       dbg.startLevel('1-1', { skipTutorial: true, rng: mulberry32(705) });
       assert.equal(dbg.tapBoardCell(0, 0).placed, true);
       dbg.openModal('pause');
-      assert.equal(dbg.useToolOnCell('fork', 0, 1).applied, false);
+      assert.equal(dbg.useToolOnCell('fork', 0, 1, 'trash').applied, false);
       assert.equal(dbg.doubleTapTray(0).discarded, false);
       assert.ok(dbg.getState().tray[0] !== null);
       dbg.closeModal();
@@ -3029,23 +3428,55 @@ async function runSectionE() {
       }
       assert.notEqual(JSON.stringify(dbg.getState().grid.cells), gridSnapBefore, 'Established axis after diagonal delay must slide');
 
-      // 7) W2-F09: Shop red-dot parity & leaderboard_auth_btn synthetic clickHit fallback
+      // 7) W2-F09 + v0.9.0 unlockLevel gating: Shop red-dot parity & leaderboard_auth_btn synthetic clickHit fallback
       dbg.closeModal();
-      // Return to lobby and check C3 affordability red-dot parity even when 1-4 is locked
       dbg.openModal('pause');
       dbg.clickHit('pause_lobby_btn');
+      // C3 (unlockLevel: '1-1', cost: 40) is unlocked on fresh save -> red dot shown & purchasable
       dbg.setSaveData({
         ...SaveSync.createDefaultSave(),
         levelStars: {},
         catcakeLevels: { 1: 4, 2: 4, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 },
-        bankStardust: 35
+        bankStardust: 40
       });
-      // Red dot fill '#E6483B' is drawn on dock_shop when hasAffordableShopItem() is true
       spy.styles.length = 0;
       dbg.advanceTime(0.01);
-      assert.ok(spy.styles.includes('#E6483B'), 'Expected dock_shop red dot when C3 (35 stardust) is purchasable');
+      assert.ok(spy.styles.includes('#E6483B'), 'Expected dock_shop red dot when C3 (40 stardust, 1-1 unlocked) is purchasable');
       dbg.openModal('shop');
       assert.equal(dbg.clickHit('shop_buy_catcake_3'), true);
+      assert.equal(dbg.getSaveData().catcakeLevels['3'], 1);
+      dbg.closeModal();
+
+      // C4 (unlockLevel: '1-3', cost: 49 -> 50) MUST NOT show red dot or allow purchase when 1-3 is still locked (bank 49 < dev_tools 50)
+      dbg.setSaveData({
+        ...SaveSync.createDefaultSave(),
+        levelStars: {},
+        catcakeLevels: { 1: 4, 2: 4, 3: 4, 4: 0, 5: 0, 6: 0, 7: 0 },
+        deviceUpgrades: { dev_tray: 2, dev_flour: 3, dev_teapot: 3, dev_tools: 3 },
+        unlockedPatrons: ['mikan', 'luna', 'mugi'],
+        unlockedThemes: ['amber', 'sakura', 'moonlight'],
+        bankStardust: 50
+      });
+      spy.styles.length = 0;
+      dbg.advanceTime(0.01);
+      assert.equal(spy.styles.includes('#E6483B'), false, 'Locked C4 (requires 1-3) must NOT trigger false dock_shop red dot');
+      dbg.openModal('shop');
+      dbg.clickHit('shop_buy_catcake_4');
+      assert.equal(dbg.getSaveData().catcakeLevels['4'], 0, 'Locked C4 must block purchase');
+      dbg.closeModal();
+
+      // Once 1-1 & 1-2 are cleared (1-3 unlocked), C4 lights red dot and can be upgraded
+      dbg.setSaveData({
+        ...dbg.getSaveData(),
+        levelStars: { '1-1': 1, '1-2': 1 },
+        bankStardust: 50
+      });
+      spy.styles.length = 0;
+      dbg.advanceTime(0.01);
+      assert.ok(spy.styles.includes('#E6483B'), 'Unlocked C4 (1-3 unlocked, 50 stardust) must show dock_shop red dot');
+      dbg.openModal('shop');
+      assert.equal(dbg.clickHit('shop_buy_catcake_4'), true);
+      assert.equal(dbg.getSaveData().catcakeLevels['4'], 1);
       dbg.closeModal();
 
       dbg.openModal('leaderboard');
@@ -3086,13 +3517,13 @@ async function runSectionE() {
         });
         bDbg.openModal('shop');
         bDbg.clickHit('shop_tab_catcakes');
-        assert.equal(bDbg.clickHit('shop_buy_catcake_1'), true); // -20
+        assert.equal(bDbg.clickHit('shop_buy_catcake_1'), true); // -25
         bDbg.clickHit('shop_tab_devices');
-        assert.equal(bDbg.clickHit('shop_buy_dev_tray'), true); // -60
+        assert.equal(bDbg.clickHit('shop_buy_dev_tray'), true); // -75
         bDbg.closeModal();
         await new Promise((r) => setTimeout(r, 60)); // let flushCloudPush persist to __hoshi_browser_cloud_doc_v1__
 
-        // Now inject v1Fixture via setSaveData, buy catcake_2 (-25 -> 205), wait > debounce, and verify ZERO contamination
+        // Now inject v1Fixture via setSaveData, buy catcake_2 (-30 -> 200), wait > debounce, and verify ZERO contamination
         bDbg.setSaveData({
           bankStardust: 50,
           unlockedPatrons: ['mikan', 'luna'],
@@ -3106,33 +3537,33 @@ async function runSectionE() {
         assert.equal(bDbg.getSaveData().deviceUpgrades.dev_tray, 0);
         bDbg.openModal('shop');
         bDbg.clickHit('shop_tab_catcakes');
-        assert.equal(bDbg.clickHit('shop_buy_catcake_2'), true); // -25 -> 205
+        assert.equal(bDbg.clickHit('shop_buy_catcake_2'), true); // -30 -> 200
         bDbg.closeModal();
         await new Promise((r) => setTimeout(r, 60));
-        assert.equal(bDbg.getSaveData().bankStardust, 205);
+        assert.equal(bDbg.getSaveData().bankStardust, 200);
         assert.equal(bDbg.getSaveData().deviceUpgrades.dev_tray, 0);
         assert.equal(bDbg.getSaveData().catcakeLevels['1'], 0);
 
-        // High-stardust setup (5250) + purchase (-20 -> 5230) must NOT be clamped by stale cloud baseline
+        // High-stardust setup (5680) + purchase (-25 -> 5655) must NOT be clamped by stale cloud baseline
         bDbg.setSaveData({
           schemaVersion: 2,
-          totalEarnedStardust: 5250,
-          lastSyncedEarnedStardust: 5250,
-          bankStardust: 5250
+          totalEarnedStardust: 5680,
+          lastSyncedEarnedStardust: 5680,
+          bankStardust: 5680
         });
         bDbg.openModal('shop');
         bDbg.clickHit('shop_tab_catcakes');
         assert.equal(bDbg.clickHit('shop_buy_catcake_1'), true);
         bDbg.closeModal();
         await new Promise((r) => setTimeout(r, 60));
-        assert.equal(bDbg.getSaveData().bankStardust, 5230);
+        assert.equal(bDbg.getSaveData().bankStardust, 5655);
 
         // Reset via setSaveData({}) + simulated Page.reload() must NOT resurrect prior cloud state
         bDbg.setSaveData({});
-        assert.equal(bDbg.getSaveData().bankStardust, 30);
+        assert.equal(bDbg.getSaveData().bankStardust, 15);
         const reloadedDbg = createBrowserApp();
         await new Promise((r) => setTimeout(r, 40));
-        assert.equal(reloadedDbg.getSaveData().bankStardust, 30);
+        assert.equal(reloadedDbg.getSaveData().bankStardust, 15);
         assert.equal(reloadedDbg.getSaveData().deviceUpgrades.dev_tray, 0);
         reloadedDbg.setSaveData({}); // cancel any timers cleanly
       } finally {
@@ -3153,7 +3584,7 @@ async function runSectionE() {
 // ============================================================================
 
 async function main() {
-  console.log('=== 一起做猫饼 v2.0 Core L1 + L2 + M4 Verification Suite ===');
+  console.log('=== 一起做猫饼 v0.9.0 Core L1 + L2 + M4 Verification Suite ===');
   await runSectionA();
   await runSectionB();
   await runSectionC();

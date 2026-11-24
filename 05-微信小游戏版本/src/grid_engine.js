@@ -1829,11 +1829,307 @@ function applyMugiBoardBlast(state, rng) {
   return { shatteredCells, upgradedCells };
 }
 
+/**
+ * Tactical Relocate Fork action (v0.9.0):
+ * 1) shatter_ice: single-cell frozen tile -> shatters ice shell & dyes cell flavor
+ * 2) trash: opts.discardToTrash === true -> destroys non-frozen tile directly (bypasses tray trash cooldown)
+ * 3) move: non-frozen tile -> empty playable cell across walls/voids + cell dye
+ * 4) merge: two non-frozen same-tier (< C7) tiles -> merges at (toR, toC) + orthogonal ice shatter + >=C5 charge
+ * 5) swap: two non-frozen diff-tier (or dual C7) tiles -> swaps positions + bidirectional cell dye
+ * Strictly 0 score change and 0 automatic random tile spawns.
+ */
+function applyForkAction(state, fromR, fromC, toR, toC, opts) {
+  let hasDest = toR !== undefined && toR !== null;
+  let optsObj = isPlainObj(opts) ? opts : null;
+  if (isPlainObj(toR) && toC === undefined && opts === undefined) {
+    optsObj = toR;
+    hasDest = false;
+  }
+
+  const snap = snapshotGrid(state, true);
+  if (!snap || snap.rows === 0 || snap.cols === 0) {
+    return { applied: false, ok: false, mode: null, reason: 'invalid_state' };
+  }
+
+  const r1 = toSafeInt(fromR);
+  const c1 = toSafeInt(fromC);
+  if (!isInBounds(snap.rows, snap.cols, r1, c1)) {
+    return { applied: false, ok: false, mode: null, reason: 'out_of_bounds' };
+  }
+
+  const srcEntry = snap.grid[r1][c1];
+  if (!srcEntry.playable) {
+    return { applied: false, ok: false, mode: null, reason: 'unplayable_cell' };
+  }
+
+  const srcTs = srcEntry.curTileSnap;
+  if (!srcTs) {
+    return { applied: false, ok: false, mode: null, reason: 'empty_cell' };
+  }
+
+  const discardToTrash = Boolean(optsObj && getOwn(optsObj, 'discardToTrash', false));
+
+  // Mode 2: Direct emergency discard to trash basket
+  if (discardToTrash) {
+    if (srcTs.frozenHp > 0) {
+      return { applied: false, ok: false, mode: null, reason: 'tile_frozen' };
+    }
+    if (!verifiedSetProp(srcEntry.cell, 'tile', null)) {
+      rollbackGridSnapshot(snap);
+      return { applied: false, ok: false, mode: null, reason: 'invalid_state' };
+    }
+    return {
+      applied: true,
+      ok: true,
+      mode: 'trash',
+      removed: true,
+      shatteredIce: false,
+      brokenIceCells: [],
+      skillChargeGain: 0,
+      tile: srcTs.tile,
+      fromR: r1,
+      fromC: c1
+    };
+  }
+
+  // Mode 1: Single-tap ice shatter when no destination is provided
+  if (!hasDest) {
+    if (srcTs.frozenHp > 0) {
+      const tile = srcTs.tile;
+      const dyedFlavor = computeCellDyeFlavor(srcTs.flavor, srcEntry.cellType, 0);
+      if (!verifiedSetProp(tile, 'frozenHp', 0) || !verifiedSetProp(tile, 'flavor', dyedFlavor)) {
+        rollbackGridSnapshot(snap);
+        return { applied: false, ok: false, mode: null, reason: 'invalid_state' };
+      }
+      if (srcTs.origProps && srcTs.origProps.frozen.exists) {
+        if (!verifiedSetProp(tile, 'frozen', false)) {
+          rollbackGridSnapshot(snap);
+          return { applied: false, ok: false, mode: null, reason: 'invalid_state' };
+        }
+      }
+      setOptionalTileProp(tile, 'fromR', r1);
+      setOptionalTileProp(tile, 'fromC', c1);
+      setOptionalTileProp(tile, 'justMerged', false);
+      setOptionalTileProp(tile, 'justSpawned', false);
+      const brokenIceCells = [];
+      safePush(brokenIceCells, { r: r1, c: c1, tile });
+      return {
+        applied: true,
+        ok: true,
+        mode: 'shatter_ice',
+        shatteredIce: true,
+        removed: false,
+        brokenIceCells,
+        skillChargeGain: 0,
+        tile,
+        flavor: dyedFlavor,
+        fromR: r1,
+        fromC: c1
+      };
+    }
+    return { applied: false, ok: false, mode: null, reason: 'missing_target' };
+  }
+
+  // Modes 3, 4, 5 require a non-frozen source tile and a valid playable non-frozen destination
+  if (srcTs.frozenHp > 0) {
+    return { applied: false, ok: false, mode: null, reason: 'tile_frozen' };
+  }
+
+  const r2 = toSafeInt(toR);
+  const c2 = toSafeInt(toC);
+  if (!isInBounds(snap.rows, snap.cols, r2, c2)) {
+    return { applied: false, ok: false, mode: null, reason: 'out_of_bounds' };
+  }
+  if (r1 === r2 && c1 === c2) {
+    return { applied: false, ok: false, mode: null, reason: 'same_cell' };
+  }
+
+  const dstEntry = snap.grid[r2][c2];
+  if (!dstEntry.playable) {
+    return { applied: false, ok: false, mode: null, reason: 'unplayable_cell' };
+  }
+
+  const dstTs = dstEntry.curTileSnap;
+  if (dstTs && dstTs.frozenHp > 0) {
+    return { applied: false, ok: false, mode: null, reason: 'target_frozen' };
+  }
+
+  // Reset transient animation markers on untouched tiles so only fork participants animate
+  for (let r = 0; r < snap.rows; r++) {
+    const snapRow = snap.grid[r];
+    for (let c = 0; c < snap.cols; c++) {
+      if ((r === r1 && c === c1) || (r === r2 && c === c2)) continue;
+      const otherTs = snapRow[c].curTileSnap;
+      if (otherTs) {
+        setOptionalTileProp(otherTs.tile, 'fromR', r);
+        setOptionalTileProp(otherTs.tile, 'fromC', c);
+        setOptionalTileProp(otherTs.tile, 'justMerged', false);
+        setOptionalTileProp(otherTs.tile, 'justSpawned', false);
+      }
+    }
+  }
+
+  // Mode 3: Cross-obstacle move into empty playable cell + destination cell dye
+  if (!dstTs) {
+    const srcTile = srcTs.tile;
+    const dyedFlavor = computeCellDyeFlavor(srcTs.flavor, dstEntry.cellType, 0);
+    if (
+      !verifiedSetProp(srcEntry.cell, 'tile', null) ||
+      !verifiedSetProp(srcTile, 'tier', srcTs.tier) ||
+      !verifiedSetProp(srcTile, 'frozenHp', 0) ||
+      !verifiedSetProp(srcTile, 'flavor', dyedFlavor) ||
+      !verifiedSetProp(dstEntry.cell, 'tile', srcTile)
+    ) {
+      rollbackGridSnapshot(snap);
+      return { applied: false, ok: false, mode: null, reason: 'invalid_state' };
+    }
+    setOptionalTileProp(srcTile, 'fromR', r1);
+    setOptionalTileProp(srcTile, 'fromC', c1);
+    setOptionalTileProp(srcTile, 'justMerged', false);
+    setOptionalTileProp(srcTile, 'justSpawned', false);
+
+    return {
+      applied: true,
+      ok: true,
+      mode: 'move',
+      removed: false,
+      shatteredIce: false,
+      brokenIceCells: [],
+      skillChargeGain: 0,
+      tile: srcTile,
+      flavor: dyedFlavor,
+      fromR: r1,
+      fromC: c1,
+      toR: r2,
+      toC: c2
+    };
+  }
+
+  if (srcTs.tile === dstTs.tile) {
+    rollbackGridSnapshot(snap);
+    return { applied: false, ok: false, mode: null, reason: 'invalid_state' };
+  }
+
+  // Mode 4: Cross-cell merge for same-tier (< C7) tiles + orthogonal 4-neighbor ice shatter
+  if (srcTs.tier === dstTs.tier && srcTs.tier < MAX_TIER) {
+    const newTier = dstTs.tier + 1;
+    const newFlavor = resolveMergedFlavorFromStrings(
+      srcTs.flavor,
+      dstTs.flavor,
+      dstEntry.cellType
+    );
+    const newUid = allocSnapUid(snap);
+    const newTile = {
+      uid: newUid,
+      tier: newTier,
+      flavor: newFlavor,
+      frozenHp: 0,
+      fromR: r1,
+      fromC: c1,
+      justMerged: true,
+      justSpawned: false
+    };
+
+    if (
+      !verifiedSetProp(srcEntry.cell, 'tile', null) ||
+      !verifiedSetProp(dstEntry.cell, 'tile', newTile)
+    ) {
+      rollbackGridSnapshot(snap);
+      return { applied: false, ok: false, mode: null, reason: 'invalid_state' };
+    }
+
+    srcEntry.curTile = null;
+    srcEntry.curTileSnap = null;
+    dstEntry.curTile = newTile;
+    dstEntry.curTileSnap = {
+      tile: newTile,
+      uid: newUid,
+      tier: newTier,
+      flavor: newFlavor,
+      frozenHp: 0,
+      origProps: null
+    };
+
+    const brokenIceCells = [];
+    if (!shatterAdjacentIceOnSnap(snap, r2, c2, brokenIceCells) || !commitSnapNextUid(snap)) {
+      rollbackGridSnapshot(snap);
+      return { applied: false, ok: false, mode: null, reason: 'invalid_state' };
+    }
+
+    const skillChargeGain = newTier >= HIGH_MERGE_MIN_TIER ? HIGH_MERGE_SKILL_CHARGE : 0;
+    return {
+      applied: true,
+      ok: true,
+      mode: 'merge',
+      newTier,
+      flavor: newFlavor,
+      tile: newTile,
+      brokenIceCells,
+      shatteredIce: brokenIceCells.length > 0,
+      removed: false,
+      skillChargeGain,
+      fromR: r1,
+      fromC: c1,
+      toR: r2,
+      toC: c2
+    };
+  }
+
+  // Mode 5: Swap positions for different-tier (or dual max-tier C7) tiles + bidirectional cell dye
+  const srcTile = srcTs.tile;
+  const dstTile = dstTs.tile;
+  const srcLandedFlavor = computeCellDyeFlavor(srcTs.flavor, dstEntry.cellType, 0);
+  const dstLandedFlavor = computeCellDyeFlavor(dstTs.flavor, srcEntry.cellType, 0);
+
+  if (
+    !verifiedSetProp(srcTile, 'tier', srcTs.tier) ||
+    !verifiedSetProp(srcTile, 'frozenHp', 0) ||
+    !verifiedSetProp(srcTile, 'flavor', srcLandedFlavor) ||
+    !verifiedSetProp(dstTile, 'tier', dstTs.tier) ||
+    !verifiedSetProp(dstTile, 'frozenHp', 0) ||
+    !verifiedSetProp(dstTile, 'flavor', dstLandedFlavor) ||
+    !verifiedSetProp(srcEntry.cell, 'tile', dstTile) ||
+    !verifiedSetProp(dstEntry.cell, 'tile', srcTile)
+  ) {
+    rollbackGridSnapshot(snap);
+    return { applied: false, ok: false, mode: null, reason: 'invalid_state' };
+  }
+
+  setOptionalTileProp(srcTile, 'fromR', r1);
+  setOptionalTileProp(srcTile, 'fromC', c1);
+  setOptionalTileProp(srcTile, 'justMerged', false);
+  setOptionalTileProp(srcTile, 'justSpawned', false);
+
+  setOptionalTileProp(dstTile, 'fromR', r2);
+  setOptionalTileProp(dstTile, 'fromC', c2);
+  setOptionalTileProp(dstTile, 'justMerged', false);
+  setOptionalTileProp(dstTile, 'justSpawned', false);
+
+  return {
+    applied: true,
+    ok: true,
+    mode: 'swap',
+    tile: srcTile,
+    swappedTile: dstTile,
+    flavor: srcLandedFlavor,
+    swappedFlavor: dstLandedFlavor,
+    brokenIceCells: [],
+    shatteredIce: false,
+    removed: false,
+    skillChargeGain: 0,
+    fromR: r1,
+    fromC: c1,
+    toR: r2,
+    toC: c2
+  };
+}
+
 module.exports = {
   createGridState,
   slideGrid,
   kneadSpawn,
   removeTileAt,
+  applyForkAction,
   upgradeTileAt,
   shatterAdjacentIce,
   resolveMergedFlavor,

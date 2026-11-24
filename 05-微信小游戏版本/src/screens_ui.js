@@ -21,6 +21,7 @@ const {
 } = require('./constants');
 const {
   CHAPTERS,
+  MAX_CAMPAIGN_STARS,
   getLevelById,
   computeTotalStars,
   isChapterUnlocked,
@@ -414,7 +415,19 @@ function drawTitlePlaqueBanner(ctx, x, y, w, h, sprites, subtitle, totalStars) {
     );
   } else if (typeof totalStars === 'number') {
     UI.drawStarIcon(c, cx - 24, y + h * 0.70, 5.5, true);
-    UI.drawFitText(c, `${totalStars}/90`, cx + 6, y + h * 0.70, 60, 10, 8, 800, '#8A5222', 'center', 'middle');
+    UI.drawFitText(
+      c,
+      `${totalStars}/${MAX_CAMPAIGN_STARS}`,
+      cx + 6,
+      y + h * 0.70,
+      60,
+      10,
+      8,
+      800,
+      '#8A5222',
+      'center',
+      'middle'
+    );
   }
 }
 
@@ -502,7 +515,7 @@ function renderLobbyTopBar(ctx, geom, app, hits) {
       const txtRight = starChipW >= 88 ? starChipW - 24 : starChipW - 6;
       UI.drawFitText(
         c,
-        `${totalStars}/90`,
+        `${totalStars}/${MAX_CAMPAIGN_STARS}`,
         starChipX + 23,
         chipY + chipH * 0.5 + 0.5,
         Math.max(24, txtRight - 23),
@@ -521,9 +534,11 @@ function renderChapterBar(ctx, rect, app, hits) {
   const c = getSafeCtx(ctx);
   const { x, y, w, h } = rect;
   const saveData = app.saveData || {};
-  const chapNum = clamp(Math.round(Number(app.selectedChapter) || 1), 1, 3);
+  const maxChapter = Math.max(1, CHAPTERS.length);
+  const chapNum = clamp(Math.round(Number(app.selectedChapter) || 1), 1, maxChapter);
   const chap = CHAPTERS[chapNum - 1] || CHAPTERS[0];
   const chapStatus = isChapterUnlocked(chapNum, saveData.levelStars);
+  const maxChapStars = chap.levelIds.length * 3;
 
   let chapStars = 0;
   for (let i = 0; i < chap.levelIds.length; i++) {
@@ -553,17 +568,16 @@ function renderChapterBar(ctx, rect, app, hits) {
   hits.add('chapter_prev', prevX, btnY, btnW, btnH, () => app.switchChapter(-1));
 
   UI.drawPillButton(c, nextX, btnY, btnW, btnH, {
-    style: chapNum < 3 ? 'wood' : 'card',
-    disabled: chapNum >= 3,
+    style: chapNum < maxChapter ? 'wood' : 'card',
+    disabled: chapNum >= maxChapter,
     radius: 8,
     text: ''
   });
-  drawChevronIcon(c, nextX + btnW * 0.5, btnY + btnH * 0.5, 12, 'right', chapNum < 3 ? '#4A2C2A' : '#A48D76');
+  drawChevronIcon(c, nextX + btnW * 0.5, btnY + btnH * 0.5, 12, 'right', chapNum < maxChapter ? '#4A2C2A' : '#A48D76');
   hits.add('chapter_next', nextX, btnY, btnW, btnH, () => app.switchChapter(1));
 
   const centerLeft = prevX + btnW + 6;
   const centerW = Math.max(80, nextX - 6 - centerLeft);
-  const centerX = centerLeft + centerW * 0.5;
 
   if (chapStatus.unlocked) {
     const titleStr = `第${chap.chapter}章 · ${chap.name}`;
@@ -585,7 +599,7 @@ function renderChapterBar(ctx, rect, app, hits) {
     UI.drawStarIcon(c, badgeX + 9, y + h * 0.5, 6.2, true);
     UI.drawFitText(
       c,
-      `${chapStars}/30`,
+      `${chapStars}/${maxChapStars}`,
       badgeX + 19,
       y + h * 0.5 + 0.5,
       badgeW - 21,
@@ -619,7 +633,8 @@ function renderCampaignMap(ctx, rect, app, hits, nowSec, includeHeroWatermark) {
   const { x, y, w, h } = rect;
   const saveData = app.saveData || {};
   const sprites = app.sprites || {};
-  const chapNum = clamp(Math.round(Number(app.selectedChapter) || 1), 1, 3);
+  const maxChapter = Math.max(1, CHAPTERS.length);
+  const chapNum = clamp(Math.round(Number(app.selectedChapter) || 1), 1, maxChapter);
   const chap = CHAPTERS[chapNum - 1] || CHAPTERS[0];
   const chapTheme = BOARD_THEMES[chap.themeHint] || BOARD_THEMES.amber;
 
@@ -968,7 +983,7 @@ function renderLobbyScreen(ctx, metrics, app, hits, nowSec) {
   const rankTitle = getChefRank(saveData);
   const ctaLevelId = saveData.highestUnlockedLevel || '1-1';
   const ctaLevel = getLevelById(ctaLevelId) || getLevelById('1-1');
-  const ctaStar1 = ctaLevel && ctaLevel.stars ? ctaLevel.stars[0] : 750;
+  const ctaStar1 = ctaLevel && ctaLevel.stars ? ctaLevel.stars[0] : 850;
 
   app.currentBoardLayout = null;
   app.guideTargets = null;
@@ -991,7 +1006,7 @@ function renderLobbyScreen(ctx, metrics, app, hits, nowSec) {
     innerW,
     plaqueH,
     sprites,
-    `${rankTitle} · 总星 ${totalStars}/90`,
+    `${rankTitle} · 总星 ${totalStars}/${MAX_CAMPAIGN_STARS}`,
     totalStars
   );
 
@@ -1031,7 +1046,7 @@ function renderPlayTopBar(ctx, geom, app, hits, nowSec) {
   const sprites = app.sprites || {};
   const orderState = app.orderState || {};
   const lvl = getLevelById(app.currentLevelId || orderState.levelId || '1-1') || getLevelById('1-1');
-  const stars = lvl && Array.isArray(lvl.stars) ? lvl.stars : [750, 1050, 1400];
+  const stars = lvl && Array.isArray(lvl.stars) ? lvl.stars : [850, 1250, 1750];
   const score = Math.max(0, Math.floor(Number(orderState.score) || 0));
   const timeLeft = Math.max(0, Number(orderState.timeLeft) || 0);
 
@@ -1312,6 +1327,7 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
       animState,
       guideTargets,
       boardFullHint: app.boardFullHintTimer > 0,
+      forkTrashReady: Boolean(app.activeTool === 'fork' && app.forkSourceCell),
       onTapTraySlot: (idx) => app.handleTraySlotTap(idx),
       onTapTrash: () => app.handleTrashBtnTap()
     }
@@ -1362,6 +1378,7 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
     nowSec,
     {
       activeTool: app.activeTool,
+      forkSourceCell: app.forkSourceCell,
       guideTargets,
       neededTiers: app.neededTiers
     }

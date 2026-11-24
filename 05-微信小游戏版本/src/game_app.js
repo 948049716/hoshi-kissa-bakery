@@ -12,7 +12,11 @@
 
 const {
   GAME_TITLE,
+  GAME_VERSION,
+  DEFAULT_INITIAL_STARDUST,
   CATCAKES,
+  FEVER_CONFIG,
+  TRASH_CONFIG,
   SHOP_DEVICES,
   PATRONS,
   PATRON_COSTS,
@@ -24,6 +28,7 @@ const {
   normalizePatronId
 } = require('./constants');
 const {
+  CHAPTERS,
   LEVEL_MAP,
   getLevelById,
   getNextLevelId,
@@ -273,7 +278,11 @@ function createApp() {
 
   // Cloud state
   const cloudState = {
-    status: CloudConfig.ENABLE_CLOUD_SYNC ? 'idle' : 'local_only',
+    status: saveData.higherSchemaDetected
+      ? 'higher_schema_blocked'
+      : CloudConfig.ENABLE_CLOUD_SYNC
+      ? 'idle'
+      : 'local_only',
     revision: 0,
     openidSuffix: 'LOCAL',
     dirty: false,
@@ -297,6 +306,8 @@ function createApp() {
   let unlockedStarsMask = 0;
   let lastTrayTapSlot = -1;
   let lastTrayTapTimeMs = -99999;
+  let runForkUses = 0;
+  let runSpoonUses = 0;
 
   // Game & UI state container passed to ScreensUI and ModalsUI
   const app = {
@@ -335,6 +346,7 @@ function createApp() {
 
     skillEnergy: 0,
     activeTool: null,
+    forkSourceCell: null,
     toolCounts: { fork: 1, spoon: 0 },
     toolBoughtThisLevel: { fork: 0, spoon: 0 },
     kneadPressTimer: 0,
@@ -383,7 +395,7 @@ function createApp() {
   }
 
   function syncAudioMood() {
-    const shouldMuffle = app.screen !== 'playing' || app.activeModal !== null;
+    const shouldMuffle = app.activeModal !== null || app.screen === 'result';
     audio.setMuffled(shouldMuffle);
     const inFever = Boolean(app.screen === 'playing' && app.activeModal === null && app.orderState && app.orderState.feverActive);
     audio.setFeverMode(inFever);
@@ -438,6 +450,17 @@ function createApp() {
 
   // ==================== Affordability Red-Dot Helpers ====================
 
+  function isCatcakeUnlockedInternal(cakeOrTier) {
+    const cake =
+      cakeOrTier && typeof cakeOrTier === 'object'
+        ? cakeOrTier
+        : CATCAKES.find((c) => c.tier === Number(cakeOrTier));
+    if (!cake || !cake.unlockLevel || cake.unlockLevel === '1-1') return true;
+    return isLevelUnlocked(cake.unlockLevel, saveData.levelStars).unlocked;
+  }
+
+  app.isCatcakeUnlocked = isCatcakeUnlockedInternal;
+
   app.hasAffordableShopTab = function hasAffordableShopTab(tabId) {
     const bank = Math.max(0, Math.floor(Number(saveData.bankStardust) || 0));
     if (bank <= 0) return false;
@@ -445,6 +468,7 @@ function createApp() {
     if (tabId === 'catcakes') {
       for (let i = 0; i < CATCAKES.length; i++) {
         const c = CATCAKES[i];
+        if (!isCatcakeUnlockedInternal(c)) continue;
         const rawLv =
           saveData.catcakeLevels && hasOwn(saveData.catcakeLevels, String(c.tier))
             ? saveData.catcakeLevels[c.tier]
@@ -502,6 +526,24 @@ function createApp() {
 
   // ==================== Cloud Sync & Dual Leaderboard ====================
 
+  function markHigherSchemaBlocked(showNotice = true) {
+    saveData.higherSchemaDetected = true;
+    cloudState.status = 'higher_schema_blocked';
+    cloudState.dirty = false;
+    if (cloudPushTimer) {
+      clearTimeout(cloudPushTimer);
+      cloudPushTimer = null;
+    }
+    if (showNotice) {
+      showToast('检测到更高版本云存档，请重启更新小游戏版本', {
+        icon: 'icon_warn',
+        tone: 'warn',
+        level: 'major',
+        duration: 3.2
+      });
+    }
+  }
+
   function refreshOfflineLeaderboardFallback() {
     app.leaderboardData = platform.buildOfflineLeaderboard(
       app.leaderboardBoardType,
@@ -556,14 +598,35 @@ function createApp() {
       });
   }
 
+  function scheduleCloudRetry(expectedEpoch) {
+    if (destroyed || !CloudConfig.ENABLE_CLOUD_SYNC || saveData.higherSchemaDetected) return;
+    cloudState.retryCount = (cloudState.retryCount || 0) + 1;
+    if (cloudState.retryCount > 4) return;
+    if (cloudPushTimer) clearTimeout(cloudPushTimer);
+    const delayMs = Math.min(10000, 1200 * Math.pow(2, cloudState.retryCount - 1));
+    cloudPushTimer = setTimeout(() => {
+      cloudPushTimer = null;
+      if (destroyed || expectedEpoch !== saveEpoch) return;
+      if (cloudState.status === 'retry_pending' || cloudState.dirty) {
+        flushCloudPush(null);
+      }
+    }, delayMs);
+  }
+
   function flushCloudPush(runReport = null) {
     if (destroyed || !CloudConfig.ENABLE_CLOUD_SYNC) return;
     if (cloudPushTimer) {
       clearTimeout(cloudPushTimer);
       cloudPushTimer = null;
     }
+    if (saveData.higherSchemaDetected) {
+      cloudState.status = 'higher_schema_blocked';
+      cloudState.dirty = false;
+      return;
+    }
 
     const reqEpoch = saveEpoch;
+    const pushedEarned = saveData.totalEarnedStardust || DEFAULT_INITIAL_STARDUST;
     cloudState.status = 'syncing';
     cloudState.dirty = false;
 
@@ -581,6 +644,10 @@ function createApp() {
       .callCloudFunction(CloudConfig.CLOUD_FUNCTION_NAME, payload)
       .then((res) => {
         if (destroyed || reqEpoch !== saveEpoch) return;
+        if (res && res.higherSchemaDetected) {
+          markHigherSchemaBlocked(true);
+          return;
+        }
         if (res && res.ok) {
           cloudState.status = 'synced';
           cloudState.retryCount = 0;
@@ -591,7 +658,14 @@ function createApp() {
             cloudState.openidSuffix = res.openidSuffix;
           }
           if (res.metaSave && typeof res.metaSave === 'object') {
-            const merged = SaveSync.mergeSaveData(saveData, res.metaSave, res.profile);
+            const localPostPush = {
+              ...saveData,
+              lastSyncedEarnedStardust: Math.max(
+                saveData.lastSyncedEarnedStardust || 0,
+                Math.min(saveData.totalEarnedStardust || DEFAULT_INITIAL_STARDUST, pushedEarned)
+              )
+            };
+            const merged = SaveSync.mergeSaveData(localPostPush, res.metaSave, res.profile);
             merged.lastSyncedEarnedStardust = merged.totalEarnedStardust;
             SaveSync.saveLocalSave(platform, merged);
             Object.assign(saveData, merged);
@@ -606,17 +680,26 @@ function createApp() {
         } else {
           cloudState.status = res && res.reason === 'cloud_unavailable' ? 'local_only' : 'retry_pending';
           cloudState.dirty = true;
+          if (cloudState.status === 'retry_pending') {
+            scheduleCloudRetry(reqEpoch);
+          }
         }
       })
       .catch(() => {
         if (destroyed || reqEpoch !== saveEpoch) return;
         cloudState.status = 'retry_pending';
         cloudState.dirty = true;
+        scheduleCloudRetry(reqEpoch);
       });
   }
 
   function scheduleCloudPush(runReport = null) {
     if (destroyed || !CloudConfig.ENABLE_CLOUD_SYNC) return;
+    if (saveData.higherSchemaDetected) {
+      cloudState.status = 'higher_schema_blocked';
+      cloudState.dirty = false;
+      return;
+    }
     cloudState.dirty = true;
     if (runReport) {
       flushCloudPush(runReport);
@@ -640,6 +723,12 @@ function createApp() {
       platform.initCloud(CloudConfig.CLOUD_ENV_ID || '');
     } catch (_) {}
 
+    if (saveData.higherSchemaDetected) {
+      markHigherSchemaBlocked(false);
+      refreshOfflineLeaderboardFallback();
+      return;
+    }
+
     const reqEpoch = saveEpoch;
     cloudState.status = 'syncing';
     platform
@@ -651,14 +740,32 @@ function createApp() {
           refreshOfflineLeaderboardFallback();
           return;
         }
-        cloudState.status = 'synced';
         cloudState.revision = typeof res.revision === 'number' ? res.revision : 1;
         if (res.openidSuffix) cloudState.openidSuffix = res.openidSuffix;
 
+        const cloudHasHigherSchema = Boolean(
+          res.higherSchemaDetected ||
+            (res.metaSave &&
+              typeof res.metaSave === 'object' &&
+              Number(res.metaSave.schemaVersion) > SaveSync.SCHEMA_VERSION)
+        );
+        if (cloudHasHigherSchema) {
+          if (res.metaSave && typeof res.metaSave === 'object') {
+            const mergedReadOnly = SaveSync.mergeSaveData(saveData, res.metaSave, res.profile);
+            mergedReadOnly.higherSchemaDetected = true;
+            Object.assign(saveData, mergedReadOnly);
+            syncAudioPrefsFromSave();
+          }
+          markHigherSchemaBlocked(true);
+          refreshOfflineLeaderboardFallback();
+          return;
+        }
+
+        cloudState.status = 'synced';
         if (res.metaSave && typeof res.metaSave === 'object') {
           const localStarsBefore =
             (saveData.lifetimeStats && saveData.lifetimeStats.totalStars) || 0;
-          const localEarnedBefore = saveData.totalEarnedStardust || 30;
+          const localEarnedBefore = saveData.totalEarnedStardust || DEFAULT_INITIAL_STARDUST;
           const merged = SaveSync.mergeSaveData(saveData, res.metaSave, res.profile);
           merged.lastSyncedEarnedStardust = merged.totalEarnedStardust;
           SaveSync.saveLocalSave(platform, merged);
@@ -670,7 +777,8 @@ function createApp() {
           if (
             res.isNewUser ||
             localStarsBefore > (res.totalStars || 0) ||
-            localEarnedBefore > ((res.metaSave && res.metaSave.totalEarnedStardust) || 30)
+            localEarnedBefore >
+              ((res.metaSave && res.metaSave.totalEarnedStardust) || DEFAULT_INITIAL_STARDUST)
           ) {
             flushCloudPush(null);
           }
@@ -710,7 +818,8 @@ function createApp() {
   // ==================== Lobby, Chapter & Shop Actions ====================
 
   app.switchChapter = function switchChapter(delta) {
-    const next = clamp(app.selectedChapter + (delta > 0 ? 1 : -1), 1, 3);
+    const maxChapter = Math.max(1, CHAPTERS.length);
+    const next = clamp(app.selectedChapter + (delta > 0 ? 1 : -1), 1, maxChapter);
     if (next === app.selectedChapter) return false;
     app.selectedChapter = next;
     audio.playPatronSelect();
@@ -792,6 +901,8 @@ function createApp() {
     app.currentLevelId = null;
     app.gridState = null;
     app.orderState = null;
+    app.activeTool = null;
+    app.forkSourceCell = null;
     app.activeShopTab = 'catcakes';
     app.activeModal = 'shop';
     app.modalScrollY = 0;
@@ -811,6 +922,14 @@ function createApp() {
   app.buyCatcakeUpgrade = function buyCatcakeUpgrade(tier) {
     const cake = CATCAKES.find((c) => c.tier === Number(tier));
     if (!cake) return false;
+    if (!isCatcakeUnlockedInternal(cake)) {
+      audio.playGridBlocked();
+      showToast(`开启第 ${cake.unlockLevel} 关后即可研发 ${cake.name}`, {
+        icon: 'icon_warn',
+        tone: 'warn'
+      });
+      return false;
+    }
     const curLv = clamp(Math.floor(Number(saveData.catcakeLevels && saveData.catcakeLevels[cake.tier]) || 0), 0, 4);
     if (curLv >= 4) {
       showToast(`${cake.name} 已达满级 Lv.4`, { icon: cake.id });
@@ -1081,6 +1200,7 @@ function createApp() {
     app.gridState = null;
     app.orderState = null;
     app.activeTool = null;
+    app.forkSourceCell = null;
     app.activeTutorialStep = null;
     app.tutorialSkipRect = null;
     levelSkipTutorial = false;
@@ -1107,6 +1227,7 @@ function createApp() {
       app.closeModal();
     } else if (!app.activeModal) {
       app.activeTool = null;
+      app.forkSourceCell = null;
       app.openModal('pause');
     }
   };
@@ -1316,6 +1437,7 @@ function createApp() {
     const lvl = getLevelById(levelId);
     if (!lvl) return false;
 
+    lastFrameMs = rawNowMs();
     levelRng = opts && typeof opts.rng === 'function' ? opts.rng : Math.random;
     app.selectedChapter = lvl.chapter;
     app.previewLevelId = lvl.id;
@@ -1325,6 +1447,7 @@ function createApp() {
     app.confirmDialog = null;
     app.lastResult = null;
     app.activeTool = null;
+    app.forkSourceCell = null;
     app.animState = createEmptyAnimState();
 
     const devToolsLv = clamp(
@@ -1335,7 +1458,16 @@ function createApp() {
     const startTools = SHOP_DEVICES[3].startTools[devToolsLv] || { fork: 1, spoon: 0 };
     app.toolCounts = { fork: startTools.fork, spoon: startTools.spoon };
     app.toolBoughtThisLevel = { fork: 0, spoon: 0 };
-    app.skillEnergy = opts && opts.forceCharge ? 100 : 0;
+
+    const failStreak =
+      saveData &&
+      saveData.levelFailStreaks &&
+      hasOwn(saveData.levelFailStreaks, lvl.id)
+        ? Math.max(0, Math.floor(Number(saveData.levelFailStreaks[lvl.id]) || 0))
+        : 0;
+    const baseCharge = opts && opts.forceCharge ? 100 : 0;
+    const softPityActive = failStreak >= 2 && baseCharge < 40;
+    app.skillEnergy = softPityActive ? 40 : baseCharge;
     app.starPopTimers = [0, 0, 0];
     app.kneadPressTimer = 0;
     app.boardFullHintTimer = 0;
@@ -1346,15 +1478,30 @@ function createApp() {
     unlockedStarsMask = 0;
     lastTrayTapSlot = -1;
     lastTrayTapTimeMs = -99999;
+    runForkUses = 0;
+    runSpoonUses = 0;
 
     const patron = PATRONS.find((p) => p.id === normalizePatronId(saveData.selectedPatron)) || PATRONS[0];
-    app.playPatronSpeech = patron.greet;
+    app.playPatronSpeech = softPityActive
+      ? '别灰心喵！已为你预充 40% 招牌技星能，加油营业吧！'
+      : patron.greet;
 
+    const modeOverrides =
+      opts && opts.modeOverrides && typeof opts.modeOverrides === 'object'
+        ? opts.modeOverrides
+        : null;
     app.gridState = GridEngine.createGridState(lvl, lvl.presets);
-    app.orderState = OrderService.createOrderState(lvl, saveData, levelRng);
+    app.orderState = OrderService.createOrderState(lvl, saveData, levelRng, modeOverrides);
     refreshNeededAndOrderMarks();
     levelSkipTutorial = Boolean(opts && opts.skipTutorial);
     initTutorialForLevel(lvl.id, levelSkipTutorial);
+
+    if (softPityActive) {
+      showToast('暖心应援：本局初始招牌技充能 +40%', {
+        icon: patron.id,
+        tone: 'success'
+      });
+    }
 
     syncGameStateMirror();
     syncAudioMood();
@@ -1380,7 +1527,7 @@ function createApp() {
     }
     if (app.activeTool !== null) {
       audio.playGridBlocked();
-      showToast('请先点选目标格使用厨具，或再次点击厨具取消', { icon: app.activeTool === 'fork' ? 'tool_fork' : 'tool_spoon' });
+      showToast('请先完成厨具点选，或再次点击厨具按钮取消', { icon: app.activeTool === 'fork' ? 'tool_fork' : 'tool_spoon' });
       return {
         moved: false,
         mergeEvents: [],
@@ -1402,7 +1549,7 @@ function createApp() {
       audio.playGridBlocked();
       if (!GridEngine.canAnyMove(app.gridState)) {
         app.boardFullHintTimer = 2.0;
-        showToast('烤盘已满！单击猫饼装入托盘或使用清格叉腾空位', { icon: 'icon_warn', tone: 'warn' });
+        showToast('烤盘已满！单击猫饼装入托盘或使用移位叉调整盘格', { icon: 'icon_warn', tone: 'warn' });
       }
       return res;
     }
@@ -1604,7 +1751,17 @@ function createApp() {
     if (!trayRes.placed) {
       audio.playGridBlocked();
       app.animState.trashWobbleTimer = 0.65;
-      showToast('配餐托盘已满！快速双击托盘槽位可丢进厨余篮', { icon: 'btn_trash', tone: 'warn' });
+      if ((app.orderState.trashCooldown || 0) > 1e-6) {
+        showToast('配餐托盘已满且厨余篮冷却中，可用移位叉腾挪盘格！', {
+          icon: 'tool_fork',
+          tone: 'warn'
+        });
+      } else {
+        showToast('配餐托盘已满！快速双击托盘槽位可丢进厨余篮（冷却 8s）', {
+          icon: 'btn_trash',
+          tone: 'warn'
+        });
+      }
       maybeArmTrayTrashTutorial(true);
       return { placed: false, slotIdx: -1, tile: null, reason: trayRes.reason || 'tray_full' };
     }
@@ -1638,9 +1795,9 @@ function createApp() {
     };
   }
 
-  function executeDiscardTraySlot(slotIdx) {
+  function executeDiscardTraySlot(slotIdx, opts = undefined) {
     if (app.screen !== 'playing' || app.activeModal !== null || !app.orderState) {
-      return { discarded: false, tile: null };
+      return { discarded: false, tile: null, reason: 'not_playing' };
     }
     const fromPt = traySlotCenterPos(slotIdx);
     const gt = app.guideTargets;
@@ -1649,9 +1806,15 @@ function createApp() {
         ? { x: gt.trashBtn.x + gt.trashBtn.w * 0.5, y: gt.trashBtn.y + gt.trashBtn.h * 0.5 }
         : { x: metrics.width - 42, y: fromPt.y };
 
-    const res = OrderService.discardTraySlot(app.orderState, slotIdx);
+    const res = OrderService.discardTraySlot(app.orderState, slotIdx, opts);
     if (!res.discarded) {
-      return { discarded: false, tile: null };
+      if (res.reason === 'cooldown') {
+        audio.playGridBlocked();
+        app.animState.trashWobbleTimer = 0.45;
+        const secTxt = Math.max(0.1, Number(res.cooldownLeft) || 0).toFixed(1);
+        showToast(`厨余篮整理中（剩余 ${secTxt}s）`, { icon: 'btn_trash', tone: 'warn' });
+      }
+      return res;
     }
 
     if (res.tile) {
@@ -1670,6 +1833,9 @@ function createApp() {
     app.animState.trashPuffTimer = 0.18;
     app.animState.trayHintSlot = -1;
     app.animState.trayHintTimer = 0;
+    if ((res.prevCombo || 0) >= 2 && TRASH_CONFIG.resetCombo) {
+      app.animState.comboBreakTimer = 0.45;
+    }
 
     audio.playTrayTrash();
     if (app.activeTutorialStep === 'tray_trash') {
@@ -1697,13 +1863,35 @@ function createApp() {
     lastTrayTapTimeMs = nowMs;
     app.animState.trayHintSlot = slotIdx;
     app.animState.trayHintTimer = 0.28;
-    showToast('再次快速点击该槽位即可丢进厨余篮（0 扣分）', { icon: 'btn_trash' });
+    if ((app.orderState.trashCooldown || 0) > 1e-6) {
+      const leftTxt = Math.max(0.1, Number(app.orderState.trashCooldown) || 0).toFixed(1);
+      showToast(`厨余篮整理中（剩余 ${leftTxt}s），冷却完毕后可双击丢弃`, {
+        icon: 'btn_trash',
+        tone: 'warn'
+      });
+    } else {
+      showToast('再次快速点击该槽位即可丢进厨余篮（冷却 8s，断连击）', { icon: 'btn_trash' });
+    }
   };
 
   app.handleTrashBtnTap = function handleTrashBtnTap() {
     if (app.screen !== 'playing' || app.activeModal !== null) return;
+    if (app.activeTool === 'fork' && app.forkSourceCell) {
+      const src = app.forkSourceCell;
+      return applyToolInternal('fork', src.r, src.c, false, undefined, undefined, {
+        discardToTrash: true
+      });
+    }
     app.animState.trashWobbleTimer = 0.45;
-    showToast('快速双击托盘里的猫饼即可丢进厨余篮腾位（不扣分）', { icon: 'btn_trash' });
+    if (app.orderState && (app.orderState.trashCooldown || 0) > 1e-6) {
+      const secTxt = Math.max(0.1, Number(app.orderState.trashCooldown) || 0).toFixed(1);
+      showToast(`厨余篮整理中（剩余 ${secTxt}s），可用移位叉挑起盘格直接销毁`, {
+        icon: 'btn_trash',
+        tone: 'warn'
+      });
+      return;
+    }
+    showToast('快速双击托盘猫饼可丢进厨余篮（冷却 8s，断连击但 0 扣分）', { icon: 'btn_trash' });
   };
 
   app.selectCustomerSeat = function selectCustomerSeat(seatIdx) {
@@ -1767,12 +1955,57 @@ function createApp() {
     return { valid: true };
   }
 
+  function validateForkCommitTarget(fromR, fromC, toR, toC, discardToTrash) {
+    const srcCheck = validateToolTargetCell('fork', fromR, fromC);
+    if (!srcCheck.valid) return srcCheck;
+
+    const srcCell = app.gridState.cells[fromR][fromC];
+    const srcFrozen = (srcCell.tile.frozenHp || 0) > 0;
+
+    if (discardToTrash) {
+      if (srcFrozen) return { valid: false, reason: 'source_frozen' };
+      return { valid: true };
+    }
+
+    if (toR === undefined || toR === null) {
+      if (!srcFrozen) return { valid: false, reason: 'missing_destination' };
+      return { valid: true };
+    }
+
+    if (srcFrozen) {
+      return { valid: false, reason: 'source_frozen' };
+    }
+    if (
+      !Number.isInteger(toR) ||
+      !Number.isInteger(toC) ||
+      toR < 0 ||
+      toR >= app.gridState.rows ||
+      toC < 0 ||
+      toC >= app.gridState.cols
+    ) {
+      return { valid: false, reason: 'out_of_bounds' };
+    }
+    if (toR === fromR && toC === fromC) {
+      return { valid: false, reason: 'same_cell' };
+    }
+    const destRow = app.gridState.cells && app.gridState.cells[toR];
+    const destCell = destRow && destRow[toC];
+    if (!destCell || destCell.type === 'void' || destCell.type === 'block') {
+      return { valid: false, reason: 'unplayable_dest' };
+    }
+    if (destCell.tile && (destCell.tile.frozenHp || 0) > 0) {
+      return { valid: false, reason: 'dest_frozen' };
+    }
+    return { valid: true };
+  }
+
   app.onTapToolButton = function onTapToolButton(kind) {
     if (app.screen !== 'playing' || app.activeModal !== null) return false;
     if (kind !== 'fork' && kind !== 'spoon') return false;
 
     if (app.activeTool === kind) {
       app.activeTool = null;
+      app.forkSourceCell = null;
       audio.playPatronSelect();
       return true;
     }
@@ -1785,7 +2018,7 @@ function createApp() {
           buyRes.reason === 'limit_reached'
             ? '本关该厨具应急购买次数已用完（限1次）'
             : `星尘不足（需 ${TOOLS[kind].cost} 星尘）`,
-            { icon: TOOLS[kind].icon, tone: 'warn' }
+          { icon: TOOLS[kind].icon, tone: 'warn' }
         );
         return false;
       }
@@ -1796,11 +2029,249 @@ function createApp() {
     }
 
     app.activeTool = kind;
+    app.forkSourceCell = null;
     audio.playPatronSelect();
     return true;
   };
 
-  function applyToolInternal(kind, r, c, allowAutoPurchase = false) {
+  function commitForkExecution(fromR, fromC, toR, toC, discardToTrash, allowAutoPurchase) {
+    const check = validateForkCommitTarget(fromR, fromC, toR, toC, discardToTrash);
+    if (!check.valid) {
+      if (
+        !allowAutoPurchase &&
+        app.forkSourceCell !== null &&
+        toR !== undefined &&
+        toR !== null &&
+        !discardToTrash
+      ) {
+        audio.playGridBlocked();
+        app.animState.blockedShake = { dir: 'left', timer: 0.09, duration: 0.09 };
+        showToast('该位置不可落子，请点选空白格、非冰封猫饼或上方厨余篮', {
+          icon: 'tool_fork',
+          tone: 'warn'
+        });
+        return { ok: false, applied: false, kind: 'fork', reason: check.reason };
+      }
+      app.activeTool = null;
+      app.forkSourceCell = null;
+      audio.playGridBlocked();
+      showToast('移位叉操作无效，请点选有效猫饼与目标落点', {
+        icon: 'tool_fork',
+        tone: 'warn'
+      });
+      return {
+        ok: false,
+        applied: false,
+        kind: 'fork',
+        removed: false,
+        shatteredIce: false,
+        tile: null,
+        reason: check.reason
+      };
+    }
+
+    if ((app.toolCounts.fork || 0) <= 0) {
+      if (allowAutoPurchase) {
+        const buyRes = tryEmergencyPurchaseTool('fork');
+        if (!buyRes.ok) {
+          app.activeTool = null;
+          app.forkSourceCell = null;
+          return { ok: false, applied: false, kind: 'fork', reason: buyRes.reason };
+        }
+      } else {
+        app.activeTool = null;
+        app.forkSourceCell = null;
+        return { ok: false, applied: false, kind: 'fork', reason: 'no_charges' };
+      }
+    }
+
+    const srcTileBefore =
+      app.gridState.cells[fromR] &&
+      app.gridState.cells[fromR][fromC] &&
+      app.gridState.cells[fromR][fromC].tile
+        ? {
+            tier: app.gridState.cells[fromR][fromC].tile.tier,
+            flavor: app.gridState.cells[fromR][fromC].tile.flavor
+          }
+        : null;
+
+    const res = GridEngine.applyForkAction(
+      app.gridState,
+      fromR,
+      fromC,
+      toR,
+      toC,
+      discardToTrash ? { discardToTrash: true } : {}
+    );
+    app.activeTool = null;
+    app.forkSourceCell = null;
+
+    if (!res || !res.applied) {
+      audio.playGridBlocked();
+      showToast('移位叉操作未生效，请重试', { icon: 'tool_fork', tone: 'warn' });
+      return { ok: false, applied: false, kind: 'fork', ...(res || {}) };
+    }
+
+    app.toolCounts.fork = Math.max(0, app.toolCounts.fork - 1);
+    runForkUses += 1;
+
+    const fromPt = cellCenterScreenPos(fromR, fromC);
+    if (res.mode === 'shatter_ice') {
+      app.animState.brokenIceCells = [{ r: fromR, c: fromC }];
+      app.animState.iceTimer = 0.22;
+      audio.playIceShatter();
+      if (app.activeTutorialStep === 'ice_tile') {
+        completeTutorialSaveKey('ice_tile');
+      }
+      if (
+        app.activeTutorialStep === 'flavor_tile' &&
+        res.tile &&
+        res.tile.flavor === 'matcha'
+      ) {
+        completeTutorialSaveKey('flavor_tile');
+      }
+    } else if (res.mode === 'trash') {
+      const gt = app.guideTargets;
+      const trashPt =
+        gt && gt.trashBtn
+          ? { x: gt.trashBtn.x + gt.trashBtn.w * 0.5, y: gt.trashBtn.y + gt.trashBtn.h * 0.5 }
+          : { x: metrics.width - 42, y: fromPt.y };
+      const rt = res.removedTile || srcTileBefore;
+      if (rt) {
+        app.animState.flyingSprites.push({
+          kind: 'board_to_trash',
+          tier: rt.tier,
+          flavor: rt.flavor,
+          fromX: fromPt.x,
+          fromY: fromPt.y,
+          toX: trashPt.x,
+          toY: trashPt.y,
+          timer: 0.20,
+          duration: 0.20
+        });
+      }
+      app.animState.trashPuffTimer = 0.20;
+      audio.playTrayTrash();
+      showToast('已用移位叉将猫饼叉入厨余篮销毁', { icon: 'tool_fork' });
+    } else if (res.mode === 'move') {
+      const toPt = cellCenterScreenPos(toR, toC);
+      if (res.tile) {
+        app.animState.flyingSprites.push({
+          kind: 'board_to_board',
+          tier: res.tile.tier,
+          flavor: res.tile.flavor,
+          destR: toR,
+          destC: toC,
+          fromX: fromPt.x,
+          fromY: fromPt.y,
+          toX: toPt.x,
+          toY: toPt.y,
+          timer: 0.18,
+          duration: 0.18
+        });
+      }
+      audio.playTool('fork');
+      if (
+        app.activeTutorialStep === 'flavor_tile' &&
+        res.tile &&
+        res.tile.flavor === 'matcha'
+      ) {
+        completeTutorialSaveKey('flavor_tile');
+      }
+    } else if (res.mode === 'swap') {
+      const toPt = cellCenterScreenPos(toR, toC);
+      if (res.tile) {
+        app.animState.flyingSprites.push({
+          kind: 'board_to_board',
+          tier: res.tile.tier,
+          flavor: res.tile.flavor,
+          destR: toR,
+          destC: toC,
+          fromX: fromPt.x,
+          fromY: fromPt.y,
+          toX: toPt.x,
+          toY: toPt.y,
+          timer: 0.18,
+          duration: 0.18
+        });
+      }
+      if (res.swappedTile) {
+        app.animState.flyingSprites.push({
+          kind: 'board_to_board',
+          tier: res.swappedTile.tier,
+          flavor: res.swappedTile.flavor,
+          destR: fromR,
+          destC: fromC,
+          fromX: toPt.x,
+          fromY: toPt.y,
+          toX: fromPt.x,
+          toY: fromPt.y,
+          timer: 0.18,
+          duration: 0.18
+        });
+      }
+      audio.playTool('fork');
+      if (
+        app.activeTutorialStep === 'flavor_tile' &&
+        ((res.tile && res.tile.flavor === 'matcha') ||
+          (res.swappedTile && res.swappedTile.flavor === 'matcha'))
+      ) {
+        completeTutorialSaveKey('flavor_tile');
+      }
+    } else if (res.mode === 'merge') {
+      const toPt = cellCenterScreenPos(toR, toC);
+      if (srcTileBefore) {
+        app.animState.flyingSprites.push({
+          kind: 'board_to_board',
+          tier: srcTileBefore.tier,
+          flavor: srcTileBefore.flavor,
+          fromX: fromPt.x,
+          fromY: fromPt.y,
+          toX: toPt.x,
+          toY: toPt.y,
+          timer: 0.12,
+          duration: 0.12
+        });
+      }
+      const newTier = res.tile ? res.tile.tier : 2;
+      const newFlavor = res.tile ? res.tile.flavor : 'plain';
+      app.animState.mergeEvents = [{ r: toR, c: toC, newTier, flavor: newFlavor }];
+      app.animState.mergeTimer = 0.22;
+      app.animState.mergeDuration = 0.22;
+      audio.playMerge(newTier, 1, newTier >= 6);
+      if (newFlavor === 'gold') audio.playGoldenMerge();
+
+      if (res.brokenIceCells && res.brokenIceCells.length > 0) {
+        app.animState.brokenIceCells = res.brokenIceCells;
+        app.animState.iceTimer = 0.22;
+        app.animState.iceDuration = 0.22;
+        audio.playIceShatter();
+        if (app.activeTutorialStep === 'ice_tile') {
+          completeTutorialSaveKey('ice_tile');
+        }
+      }
+      if (res.skillChargeGain > 0) {
+        app.skillEnergy = clamp(app.skillEnergy + res.skillChargeGain, 0, 100);
+      }
+      if (app.activeTutorialStep === 'flavor_tile' && newFlavor === 'matcha') {
+        completeTutorialSaveKey('flavor_tile');
+      }
+    }
+
+    refreshNeededAndOrderMarks();
+    syncGameStateMirror();
+    return { ok: true, applied: true, kind: 'fork', ...res };
+  }
+
+  function applyToolInternal(
+    kind,
+    r,
+    c,
+    allowAutoPurchase = false,
+    r2 = undefined,
+    c2 = undefined,
+    extraOpts = null
+  ) {
     if (
       app.screen !== 'playing' ||
       app.activeModal !== null ||
@@ -1813,12 +2284,51 @@ function createApp() {
       return { ok: false, applied: false, reason: 'invalid_tool' };
     }
 
-    const targetCheck = validateToolTargetCell(kind, r, c);
-    if (!targetCheck.valid) {
-      app.activeTool = null;
-      audio.playGridBlocked();
-      if (kind === 'fork') {
-        showToast('清格叉需点选有猫饼或冰封的盘格', { icon: 'tool_fork', tone: 'warn' });
+    if (kind === 'fork') {
+      const optDiscard = Boolean(
+        r2 === 'trash' ||
+          (r2 && typeof r2 === 'object' && r2.discardToTrash) ||
+          (c2 && typeof c2 === 'object' && c2.discardToTrash) ||
+          (extraOpts && typeof extraOpts === 'object' && extraOpts.discardToTrash)
+      );
+      if (optDiscard) {
+        return commitForkExecution(r, c, undefined, undefined, true, allowAutoPurchase);
+      }
+
+      if (typeof r2 === 'number' && typeof c2 === 'number') {
+        return commitForkExecution(r, c, r2, c2, false, allowAutoPurchase);
+      }
+
+      if (app.forkSourceCell !== null) {
+        const src = app.forkSourceCell;
+        const srcCheck = validateToolTargetCell('fork', src.r, src.c);
+        if (
+          !srcCheck.valid ||
+          (app.gridState.cells[src.r][src.c].tile.frozenHp || 0) > 0
+        ) {
+          app.forkSourceCell = null;
+        } else if (r === src.r && c === src.c) {
+          app.forkSourceCell = null;
+          audio.playPatronSelect();
+          showToast('已放下猫饼，请重新点选起点猫饼或冰封格', { icon: 'tool_fork' });
+          return {
+            ok: true,
+            applied: false,
+            cancelledSource: true,
+            step: 1,
+            kind: 'fork'
+          };
+        } else {
+          return commitForkExecution(src.r, src.c, r, c, false, allowAutoPurchase);
+        }
+      }
+
+      const targetCheck = validateToolTargetCell('fork', r, c);
+      if (!targetCheck.valid) {
+        app.activeTool = null;
+        app.forkSourceCell = null;
+        audio.playGridBlocked();
+        showToast('移位叉需先点选有猫饼或冰封的盘格', { icon: 'tool_fork', tone: 'warn' });
         return {
           ok: false,
           applied: false,
@@ -1829,6 +2339,47 @@ function createApp() {
           reason: targetCheck.reason
         };
       }
+
+      const clickedTile = app.gridState.cells[r][c].tile;
+      if ((clickedTile.frozenHp || 0) > 0) {
+        return commitForkExecution(r, c, undefined, undefined, false, allowAutoPurchase);
+      }
+
+      if ((app.toolCounts.fork || 0) <= 0) {
+        if (allowAutoPurchase) {
+          const buyRes = tryEmergencyPurchaseTool('fork');
+          if (!buyRes.ok) {
+            app.activeTool = null;
+            app.forkSourceCell = null;
+            return { ok: false, applied: false, kind: 'fork', reason: buyRes.reason };
+          }
+        } else {
+          app.activeTool = null;
+          app.forkSourceCell = null;
+          return { ok: false, applied: false, kind: 'fork', reason: 'no_charges' };
+        }
+      }
+
+      app.activeTool = 'fork';
+      app.forkSourceCell = { r, c };
+      audio.playPatronSelect();
+      showToast('已挑起猫饼：点选落点移位/互换/合并，或点厨余篮销毁', { icon: 'tool_fork' });
+      return {
+        ok: true,
+        applied: false,
+        armed: true,
+        step: 2,
+        kind: 'fork',
+        forkSourceCell: { r, c }
+      };
+    }
+
+    // kind === 'spoon'
+    app.forkSourceCell = null;
+    const targetCheck = validateToolTargetCell('spoon', r, c);
+    if (!targetCheck.valid) {
+      app.activeTool = null;
+      audio.playGridBlocked();
       showToast('升阶勺仅可对 1~6 阶非冰封猫饼使用', { icon: 'tool_spoon', tone: 'warn' });
       return {
         ok: false,
@@ -1841,9 +2392,9 @@ function createApp() {
       };
     }
 
-    if ((app.toolCounts[kind] || 0) <= 0) {
+    if ((app.toolCounts.spoon || 0) <= 0) {
       if (allowAutoPurchase) {
-        const buyRes = tryEmergencyPurchaseTool(kind);
+        const buyRes = tryEmergencyPurchaseTool('spoon');
         if (!buyRes.ok) {
           app.activeTool = null;
           return { ok: false, applied: false, reason: buyRes.reason };
@@ -1854,30 +2405,6 @@ function createApp() {
       }
     }
 
-    if (kind === 'fork') {
-      const res = GridEngine.removeTileAt(app.gridState, r, c, { allowShatterIce: true });
-      app.activeTool = null;
-      if (!res.removed && !res.shatteredIce) {
-        audio.playGridBlocked();
-        showToast('清格叉需点选有猫饼或冰封的盘格', { icon: 'tool_fork', tone: 'warn' });
-        return { ok: false, applied: false, kind: 'fork', ...res };
-      }
-      app.toolCounts.fork = Math.max(0, app.toolCounts.fork - 1);
-      if (res.shatteredIce) {
-        app.animState.brokenIceCells = [{ r, c }];
-        app.animState.iceTimer = 0.22;
-        audio.playIceShatter();
-        if (app.activeTutorialStep === 'ice_tile') {
-          completeTutorialSaveKey('ice_tile');
-        }
-      } else {
-        audio.playTool('fork');
-      }
-      refreshNeededAndOrderMarks();
-      syncGameStateMirror();
-      return { ok: true, applied: true, kind: 'fork', ...res };
-    }
-
     const res = GridEngine.upgradeTileAt(app.gridState, r, c);
     app.activeTool = null;
     if (!res.upgraded) {
@@ -1886,6 +2413,7 @@ function createApp() {
       return { ok: false, applied: false, kind: 'spoon', ...res };
     }
     app.toolCounts.spoon = Math.max(0, app.toolCounts.spoon - 1);
+    runSpoonUses += 1;
     if (res.skillChargeGain > 0) {
       app.skillEnergy = clamp(app.skillEnergy + res.skillChargeGain, 0, 100);
     }
@@ -1912,6 +2440,7 @@ function createApp() {
     const patron = PATRONS.find((p) => p.id === patronId) || PATRONS[0];
     app.skillEnergy = 0;
     app.activeTool = null;
+    app.forkSourceCell = null;
     audio.playChefSkill(patronId);
     app.playPatronSpeech = patron.thanks;
 
@@ -2014,11 +2543,14 @@ function createApp() {
     if (serveRes.triggeredFever) {
       audio.setFeverMode(true);
       audio.playFeverStart();
-      showToast('星光热潮开启！10 秒内得分 ×1.35 且耐心减半流逝', {
-        icon: 'icon_stardust',
-        tone: 'event',
-        level: 'major'
-      });
+      showToast(
+        `星光热潮开启！10 秒内得分 ×${(FEVER_CONFIG.scoreMult || 1.25).toFixed(2)} 且耐心减半流逝`,
+        {
+          icon: 'icon_stardust',
+          tone: 'event',
+          level: 'major'
+        }
+      );
     }
 
     // Check 1~3 Star crossings
@@ -2066,13 +2598,24 @@ function createApp() {
     Object.assign(saveData, updatedSave);
     platform.setWxFriendCloudScore(saveData);
 
+    const trashDiscards = Math.max(0, Math.floor(Number(app.orderState.trashDiscards) || 0));
+    const failStreakAfter =
+      !settlement.cleared &&
+      saveData.levelFailStreaks &&
+      hasOwn(saveData.levelFailStreaks, lvl.id)
+        ? Math.max(0, Math.floor(Number(saveData.levelFailStreaks[lvl.id]) || 0))
+        : 0;
+
     const runReport = {
       levelId: lvl.id,
       score: settlement.ordersServed === 0 && app.orderState.ordersServed === 0 ? 0 : app.orderState.score,
       serves: app.orderState.ordersServed,
       ordersServed: app.orderState.ordersServed,
       stars: settlement.starsEarned,
-      durationSec: Math.max(3, Math.round(app.orderState.elapsedSec || lvl.durationSec))
+      durationSec: Math.max(3, Math.round(app.orderState.elapsedSec || lvl.durationSec)),
+      trashDiscards,
+      forkUses: runForkUses,
+      spoonUses: runSpoonUses
     };
     scheduleCloudPush(runReport);
 
@@ -2082,6 +2625,11 @@ function createApp() {
       ordersServed: app.orderState.ordersServed,
       vipServed: app.orderState.vipServed,
       maxCombo: app.orderState.maxCombo,
+      trashDiscards,
+      forkUses: runForkUses,
+      spoonUses: runSpoonUses,
+      failStreak: failStreakAfter,
+      softPityNextRun: failStreakAfter >= 2,
       isNewBest: app.orderState.ordersServed >= 1 && app.orderState.score > prevBest,
       elapsedRevealSec: 0,
       ...settlement
@@ -2089,6 +2637,7 @@ function createApp() {
 
     app.screen = 'result';
     app.activeTool = null;
+    app.forkSourceCell = null;
     app.activeTutorialStep = null;
     app.tutorialSkipRect = null;
     app.activeModal = 'level_result';
@@ -2640,6 +3189,7 @@ function createApp() {
         else app.closeModal();
       } else if (app.activeTool) {
         app.activeTool = null;
+        app.forkSourceCell = null;
       } else if (app.screen === 'playing') {
         app.togglePause();
       }
@@ -2712,6 +3262,7 @@ function createApp() {
       if (destroyed) return;
       audio.setTabHidden(true);
       app.activeTool = null;
+      app.forkSourceCell = null;
       if (app.screen === 'playing' && !app.activeModal) {
         app.openModal('pause');
       }
@@ -2839,7 +3390,7 @@ function createApp() {
   }
 
   const debugApi = {
-    version: '2.0',
+    version: GAME_VERSION,
 
     getState() {
       const os = app.orderState;
@@ -2899,7 +3450,11 @@ function createApp() {
         feverEnergy: os ? os.feverEnergy : 0,
         skillEnergy: app.skillEnergy,
         activeTool: app.activeTool,
+        forkSourceCell: app.forkSourceCell
+          ? { r: app.forkSourceCell.r, c: app.forkSourceCell.c }
+          : null,
         toolCounts: { fork: app.toolCounts.fork, spoon: app.toolCounts.spoon },
+        trashCooldown: os ? os.trashCooldown || 0 : 0,
         trayCapacity: trayCap,
         tray: trayArr,
         seats: buildNormalizedSeatsSnapshot(),
@@ -2908,6 +3463,7 @@ function createApp() {
         boardLayout,
         lastResult: cloneJsonSafe(app.lastResult),
         cloudStatus: cloudState.status,
+        higherSchemaDetected: Boolean(saveData.higherSchemaDetected),
         assetsLoaded: sprites.loadedCount,
         assetsTotal: sprites.totalCount,
         metrics: {
@@ -2939,17 +3495,23 @@ function createApp() {
         cloudPushTimer = null;
       }
       cloudState.dirty = false;
+      cloudState.retryCount = 0;
 
       let inputObj = rawObj;
+      let rawRequestedSv = 2;
       if (rawObj && typeof rawObj === 'object' && !Array.isArray(rawObj)) {
         inputObj = { ...rawObj };
+        if (Number.isFinite(Number(rawObj.schemaVersion)) && Number(rawObj.schemaVersion) > 2) {
+          rawRequestedSv = Math.floor(Number(rawObj.schemaVersion));
+        }
         const isSpreadFromCurrent =
           Number(rawObj.totalEarnedStardust) === saveData.totalEarnedStardust &&
           Number(rawObj.bankStardust) !== saveData.bankStardust;
         const isSpreadFromDefault =
-          Number(rawObj.totalEarnedStardust) === 30 &&
+          (Number(rawObj.totalEarnedStardust) === DEFAULT_INITIAL_STARDUST ||
+            Number(rawObj.totalEarnedStardust) === 30) &&
           Number(rawObj.lastSyncedEarnedStardust || 0) === 0 &&
-          Number(rawObj.bankStardust) !== 30;
+          Number(rawObj.bankStardust) !== Number(rawObj.totalEarnedStardust);
         if (
           Number(rawObj.schemaVersion) >= 2 &&
           hasOwn(rawObj, 'bankStardust') &&
@@ -2974,6 +3536,12 @@ function createApp() {
       }
       Object.assign(saveData, normalized);
 
+      if (saveData.higherSchemaDetected) {
+        cloudState.status = 'higher_schema_blocked';
+      } else if (cloudState.status === 'higher_schema_blocked') {
+        cloudState.status = CloudConfig.ENABLE_CLOUD_SYNC ? 'idle' : 'local_only';
+      }
+
       checkVeteranGiftToast();
       syncAudioPrefsFromSave();
 
@@ -2994,13 +3562,17 @@ function createApp() {
           cloudState.openidSuffix && cloudState.openidSuffix !== 'LOCAL'
             ? cloudState.openidSuffix
             : 'CAFE';
+        const seededMeta = cloneJsonSafe(saveData) || {};
+        if (rawRequestedSv > 2) {
+          seededMeta.schemaVersion = rawRequestedSv;
+        }
         platform.setStorageJSON('__hoshi_browser_cloud_doc_v1__', {
-          schemaVersion: 2,
+          schemaVersion: rawRequestedSv,
           openidSuffix: seededSuffix,
           profile: cloneJsonSafe(saveData.playerProfile),
           totalStars: saveData.lifetimeStats.totalStars,
           totalCumulativeScore: saveData.lifetimeStats.totalCumulativeScore,
-          metaSave: cloneJsonSafe(saveData),
+          metaSave: seededMeta,
           revision: 1
         });
         cloudState.revision = 1;
@@ -3008,8 +3580,11 @@ function createApp() {
 
       if (app.screen === 'lobby') {
         app.previewLevelId = saveData.highestUnlockedLevel || '1-1';
-        const fLvl = getLevelById(app.previewLevelId);
-        if (fLvl) app.selectedChapter = fLvl.chapter;
+        if (!saveData.levelStars || Object.keys(saveData.levelStars).length === 0) {
+          app.selectedChapter = 1;
+        } else {
+          app.selectedChapter = clamp(app.selectedChapter || 1, 1, Math.max(1, CHAPTERS.length));
+        }
       }
 
       if (app.orderState) {
@@ -3082,14 +3657,14 @@ function createApp() {
       return res;
     },
 
-    doubleTapTray(slotIdx) {
-      const res = executeDiscardTraySlot(slotIdx);
+    doubleTapTray(slotIdx, opts = undefined) {
+      const res = executeDiscardTraySlot(slotIdx, opts);
       renderFrame(0);
       return res;
     },
 
-    useToolOnCell(kind, r, c) {
-      const res = applyToolInternal(kind, r, c, true);
+    useToolOnCell(kind, r, c, r2 = undefined, c2 = undefined, opts = null) {
+      const res = applyToolInternal(kind, r, c, true, r2, c2, opts);
       renderFrame(0);
       return res;
     },

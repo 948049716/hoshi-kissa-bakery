@@ -7,6 +7,8 @@
 const {
   GAME_TITLE,
   ASSET_PATHS,
+  DEFAULT_INITIAL_STARDUST,
+  SHOP_TOTAL_CAP,
   DEFAULT_NPC_RIVALS,
   normalizePatronId
 } = require('./constants');
@@ -14,6 +16,7 @@ const {
 const {
   CHAPTERS,
   VALID_LEVEL_IDS,
+  MAX_CAMPAIGN_STARS,
   computeTotalStars
 } = require('./levels_data');
 
@@ -37,12 +40,11 @@ const memoryStorage = new Map();
 const BROWSER_MOCK_CLOUD_KEY = '__hoshi_browser_cloud_doc_v1__';
 const BROWSER_MOCK_CLOUD_KEY_V2 = '__hoshi_browser_cloud_doc_v2__';
 
-const MAX_TOTAL_STARS = 90;
+const MAX_TOTAL_STARS = MAX_CAMPAIGN_STARS;
 const MAX_TOTAL_CUMULATIVE_SCORE = 3450000;
 const MAX_OFFLINE_STARDUST_DELTA = 1500;
 const MAX_INITIAL_UNSYNCED_STARDUST = 6000;
 const MAX_SAFE_STARDUST = 9999999;
-const SHOP_TOTAL_CAP = 5220;
 const MAX_CONSUMABLE_SPENT_STARDUST = MAX_SAFE_STARDUST - SHOP_TOTAL_CAP;
 const MAX_TIMESTAMP_MS = 9999999999999;
 
@@ -1263,6 +1265,26 @@ function triggerShare(payload) {
   return false;
 }
 
+/**
+ * 统一激励行为抽象桩（商业化 IAA 激励视频 / 社交分享预留扩展口）。
+ * 当前 v0.9.0 返回无广告分享成功桩，后续接入 `wx.createRewardedVideoAd` 无需修改业务层调用方。
+ */
+function requestRewardAction(scene = 'default', opts = {}) {
+  const safeScene =
+    typeof scene === 'string' && scene.trim() ? scene.trim().slice(0, 32) : 'default';
+  const silent = isPlainRecord(opts) && Boolean(getOwn(opts, 'silent'));
+  if (!silent) {
+    const sharePayload = isPlainRecord(opts) ? getOwn(opts, 'sharePayload') : null;
+    triggerShare(sharePayload);
+  }
+  return Promise.resolve({
+    ok: true,
+    rewarded: true,
+    channel: 'share_stub',
+    scene: safeScene
+  });
+}
+
 // ============================================================================
 // WeChat Cloud Development (`wx.cloud`) & Native UserInfo Authorization Layer
 // ============================================================================
@@ -1596,6 +1618,9 @@ function auditAndSanitizeSaveForCloud(rawMeta, warnings) {
   }
 
   const copy = safeShallowCopyPlain(rawMeta);
+  if (Number.isFinite(sv) && Math.floor(sv) > 2) {
+    copy.higherSchemaDetected = true;
+  }
   copy.schemaVersion = 2;
   copy.levelBestScores = cleanScores;
   copy.levelStars = cleanStars;
@@ -1722,7 +1747,7 @@ function isUntouchedDefaultMeta(s) {
   const SaveSync = getSaveSync();
   return Boolean(
     isPlainRecord(s) &&
-      s.totalEarnedStardust === 30 &&
+      s.totalEarnedStardust === DEFAULT_INITIAL_STARDUST &&
       SaveSync.computeSpentStardust(s) === 0 &&
       s.lifetimeStats &&
       s.lifetimeStats.runsPlayed === 0 &&
@@ -1730,6 +1755,7 @@ function isUntouchedDefaultMeta(s) {
       s.lifetimeStats.vipServed === 0 &&
       s.lifetimeStats.totalStars === 0 &&
       s.lifetimeStats.totalCumulativeScore === 0 &&
+      (!isPlainRecord(s.levelFailStreaks) || Object.keys(s.levelFailStreaks).length === 0) &&
       !s.migratedFromV1GiftPending &&
       s.selectedPatron === 'mikan' &&
       s.equippedTheme === 'amber' &&
@@ -1749,7 +1775,7 @@ function isUntouchedInitialServerMeta(s, prevRevision) {
   return Boolean(
     prevRevision <= 1 &&
       isPlainRecord(s) &&
-      s.totalEarnedStardust === 30 &&
+      s.totalEarnedStardust === DEFAULT_INITIAL_STARDUST &&
       SaveSync.computeSpentStardust(s) === 0 &&
       s.lifetimeStats &&
       s.lifetimeStats.runsPlayed === 0 &&
@@ -1757,6 +1783,7 @@ function isUntouchedInitialServerMeta(s, prevRevision) {
       s.lifetimeStats.vipServed === 0 &&
       s.lifetimeStats.totalStars === 0 &&
       s.lifetimeStats.totalCumulativeScore === 0 &&
+      (!isPlainRecord(s.levelFailStreaks) || Object.keys(s.levelFailStreaks).length === 0) &&
       !s.migratedFromV1GiftPending
   );
 }
@@ -2244,6 +2271,20 @@ function runBrowserMockCloud(data = {}) {
   }
 }
 
+function isHigherSchemaCloudDoc(rawObj) {
+  if (!isPlainRecord(rawObj)) return false;
+  const topSv = hasOwn(rawObj, 'schemaVersion')
+    ? toSafeFiniteNumber(getOwn(rawObj, 'schemaVersion'))
+    : 0;
+  if (Number.isFinite(topSv) && Math.floor(topSv) > 2) return true;
+  const rawMeta = getOwn(rawObj, 'metaSave');
+  if (isPlainRecord(rawMeta) && hasOwn(rawMeta, 'schemaVersion')) {
+    const metaSv = toSafeFiniteNumber(getOwn(rawMeta, 'schemaVersion'));
+    if (Number.isFinite(metaSv) && Math.floor(metaSv) > 2) return true;
+  }
+  return false;
+}
+
 function runBrowserMockCloudInner(data = {}) {
   const SaveSync = getSaveSync();
   const req = isPlainRecord(data) ? data : {};
@@ -2257,11 +2298,36 @@ function runBrowserMockCloudInner(data = {}) {
 
   const defaultSuffix = 'CAFE';
   const rawStored = readStoredMockCloudRaw();
+  const higherSchemaStored = isHigherSchemaCloudDoc(rawStored);
   const normalizedState = rawStored ? normalizeStoredCloudDoc(rawStored, defaultSuffix) : null;
   let doc = normalizedState ? normalizedState.doc : null;
   const openidSuffix = (doc && doc.openidSuffix) || defaultSuffix;
 
   if (action === 'pull') {
+    if (higherSchemaStored) {
+      const safeReadMeta = doc
+        ? SaveSync.normalizeSaveData(doc.metaSave)
+        : SaveSync.createDefaultSave();
+      safeReadMeta.higherSchemaDetected = true;
+      const rawMetaCand = isPlainRecord(getOwn(rawStored, 'metaSave'))
+        ? getOwn(rawStored, 'metaSave')
+        : rawStored;
+      return Promise.resolve({
+        ok: true,
+        isMockCloud: true,
+        isNewUser: false,
+        higherSchemaDetected: true,
+        openidSuffix,
+        profile: doc ? { ...doc.profile } : sanitizeCloudProfile(null, openidSuffix, 'mikan'),
+        totalStars: doc ? doc.totalStars : safeReadMeta.lifetimeStats.totalStars,
+        totalCumulativeScore: doc
+          ? doc.totalCumulativeScore
+          : safeReadMeta.lifetimeStats.totalCumulativeScore,
+        metaSave: rawMetaCand,
+        revision: doc ? doc.revision : 1
+      });
+    }
+
     if (!doc) {
       const now = Date.now();
       const freshMeta = SaveSync.createDefaultSave();
@@ -2317,6 +2383,16 @@ function runBrowserMockCloudInner(data = {}) {
   }
 
   if (action === 'push') {
+    if (higherSchemaStored) {
+      return Promise.resolve({
+        ok: false,
+        blocked: true,
+        isMockCloud: true,
+        higherSchemaDetected: true,
+        reason: 'higher_schema_version_on_cloud'
+      });
+    }
+
     const warnings = [];
     const rawStoredRev = isPlainRecord(rawStored) ? getOwn(rawStored, 'revision') : undefined;
     const prevRev = doc ? clampSafeInt(rawStoredRev, 0, 999999999, 0) : 0;
@@ -2353,7 +2429,7 @@ function runBrowserMockCloudInner(data = {}) {
         addUniqueWarning(warnings, 'stardust_delta_clamped');
         totalEarned = maxFirstPush;
       } else {
-        totalEarned = Math.max(30, clientMeta.totalEarnedStardust, spent);
+        totalEarned = Math.max(DEFAULT_INITIAL_STARDUST, clientMeta.totalEarnedStardust, spent);
       }
       mergedMeta.totalEarnedStardust = Math.min(MAX_SAFE_STARDUST, totalEarned);
       mergedMeta.lastSyncedEarnedStardust = mergedMeta.totalEarnedStardust;
@@ -2377,6 +2453,7 @@ function runBrowserMockCloudInner(data = {}) {
 
       const mergedScores = {};
       const mergedStars = {};
+      const mergedFailStreaks = {};
       for (let i = 0; i < VALID_LEVEL_IDS.length; i++) {
         const id = VALID_LEVEL_IDS[i];
         const baseSc = hasOwn(baseMeta.levelBestScores, id) ? baseMeta.levelBestScores[id] : 0;
@@ -2392,7 +2469,23 @@ function runBrowserMockCloudInner(data = {}) {
         if (bestSt > 0 && bestSc <= 0) {
           bestSt = 0;
         }
-        if (bestSt > 0) mergedStars[id] = bestSt;
+        if (bestSt > 0) {
+          mergedStars[id] = bestSt;
+        } else {
+          const fs =
+            isPlainRecord(latest.levelFailStreaks) && hasOwn(latest.levelFailStreaks, id)
+              ? latest.levelFailStreaks[id]
+              : Math.max(
+                  isPlainRecord(baseMeta.levelFailStreaks) && hasOwn(baseMeta.levelFailStreaks, id)
+                    ? baseMeta.levelFailStreaks[id]
+                    : 0,
+                  isPlainRecord(clientMeta.levelFailStreaks) &&
+                    hasOwn(clientMeta.levelFailStreaks, id)
+                    ? clientMeta.levelFailStreaks[id]
+                    : 0
+                );
+          if (fs > 0) mergedFailStreaks[id] = fs;
+        }
       }
 
       const catcakeLevels = {};
@@ -2460,7 +2553,7 @@ function runBrowserMockCloudInner(data = {}) {
         bgmTrack: latest.bgmTrack,
         sfxEnabled: latest.sfxEnabled,
         bankStardust: 0,
-        totalEarnedStardust: 30,
+        totalEarnedStardust: DEFAULT_INITIAL_STARDUST,
         lastSyncedEarnedStardust: 0,
         consumableSpentStardust: clampSafeInt(
           Math.max(
@@ -2474,6 +2567,7 @@ function runBrowserMockCloudInner(data = {}) {
         migratedFromV1GiftPending,
         levelStars: mergedStars,
         levelBestScores: mergedScores,
+        levelFailStreaks: mergedFailStreaks,
         highestUnlockedLevel: SaveSync.computeHighestUnlockedLevel(mergedStars),
         catcakeLevels,
         deviceUpgrades,
@@ -2525,10 +2619,14 @@ function runBrowserMockCloudInner(data = {}) {
           addUniqueWarning(warnings, 'stardust_delta_clamped');
           totalEarned = maxFirstPush;
         } else {
-          totalEarned = Math.max(30, clientMeta.totalEarnedStardust, spent);
+          totalEarned = Math.max(
+            DEFAULT_INITIAL_STARDUST,
+            clientMeta.totalEarnedStardust,
+            spent
+          );
         }
       } else if (
-        syncBase >= 30 &&
+        syncBase >= DEFAULT_INITIAL_STARDUST &&
         clientMeta.totalEarnedStardust > syncBase &&
         baseMeta.totalEarnedStardust > syncBase
       ) {
@@ -2537,20 +2635,24 @@ function runBrowserMockCloudInner(data = {}) {
           addUniqueWarning(warnings, 'stardust_delta_clamped');
         }
         const clampedDelta = Math.min(MAX_OFFLINE_STARDUST_DELTA, rawDelta);
-        totalEarned = Math.max(30, spent, baseMeta.totalEarnedStardust + clampedDelta);
+        totalEarned = Math.max(
+          DEFAULT_INITIAL_STARDUST,
+          spent,
+          baseMeta.totalEarnedStardust + clampedDelta
+        );
       } else if (
         clientMeta.totalEarnedStardust - baseMeta.totalEarnedStardust >
         MAX_OFFLINE_STARDUST_DELTA
       ) {
         addUniqueWarning(warnings, 'stardust_delta_clamped');
         totalEarned = Math.max(
-          30,
+          DEFAULT_INITIAL_STARDUST,
           spent,
           baseMeta.totalEarnedStardust + MAX_OFFLINE_STARDUST_DELTA
         );
       } else {
         totalEarned = Math.max(
-          30,
+          DEFAULT_INITIAL_STARDUST,
           baseMeta.totalEarnedStardust,
           clientMeta.totalEarnedStardust,
           spent
@@ -3151,6 +3253,7 @@ module.exports = {
   vibrateShort,
   setupShare,
   triggerShare,
+  requestRewardAction,
   initCloud,
   callCloudFunction,
   setWxFriendCloudScore,

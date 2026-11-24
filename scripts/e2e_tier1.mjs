@@ -25,25 +25,25 @@ for (let ch = 1; ch <= 3; ch++) {
 const EXPECTED_CATCAKE_BASES = [30, 70, 150, 320, 680, 1400, 2800];
 const EXPECTED_CATCAKE_UNLOCKS = ['1-1', '1-1', '1-1', '1-3', '1-6', '2-1', '3-1'];
 const EXPECTED_CATCAKE_COSTS = {
-  1: [20, 40, 70, 110],
-  2: [25, 50, 85, 130],
-  3: [35, 65, 105, 160],
-  4: [45, 85, 135, 200],
-  5: [60, 110, 170, 250],
-  6: [80, 140, 220, 320],
-  7: [100, 180, 280, 400]
+  1: [25, 50, 80, 120],
+  2: [30, 60, 95, 145],
+  3: [40, 75, 115, 175],
+  4: [50, 95, 145, 215],
+  5: [65, 120, 185, 270],
+  6: [85, 150, 235, 340],
+  7: [105, 185, 280, 385]
 };
 const EXPECTED_DEVICE_COSTS = {
-  dev_tray: [60, 150],
-  dev_flour: [45, 95, 170],
-  dev_teapot: [50, 105, 185],
-  dev_tools: [40, 90, 160]
+  dev_tray: [75, 165],
+  dev_flour: [55, 110, 180],
+  dev_teapot: [60, 115, 190],
+  dev_tools: [50, 95, 155]
 };
 const EXPECTED_RECIPE_SCORES_LV0 = {
-  R01: 30, R02: 70, R03: 118, R04: 150, R05: 260, R06: 165,
-  R07: 320, R08: 338, R09: 555, R10: 729, R11: 680, R12: 979,
-  R13: 1445, R14: 1180, R15: 322, R16: 687, R17: 1400, R18: 1891,
-  R19: 3240, R20: 592, R21: 2800, R22: 2735, R23: 1593, R24: 7571
+  R01: 30, R02: 70, R03: 112, R04: 150, R05: 246, R06: 157,
+  R07: 320, R08: 313, R09: 526, R10: 675, R11: 680, R12: 930,
+  R13: 1338, R14: 1120, R15: 288, R16: 616, R17: 1400, R18: 1778,
+  R19: 3000, R20: 526, R21: 2800, R22: 2520, R23: 1400, R24: 6750
 };
 const FALLBACK_RECIPE_SLOTS = {
   R01: [{ tier: 1, flavor: 'any' }],
@@ -244,8 +244,8 @@ async function startLevelClean(ctx, levelId, saveOverrides = {}, startOpts = {})
   };
   const mergedSave = {
     schemaVersion: 2,
-    bankStardust: 30,
-    totalEarnedStardust: 30,
+    bankStardust: 15,
+    totalEarnedStardust: 15,
     consumableSpentStardust: 0,
     selectedPatron: 'mikan',
     unlockedPatrons: ['mikan'],
@@ -274,11 +274,11 @@ async function clearBoardAtT0(ctx, keepCoords = []) {
   await ctx.eval((keepKeys) => {
     const keep = new Set(keepKeys);
     const dbg = window.__HOSHI_DEBUG__;
-    // First empty tray if anything is sitting in it
+    // First empty tray if anything is sitting in it (bypass 8s trash cooldown in test setup helper)
     const st0 = dbg.getState();
     if (Array.isArray(st0.tray)) {
       for (let i = 0; i < st0.tray.length; i++) {
-        if (st0.tray[i]) dbg.doubleTapTray(i);
+        if (st0.tray[i]) dbg.doubleTapTray(i, { ignoreCooldown: true });
       }
     }
     const st = dbg.getState();
@@ -290,7 +290,7 @@ async function clearBoardAtT0(ctx, keepCoords = []) {
           dbg.tapBoardCell(r, c);
           const curTray = dbg.getState().tray || [];
           for (let s = 0; s < curTray.length; s++) {
-            if (curTray[s]) dbg.doubleTapTray(s);
+            if (curTray[s]) dbg.doubleTapTray(s, { ignoreCooldown: true });
           }
         }
       }
@@ -422,7 +422,7 @@ async function bakeAndServeSeat(ctx, seatIdx, opts = {}) {
     const dbg = window.__HOSHI_DEBUG__;
     const cur = dbg.getState().tray || [];
     for (let i = 0; i < cur.length; i++) {
-      if (cur[i] && !keep.has(i)) dbg.doubleTapTray(i);
+      if (cur[i] && !keep.has(i)) dbg.doubleTapTray(i, { ignoreCooldown: true });
     }
   }, Array.from(preserve));
 
@@ -495,24 +495,30 @@ async function bakeAndServeSeat(ctx, seatIdx, opts = {}) {
     }
     const unfrozen = listOccupiedCells(st.grid, false);
     const overLeveled = unfrozen.find((t) => t.tier > maxReqTier);
-    if (overLeveled || emptyPlayable <= 1) {
+    if ((overLeveled && emptyPlayable <= 2) || emptyPlayable === 0) {
       const victim = overLeveled || unfrozen.sort((a, b) => a.tier - b.tier)[0];
       if (victim) {
-        await ctx.eval(
-          (r, c, keepIdx) => {
-            const keep = new Set(keepIdx);
-            const dbg = window.__HOSHI_DEBUG__;
-            dbg.tapBoardCell(r, c);
-            const tray = dbg.getState().tray || [];
-            for (let i = 0; i < tray.length; i++) {
-              if (tray[i] && !keep.has(i)) dbg.doubleTapTray(i);
-            }
-          },
-          victim.r,
-          victim.c,
-          Array.from(preserve)
-        );
-        continue;
+        if ((st.toolCounts?.fork || 0) > 0 && opts.allowTools !== false) {
+          await ctx.eval((r, c) => window.__HOSHI_DEBUG__.useToolOnCell('fork', r, c, 'trash'), victim.r, victim.c);
+          continue;
+        }
+        if (emptyPlayable === 0) {
+          await ctx.eval(
+            (r, c, keepIdx) => {
+              const keep = new Set(keepIdx);
+              const dbg = window.__HOSHI_DEBUG__;
+              dbg.tapBoardCell(r, c);
+              const tray = dbg.getState().tray || [];
+              for (let i = 0; i < tray.length; i++) {
+                if (tray[i] && !keep.has(i)) dbg.doubleTapTray(i, { ignoreCooldown: true });
+              }
+            },
+            victim.r,
+            victim.c,
+            Array.from(preserve)
+          );
+          continue;
+        }
       }
     }
 
@@ -989,7 +995,7 @@ const F02_TESTS = [
         ctx.assertEq(st.currentLevelId, id, `Expected currentLevelId === '${id}'`);
         ctx.assertEq(st.activeModal, null, `Expected activeModal === null on ${id}`);
         ctx.assertEq(st.score, 0, `Expected initial score === 0 on ${id}`);
-        ctx.assert(st.timeLeft >= 90 && st.timeLeft <= 150, `Invalid timeLeft ${st.timeLeft} on ${id}`);
+        ctx.assert(st.timeLeft >= 89.5 && st.timeLeft <= 150, `Invalid timeLeft ${st.timeLeft} on ${id}`);
         ctx.assert(st.grid.rows >= 3 && st.grid.rows <= 5, `Invalid grid.rows ${st.grid.rows} on ${id}`);
         ctx.assert(st.grid.cols >= 3 && st.grid.cols <= 5, `Invalid grid.cols ${st.grid.cols} on ${id}`);
         ctx.assert(
@@ -1027,7 +1033,7 @@ const F02_TESTS = [
     id: 'T1-F02-02',
     tier: 1,
     features: ['F02'],
-    title: '7-tier Cat-Cake prices (Lv.0..4) and 3,670 stardust upgrade cost table contract',
+    title: '7-tier Cat-Cake prices (Lv.0..4, +15%/lv) and 3,920 stardust upgrade cost table contract',
     run: async (ctx) => {
       const constants = await loadBundledModule(ctx, 'constants.js');
       ctx.assert(Array.isArray(constants.CATCAKES) && constants.CATCAKES.length === 7, 'Expected 7 CATCAKES');
@@ -1046,14 +1052,14 @@ const F02_TESTS = [
         costSum += costs.reduce((acc, v) => acc + v, 0);
 
         for (let lv = 0; lv <= 4; lv++) {
-          const expectedPrice = Math.round(EXPECTED_CATCAKE_BASES[i] * (1 + 0.2 * lv));
+          const expectedPrice = Math.round(EXPECTED_CATCAKE_BASES[i] * (1 + 0.15 * lv));
           ctx.assertEq(constants.getCatcakePrice(tier, lv), expectedPrice, `getCatcakePrice(${tier}, ${lv})`);
         }
       }
-      ctx.assertEq(costSum, 3670, 'Total 7-tier catcake upgrade cost must equal 3,670 stardust');
+      ctx.assertEq(costSum, 3920, 'Total 7-tier catcake upgrade cost must equal 3,920 stardust');
       ctx.assertEq(constants.getCatcakePrice(1, -1), 30, 'Negative upgrade level must clamp to Lv.0');
-      ctx.assertEq(constants.getCatcakePrice(1, 99), 54, 'Excess upgrade level must clamp to Lv.4');
-      ctx.assertEq(constants.getCatcakePrice(7, 4), 5040, 'C7 Lv.4 must equal 5040');
+      ctx.assertEq(constants.getCatcakePrice(1, 99), 48, 'Excess upgrade level must clamp to Lv.4');
+      ctx.assertEq(constants.getCatcakePrice(7, 4), 4480, 'C7 Lv.4 must equal 4480');
 
       // Verify shop catcakes tab opens cleanly in live UI
       await ctx.eval(() => window.__HOSHI_DEBUG__.openModal('shop'));
@@ -1067,14 +1073,14 @@ const F02_TESTS = [
     id: 'T1-F02-03',
     tier: 1,
     features: ['F02', 'F14'],
-    title: 'Full 4-tab Kissa Shop 5,220 stardust exact graduation sweep via live UI hits',
+    title: 'Full 4-tab Kissa Shop 5,650 stardust exact graduation sweep via live UI hits',
     viewport: { width: 1280, height: 760, mobile: false, dpr: 1 },
     query: '?safeTop=8&safeBottom=0&capsule=1&cloud=0',
     run: async (ctx) => {
       await ctx.setSaveData({
         schemaVersion: 2,
-        bankStardust: 5220,
-        totalEarnedStardust: 5220,
+        bankStardust: 5650,
+        totalEarnedStardust: 5650,
         consumableSpentStardust: 0,
         levelStars: makeUnlockedStarsMap(ctx, 3),
         highestUnlockedLevel: '3-10',
@@ -1090,7 +1096,7 @@ const F02_TESTS = [
       let st = await ctx.getState();
       ctx.assertEq(st.activeModal, 'shop', 'Expected shop modal open');
 
-      // Tab 1: Catcakes (3,670 stardust -> 5220 - 3670 = 1550)
+      // Tab 1: Catcakes (3,920 stardust -> 5650 - 3920 = 1730)
       await clickHitScrollingModalIfNeeded(ctx, 'shop_tab_catcakes');
       for (let tier = 1; tier <= 7; tier++) {
         for (let lv = 0; lv < 4; lv++) {
@@ -1098,12 +1104,12 @@ const F02_TESTS = [
         }
       }
       let save = await ctx.getSaveData();
-      ctx.assertEq(save.bankStardust, 1550, 'After all 7 catcakes Lv.4, bankStardust must be 1550');
+      ctx.assertEq(save.bankStardust, 1730, 'After all 7 catcakes Lv.4, bankStardust must be 1730');
       for (let tier = 1; tier <= 7; tier++) {
         ctx.assertEq(save.catcakeLevels[tier] ?? save.catcakeLevels[String(tier)], 4, `C${tier} must be Lv.4`);
       }
 
-      // Tab 2: Devices (1,150 stardust -> 1550 - 1150 = 400)
+      // Tab 2: Devices (1,250 stardust -> 1730 - 1250 = 480)
       await clickHitScrollingModalIfNeeded(ctx, 'shop_tab_devices');
       const devClicks = [
         ['shop_buy_dev_tray', 2],
@@ -1117,21 +1123,21 @@ const F02_TESTS = [
         }
       }
       save = await ctx.getSaveData();
-      ctx.assertEq(save.bankStardust, 400, 'After all 4 devices maxed, bankStardust must be 400');
+      ctx.assertEq(save.bankStardust, 480, 'After all 4 devices maxed, bankStardust must be 480');
 
-      // Tab 3: Patrons (200 stardust -> 400 - 200 = 200)
+      // Tab 3: Patrons (240 stardust -> 480 - 240 = 240)
       await clickHitScrollingModalIfNeeded(ctx, 'shop_tab_patrons');
       await clickHitScrollingModalIfNeeded(ctx, 'shop_buy_patron_luna');
       await clickHitScrollingModalIfNeeded(ctx, 'shop_buy_patron_mugi');
       save = await ctx.getSaveData();
-      ctx.assertEq(save.bankStardust, 200, 'After buying luna (80) & mugi (120), bankStardust must be 200');
+      ctx.assertEq(save.bankStardust, 240, 'After buying luna (100) & mugi (140), bankStardust must be 240');
 
-      // Tab 4: Themes (200 stardust -> 200 - 200 = 0)
+      // Tab 4: Themes (240 stardust -> 240 - 240 = 0)
       await clickHitScrollingModalIfNeeded(ctx, 'shop_tab_themes');
       await clickHitScrollingModalIfNeeded(ctx, 'shop_buy_theme_sakura');
       await clickHitScrollingModalIfNeeded(ctx, 'shop_buy_theme_moonlight');
       save = await ctx.getSaveData();
-      ctx.assertEq(save.bankStardust, 0, 'After full 5,220 shop graduation, bankStardust must be exact 0');
+      ctx.assertEq(save.bankStardust, 0, 'After full 5,650 shop graduation, bankStardust must be exact 0');
     }
   },
 
@@ -1145,7 +1151,7 @@ const F02_TESTS = [
       const recipeList = levelsMod.RECIPE_LIST || Object.values(levelsMod.RECIPES || {});
       ctx.assertEq(recipeList.length, 24, 'Expected exact 24 recipes R01..R24');
 
-      const comboMultMap = { 1: 1.0, 2: 1.18, 3: 1.35 };
+      const comboMultMap = { 1: 1.0, 2: 1.12, 3: 1.25 };
       for (let i = 1; i <= 24; i++) {
         const rid = `R${String(i).padStart(2, '0')}`;
         const rec = levelsMod.RECIPES[rid];
@@ -1161,7 +1167,7 @@ const F02_TESTS = [
           ctx.assert(sl.tier >= 1 && sl.tier <= 7, `Invalid slot tier in ${rid}`);
           ctx.assert(['any', 'matcha', 'berry'].includes(sl.flavor), `Invalid slot flavor '${sl.flavor}' in ${rid}`);
           const base = EXPECTED_CATCAKE_BASES[sl.tier - 1];
-          const fMult = sl.flavor === 'any' ? 1.0 : 1.35;
+          const fMult = sl.flavor === 'any' ? 1.0 : 1.25;
           rawItemSum += base * fMult;
         }
         const computedBase = Math.round(rawItemSum * expectedComboMult);
@@ -1201,8 +1207,8 @@ const F02_TESTS = [
       const critic = constants.CUSTOMER_MAP?.cust_critic || constants.CUSTOMERS.find((c) => c.id === 'cust_critic');
       ctx.assert(fox.bountyMult === 1.25 && fox.isUrgent === true, 'cust_fox must have bountyMult 1.25 and isUrgent true');
       ctx.assert(
-        critic.bountyMult === 1.5 && critic.isVip === true && critic.rewardDustBonus === 5,
-        'cust_critic must have bountyMult 1.50, isVip true, rewardDustBonus 5'
+        critic.bountyMult === 1.5 && critic.isVip === true && critic.rewardDustBonus === 4,
+        'cust_critic must have bountyMult 1.50, isVip true, rewardDustBonus 4'
       );
 
       // Non-overlapping 256x256 customer rects inside 1024x512
@@ -1225,8 +1231,8 @@ const F02_TESTS = [
       ctx.assertEq(tileRectKeys.size, 8, 'BOARD_TILES_ATLAS_RECTS must have 8 distinct cells');
 
       ctx.assertEq(constants.PATRONS.map((p) => p.id), ['mikan', 'luna', 'mugi'], 'PATRONS canonical IDs');
-      ctx.assertEq(constants.PATRON_COSTS, { mikan: 0, luna: 80, mugi: 120 }, 'PATRON_COSTS');
-      ctx.assertEq(constants.THEME_COSTS, { amber: 0, sakura: 80, moonlight: 120 }, 'THEME_COSTS');
+      ctx.assertEq(constants.PATRON_COSTS, { mikan: 0, luna: 100, mugi: 140 }, 'PATRON_COSTS');
+      ctx.assertEq(constants.THEME_COSTS, { amber: 0, sakura: 100, moonlight: 140 }, 'THEME_COSTS');
 
       // Render 1-1 under all 3 themes and verify 0 hsl()/hsla() gradient violations
       for (const themeId of ['amber', 'sakura', 'moonlight']) {
@@ -1255,12 +1261,12 @@ const F02_TESTS = [
       ctx.assert(Array.isArray(ld.CHAPTERS) && ld.CHAPTERS.length === 3, 'Expected 3 CHAPTERS');
 
       const [ch1, ch2, ch3] = ld.CHAPTERS;
-      ctx.assert(ch1.unlockStars === 0 && !ch1.prevLevelReq && ch1.baseClearDust === 10, 'Ch1 metadata mismatch');
-      ctx.assertEq(ch1.firstStarDust, [15, 20, 30], 'Ch1 firstStarDust');
-      ctx.assert(ch2.unlockStars === 18 && ch2.prevLevelReq === '1-10' && ch2.baseClearDust === 14, 'Ch2 metadata mismatch');
-      ctx.assertEq(ch2.firstStarDust, [20, 25, 35], 'Ch2 firstStarDust');
-      ctx.assert(ch3.unlockStars === 40 && ch3.prevLevelReq === '2-10' && ch3.baseClearDust === 18, 'Ch3 metadata mismatch');
-      ctx.assertEq(ch3.firstStarDust, [25, 35, 45], 'Ch3 firstStarDust');
+      ctx.assert(ch1.unlockStars === 0 && !ch1.prevLevelReq && ch1.baseClearDust === 6, 'Ch1 metadata mismatch');
+      ctx.assertEq(ch1.firstStarDust, [10, 15, 22], 'Ch1 firstStarDust');
+      ctx.assert(ch2.unlockStars === 18 && ch2.prevLevelReq === '1-10' && ch2.baseClearDust === 10, 'Ch2 metadata mismatch');
+      ctx.assertEq(ch2.firstStarDust, [16, 22, 32], 'Ch2 firstStarDust');
+      ctx.assert(ch3.unlockStars === 40 && ch3.prevLevelReq === '2-10' && ch3.baseClearDust === 14, 'Ch3 metadata mismatch');
+      ctx.assertEq(ch3.firstStarDust, [22, 30, 42], 'Ch3 firstStarDust');
 
       ctx.assertEq(ld.getNextLevelId('1-1'), '1-2', 'next after 1-1');
       ctx.assertEq(ld.getNextLevelId('1-10'), '2-1', 'next after 1-10');
@@ -1842,7 +1848,7 @@ const F05_TESTS = [
             for (let c = 0; c < st.grid.cols; c++) {
               if (st.grid.cells[r][c].tile) {
                 dbg.tapBoardCell(r, c);
-                dbg.doubleTapTray(0);
+                dbg.doubleTapTray(0, { ignoreCooldown: true });
               }
             }
           }
@@ -1864,7 +1870,7 @@ const F05_TESTS = [
                   if (t) {
                     if (t.tier === 2) c2 += 1;
                     dbg.tapBoardCell(r, c);
-                    dbg.doubleTapTray(0);
+                    dbg.doubleTapTray(0, { ignoreCooldown: true });
                   }
                 }
               }
@@ -1889,7 +1895,7 @@ const F05_TESTS = [
                 if (t) {
                   spawnedTier = t.tier;
                   dbg.tapBoardCell(r, c);
-                  dbg.doubleTapTray(0);
+                  dbg.doubleTapTray(0, { ignoreCooldown: true });
                 }
               }
             }
@@ -1938,7 +1944,7 @@ const F05_TESTS = [
           for (let c = 0; c < st0.grid.cols; c++) {
             if (st0.grid.cells[r][c].tile) {
               dbg.tapBoardCell(r, c);
-              dbg.doubleTapTray(0);
+              dbg.doubleTapTray(0, { ignoreCooldown: true });
             }
           }
         }
@@ -1956,7 +1962,7 @@ const F05_TESTS = [
                 if (t) {
                   if (t.tier === 2) c2 += 1;
                   dbg.tapBoardCell(r, c);
-                  dbg.doubleTapTray(0);
+                  dbg.doubleTapTray(0, { ignoreCooldown: true });
                 }
               }
             }
@@ -1984,7 +1990,7 @@ const F05_TESTS = [
                 if (tile) {
                   tier = tile.tier;
                   dbg.tapBoardCell(r, c);
-                  dbg.doubleTapTray(0);
+                  dbg.doubleTapTray(0, { ignoreCooldown: true });
                 }
               }
             }
@@ -2165,6 +2171,17 @@ const F06_TESTS = [
       ctx.assertEq(st.tray[0], null, 'tray[0] must be discarded to null after fast double-tap');
       ctx.assertEq(st.grid.cells[0][0].tile, null, 'Discarded tile must not return to board (0,0)');
       ctx.assertEq(st.score, 0, 'Trash discard must incur 0 score penalty');
+      ctx.assert(st.trashCooldown >= 7.5 && st.trashCooldown <= 8.0, `Expected 8.0s trashCooldown armed, got ${st.trashCooldown}`);
+
+      // Verify 2nd discard during 8.0s cooldown is blocked, then succeeds after cooldown expires
+      await ctx.eval(() => window.__HOSHI_DEBUG__.tapBoardCell(1, 3)); // load C3 at (1,3) into tray[0]
+      await ctx.doubleTapCanvas(sx, sy, { gapMs: 85, holdMs: 28 });
+      st = await ctx.getState();
+      ctx.assert(st.tray[0] !== null, '2nd trash discard during 8.0s cooldown must be blocked');
+      await ctx.advanceTime(8.1);
+      await ctx.doubleTapCanvas(sx, sy, { gapMs: 85, holdMs: 28 });
+      st = await ctx.getState();
+      ctx.assertEq(st.tray[0], null, 'Trash discard succeeds after 8.0s cooldown expires');
     }
   },
 
@@ -2365,7 +2382,7 @@ const F07_TESTS = [
       ctx.assert(r15Idx >= 0, 'Expected R15 (C2 + C3[matcha]) customer on 2-1');
 
       const custMult = seatSnap.isVip ? 1.5 : seatSnap.isUrgent ? 1.25 : 1.0;
-      const expectedScore = Math.round((70 + 150 * 1.35) * 1.18 * 1.3 * custMult);
+      const expectedScore = Math.round((70 + 150 * 1.25) * 1.12 * 1.2 * custMult);
 
       // 2-1 presets: (0,1):C2(plain), (1,1):C3(matcha)
       await ctx.eval((idx) => {
@@ -2407,8 +2424,8 @@ const F07_TESTS = [
       ctx.assert(r16Idx >= 0, 'Expected R16 (C4[matcha] + C3) customer on 2-2');
 
       const custMult = seatSnap.isVip ? 1.5 : seatSnap.isUrgent ? 1.25 : 1.0;
-      // C4(gold) uses 1.50x (480) + C3(plain) uses 1.00x (150) = 630
-      const expectedGoldScore = Math.round((320 * 1.5 + 150 * 1.0) * 1.18 * 1.3 * custMult);
+      // C4(gold) uses 1.35x (432) + C3(plain) uses 1.00x (150) = 582
+      const expectedGoldScore = Math.round((320 * 1.35 + 150 * 1.0) * 1.12 * 1.2 * custMult);
 
       // 2-2 presets: (1,1):C4(gold), (0,1):C3(plain)
       await ctx.eval((idx) => {
@@ -2420,7 +2437,7 @@ const F07_TESTS = [
 
       const stAfter = await ctx.advanceTime(0.6);
       ctx.assertEq(stAfter.ordersServed, 1, 'C4(gold) wildcard must satisfy C4[matcha] in R16');
-      ctx.assertEq(stAfter.score, expectedGoldScore, `Expected gold x1.50 score ${expectedGoldScore}, got ${stAfter.score}`);
+      ctx.assertEq(stAfter.score, expectedGoldScore, `Expected gold x1.35 score ${expectedGoldScore}, got ${stAfter.score}`);
     }
   },
 
@@ -2450,7 +2467,7 @@ const F07_TESTS = [
                   const dbg = window.__HOSHI_DEBUG__;
                   dbg.tapBoardCell(r, c);
                   const tr = dbg.getState().tray || [];
-                  for (let i = 0; i < tr.length; i++) if (tr[i]) dbg.doubleTapTray(i);
+                  for (let i = 0; i < tr.length; i++) if (tr[i]) dbg.doubleTapTray(i, { ignoreCooldown: true });
                 },
                 over.r,
                 over.c
@@ -2544,7 +2561,7 @@ const F07_TESTS = [
         (p1, p2) => {
           const dbg = window.__HOSHI_DEBUG__;
           const tr = dbg.getState().tray || [];
-          for (let i = 0; i < tr.length; i++) if (tr[i]) dbg.doubleTapTray(i);
+          for (let i = 0; i < tr.length; i++) if (tr[i]) dbg.doubleTapTray(i, { ignoreCooldown: true });
           dbg.tapBoardCell(p1.r, p1.c);
           dbg.tapBoardCell(p2.r, p2.c);
         },
@@ -2586,7 +2603,7 @@ const F07_TESTS = [
                   const dbg = window.__HOSHI_DEBUG__;
                   dbg.tapBoardCell(r, c);
                   const tr = dbg.getState().tray || [];
-                  for (let i = 0; i < tr.length; i++) if (tr[i]) dbg.doubleTapTray(i);
+                  for (let i = 0; i < tr.length; i++) if (tr[i]) dbg.doubleTapTray(i, { ignoreCooldown: true });
                 },
                 over.r,
                 over.c
@@ -2683,7 +2700,7 @@ const F07_TESTS = [
         (p1, p2) => {
           const dbg = window.__HOSHI_DEBUG__;
           const tr = dbg.getState().tray || [];
-          for (let i = 0; i < tr.length; i++) if (tr[i]) dbg.doubleTapTray(i);
+          for (let i = 0; i < tr.length; i++) if (tr[i]) dbg.doubleTapTray(i, { ignoreCooldown: true });
           dbg.tapBoardCell(p1.r, p1.c);
           dbg.tapBoardCell(p2.r, p2.c);
         },
@@ -2763,7 +2780,7 @@ const F08_TESTS = [
       await ctx.eval(() => {
         const dbg = window.__HOSHI_DEBUG__;
         dbg.doubleTapTray(0);
-        dbg.doubleTapTray(1);
+        dbg.doubleTapTray(1, { ignoreCooldown: true });
       });
       await assertZeroScore('tray_trash_x2');
 
@@ -2803,15 +2820,15 @@ const F08_TESTS = [
         throw new Error(`Could not roll ${recipeId} on 1-1 within 25 tries`);
       }
 
-      // Pass A: luna (patronMult = 1.00)
-      ctx.assertEq(await measureRecipeScore('luna', 'R01'), 39, 'luna green R01 === round(30 * 1.30) = 39');
-      ctx.assertEq(await measureRecipeScore('luna', 'R02'), 91, 'luna green R02 === round(70 * 1.30) = 91');
-      ctx.assertEq(await measureRecipeScore('luna', 'R03'), 153, 'luna green R03 === round(100 * 1.18 * 1.30) = 153');
+      // Pass A: luna (patronMult = 1.00, green = 1.20)
+      ctx.assertEq(await measureRecipeScore('luna', 'R01'), 36, 'luna green R01 === round(30 * 1.20) = 36');
+      ctx.assertEq(await measureRecipeScore('luna', 'R02'), 84, 'luna green R02 === round(70 * 1.20) = 84');
+      ctx.assertEq(await measureRecipeScore('luna', 'R03'), 134, 'luna green R03 === round(100 * 1.12 * 1.20) = 134');
 
-      // Pass B: mikan (patronMult = 1.08)
-      ctx.assertEq(await measureRecipeScore('mikan', 'R01'), 42, 'mikan green R01 === round(30 * 1.30 * 1.08) = 42');
-      ctx.assertEq(await measureRecipeScore('mikan', 'R02'), 98, 'mikan green R02 === round(70 * 1.30 * 1.08) = 98');
-      ctx.assertEq(await measureRecipeScore('mikan', 'R03'), 166, 'mikan green R03 === round(100 * 1.18 * 1.30 * 1.08) = 166');
+      // Pass B: mikan (patronMult = 1.08, green = 1.20)
+      ctx.assertEq(await measureRecipeScore('mikan', 'R01'), 39, 'mikan green R01 === round(30 * 1.20 * 1.08) = 39');
+      ctx.assertEq(await measureRecipeScore('mikan', 'R02'), 91, 'mikan green R02 === round(70 * 1.20 * 1.08) = 91');
+      ctx.assertEq(await measureRecipeScore('mikan', 'R03'), 145, 'mikan green R03 === round(100 * 1.12 * 1.20 * 1.08) = 145');
     }
   },
 
@@ -2831,7 +2848,7 @@ const F08_TESTS = [
       const idx = st.seats.findIndex(Boolean);
       const recId = st.seats[idx].recipeId;
       st = await bakeAndServeSeat(ctx, idx);
-      const expectedMap = { R01: 70, R02: 127, R03: 233 };
+      const expectedMap = { R01: 58, R02: 109, R03: 187 };
       ctx.assertEq(st.score, expectedMap[recId], `Upgraded ${recId} score mismatch`);
 
       // 2. 3-item R08 (C1+C2+C3) on 1-3 with dev_tray Lv.2 (x1.12 bonus)
@@ -2855,7 +2872,7 @@ const F08_TESTS = [
       ctx.assert(r08Idx >= 0, 'Expected R08 (C1+C2+C3) customer on 1-3');
 
       const custMult = r08Seat.isUrgent ? 1.25 : 1.0;
-      const expectedR08 = Math.round((30 + 70 + 150) * 1.35 * 1.3 * custMult * 1.12);
+      const expectedR08 = Math.round((30 + 70 + 150) * 1.25 * 1.2 * custMult * 1.12);
       // 1-3 presets already contain (2,0):C1, (0,0):C2, (3,2):C3
       await ctx.eval((sIdx) => {
         const dbg = window.__HOSHI_DEBUG__;
@@ -2875,7 +2892,7 @@ const F08_TESTS = [
     features: ['F08'],
     title: 'Three-band patience tip multipliers (Green >0.55 -> x1.30, Yellow 0.25..0.55 -> x1.00, Red <0.25 -> x0.85)',
     run: async (ctx) => {
-      const baseByRec = { R01: 30, R02: 70, R03: 118 };
+      const baseByRec = { R01: 30, R02: 70, R03: 112 };
 
       async function serveAtPatienceFraction(targetRatio) {
         await startLevelClean(ctx, '1-1', {
@@ -2896,23 +2913,23 @@ const F08_TESTS = [
         return { ratioBefore, recId, score: after.score };
       }
 
-      // 1. Green (~0.96 > 0.55 -> x1.30)
+      // 1. Green (~0.96 >= 0.60 -> x1.20)
       const green = await serveAtPatienceFraction(0.96);
-      ctx.assert(green.ratioBefore > 0.55, 'Green pRatio > 0.55');
-      const rawGreen = green.recId === 'R03' ? 100 * 1.18 : baseByRec[green.recId];
-      ctx.assertEq(green.score, Math.round(rawGreen * 1.3), `Green score mismatch for ${green.recId}`);
+      ctx.assert(green.ratioBefore >= 0.6, 'Green pRatio >= 0.60');
+      const rawGreen = green.recId === 'R03' ? 100 * 1.12 : baseByRec[green.recId];
+      ctx.assertEq(green.score, Math.round(rawGreen * 1.2), `Green score mismatch for ${green.recId}`);
 
-      // 2. Yellow (~0.40 in [0.25, 0.55] -> x1.00)
+      // 2. Yellow (~0.40 in [0.25, 0.60) -> x1.00)
       const yellow = await serveAtPatienceFraction(0.4);
-      ctx.assert(yellow.ratioBefore >= 0.28 && yellow.ratioBefore <= 0.52, `Yellow pRatio=${yellow.ratioBefore}`);
-      const rawYellow = yellow.recId === 'R03' ? 100 * 1.18 : baseByRec[yellow.recId];
+      ctx.assert(yellow.ratioBefore >= 0.28 && yellow.ratioBefore <= 0.55, `Yellow pRatio=${yellow.ratioBefore}`);
+      const rawYellow = yellow.recId === 'R03' ? 100 * 1.12 : baseByRec[yellow.recId];
       ctx.assertEq(yellow.score, Math.round(rawYellow * 1.0), `Yellow score mismatch for ${yellow.recId}`);
 
-      // 3. Red (~0.15 < 0.25 -> x0.85)
+      // 3. Red (~0.15 < 0.25 -> x0.80)
       const red = await serveAtPatienceFraction(0.15);
       ctx.assert(red.ratioBefore > 0.05 && red.ratioBefore < 0.22, `Red pRatio=${red.ratioBefore}`);
-      const rawRed = red.recId === 'R03' ? 100 * 1.18 : baseByRec[red.recId];
-      ctx.assertEq(red.score, Math.round(rawRed * 0.85), `Red score mismatch for ${red.recId}`);
+      const rawRed = red.recId === 'R03' ? 100 * 1.12 : baseByRec[red.recId];
+      ctx.assertEq(red.score, Math.round(rawRed * 0.8), `Red score mismatch for ${red.recId}`);
     }
   },
 
@@ -2928,31 +2945,30 @@ const F08_TESTS = [
         deviceUpgrades: { dev_tray: 1, dev_flour: 1, dev_teapot: 2, dev_tools: 3 }
       });
 
-      const comboMults = [1.0, 1.1, 1.22, 1.35, 1.5];
+      const comboMults = [1.0, 1.06, 1.13, 1.2, 1.28];
       await ctx.advanceTime(3.1);
 
       for (let k = 1; k <= 5; k++) {
         let st = await ctx.getState();
-        let seatIdx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.6);
+        let seatIdx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
         if (seatIdx < 0) {
           st = await ctx.advanceTime(2.3);
-          seatIdx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.6);
+          seatIdx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
         }
         ctx.assert(seatIdx >= 0, `Expected green-patience customer for serve #${k}`);
 
         const scoreBefore = st.score;
         const feverBefore = st.feverActive;
         const recId = st.seats[seatIdx].recipeId;
-        const rawBase = recId === 'R01' ? 30 : recId === 'R02' ? 70 : 100 * 1.18;
+        const rawBase = recId === 'R01' ? 30 : recId === 'R02' ? 70 : 100 * 1.12;
 
         const after = await bakeAndServeSeat(ctx, seatIdx);
         ctx.assertEq(after.comboCount, k, `Expected comboCount === ${k} after serve #${k}`);
 
         const delta = after.score - scoreBefore;
-        const feverMult = feverBefore ? 1.35 : 1.0;
-        const expected = Math.round(rawBase * 1.3 * comboMults[k - 1] * feverMult);
-        // Allow trigger-frame Fever ambiguity only if k === 4 flipped feverActive before scoring
-        const altTrigger = k === 4 && after.feverActive ? Math.round(rawBase * 1.3 * comboMults[k - 1] * 1.35) : expected;
+        const feverMult = feverBefore ? 1.25 : 1.0;
+        const expected = Math.round(rawBase * 1.2 * comboMults[k - 1] * feverMult);
+        const altTrigger = k === 5 && after.feverActive ? Math.round(rawBase * 1.2 * comboMults[k - 1] * 1.25) : expected;
         ctx.assert(
           delta === expected || delta === altTrigger,
           `Serve #${k} (${recId}) expected ${expected}, got ${delta} (feverBefore=${feverBefore})`
@@ -2975,21 +2991,22 @@ const F08_TESTS = [
 
       await ctx.advanceTime(3.1);
       const energies = [];
-      for (let k = 1; k <= 4; k++) {
+      for (let k = 1; k <= 5; k++) {
         let st = await ctx.getState();
-        let seatIdx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.6);
+        let seatIdx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
         if (seatIdx < 0) {
           st = await ctx.advanceTime(2.3);
-          seatIdx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.6);
+          seatIdx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
         }
         const after = await bakeAndServeSeat(ctx, seatIdx);
         energies.push({ k, energy: after.feverEnergy, active: after.feverActive });
       }
 
-      ctx.assert(energies[0].energy === 25 && !energies[0].active, `After serve 1 expected energy 25, got ${JSON.stringify(energies[0])}`);
-      ctx.assert(energies[1].energy === 50 && !energies[1].active, `After serve 2 expected energy 50, got ${JSON.stringify(energies[1])}`);
-      ctx.assert(energies[2].energy === 75 && !energies[2].active, `After serve 3 expected energy 75, got ${JSON.stringify(energies[2])}`);
-      ctx.assertEq(energies[3].active, true, 'After 4 green serves (4x25%=100%), feverActive must be true');
+      ctx.assert(energies[0].energy === 20 && !energies[0].active, `After serve 1 expected energy 20, got ${JSON.stringify(energies[0])}`);
+      ctx.assert(energies[1].energy === 40 && !energies[1].active, `After serve 2 expected energy 40, got ${JSON.stringify(energies[1])}`);
+      ctx.assert(energies[2].energy === 60 && !energies[2].active, `After serve 3 expected energy 60, got ${JSON.stringify(energies[2])}`);
+      ctx.assert(energies[3].energy === 80 && !energies[3].active, `After serve 4 expected energy 80, got ${JSON.stringify(energies[3])}`);
+      ctx.assertEq(energies[4].active, true, 'After 5 green serves (5x20%=100%), feverActive must be true');
 
       // Measure patience decay over 2.0s during active Fever -> expected 1.0s (x0.5 rate)
       let st = await ctx.getState();
@@ -3007,19 +3024,19 @@ const F08_TESTS = [
         `During Fever, 2.0s elapsed must decay patience by ~1.0s (0.5x), got ${pDrop.toFixed(3)}s`
       );
 
-      // Serve #5 while feverActive === true -> must include x1.35 feverMult
-      let serve5Idx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.6);
-      if (serve5Idx < 0) {
+      // Serve #6 while feverActive === true -> must include x1.25 feverMult and 1.28 combo cap
+      let serve6Idx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
+      if (serve6Idx < 0) {
         st = await ctx.advanceTime(2.3);
-        serve5Idx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.6);
+        serve6Idx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
       }
-      ctx.assert(st.feverActive, 'Fever still active before Serve #5');
-      const scoreBefore5 = st.score;
-      const rec5 = st.seats[serve5Idx].recipeId;
-      const raw5 = rec5 === 'R01' ? 30 : rec5 === 'R02' ? 70 : 100 * 1.18;
-      const after5 = await bakeAndServeSeat(ctx, serve5Idx);
-      const expected5 = Math.round(raw5 * 1.3 * 1.5 * 1.35);
-      ctx.assertEq(after5.score - scoreBefore5, expected5, `Serve #5 during Fever must include x1.35 multiplier`);
+      ctx.assert(st.feverActive, 'Fever still active before Serve #6');
+      const scoreBefore6 = st.score;
+      const rec6 = st.seats[serve6Idx].recipeId;
+      const raw6 = rec6 === 'R01' ? 30 : rec6 === 'R02' ? 70 : 100 * 1.12;
+      const after6 = await bakeAndServeSeat(ctx, serve6Idx);
+      const expected6 = Math.round(raw6 * 1.2 * 1.28 * 1.25);
+      ctx.assertEq(after6.score - scoreBefore6, expected6, `Serve #6 during Fever must include x1.25 multiplier`);
     }
   }
 ];
@@ -3251,11 +3268,13 @@ const F09_TESTS = [
     title: 'VIP Critic (cust_critic) visit, x1.50 bounty, +40% skill / +35% fever, and +5 stardust settlement bonus',
     query: '?safeTop=47&safeBottom=34&capsule=1&cloud=0',
     run: async (ctx) => {
-      // 1-10 has vipQuota: 1, vipFixedRecipeId: 'R14' (C4 + C5), stars: [4800, 6600, 8400]
+      // 1-10 has vipQuota: 1, vipFixedRecipeId: 'R14' (C4 + C5), stars: [5500, 8000, 10600]
+      const pre1_10Stars = {};
+      for (let i = 1; i <= 9; i++) pre1_10Stars[`1-${i}`] = 3;
       await startLevelClean(ctx, '1-10', {
-        totalEarnedStardust: 6000,
-        bankStardust: 1180,
-        levelStars: makeUnlockedStarsMap(ctx, 3),
+        totalEarnedStardust: 6500,
+        bankStardust: 850,
+        levelStars: pre1_10Stars,
         catcakeLevels: { 1: 4, 2: 4, 3: 4, 4: 4, 5: 4, 6: 4, 7: 4 },
         deviceUpgrades: { dev_tray: 2, dev_flour: 3, dev_teapot: 3, dev_tools: 3 }
       });
@@ -3265,7 +3284,7 @@ const F09_TESTS = [
       let st = await ctx.advanceTime(3.2);
       let vipServedDone = false;
 
-      for (let cycle = 0; cycle < 18 && st.timeLeft > 9.0; cycle++) {
+      for (let cycle = 0; cycle < 20 && st.timeLeft > 9.0; cycle++) {
         const vipIdx = st.seats.findIndex((s) => s && s.isVip);
         if (vipIdx >= 0) {
           const vipSeat = st.seats[vipIdx];
@@ -3282,17 +3301,17 @@ const F09_TESTS = [
             `VIP serve must grant +40% skillEnergy (${skillBefore} -> ${st.skillEnergy})`
           );
           if (!feverWasActive && !st.feverActive) {
-            ctx.assertEq(st.feverEnergy, feverBefore + 35, 'VIP serve must grant +35% feverEnergy');
+            ctx.assertEq(st.feverEnergy, feverBefore + 30, 'VIP serve must grant +30% feverEnergy');
           }
           vipServedDone = true;
-          if (st.score >= 4800) break;
+          if (st.score >= 5500) break;
         }
 
-        // Serve a normal seat to cycle waves AND ensure score >= 4800 (star1 on 1-10)
+        // Serve a normal seat to cycle waves AND ensure score >= 5500 (star1 on 1-10)
         const anyIdx = st.seats.findIndex(Boolean);
         if (anyIdx >= 0) {
           st = await bakeAndServeSeat(ctx, anyIdx);
-          if (vipServedDone && st.score >= 4800) break;
+          if (vipServedDone && st.score >= 5500) break;
           st = await ctx.advanceTime(2.3);
         } else {
           st = await ctx.advanceTime(2.3);
@@ -3300,25 +3319,23 @@ const F09_TESTS = [
       }
 
       ctx.assert(vipServedDone, 'Expected cust_critic VIP to visit and be served on 1-10');
-      // Ensure score >= 4800 for star1 clear
-      while (st.score < 4800 && st.timeLeft > 9.0) {
+      while (st.score < 5500 && st.timeLeft > 9.0) {
         const idx = st.seats.findIndex(Boolean);
         if (idx >= 0) st = await bakeAndServeSeat(ctx, idx);
         else st = await ctx.advanceTime(2.0);
       }
-      ctx.assert(st.score >= 4800, `Expected score >= 4800 on 1-10, got ${st.score}`);
+      ctx.assert(st.score >= 5500, `Expected score >= 5500 on 1-10, got ${st.score}`);
 
-      // Settle level
       st = await ctx.advanceTime(st.timeLeft + 1.0);
       ctx.assertEq(st.activeModal, 'level_result', 'Expected level_result modal');
       const res = st.lastResult || {};
-      const vipDust = res.vipDustAward ?? res.vipDust ?? st.vipServed * 5;
-      ctx.assertEq(vipDust, st.vipServed * 5, 'vipDustAward must equal vipServed * 5');
+      const vipDust = res.vipDustAward ?? res.vipDust ?? st.vipServed * 4;
+      ctx.assertEq(vipDust, st.vipServed * 4, 'vipDustAward must equal vipServed * 4');
 
       const saveAfter = await ctx.getSaveData();
       const totalDust = res.totalDustAward ?? res.dustAward ?? saveAfter.bankStardust - bankBefore;
-      ctx.assert(totalDust >= 10 + st.vipServed * 5, `Expected totalDust >= ${10 + st.vipServed * 5}, got ${totalDust}`);
-      ctx.assertEq(saveAfter.bankStardust, bankBefore + totalDust, 'bankStardust must include +5 VIP bonus dust');
+      ctx.assert(totalDust >= 6 + st.vipServed * 4, `Expected totalDust >= ${6 + st.vipServed * 4}, got ${totalDust}`);
+      ctx.assertEq(saveAfter.bankStardust, bankBefore + totalDust, 'bankStardust must include +4 VIP bonus dust');
     }
   }
 ];
@@ -3527,21 +3544,21 @@ const F10_TESTS = [
         `Expected restored lowpass target ~12500 Hz, got ${brightTel.lowpassLastTargetHz}`
       );
 
-      // Enter 1-1 and trigger Starlight Fever (4 green serves)
+      // Enter 1-1 and trigger Starlight Fever (5 green serves)
       await ctx.eval(() => window.__HOSHI_DEBUG__.startLevel('1-1'));
       await ctx.advanceTime(3.1);
-      for (let k = 0; k < 4; k++) {
+      for (let k = 0; k < 5; k++) {
         let st = await ctx.getState();
-        let idx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.6);
+        let idx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
         if (idx < 0) {
           st = await ctx.advanceTime(2.3);
-          idx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.6);
+          idx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
         }
-        if (k === 3) await clearAudioTelemetry(ctx);
+        if (k === 4) await clearAudioTelemetry(ctx);
         await bakeAndServeSeat(ctx, idx);
       }
       const stFever = await ctx.getState();
-      ctx.assertEq(stFever.feverActive, true, 'Expected Fever activated after 4 green serves');
+      ctx.assertEq(stFever.feverActive, true, 'Expected Fever activated after 5 green serves');
       ctx.assert((await getAudioTelemetry(ctx)).synthEvents >= 1, 'Expected Fever fanfare / BGM synthesis');
     }
   },
@@ -3597,8 +3614,8 @@ const F11_TESTS = [
 
       const save = await ctx.getSaveData();
       ctx.assertEq(save.schemaVersion, 2, 'schemaVersion === 2');
-      ctx.assertEq(save.bankStardust, 30, 'Fresh bankStardust === 30');
-      ctx.assertEq(save.totalEarnedStardust, 30, 'Fresh totalEarnedStardust === 30');
+      ctx.assertEq(save.bankStardust, 15, 'Fresh bankStardust === 15');
+      ctx.assertEq(save.totalEarnedStardust, 15, 'Fresh totalEarnedStardust === 15');
       ctx.assertEq(save.highestUnlockedLevel, '1-1', 'highestUnlockedLevel === 1-1');
       ctx.assertEq(save.unlockedPatrons, ['mikan'], 'unlockedPatrons === [mikan]');
       ctx.assertEq(save.unlockedThemes, ['amber'], 'unlockedThemes === [amber]');
@@ -3640,7 +3657,7 @@ const F11_TESTS = [
       ctx.assertEq(save.schemaVersion, 2, 'Migrated schemaVersion === 2');
       ctx.assert(save.unlockedPatrons.includes('luna'), 'luna retained in unlockedPatrons');
       ctx.assert(save.unlockedThemes.includes('sakura'), 'sakura retained in unlockedThemes');
-      ctx.assertEq(save.totalEarnedStardust, 390, 'UT-S01 totalEarnedStardust === 390 (320 + 20 luna diff + 50 gift)');
+      ctx.assertEq(save.totalEarnedStardust, 430, 'UT-S01 totalEarnedStardust === 430 (320 + 40 luna diff + 20 sakura diff + 50 gift)');
       ctx.assertEq(save.bankStardust, 230, 'UT-S01 bankStardust === 230 (50 + 130 refund + 50 gift)');
     }
   },
@@ -3674,7 +3691,7 @@ const F11_TESTS = [
         'All 3 patrons retained'
       );
       // v1Total = 40 + (60 luna + 100 mugi + 50 up_fever) = 250; +20 luna +20 mugi +50 gift = 340; v2Spent = 200 -> bank = 140
-      ctx.assertEq(save.totalEarnedStardust, 340, 'Expected totalEarnedStardust === 340');
+      ctx.assertEq(save.totalEarnedStardust, 380, 'Expected totalEarnedStardust === 380');
       ctx.assertEq(save.bankStardust, 140, 'Expected bankStardust === 140 (40 + 50 up_fever refund + 50 gift)');
     }
   },
@@ -3724,7 +3741,7 @@ const F11_TESTS = [
         schemaVersion: 2,
         lastSyncedEarnedStardust: 200,
         totalEarnedStardust: 230,
-        bankStardust: 170,
+        bankStardust: 155,
         consumableSpentStardust: 0,
         catcakeLevels: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 },
         deviceUpgrades: { dev_tray: 1, dev_flour: 0, dev_teapot: 0, dev_tools: 0 },
@@ -3776,8 +3793,8 @@ const F11_TESTS = [
 
       const merged = await ctx.getSaveData();
       ctx.assertEq(merged.totalEarnedStardust, 275, 'UT-S02 merged totalEarnedStardust === 230 + (245 - 200) = 275');
-      ctx.assertEq(merged.deviceUpgrades.dev_tray, 1, 'UT-S02 retains cloud dev_tray: 1 (spent = 60)');
-      ctx.assertEq(merged.bankStardust, 215, 'UT-S02 merged bankStardust === 275 - 60 = 215');
+      ctx.assertEq(merged.deviceUpgrades.dev_tray, 1, 'UT-S02 retains cloud dev_tray: 1 (spent = 75)');
+      ctx.assertEq(merged.bankStardust, 200, 'UT-S02 merged bankStardust === 275 - 75 = 200');
       ctx.assertEq(merged.levelStars['1-1'], 3, 'UT-S02 per-level max star 1-1 === 3');
       ctx.assertEq(merged.levelStars['1-2'], 2, 'UT-S02 per-level max star 1-2 === 2');
       ctx.assertEq(merged.lifetimeStats?.totalStars, 5, 'UT-S02 totalStars === 5');
@@ -3817,29 +3834,29 @@ const F11_TESTS = [
       await ctx.clickHit('modal_close');
 
       let save = await ctx.getSaveData();
-      ctx.assertEq(save.bankStardust, 160, '300 - 140 permanent spend === 160');
+      ctx.assertEq(save.bankStardust, 125, '300 - 175 permanent spend === 125');
 
-      // Enter 1-1 (dev_tools Lv.1 grants fork:1, spoon:1), consume free fork, then buy 1 emergency fork (-15)
+      // Enter 1-1 (dev_tools Lv.1 grants fork:1, spoon:1), consume free fork, then buy 1 emergency fork (-20)
       await ctx.eval(() => window.__HOSHI_DEBUG__.startLevel('1-1'));
-      await ctx.useToolOnCell('fork', 0, 0);
+      await ctx.useToolOnCell('fork', 0, 0, 'trash');
       ctx.assertEq((await ctx.getState()).toolCounts.fork, 0, 'Free fork consumed');
 
       await buyEmergencyUtensil(ctx, 'fork');
       const stAfterBuy = await ctx.getState();
       if (stAfterBuy.activeTool === 'fork' || (stAfterBuy.toolCounts?.fork || 0) > 0) {
-        await ctx.useToolOnCell('fork', 0, 1);
+        await ctx.useToolOnCell('fork', 0, 1, 'trash');
       }
 
       save = await ctx.getSaveData();
-      ctx.assertEq(save.consumableSpentStardust, 15, 'consumableSpentStardust === 15');
+      ctx.assertEq(save.consumableSpentStardust, 20, 'consumableSpentStardust === 20');
       ctx.assertEq(save.totalEarnedStardust, 300, 'totalEarnedStardust unchanged at 300');
-      ctx.assertEq(save.bankStardust, 145, '300 - (140 + 15) === 145');
+      ctx.assertEq(save.bankStardust, 105, '300 - (175 + 20) === 105');
 
       await ctx.reload();
       const reloaded = await ctx.getSaveData();
-      ctx.assertEq(reloaded.consumableSpentStardust, 15, 'Post-reload consumableSpentStardust === 15');
+      ctx.assertEq(reloaded.consumableSpentStardust, 20, 'Post-reload consumableSpentStardust === 20');
       ctx.assertEq(reloaded.totalEarnedStardust, 300, 'Post-reload totalEarnedStardust === 300');
-      ctx.assertEq(reloaded.bankStardust, 145, 'Post-reload bankStardust === 145 (no refund exploit)');
+      ctx.assertEq(reloaded.bankStardust, 105, 'Post-reload bankStardust === 105 (no refund exploit)');
     }
   }
 ];
@@ -3878,7 +3895,7 @@ const F12_TESTS = [
         deviceUpgrades: { dev_tray: 1, dev_flour: 2, dev_teapot: 2, dev_tools: 2 }
       });
       let st = await ctx.advanceTime(3.1);
-      while (st.score < 850 && st.timeLeft > 10) {
+      while (st.score < 900 && st.timeLeft > 10) {
         const idx = st.seats.findIndex(Boolean);
         if (idx >= 0) st = await bakeAndServeSeat(ctx, idx);
         else st = await ctx.advanceTime(2.0);
@@ -4106,16 +4123,17 @@ const F12_TESTS = [
         if (window.__WX_HARNESS__) window.__WX_HARNESS__.failNextPushCount = 1;
       });
 
-      // Trigger a save push via Shop C1 Lv.1 purchase
+      // Trigger a save push via Shop C1 Lv.1 purchase (1800ms debounce)
       await ctx.clickHit('dock_shop');
       await clickHitScrollingModalIfNeeded(ctx, 'shop_buy_catcake_1');
+      await stepBothClocks(ctx, 1850);
 
       const retrySt = await ctx.waitFor(
         async () => {
           const cur = await ctx.getState();
           return cur.cloudStatus === 'retry_pending' ? cur : null;
         },
-        { timeoutMs: 2000, label: 'cloudStatus === retry_pending' }
+        { timeoutMs: 3500, label: 'cloudStatus === retry_pending' }
       );
       ctx.assertEq(retrySt.cloudStatus, 'retry_pending', 'Failed push must enter retry_pending (not local_only)');
 
@@ -4258,17 +4276,17 @@ const F13_TESTS = [
     run: async (ctx) => {
       await ctx.resetGame();
       await startLevelClean(ctx, '1-1', {
-        bankStardust: 30,
-        totalEarnedStardust: 30,
+        bankStardust: 15,
+        totalEarnedStardust: 15,
         levelStars: {},
         levelBestScores: {},
         highestUnlockedLevel: '1-1'
       });
 
-      // Organically serve orders on 1-1 until score >= 1400 (3-star target)
+      // Organically serve orders on 1-1 until score >= 1750 (3-star target in v0.9.0)
       let st = await ctx.advanceTime(3.1);
-      for (let guard = 0; guard < 35 && st.score < 1420 && st.timeLeft > 9.0; guard++) {
-        let idx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.56);
+      for (let guard = 0; guard < 45 && st.score < 1770 && st.timeLeft > 9.0; guard++) {
+        let idx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.62);
         if (idx < 0) idx = st.seats.findIndex(Boolean);
         if (idx >= 0) {
           st = await bakeAndServeSeat(ctx, idx);
@@ -4276,7 +4294,7 @@ const F13_TESTS = [
           st = await ctx.advanceTime(2.0);
         }
       }
-      ctx.assert(st.score >= 1400, `Expected 3-star score >= 1400 on 1-1, got ${st.score}`);
+      ctx.assert(st.score >= 1750, `Expected 3-star score >= 1750 on 1-1, got ${st.score}`);
 
       // Expire remaining shift timer to trigger settlement
       st = await ctx.advanceTime(st.timeLeft + 1.0);
@@ -4285,14 +4303,14 @@ const F13_TESTS = [
       const res = st.lastResult || {};
       const starsEarned = res.starsEarned ?? res.stars;
       ctx.assertEq(starsEarned, 3, 'Expected 3 stars earned');
-      if (res.firstStarDustAward !== undefined) ctx.assertEq(res.firstStarDustAward, 65, 'First-star 15+20+30 = 65');
-      if (res.clearDustAward !== undefined) ctx.assertEq(res.clearDustAward, 10, 'Ch.1 clearDustAward = 10');
-      if (res.threeStarBonusDust !== undefined) ctx.assertEq(res.threeStarBonusDust, 8, 'threeStarBonusDust = 8');
-      ctx.assertEq(res.totalDustAward ?? res.dustAward, 83, 'Total 3-star first-clear dust = 83');
+      if (res.firstStarDustAward !== undefined) ctx.assertEq(res.firstStarDustAward, 47, 'First-star 10+15+22 = 47');
+      if (res.clearDustAward !== undefined) ctx.assertEq(res.clearDustAward, 6, 'Ch.1 clearDustAward = 6');
+      if (res.threeStarBonusDust !== undefined) ctx.assertEq(res.threeStarBonusDust, 4, 'threeStarBonusDust = 4');
+      ctx.assertEq(res.totalDustAward ?? res.dustAward, 57, 'Total 3-star first-clear dust = 57');
 
       const save = await ctx.getSaveData();
-      ctx.assertEq(save.bankStardust, 113, 'bankStardust must increase from 30 to 113 (+83)');
-      ctx.assertEq(save.totalEarnedStardust, 113, 'totalEarnedStardust === 113');
+      ctx.assertEq(save.bankStardust, 72, 'bankStardust must increase from 15 to 72 (+57)');
+      ctx.assertEq(save.totalEarnedStardust, 72, 'totalEarnedStardust === 72');
       ctx.assertEq(save.levelStars['1-1'], 3, 'levelStars["1-1"] === 3');
       ctx.assertEq(save.highestUnlockedLevel, '1-2', 'highestUnlockedLevel === 1-2');
 
@@ -4321,50 +4339,50 @@ const F13_TESTS = [
         highestUnlockedLevel: '1-2'
       });
 
-      // Run 1: achieve 2 stars (1050 <= score < 1400) -> +20 (2nd star) + 10 (base clear) = +30 stardust
+      // Run 1: achieve 2 stars (1250 <= score < 1750) -> +15 (2nd star) + 6 (base clear) = +21 stardust
       let st = await ctx.advanceTime(3.1);
-      while (st.score < 1060 && st.timeLeft > 10) {
-        // Reset combo before crossing 1050 if needed so single serve doesn't overshoot 1400
-        if (st.score >= 920 && st.comboCount >= 3) {
-          st = await ctx.advanceTime(10.5);
+      while (st.score < 1265 && st.timeLeft > 10) {
+        if (st.score >= 1120 && st.comboCount >= 3) {
+          st = await ctx.advanceTime(8.5);
         }
         const idx = st.seats.findIndex(Boolean);
         if (idx >= 0) st = await bakeAndServeSeat(ctx, idx);
         else st = await ctx.advanceTime(2.0);
       }
-      ctx.assert(st.score >= 1050 && st.score < 1400, `Expected 2-star score in [1050, 1399], got ${st.score}`);
+      ctx.assert(st.score >= 1250 && st.score < 1750, `Expected 2-star score in [1250, 1749], got ${st.score}`);
 
       st = await ctx.advanceTime(st.timeLeft + 1.0);
       ctx.assertEq(st.activeModal, 'level_result', 'Run 1 settled');
       const res1 = st.lastResult || {};
       ctx.assertEq(res1.starsEarned ?? res1.stars, 2, 'Run 1 earned 2 stars');
-      if (res1.firstStarDustAward !== undefined) ctx.assertEq(res1.firstStarDustAward, 20, 'Delta 1★->2★ firstStarDustAward === 20');
-      ctx.assertEq(res1.totalDustAward ?? res1.dustAward, 30, 'Run 1 totalDustAward === 30');
+      if (res1.firstStarDustAward !== undefined) ctx.assertEq(res1.firstStarDustAward, 15, 'Delta 1★->2★ firstStarDustAward === 15');
+      ctx.assertEq(res1.totalDustAward ?? res1.dustAward, 21, 'Run 1 totalDustAward === 21');
 
       let save = await ctx.getSaveData();
-      ctx.assertEq(save.bankStardust, 130, 'After 1★->2★ upgrade, bankStardust === 130');
+      ctx.assertEq(save.bankStardust, 121, 'After 1★->2★ upgrade, bankStardust === 121');
       ctx.assertEq(save.levelStars['1-1'], 2, 'levelStars["1-1"] === 2');
 
-      // Run 2: replay 1-1 achieving 2 stars again -> 0 first-star dust + 10 base clear = +10 stardust
+      // Run 2: replay 1-1 achieving 2 stars again -> 0 first-star dust + ceil(6 * 0.5) = +3 stardust
       await ctx.eval(() => window.__HOSHI_DEBUG__.startLevel('1-1'));
       st = await ctx.advanceTime(3.1);
-      while (st.score < 1060 && st.timeLeft > 10) {
-        if (st.score >= 920 && st.comboCount >= 3) {
-          st = await ctx.advanceTime(10.5);
+      while (st.score < 1265 && st.timeLeft > 10) {
+        if (st.score >= 1120 && st.comboCount >= 3) {
+          st = await ctx.advanceTime(8.5);
         }
         const idx = st.seats.findIndex(Boolean);
         if (idx >= 0) st = await bakeAndServeSeat(ctx, idx);
         else st = await ctx.advanceTime(2.0);
       }
-      ctx.assert(st.score >= 1050 && st.score < 1400, `Run 2 expected 2-star score, got ${st.score}`);
+      ctx.assert(st.score >= 1250 && st.score < 1750, `Run 2 expected 2-star score, got ${st.score}`);
 
       st = await ctx.advanceTime(st.timeLeft + 1.0);
       const res2 = st.lastResult || {};
       if (res2.firstStarDustAward !== undefined) ctx.assertEq(res2.firstStarDustAward, 0, 'Same-star replay firstStarDustAward === 0');
-      ctx.assertEq(res2.totalDustAward ?? res2.dustAward, 10, 'Same-star replay totalDustAward === 10');
+      ctx.assertEq(res2.isReplayDecay, true, 'Same-star replay sets isReplayDecay === true');
+      ctx.assertEq(res2.totalDustAward ?? res2.dustAward, 3, 'Same-star replay totalDustAward === 3');
 
       save = await ctx.getSaveData();
-      ctx.assertEq(save.bankStardust, 140, 'After 2★->2★ replay, bankStardust === 140');
+      ctx.assertEq(save.bankStardust, 124, 'After 2★->2★ replay, bankStardust === 124');
     }
   },
 
@@ -4384,14 +4402,14 @@ const F13_TESTS = [
       let st = await ctx.advanceTime(0.6);
       st = await bakeAndServeSeat(ctx, st.seats.findIndex(Boolean));
       const failScore = st.score;
-      ctx.assert(failScore > 0 && failScore < 750 && st.ordersServed === 1, `Expected 1 serve < 750, got ${failScore}`);
+      ctx.assert(failScore > 0 && failScore < 850 && st.ordersServed === 1, `Expected 1 serve < 850, got ${failScore}`);
 
       st = await ctx.advanceTime(st.timeLeft + 1.0);
       ctx.assertEq(st.activeModal, 'level_result', 'Run A settled');
       const resA = st.lastResult || {};
       ctx.assertEq(resA.cleared, false, 'Run A cleared === false');
       ctx.assertEq(resA.starsEarned ?? resA.stars, 0, 'Run A starsEarned === 0');
-      const expectedConsolation = Math.max(5, Math.floor((failScore / 750) * 8));
+      const expectedConsolation = Math.max(1, Math.floor((failScore / 850) * 4));
       ctx.assertEq(resA.totalDustAward ?? resA.consolationDust, expectedConsolation, 'Run A consolation formula');
       let save = await ctx.getSaveData();
       ctx.assertEq(save.bankStardust, 50 + expectedConsolation, 'Consolation stardust credited to bankStardust');
@@ -4439,15 +4457,17 @@ const F14_TESTS = [
 
       await clickHitScrollingModalIfNeeded(ctx, 'shop_buy_catcake_1');
       await clickHitScrollingModalIfNeeded(ctx, 'shop_buy_catcake_2');
+      await clickHitScrollingModalIfNeeded(ctx, 'shop_buy_catcake_4');
 
       const save = await ctx.getSaveData();
-      ctx.assertEq(save.catcakeLevels[1] ?? save.catcakeLevels['1'], 1, 'C1 upgraded to Lv.1 (price 36)');
-      ctx.assertEq(save.catcakeLevels[2] ?? save.catcakeLevels['2'], 1, 'C2 upgraded to Lv.1 (price 84)');
-      ctx.assertEq(save.bankStardust, 455, '500 - 20 - 25 === 455');
+      ctx.assertEq(save.catcakeLevels[1] ?? save.catcakeLevels['1'], 1, 'C1 upgraded to Lv.1 (price 35)');
+      ctx.assertEq(save.catcakeLevels[2] ?? save.catcakeLevels['2'], 1, 'C2 upgraded to Lv.1 (price 81)');
+      ctx.assertEq(save.catcakeLevels[4] ?? save.catcakeLevels['4'], 0, 'Locked C4 (unlockLevel 1-3) gated in shop');
+      ctx.assertEq(save.bankStardust, 445, '500 - 25 - 30 === 445');
 
       const constants = await loadBundledModule(ctx, 'constants.js');
-      ctx.assertEq(constants.getCatcakePrice(1, 1), 36, 'C1 Lv.1 price === 36');
-      ctx.assertEq(constants.getCatcakePrice(2, 1), 84, 'C2 Lv.1 price === 84');
+      ctx.assertEq(constants.getCatcakePrice(1, 1), 35, 'C1 Lv.1 price === 35');
+      ctx.assertEq(constants.getCatcakePrice(2, 1), 81, 'C2 Lv.1 price === 81');
     }
   },
 
@@ -4477,7 +4497,7 @@ const F14_TESTS = [
 
       const save = await ctx.getSaveData();
       ctx.assertEq(save.deviceUpgrades, { dev_tray: 1, dev_flour: 1, dev_teapot: 1, dev_tools: 1 }, 'All 4 devices at Lv.1');
-      ctx.assertEq(save.bankStardust, 205, '400 - (60 + 45 + 50 + 40 = 195) === 205');
+      ctx.assertEq(save.bankStardust, 160, '400 - (75 + 55 + 60 + 50 = 240) === 160');
 
       await ctx.clickHit('modal_close');
       await ctx.eval(() => window.__HOSHI_DEBUG__.startLevel('1-1'));
@@ -4518,7 +4538,7 @@ const F14_TESTS = [
       save = await ctx.getSaveData();
       ctx.assertEq(save.unlockedPatrons.length, 3, 'All 3 patrons unlocked');
       ctx.assertEq(save.selectedPatron, 'mugi', 'selectedPatron === mugi');
-      ctx.assertEq(save.bankStardust, 300, '500 - 200 === 300');
+      ctx.assertEq(save.bankStardust, 260, '500 - 240 === 260');
       await ctx.clickHit('modal_close');
 
       // Tap dock_themes from Lobby -> opens Shop directly on themes tab
@@ -4534,7 +4554,7 @@ const F14_TESTS = [
       save = await ctx.getSaveData();
       ctx.assertEq(save.unlockedThemes.length, 3, 'All 3 themes unlocked');
       ctx.assertEq(save.equippedTheme, 'sakura', 'equippedTheme === sakura');
-      ctx.assertEq(save.bankStardust, 100, '300 - 200 === 100');
+      ctx.assertEq(save.bankStardust, 20, '260 - 240 === 20');
     }
   },
 
@@ -4551,7 +4571,7 @@ const F14_TESTS = [
       const graduatedSave = {
         schemaVersion: 2,
         bankStardust: 0,
-        totalEarnedStardust: 5220,
+        totalEarnedStardust: 5650,
         consumableSpentStardust: 0,
         levelStars: makeUnlockedStarsMap(ctx, 3),
         highestUnlockedLevel: '3-10',
@@ -4566,8 +4586,8 @@ const F14_TESTS = [
       await ctx.setSaveData(graduatedSave);
 
       let save = await ctx.getSaveData();
-      ctx.assertEq(saveMod.computeSpentStardust(save), 5220, 'computeSpentStardust(graduatedSave) === 5220');
-      ctx.assertEq(save.bankStardust, 0, '5220 - 5220 === 0 leftover stardust');
+      ctx.assertEq(saveMod.computeSpentStardust(save), 5650, 'computeSpentStardust(graduatedSave) === 5650');
+      ctx.assertEq(save.bankStardust, 0, '5650 - 5650 === 0 leftover stardust');
 
       // Reload and verify persistence + Shop renders cleanly with 0 affordable upgrades
       await ctx.reload();
@@ -4768,7 +4788,7 @@ const F15_TESTS = [
             await ctx.eval(
               (r, c) => {
                 window.__HOSHI_DEBUG__.tapBoardCell(r, c);
-                window.__HOSHI_DEBUG__.doubleTapTray(0);
+                window.__HOSHI_DEBUG__.doubleTapTray(0, { ignoreCooldown: true });
               },
               victim.r,
               victim.c
@@ -4791,30 +4811,30 @@ const F15_TESTS = [
       ctx.assertEq(postTiles.filter((t) => t.tier === 1).length, 0, 'All C1 tiles must be cleared by luna tidy');
       ctx.assertEq(st.grid.cells[0][0].tile?.tier, preCastMax, 'Highest-tier tile must be sorted to (0,0)');
 
-      // Serve #1 after Luna skill (green patience, combo 1) -> MUST receive x1.50 boost!
-      let idx1 = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.56);
+      // Serve #1 after Luna skill (green patience >= 0.65, combo 1) -> MUST receive x1.50 boost!
+      let idx1 = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
       if (idx1 < 0) {
         st = await ctx.advanceTime(2.5);
-        idx1 = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.56);
+        idx1 = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
       }
       const rec1 = st.seats[idx1].recipeId;
-      const raw1 = rec1 === 'R01' ? 30 : rec1 === 'R02' ? 70 : 100 * 1.18;
+      const raw1 = rec1 === 'R01' ? 30 : rec1 === 'R02' ? 70 : 100 * 1.12;
       const sBefore1 = st.score;
       st = await bakeAndServeSeat(ctx, idx1);
-      ctx.assertEq(st.score - sBefore1, Math.round(raw1 * 1.3 * 1.5), '1st post-luna serve must get x1.50 boost');
+      ctx.assertEq(st.score - sBefore1, Math.round(raw1 * 1.2 * 1.5), '1st post-luna serve must get x1.50 boost');
 
       // Reset combo via 10.5s wait, then Serve #2 -> MUST revert to x1.00!
       st = await ctx.advanceTime(10.5);
-      let idx2 = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.56);
+      let idx2 = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
       if (idx2 < 0) {
         st = await ctx.advanceTime(2.5);
-        idx2 = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.56);
+        idx2 = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
       }
       const rec2 = st.seats[idx2].recipeId;
-      const raw2 = rec2 === 'R01' ? 30 : rec2 === 'R02' ? 70 : 100 * 1.18;
+      const raw2 = rec2 === 'R01' ? 30 : rec2 === 'R02' ? 70 : 100 * 1.12;
       const sBefore2 = st.score;
       st = await bakeAndServeSeat(ctx, idx2);
-      ctx.assertEq(st.score - sBefore2, Math.round(raw2 * 1.3 * 1.0), '2nd post-luna serve reverts to x1.00');
+      ctx.assertEq(st.score - sBefore2, Math.round(raw2 * 1.2 * 1.0), '2nd post-luna serve reverts to x1.00');
     }
   },
 
@@ -4833,25 +4853,25 @@ const F15_TESTS = [
       let st = await ctx.advanceTime(3.1);
 
       for (let k = 1; k <= 3; k++) {
-        let idx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.6);
+        let idx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
         if (idx < 0) {
           st = await ctx.advanceTime(2.3);
-          idx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.6);
+          idx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
         }
         const recId = st.seats[idx].recipeId;
-        const rawBase = recId === 'R01' ? 30 : recId === 'R02' ? 70 : 100 * 1.18;
+        const rawBase = recId === 'R01' ? 30 : recId === 'R02' ? 70 : 100 * 1.12;
         const sBefore = st.score;
         st = await bakeAndServeSeat(ctx, idx);
         const delta = st.score - sBefore;
 
         if (k === 1) {
-          ctx.assertEq(delta, Math.round(rawBase * 1.3 * 1.0), 'mugi at combo 1 must grant 0 passive bonus');
+          ctx.assertEq(delta, Math.round(rawBase * 1.2 * 1.0), 'mugi at combo 1 must grant 0 passive bonus');
         } else if (k === 2) {
-          ctx.assertEq(delta, Math.round(rawBase * 1.3 * 1.1), 'mugi at combo 2 must grant 0 passive bonus');
+          ctx.assertEq(delta, Math.round(rawBase * 1.2 * 1.06), 'mugi at combo 2 must grant 0 passive bonus');
         } else {
-          const neutral3 = Math.round(rawBase * 1.3 * 1.22);
-          const additive3 = Math.round(rawBase * 1.3 * 1.32); // 1.22 + 0.10
-          const mult3 = Math.round(rawBase * 1.3 * 1.22 * 1.1); // 1.22 * 1.10
+          const neutral3 = Math.round(rawBase * 1.2 * 1.13);
+          const additive3 = Math.round(rawBase * 1.2 * 1.23);
+          const mult3 = Math.round(rawBase * 1.2 * 1.13 * 1.1);
           ctx.assert(
             delta > neutral3 && (delta === additive3 || delta === mult3 || (delta >= neutral3 * 1.075 - 1 && delta <= neutral3 * 1.105 + 1)),
             `mugi at combo 3 must exceed neutral ${neutral3} (expected ${additive3} or ${mult3}, got ${delta})`
@@ -4877,12 +4897,12 @@ const F15_TESTS = [
           const t0 = s0.grid?.cells?.[r]?.[c]?.tile;
           if (!t0 || t0.frozenHp > 0) return;
           for (let i = 0; i < (s0.tray || []).length; i++) {
-            if (s0.tray[i]) dbg.doubleTapTray(i);
+            if (s0.tray[i]) dbg.doubleTapTray(i, { ignoreCooldown: true });
           }
           dbg.tapBoardCell(r, c);
           const s1 = dbg.getState();
           for (let i = 0; i < (s1.tray || []).length; i++) {
-            if (s1.tray[i]) dbg.doubleTapTray(i);
+            if (s1.tray[i]) dbg.doubleTapTray(i, { ignoreCooldown: true });
           }
         };
 
@@ -5027,12 +5047,15 @@ const F15_TESTS = [
       let st = await ctx.getState();
       ctx.assertEq(st.toolCounts.fork, 2, 'dev_tools Lv.2 starts with fork === 2');
 
-      // 1st fork via HUD button + board cell tap on unfrozen (0,1):C3 -> deleted!
+      // 1st fork via HUD button + 2-step direct trash via tray_trash_btn on unfrozen (0,1):C3 -> deleted!
       await ctx.clickHit('tool_fork_btn');
       ctx.assertEq((await ctx.getState()).activeTool, 'fork', 'tool_fork_btn arms fork');
       await ctx.tapBoardCell(0, 1, { viaCdp: true });
       st = await ctx.getState();
-      ctx.assertEq(st.grid.cells[0][1].tile, null, '1st fork must delete normal tile (0,1):C3');
+      ctx.assertEq(st.forkSourceCell, { r: 0, c: 1 }, '1st tap on normal tile selects forkSourceCell');
+      await ctx.clickHit('tray_trash_btn');
+      st = await ctx.getState();
+      ctx.assertEq(st.grid.cells[0][1].tile, null, '1st fork + tray_trash_btn must delete normal tile (0,1):C3');
       ctx.assertEq(st.toolCounts.fork, 1, 'fork count decremented to 1');
       ctx.assertEq(st.score, 0, 'fork delete awards 0 score');
 
@@ -5101,24 +5124,25 @@ const F15_TESTS = [
         deviceUpgrades: { dev_tray: 0, dev_flour: 0, dev_teapot: 0, dev_tools: 0 } // fork: 1, spoon: 0
       });
 
-      // Spend free fork on (0,0)
-      await ctx.useToolOnCell('fork', 0, 0);
+      // Spend free fork on (0,0) -> trash
+      await ctx.useToolOnCell('fork', 0, 0, 'trash');
       let st = await ctx.getState();
       ctx.assertEq(st.toolCounts.fork, 0, 'Free fork spent');
       ctx.assertEq(st.toolCounts.spoon, 0, 'Initial spoon === 0 at dev_tools Lv.0');
 
-      // Buy & use emergency fork (-15 stardust)
+      // Buy & use emergency fork (-20 stardust)
       st = await buyEmergencyUtensil(ctx, 'fork');
       if (st.activeTool === 'fork') {
         await ctx.tapBoardCell(0, 1, { viaCdp: true });
+        await ctx.clickHit('tray_trash_btn');
       } else if ((st.toolCounts?.fork || 0) > 0) {
-        await ctx.useToolOnCell('fork', 0, 1);
+        await ctx.useToolOnCell('fork', 0, 1, 'trash');
       }
       let save = await ctx.getSaveData();
-      ctx.assertEq(save.bankStardust, 85, 'Emergency fork costs 15 stardust (100 -> 85)');
-      ctx.assertEq(save.consumableSpentStardust, 15, 'consumableSpentStardust === 15');
+      ctx.assertEq(save.bankStardust, 80, 'Emergency fork costs 20 stardust (100 -> 80)');
+      ctx.assertEq(save.consumableSpentStardust, 20, 'consumableSpentStardust === 20');
 
-      // Buy & use emergency spoon (-20 stardust) on (1,1):C2
+      // Buy & use emergency spoon (-25 stardust) on (1,1):C2
       st = await buyEmergencyUtensil(ctx, 'spoon');
       if (st.activeTool === 'spoon') {
         await ctx.tapBoardCell(1, 1, { viaCdp: true });
@@ -5130,13 +5154,13 @@ const F15_TESTS = [
       ctx.assertEq(st.score, 0, 'Emergency utensils award 0 score');
 
       save = await ctx.getSaveData();
-      ctx.assertEq(save.bankStardust, 65, 'Emergency fork(15) + spoon(20) -> bankStardust === 65');
-      ctx.assertEq(save.consumableSpentStardust, 35, 'consumableSpentStardust === 35');
+      ctx.assertEq(save.bankStardust, 55, 'Emergency fork(20) + spoon(25) -> bankStardust === 55');
+      ctx.assertEq(save.consumableSpentStardust, 45, 'consumableSpentStardust === 45');
 
       await ctx.reload();
       const postReload = await ctx.getSaveData();
-      ctx.assertEq(postReload.bankStardust, 65, 'Post-reload bankStardust === 65 (no refund)');
-      ctx.assertEq(postReload.consumableSpentStardust, 35, 'Post-reload consumableSpentStardust === 35');
+      ctx.assertEq(postReload.bankStardust, 55, 'Post-reload bankStardust === 55 (no refund)');
+      ctx.assertEq(postReload.consumableSpentStardust, 45, 'Post-reload consumableSpentStardust === 45');
     }
   }
 ];
@@ -5438,9 +5462,9 @@ const F16_TESTS = [
         if (t10 && t11 && t10.tier === t11.tier) break;
         if (t10 && t11 && t10.tier !== t11.tier) {
           if (t10.tier !== 1) {
-            await ctx.eval(() => { window.__HOSHI_DEBUG__.tapBoardCell(1, 0); window.__HOSHI_DEBUG__.doubleTapTray(0); });
+            await ctx.eval(() => { window.__HOSHI_DEBUG__.tapBoardCell(1, 0); window.__HOSHI_DEBUG__.doubleTapTray(0, { ignoreCooldown: true }); });
           } else {
-            await ctx.eval(() => { window.__HOSHI_DEBUG__.tapBoardCell(1, 1); window.__HOSHI_DEBUG__.doubleTapTray(0); });
+            await ctx.eval(() => { window.__HOSHI_DEBUG__.tapBoardCell(1, 1); window.__HOSHI_DEBUG__.doubleTapTray(0, { ignoreCooldown: true }); });
           }
         }
         await stepBothClocks(ctx, 130);

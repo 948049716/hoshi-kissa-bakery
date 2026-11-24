@@ -9,6 +9,7 @@ const {
   SERVE_COMBO_WINDOW_SEC,
   PATIENCE_TIP_BANDS,
   FEVER_CONFIG,
+  TRASH_CONFIG,
   CUSTOMER_MAP,
   BOARD_THEMES
 } = require('./constants');
@@ -1518,21 +1519,66 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
 
     // 2. Wicker Trash Basket Button (right side)
     const isFullTray = filledSlots >= trayCap;
+    const trashCooldown = Math.max(0, toSafeNum(getOwn(orderState, 'trashCooldown', 0), 0));
+    const trashCooling = trashCooldown > 1e-6;
+    const forkTrashReady = Boolean(
+      getOwn(opts, 'forkTrashReady', false) ||
+        (getOwn(appObj, 'activeTool', null) === 'fork' &&
+          isPlainObj(getOwn(appObj, 'forkSourceCell', null)))
+    );
     const shouldWobble =
-      isFullTray ||
+      forkTrashReady ||
+      (!trashCooling && isFullTray) ||
       Boolean(getOwn(opts, 'boardFullHint', false)) ||
       Boolean(animState && toSafeNum(getOwn(animState, 'trashWobbleTimer', 0), 0) > 0);
     const trashRot = shouldWobble ? Math.sin(nowSec * 13) * 0.11 : 0;
 
     safeAddHit(hits, 'tray_trash_btn', trashX, trashY, trashW, trayRowH, () => onTapTrash(), {
-      isFullTray
+      isFullTray,
+      trashCooldown,
+      forkTrashReady
     });
 
     UI.drawKissaCard(ctx, trashX, trashY, trashW, trayRowH, {
-      tone: isFullTray ? 'amber' : 'cream',
-      borderColor: isFullTray ? '#C97B1A' : '#B98E58',
+      tone: forkTrashReady ? 'selected' : trashCooling ? 'soft' : isFullTray ? 'amber' : 'cream',
+      borderColor: forkTrashReady
+        ? '#36A868'
+        : trashCooling
+        ? '#9E8D7B'
+        : isFullTray
+        ? '#C97B1A'
+        : '#B98E58',
       radius: 10
     });
+
+    if (forkTrashReady) {
+      ctx.save();
+      try {
+        ctx.strokeStyle = 'rgba(54, 168, 104, 0.92)';
+        ctx.lineWidth = 2.0;
+        if (typeof ctx.setLineDash === 'function') ctx.setLineDash([4, 3]);
+        UI.roundRectPath(ctx, trashX + 1.5, trashY + 1.5, trashW - 3, trayRowH - 3, 8.5);
+        ctx.stroke();
+        if (typeof ctx.setLineDash === 'function') ctx.setLineDash([]);
+      } finally {
+        try {
+          ctx.restore();
+        } catch (_) {}
+      }
+    } else if (trashCooling) {
+      const cdMax = Math.max(0.5, toSafeNum(TRASH_CONFIG && TRASH_CONFIG.cooldownSec, 8.0));
+      const cdRatio = clamp(trashCooldown / cdMax, 0, 1);
+      ctx.save();
+      try {
+        ctx.fillStyle = 'rgba(52, 40, 32, 0.24)';
+        UI.roundRectPath(ctx, trashX + 1.5, trashY + 1.5, (trashW - 3) * cdRatio, trayRowH - 3, 8.5);
+        ctx.fill();
+      } finally {
+        try {
+          ctx.restore();
+        } catch (_) {}
+      }
+    }
 
     const trashIcS = Math.min(22, Math.max(14, trayRowH - 8));
     UI.drawUiIcon(
@@ -1542,22 +1588,29 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
       trashX + 4 + trashIcS * 0.5,
       trashY + trayRowH * 0.5,
       trashIcS,
-      1,
+      trashCooling && !forkTrashReady ? 0.58 : 1,
       trashRot
     );
 
     const trashTextX = trashX + 6 + trashIcS;
     const trashTextW = Math.max(16, trashX + trashW - trashTextX - 3);
+    const trashLabel = forkTrashReady
+      ? '叉入销毁'
+      : trashCooling
+      ? `冷却${Math.ceil(trashCooldown)}s`
+      : isFullTray
+      ? '双击弃'
+      : '厨余';
     UI.drawFitText(
       ctx,
-      isFullTray ? '双击弃' : '厨余',
+      trashLabel,
       trashTextX + trashTextW * 0.5,
       trashY + trayRowH * 0.5 + 0.5,
       trashTextW,
       9.8,
-      7.6,
+      7.2,
       800,
-      '#5A341E',
+      forkTrashReady ? '#236E42' : trashCooling ? '#6B5848' : '#5A341E',
       'center',
       'middle'
     );
@@ -1595,7 +1648,7 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
 
       const comboCount = Math.max(0, Math.floor(toSafeNum(getOwn(orderState, 'comboCount', 0), 0)));
       const comboTimer = Math.max(0, toSafeNum(getOwn(orderState, 'comboTimer', 0), 0));
-      const comboWindow = SERVE_COMBO_WINDOW_SEC || 10.0;
+      const comboWindow = SERVE_COMBO_WINDOW_SEC || 8.0;
       const comboActive = comboCount >= 2 && comboTimer > 0;
       const comboBroken = Boolean(animState && toSafeNum(getOwn(animState, 'comboBreakTimer', 0), 0) > 0);
       const multLen = Math.max(1, safeArrayLen(SERVE_COMBO_MULTS, 16));
@@ -1716,7 +1769,7 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
       const fTx = drewDust ? feverX + 8 + fIcS : feverX + 6;
       const fTw = Math.max(20, feverX + feverW - fTx - 5);
       const feverLabel = feverActive
-        ? `星光热潮 x${(FEVER_CONFIG.scoreMult || 1.35).toFixed(2)}`
+        ? `星光热潮 x${(FEVER_CONFIG.scoreMult || 1.25).toFixed(2)}`
         : `星光热潮 ${Math.round(feverEnergy)}%`;
       UI.drawFitText(
         ctx,
@@ -2251,6 +2304,14 @@ function renderBoardStage(
       typeof rawTool === 'string' && (rawTool === 'fork' || rawTool === 'spoon')
         ? rawTool
         : null;
+    const rawForkSrc = getOwn(opts, 'forkSourceCell', null);
+    const forkSourceCell =
+      activeTool === 'fork' &&
+      isPlainObj(rawForkSrc) &&
+      Number.isInteger(getOwn(rawForkSrc, 'r', null)) &&
+      Number.isInteger(getOwn(rawForkSrc, 'c', null))
+        ? { r: getOwn(rawForkSrc, 'r', 0), c: getOwn(rawForkSrc, 'c', 0) }
+        : null;
     const pulse = 0.5 + 0.5 * Math.sin(nowSec * 5.2);
 
     // Prepare guideTargets containers if requested
@@ -2448,26 +2509,68 @@ function renderBoardStage(
           }
         }
 
-        // Active utensil aiming highlight ('fork' targets any tile incl. frozen; 'spoon' targets non-frozen C1..C6)
-        if (activeTool && tile) {
-          const validTarget =
-            activeTool === 'fork'
-              ? true
-              : !(tileFrozenHp > 0) && tileTier >= 1 && tileTier <= 6;
-          if (validTarget) {
+        // Active utensil aiming highlight ('spoon' C1..C6; 'fork' Step 1 cyan-blue on tiles, Step 2 gold source + emerald destinations)
+        if (activeTool === 'spoon' && tile && !(tileFrozenHp > 0) && tileTier >= 1 && tileTier <= 6) {
+          ctx.save();
+          try {
+            ctx.strokeStyle = 'rgba(248, 186, 48, 0.94)';
+            ctx.lineWidth = 2.4;
+            if (typeof ctx.setLineDash === 'function') ctx.setLineDash([5, 4]);
+            UI.roundRectPath(ctx, cx0 + 1, cy0 + 1, cw - 2, cw - 2, cushionRad);
+            ctx.stroke();
+            if (typeof ctx.setLineDash === 'function') ctx.setLineDash([]);
+          } finally {
+            try {
+              ctx.restore();
+            } catch (_) {}
+          }
+        } else if (activeTool === 'fork') {
+          if (!forkSourceCell) {
+            if (tile) {
+              ctx.save();
+              try {
+                ctx.strokeStyle = `rgba(68, 194, 244, ${(0.72 + 0.24 * pulse).toFixed(3)})`;
+                ctx.lineWidth = 2.4;
+                if (typeof ctx.setLineDash === 'function') ctx.setLineDash([5, 4]);
+                UI.roundRectPath(ctx, cx0 + 1, cy0 + 1, cw - 2, cw - 2, cushionRad);
+                ctx.stroke();
+                if (typeof ctx.setLineDash === 'function') ctx.setLineDash([]);
+              } finally {
+                try {
+                  ctx.restore();
+                } catch (_) {}
+              }
+            }
+          } else if (r === forkSourceCell.r && c === forkSourceCell.c) {
             ctx.save();
             try {
-              ctx.strokeStyle =
-                activeTool === 'fork' ? 'rgba(68, 194, 244, 0.92)' : 'rgba(248, 186, 48, 0.94)';
-              ctx.lineWidth = 2.4;
-              if (typeof ctx.setLineDash === 'function') {
-                ctx.setLineDash([5, 4]);
-              }
+              ctx.fillStyle = 'rgba(255, 224, 112, 0.26)';
+              UI.roundRectPath(ctx, cx0 + 1, cy0 + 1, cw - 2, cw - 2, cushionRad);
+              ctx.fill();
+
+              ctx.strokeStyle = '#FFB624';
+              ctx.lineWidth = 2.8;
+              UI.roundRectPath(ctx, cx0 + 0.5, cy0 + 0.5, cw - 1, cw - 1, cushionRad);
+              ctx.stroke();
+
+              ctx.strokeStyle = 'rgba(255, 248, 178, 0.95)';
+              ctx.lineWidth = 1.6;
+              UI.roundRectPath(ctx, cx0 - 2, cy0 - 2, cw + 4, cw + 4, cushionRad + 2);
+              ctx.stroke();
+            } finally {
+              try {
+                ctx.restore();
+              } catch (_) {}
+            }
+          } else if (!tile || !(tileFrozenHp > 0)) {
+            ctx.save();
+            try {
+              ctx.strokeStyle = `rgba(56, 196, 114, ${(0.72 + 0.24 * pulse).toFixed(3)})`;
+              ctx.lineWidth = 2.3;
+              if (typeof ctx.setLineDash === 'function') ctx.setLineDash([5, 4]);
               UI.roundRectPath(ctx, cx0 + 1, cy0 + 1, cw - 2, cw - 2, cushionRad);
               ctx.stroke();
-              if (typeof ctx.setLineDash === 'function') {
-                ctx.setLineDash([]);
-              }
+              if (typeof ctx.setLineDash === 'function') ctx.setLineDash([]);
             } finally {
               try {
                 ctx.restore();
@@ -2507,6 +2610,20 @@ function renderBoardStage(
       }
     }
 
+    const hiddenFlyingDestKeys = Object.create(null);
+    const preFlyingList = getOwn(animState, 'flyingSprites', null);
+    const preFlyingLen = safeArrayLen(preFlyingList, 256);
+    for (let i = 0; i < preFlyingLen; i++) {
+      const fl = getOwn(preFlyingList, i, null);
+      if (!isPlainObj(fl) || getOwn(fl, 'kind', '') !== 'board_to_board') continue;
+      const dr = getOwn(fl, 'destR', null);
+      const dc = getOwn(fl, 'destC', null);
+      const rem = toSafeNum(getOwn(fl, 'timer', 0), 0);
+      if (Number.isInteger(dr) && Number.isInteger(dc) && rem > 0) {
+        hiddenFlyingDestKeys[`${dr},${dc}`] = true;
+      }
+    }
+
     const spriteSize = Math.round(cellSize * 0.84);
     const badgeSize = Math.max(12, Math.round(cellSize * 0.28));
     const animMergeTimer = toSafeNum(getOwn(animState, 'mergeTimer', 0), 0);
@@ -2528,6 +2645,10 @@ function renderBoardStage(
         const tileFlavor = typeof rawTileFlv === 'string' ? rawTileFlv : 'plain';
         const tileFromR = getOwn(tile, 'fromR', null);
         const tileFromC = getOwn(tile, 'fromC', null);
+
+        if (hiddenFlyingDestKeys[cellKey]) {
+          continue;
+        }
 
         // Skip destination tile while explicit MoveEvent is sliding into it
         if (
@@ -2568,6 +2689,13 @@ function renderBoardStage(
 
         let scale = 1.0;
         let isHappy = Boolean(getOwn(tile, 'happy', false));
+        const isForkLifted = Boolean(forkSourceCell && r === forkSourceCell.r && c === forkSourceCell.c);
+        if (isForkLifted) {
+          drawCy -= 5.5 + Math.sin(nowSec * 6.5) * 1.5;
+          scale = 1.08;
+          isHappy = true;
+        }
+
         const mergeP = hasOwn(mergeMap, cellKey)
           ? mergeMap[cellKey]
           : tileJustMerged && animMergeTimer > 0
@@ -2757,27 +2885,40 @@ function renderBoardStage(
 
     // Pass 5: Active Utensil Aiming Notice Banner at Top of Board Stage
     if (activeTool && !isThumb) {
-      const bw = Math.min(layout.w - 16, 268);
+      const bannerText =
+        activeTool === 'spoon'
+          ? '请点选 1~6 阶猫饼升阶（再点厨具取消）'
+          : forkSourceCell
+          ? '请点选落点移位/互换/合并，或点厨余篮销毁'
+          : '点冰块破冰，或点猫饼挑起移位/互换/合并';
+      const bw = Math.min(layout.w - 12, 296);
       const bx = layout.x + (layout.w - bw) * 0.5;
       const by = layout.y + 2;
       UI.drawNoticeBanner(ctx, bx, by, bw, 22, {
         tone: 'event',
         icon: activeTool === 'fork' ? 'tool_fork' : 'tool_spoon',
         sprites: sprites || {},
-        text: '请点选目标猫饼（再点厨具取消）',
-        fontSize: 10.5
+        text: bannerText,
+        fontSize: 10.0
       });
     }
 
-    // Pass 6: Parabolic Flying Cat-Cake Arcs (board->tray 160ms, tray->seat 280ms, tray->trash 180ms)
+    // Pass 6: Parabolic Flying Cat-Cake Arcs (board->tray, board->board, tray->seat, tray/board->trash)
     const flyingList = getOwn(animState, 'flyingSprites', null);
     const flyingLen = safeArrayLen(flyingList, 256);
     for (let i = 0; i < flyingLen; i++) {
       const fl = getOwn(flyingList, i, null);
       if (!isPlainObj(fl)) continue;
       const flKind = getOwn(fl, 'kind', '');
+      const isTrash = flKind === 'tray_to_trash' || flKind === 'board_to_trash';
       const defDur =
-        flKind === 'tray_to_seat' ? 0.28 : flKind === 'tray_to_trash' ? 0.18 : 0.16;
+        flKind === 'tray_to_seat'
+          ? 0.28
+          : isTrash
+          ? 0.18
+          : flKind === 'board_to_board'
+          ? 0.18
+          : 0.16;
       const dur = Math.max(0.02, toSafeNum(getOwn(fl, 'duration', defDur), defDur));
       let p = NaN;
       const rawFlProg = getOwn(fl, 'progress', NaN);
@@ -2794,12 +2935,13 @@ function renderBoardStage(
       const fx1 = toSafeNum(getOwn(fl, 'toX', fx0), fx0);
       const fy1 = toSafeNum(getOwn(fl, 'toY', fy0), fy0);
       const ctrlX = (fx0 + fx1) * 0.5;
-      const ctrlY = Math.min(fy0, fy1) - (flKind === 'tray_to_seat' ? 46 : 34);
+      const ctrlY =
+        Math.min(fy0, fy1) -
+        (flKind === 'tray_to_seat' ? 46 : flKind === 'board_to_board' ? 28 : 34);
 
       const inv = 1 - p;
       const bx = inv * inv * fx0 + 2 * inv * p * ctrlX + p * p * fx1;
       const by = inv * inv * fy0 + 2 * inv * p * ctrlY + p * p * fy1;
-      const isTrash = flKind === 'tray_to_trash';
       const fScale = isTrash ? 1 - p * 0.55 : 1 + Math.sin(p * Math.PI) * 0.12;
       const fRot = isTrash ? p * 5.0 : 0;
       const flTier = toSafeTier(getOwn(fl, 'tier', 1), 1);
@@ -2811,9 +2953,9 @@ function renderBoardStage(
         flTier,
         bx,
         by,
-        Math.max(24, Math.round(cellSize * 0.72)),
+        Math.max(24, Math.round(cellSize * (flKind === 'board_to_board' ? 0.80 : 0.72))),
         {
-          happy: flKind === 'tray_to_seat',
+          happy: flKind === 'tray_to_seat' || flKind === 'board_to_board',
           flavor: typeof rawFlFlv === 'string' ? rawFlFlv : 'plain',
           showFlavorBadge: true,
           scaleX: fScale,

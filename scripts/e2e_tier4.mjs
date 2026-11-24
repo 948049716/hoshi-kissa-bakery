@@ -264,7 +264,7 @@ async function clearTraySlots(ctx) {
   const tray = st.tray || [];
   for (let i = 0; i < tray.length; i++) {
     if (tray[i] !== null) {
-      await ctx.doubleTapTray(i);
+      await ctx.doubleTapTray(i, { ignoreCooldown: true });
     }
   }
 }
@@ -370,11 +370,11 @@ async function bakeTileOrganically(ctx, targetTier, targetFlavor = 'any', opts =
       .sort((a, b) => a.tier - b.tier)[0];
     if (emptyTrayIdx >= 0 && trashCandidate) {
       await ctx.tapBoardCell(trashCandidate.r, trashCandidate.c);
-      await ctx.doubleTapTray(emptyTrayIdx);
+      await ctx.doubleTapTray(emptyTrayIdx, { ignoreCooldown: true });
       continue;
     }
     if (opts.allowTools && st.toolCounts && st.toolCounts.fork > 0 && trashCandidate) {
-      await ctx.useToolOnCell('fork', trashCandidate.r, trashCandidate.c);
+      await ctx.useToolOnCell('fork', trashCandidate.r, trashCandidate.c, 'trash');
       continue;
     }
     break;
@@ -486,13 +486,16 @@ async function bakeOrderMultisetOrganically(ctx, reqSlots, opts = {}) {
         await ctx.tapCanvas(px.x, px.y, { holdMs: 40 });
         const mid = await ctx.getState();
         const tIdx = (mid.tray || []).findIndex((x) => x !== null);
-        if (tIdx >= 0) await ctx.doubleTapTray(tIdx, { viaCdp: true });
+        if (tIdx >= 0) {
+          if ((mid.trashCooldown || 0) > 0) await ctx.advanceTime((mid.trashCooldown || 0) + 0.2);
+          await ctx.doubleTapTray(tIdx, { viaCdp: true });
+        }
       } else {
         await ctx.eval((tr, tc) => {
           const dbg = globalThis.__HOSHI_DEBUG__;
           dbg.tapBoardCell(tr, tc);
           const idx = (dbg.getState().tray || []).findIndex((x) => x !== null);
-          if (idx >= 0) dbg.doubleTapTray(idx);
+          if (idx >= 0) dbg.doubleTapTray(idx, { ignoreCooldown: true });
         }, overTierTile.r, overTierTile.c);
       }
       continue;
@@ -608,13 +611,16 @@ async function bakeOrderMultisetOrganically(ctx, reqSlots, opts = {}) {
         await ctx.tapCanvas(px.x, px.y, { holdMs: 40 });
         const mid = await ctx.getState();
         const tIdx = (mid.tray || []).findIndex((x) => x !== null);
-        if (tIdx >= 0) await ctx.doubleTapTray(tIdx, { viaCdp: true });
+        if (tIdx >= 0) {
+          if ((mid.trashCooldown || 0) > 0) await ctx.advanceTime((mid.trashCooldown || 0) + 0.2);
+          await ctx.doubleTapTray(tIdx, { viaCdp: true });
+        }
       } else {
         await ctx.eval((tr, tc) => {
           const dbg = globalThis.__HOSHI_DEBUG__;
           dbg.tapBoardCell(tr, tc);
           const idx = (dbg.getState().tray || []).findIndex((x) => x !== null);
-          if (idx >= 0) dbg.doubleTapTray(idx);
+          if (idx >= 0) dbg.doubleTapTray(idx, { ignoreCooldown: true });
         }, trashCand.r, trashCand.c);
       }
       continue;
@@ -693,7 +699,7 @@ async function serveCustomerOrganic(ctx, preferredSeat = null, opts = {}) {
 }
 
 async function buyAndApplyEmergencyTool(ctx, kind, r, c) {
-  const cost = kind === 'fork' ? 15 : 20;
+  const cost = kind === 'fork' ? 20 : 25;
   const saveBefore = await ctx.getSaveData();
   const spentBefore = Number(saveBefore.consumableSpentStardust || 0);
 
@@ -704,7 +710,11 @@ async function buyAndApplyEmergencyTool(ctx, kind, r, c) {
         kind === 'fork' ? true : t.frozenHp === 0 && t.tier < 7
       );
       if (!target) break;
-      await ctx.useToolOnCell(kind, target.r, target.c);
+      if (kind === 'fork' && target.frozenHp === 0) {
+        await ctx.useToolOnCell('fork', target.r, target.c, 'trash');
+      } else {
+        await ctx.useToolOnCell(kind, target.r, target.c);
+      }
     }
   }
 
@@ -719,10 +729,18 @@ async function buyAndApplyEmergencyTool(ctx, kind, r, c) {
   }
 
   const saveMid = await ctx.getSaveData();
+  const cellTile = st.grid?.cells?.[r]?.[c]?.tile;
   if (st.activeTool === kind) {
     await ctx.tapBoardCell(r, c, { viaCdp: true });
+    if (kind === 'fork' && cellTile && !(cellTile.frozenHp > 0)) {
+      await ctx.clickHit('tray_trash_btn');
+    }
   } else if ((st.toolCounts && st.toolCounts[kind] > 0) || Number(saveMid.consumableSpentStardust || 0) === spentBefore) {
-    await ctx.useToolOnCell(kind, r, c);
+    if (kind === 'fork' && cellTile && !(cellTile.frozenHp > 0)) {
+      await ctx.useToolOnCell('fork', r, c, 'trash');
+    } else {
+      await ctx.useToolOnCell(kind, r, c);
+    }
   }
 
   const saveAfter = await ctx.getSaveData();
@@ -1017,6 +1035,7 @@ export const TIER4_TESTS = [
       st = await ctx.getState();
       const escapeTile =
         inspectBoard(st).tiles.find((t) => t.tier >= 3) || inspectBoard(st).tiles[0];
+      await ctx.advanceTime(8.1);
       await ctx.tapBoardCell(escapeTile.r, escapeTile.c);
       await ctx.doubleTapTray(0);
 
@@ -1051,8 +1070,8 @@ export const TIER4_TESTS = [
         await ctx.resetGame({ clearCloud: true, clearLocal: true });
         await ctx.setSaveData({
           schemaVersion: 2,
-          bankStardust: 30,
-          totalEarnedStardust: 30,
+          bankStardust: 15,
+          totalEarnedStardust: 15,
           seenTutorials: TUTORIALS_ALL_SEEN
         });
         saveBefore = await ctx.getSaveData();
@@ -1060,25 +1079,25 @@ export const TIER4_TESTS = [
       }
 
       const bankBefore = saveBefore.bankStardust;
-      ctx.assertEq(bankBefore, 30, 'Fresh save starts at 30 stardust');
+      ctx.assertEq(bankBefore, 15, 'Fresh save starts at 15 stardust');
 
       await ctx.advanceTime(3.2);
-      while ((await ctx.getState()).score < 1420) {
+      while ((await ctx.getState()).score < 1780) {
         await serveCustomerOrganic(ctx);
       }
 
       st = await ctx.getState();
-      ctx.assert(st.score >= 1400, `Reached 3-star score (>= 1400) on 1-1: ${st.score}`);
+      ctx.assert(st.score >= 1750, `Reached 3-star score (>= 1750) on 1-1: ${st.score}`);
 
       // Advance timer to shift end
       st = await ctx.advanceTime(st.timeLeft + 0.6);
       ctx.assertEq(st.activeModal, 'level_result', 'Settlement modal automatically opens at timeLeft === 0');
       ctx.assert(st.lastResult && st.lastResult.cleared === true, '1-1 cleared === true');
       ctx.assertEq(st.lastResult.starsEarned, 3, 'Earned 3 stars on 1-1');
-      ctx.assertEq(st.lastResult.totalDustAward, 83, '1-1 first 3★ awards 65 + 10 + 8 = 83 stardust');
+      ctx.assertEq(st.lastResult.totalDustAward, 57, '1-1 first 3★ awards 47 + 6 + 4 = 57 stardust');
 
       const saveAfter = await ctx.getSaveData();
-      ctx.assertEq(saveAfter.bankStardust, 113, 'bankStardust increased 30 -> 113');
+      ctx.assertEq(saveAfter.bankStardust, 72, 'bankStardust increased 15 -> 72');
       ctx.assertEq(saveAfter.levelStars['1-1'], 3, 'levelStars["1-1"] === 3');
       ctx.assertEq(saveAfter.highestUnlockedLevel, '1-2', 'Level 1-2 unlocked');
 
@@ -1101,7 +1120,7 @@ export const TIER4_TESTS = [
       // organically clear 1-1 to 3★ first so stardust is 100% genuinely earned!
       let save0 = await ctx.getSaveData();
       if (
-        save0.bankStardust < 80 ||
+        save0.bankStardust < 100 ||
         !save0.levelStars ||
         !save0.levelStars['1-1'] ||
         (save0.catcakeLevels && save0.catcakeLevels['1'] > 0) ||
@@ -1110,13 +1129,13 @@ export const TIER4_TESTS = [
         await ctx.resetGame({ clearCloud: true, clearLocal: true });
         await ctx.setSaveData({
           schemaVersion: 2,
-          bankStardust: 30,
-          totalEarnedStardust: 30,
+          bankStardust: 50,
+          totalEarnedStardust: 50,
           seenTutorials: TUTORIALS_ALL_SEEN
         });
         await ctx.clickHit('lobby_start_cta', { viaCdp: true });
         await ctx.advanceTime(3.2);
-        while ((await ctx.getState()).score < 1420) {
+        while ((await ctx.getState()).score < 1780) {
           await serveCustomerOrganic(ctx);
         }
         const stRun = await ctx.getState();
@@ -1125,7 +1144,7 @@ export const TIER4_TESTS = [
       }
 
       const bankBeforeShop = save0.bankStardust;
-      ctx.assert(bankBeforeShop >= 80, `Sufficient organically earned stardust (${bankBeforeShop} >= 80)`);
+      ctx.assert(bankBeforeShop >= 100, `Sufficient organically earned stardust (${bankBeforeShop} >= 100)`);
 
       let st = await ctx.getState();
       if (st.activeModal === 'level_result' && (st.hits || []).some((h) => h.id === 'result_shop_btn')) {
@@ -1138,7 +1157,7 @@ export const TIER4_TESTS = [
       st = await ctx.getState();
       ctx.assertEq(st.activeModal, 'shop', 'Kissa Shop modal open');
 
-      // Buy C1 Lv.1 (20 stardust) and dev_tray Lv.1 (60 stardust)
+      // Buy C1 Lv.1 (25 stardust) and dev_tray Lv.1 (75 stardust) = 100 stardust
       await clickModalHit(ctx, 'shop_tab_catcakes');
       await clickModalHit(ctx, 'shop_buy_catcake_1');
       await clickModalHit(ctx, 'shop_tab_devices');
@@ -1147,18 +1166,18 @@ export const TIER4_TESTS = [
       const saveMid = await ctx.getSaveData();
       ctx.assertEq(saveMid.catcakeLevels['1'], 1, 'C1 upgraded to Lv.1');
       ctx.assertEq(saveMid.deviceUpgrades.dev_tray, 1, 'Wide Wooden Tray upgraded to Lv.1');
-      ctx.assertEq(saveMid.bankStardust, bankBeforeShop - 80, 'Deducted 20 + 60 = 80 stardust');
+      ctx.assertEq(saveMid.bankStardust, bankBeforeShop - 100, 'Deducted 25 + 75 = 100 stardust');
 
       // Reload page to verify wx_ localStorage persistence!
       await ctx.reload();
       const saveReloaded = await ctx.getSaveData();
       ctx.assertEq(saveReloaded.catcakeLevels['1'], 1, 'Post-reload C1 Lv.1 persisted in wx storage');
       ctx.assertEq(saveReloaded.deviceUpgrades.dev_tray, 1, 'Post-reload dev_tray Lv.1 persisted in wx storage');
-      ctx.assertEq(saveReloaded.bankStardust, bankBeforeShop - 80, 'Post-reload bankStardust persisted');
+      ctx.assertEq(saveReloaded.bankStardust, bankBeforeShop - 100, 'Post-reload bankStardust persisted');
 
       const consts = await ctx.requireBundledModule('./src/constants.js');
       if (consts && typeof consts.getCatcakePrice === 'function') {
-        ctx.assertEq(consts.getCatcakePrice(1, saveReloaded.catcakeLevels['1']), 36, 'C1 Lv.1 base price === 36');
+        ctx.assertEq(consts.getCatcakePrice(1, saveReloaded.catcakeLevels['1']), 35, 'C1 Lv.1 base price === 35');
       }
 
       // Enter unlocked 1-2 via Lobby UI and assert 4-slot tray + C1 price === 36 in live serve math
@@ -1197,13 +1216,13 @@ export const TIER4_TESTS = [
           st = await ctx.getState();
         }
         const targetOrder = st.seats[c1OrderIdx];
-        if (targetOrder && targetOrder.patience / targetOrder.maxPatience > 0.56) {
+        if (targetOrder && targetOrder.patience / targetOrder.maxPatience > 0.62) {
           const { scoreGain } = await serveCustomerOrganic(ctx, c1OrderIdx);
-          const expected36 =
+          const expected35 =
             targetOrder.recipeId === 'R01'
-              ? Math.round(36 * 1.0 * 1.3 * 1.08)
-              : Math.round((36 + 70) * 1.18 * 1.3 * 1.08);
-          ctx.assertClose(scoreGain, expected36, 2, `Live ${targetOrder.recipeId} serve reflects C1 Lv.1 price === 36`);
+              ? Math.round(35 * 1.0 * 1.2 * 1.08)
+              : Math.round((35 + 70) * 1.12 * 1.2 * 1.08);
+          ctx.assertClose(scoreGain, expected35, 2, `Live ${targetOrder.recipeId} serve reflects C1 Lv.1 price === 35`);
         }
       }
 
@@ -1299,7 +1318,7 @@ export const TIER4_TESTS = [
           ctx.assert(sPlay && sPlay.bytes > 1024, `Captured 07_l3_play_${vp.tag}.png`);
 
           // 4) Result settlement modal view
-          while ((await ctx.getState()).score < 800) {
+          while ((await ctx.getState()).score < 900) {
             await serveCustomerOrganic(ctx);
           }
           const curPlay = await ctx.getState();
@@ -1431,7 +1450,7 @@ export const TIER4_TESTS = [
 
       let save = await ctx.getSaveData();
       ctx.assertEq(save.schemaVersion, 2, 'Veteran save migrated to schemaVersion === 2');
-      ctx.assertEq(save.totalEarnedStardust, 950, 'Veteran totalEarnedStardust === 950');
+      ctx.assertEq(save.totalEarnedStardust, 1010, 'Veteran totalEarnedStardust === 1010 (860 + 40 luna + 40 mugi + 20 sakura + 50 gift)');
       ctx.assertEq(save.bankStardust, 670, 'Veteran bankStardust === 670 (120 + 500 refund + 50 gift)');
 
       const legacyKeysCleared = await ctx.eval(
@@ -1454,7 +1473,7 @@ export const TIER4_TESTS = [
       await ctx.clickHit('modal_close', { viaCdp: true });
 
       save = await ctx.getSaveData();
-      ctx.assertEq(save.bankStardust, 670 - 120 - 210, '340 stardust remaining after moonlight + dev_tray Lv.2');
+      ctx.assertEq(save.bankStardust, 670 - 140 - 240, '290 stardust remaining after moonlight (140) + dev_tray Lv.2 (240)');
 
       // 3) Verify Ch.2 (18★ + 1-10) & Ch.3 (40★ + 2-10) campaign gates, then upgrade C5..C7 for finale 3-10!
       const ch1Stars = {};
@@ -1498,7 +1517,7 @@ export const TIER4_TESTS = [
         selectedPatron: 'mugi',
         equippedTheme: 'moonlight',
         totalEarnedStardust: 2300,
-        bankStardust: 2300 - 610,
+        bankStardust: 2300 - 720,
         seenTutorials: TUTORIALS_ALL_SEEN
       });
 
@@ -1522,7 +1541,7 @@ export const TIER4_TESTS = [
       ctx.assertEq(save.catcakeLevels['5'], 2, 'C5 upgraded to Lv.2 in Shop');
       ctx.assertEq(save.catcakeLevels['6'], 2, 'C6 upgraded to Lv.2 in Shop');
       ctx.assertEq(save.catcakeLevels['7'], 2, 'C7 upgraded to Lv.2 in Shop');
-      ctx.assertEq(save.bankStardust, 2300 - (610 + 290 + 170 + 220 + 280), 'Exact 730 stardust remaining before 3-10');
+      ctx.assertEq(save.bankStardust, 2300 - (720 + 300 + 185 + 235 + 290), 'Exact 570 stardust remaining before 3-10');
 
       // Navigate to Ch.3 and start Boss Finale 3-10
       while ((await ctx.getState()).selectedChapter < 3) {
@@ -1575,7 +1594,7 @@ export const TIER4_TESTS = [
           castedMugi = true;
         }
 
-        if (castedMugi && sawFever && st.vipServed >= 1 && st.score >= 35500) {
+        if (castedMugi && sawFever && st.vipServed >= 1 && st.score >= 39000) {
           break;
         }
         if (st.timeLeft <= 9) break;
@@ -1599,13 +1618,13 @@ export const TIER4_TESTS = [
       ctx.assert(sawFever, 'Triggered Starlight Fever during 3-10 boss run');
       ctx.assert(castedMugi, 'Charged and cast Mugi active skill during 3-10');
       ctx.assert(st.vipServed >= 1, `Served >= 1 VIP critic on 3-10 (got ${st.vipServed})`);
-      ctx.assert(st.score >= 35000, `Cleared 3-10 star1 >= 35000 (got ${st.score})`);
+      ctx.assert(st.score >= 38500, `Cleared 3-10 star1 >= 38500 (got ${st.score})`);
 
       // Settle 3-10 and sync with CloudBase
       const stRes = await ctx.advanceTime(st.timeLeft + 0.8);
       ctx.assertEq(stRes.activeModal, 'level_result', '3-10 settlement modal open');
       ctx.assertEq(stRes.lastResult.cleared, true, '3-10 cleared === true');
-      ctx.assertEq(stRes.lastResult.vipDustAward, stRes.vipServed * 5, 'VIP +5 stardust bonus awarded');
+      ctx.assertEq(stRes.lastResult.vipDustAward, stRes.vipServed * 4, 'VIP +4 stardust bonus awarded');
 
       await ctx.flushCloudSync(2500);
       ctx.assertEq((await ctx.getState()).cloudStatus, 'synced', '3-10 settlement synced to CloudBase');
@@ -1629,7 +1648,7 @@ export const TIER4_TESTS = [
       save = await ctx.getSaveData();
       ctx.assertEq(save.playerProfile.authorized, true, 'UserInfoButton profile authorized');
       ctx.assertEq(save.playerProfile.nickName, '星冠老店长', 'Authorized nickname synced');
-      ctx.assertEq(save.consumableSpentStardust, 20, 'Emergency spoon 20 stardust conserved in save');
+      ctx.assertEq(save.consumableSpentStardust, 25, 'Emergency spoon 25 stardust conserved in save');
 
       const expectedStars = Object.values(save.levelStars).reduce((a, b) => a + Number(b || 0), 0);
       const expectedCumScore = Object.values(save.levelBestScores).reduce((a, b) => a + Number(b || 0), 0);
@@ -1705,29 +1724,29 @@ export const TIER4_TESTS = [
       // Recovery path 2: spend free fork, then buy & apply emergency fork (-15⭐)
       st = await ctx.getState();
       const forkCell1 = inspectBoard(st).tiles[0];
-      await ctx.useToolOnCell('fork', forkCell1.r, forkCell1.c);
+      await ctx.useToolOnCell('fork', forkCell1.r, forkCell1.c, 'trash');
       st = await ctx.getState();
       const forkCell2 = inspectBoard(st).tiles[0];
       await buyAndApplyEmergencyTool(ctx, 'fork', forkCell2.r, forkCell2.c);
 
-      ctx.assertEq((await ctx.getSaveData()).consumableSpentStardust, 15, 'Offline emergency fork recorded 15 stardust');
+      ctx.assertEq((await ctx.getSaveData()).consumableSpentStardust, 20, 'Offline emergency fork recorded 20 stardust');
 
-      // Clear 1-4 (star1 = 2000)
+      // Clear 1-4 (star1 = 2300)
       await ctx.advanceTime(3.2);
-      while ((await ctx.getState()).score < 2100) {
+      while ((await ctx.getState()).score < 2350) {
         await serveCustomerOrganic(ctx);
       }
       st = await ctx.getState();
       await ctx.advanceTime(st.timeLeft + 0.6);
       ctx.assertEq((await ctx.getState()).lastResult.cleared, true, 'Cleared 1-4 offline');
 
-      // Clear 1-5 (star1 = 2400) offline
+      // Clear 1-5 (star1 = 2800) offline
       await ctx.clickHit('result_next_btn', { viaCdp: true });
       if ((await ctx.getState()).activeModal === 'level_preview') {
         await ctx.clickHit('preview_start_btn', { viaCdp: true });
       }
       await ctx.advanceTime(3.2);
-      while ((await ctx.getState()).score < 2500) {
+      while ((await ctx.getState()).score < 2850) {
         await serveCustomerOrganic(ctx);
       }
       st = await ctx.getState();
@@ -1751,7 +1770,7 @@ export const TIER4_TESTS = [
             levelStars: { '1-1': 3, '1-2': 3, '1-3': 3, '1-6': 2 },
             levelBestScores: { '1-1': 1600, '1-2': 2100, '1-3': 3100, '1-6': 4100 },
             highestUnlockedLevel: '1-7',
-            bankStardust: 230,
+            bankStardust: 220,
             totalEarnedStardust: 280,
             lastSyncedEarnedStardust: 280,
             consumableSpentStardust: 0,
@@ -1775,13 +1794,13 @@ export const TIER4_TESTS = [
       ctx.assert(mergedSave.levelStars['1-4'] >= 1, 'Union retained offline 1-4 stars');
       ctx.assert(mergedSave.levelStars['1-5'] >= 1, 'Union retained offline 1-5 stars');
       ctx.assertEq(mergedSave.levelStars['1-6'], 2, 'Union retained cloud Device B 1-6 stars');
-      ctx.assertEq(mergedSave.deviceUpgrades.dev_teapot, 1, 'Union retained Device B dev_teapot Lv.1 (50⭐)');
-      ctx.assertEq(mergedSave.consumableSpentStardust, 15, 'Union retained offline emergency fork 15⭐');
+      ctx.assertEq(mergedSave.deviceUpgrades.dev_teapot, 1, 'Union retained Device B dev_teapot Lv.1 (60⭐)');
+      ctx.assertEq(mergedSave.consumableSpentStardust, 20, 'Union retained offline emergency fork 20⭐');
       ctx.assertEq(mergedSave.totalEarnedStardust, 280 + offlineDelta, 'Additive offline delta merged onto cloud baseline');
       ctx.assertEq(
         mergedSave.bankStardust,
-        280 + offlineDelta - (50 + 15),
-        'Merged bankStardust strictly equals totalEarned - (50 teapot + 15 fork)'
+        280 + offlineDelta - (60 + 20),
+        'Merged bankStardust strictly equals totalEarned - (60 teapot + 20 fork)'
       );
 
       // 4) Inject transient push failure (failNextPushCount = 1), trigger Shop purchase (C1 Lv.1 = 20⭐),
@@ -1814,7 +1833,7 @@ export const TIER4_TESTS = [
       ctx.assertEq(finalSave.catcakeLevels['1'], 1, 'Retried push persisted C1 Lv.1');
       ctx.assertEq(
         finalSave.bankStardust,
-        280 + offlineDelta - (50 + 15 + 20),
+        280 + offlineDelta - (60 + 20 + 25),
         'Final bankStardust strictly conserved after retry sync'
       );
 

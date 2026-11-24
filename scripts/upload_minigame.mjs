@@ -35,11 +35,28 @@ function readProjectConfig() {
   return JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
 }
 
+function readMajorMinorFromGameVersion() {
+  try {
+    const req = createRequire(import.meta.url);
+    const { GAME_VERSION } = req(path.join(MINIGAME_DIR, 'src', 'constants.js'));
+    const parts = String(GAME_VERSION || '0.9.0')
+      .replace(/^v/i, '')
+      .split('.');
+    const major = Number.isFinite(Number(parts[0])) ? Math.max(0, Math.floor(Number(parts[0]))) : 0;
+    const minor = Number.isFinite(Number(parts[1])) ? Math.max(0, Math.floor(Number(parts[1]))) : 9;
+    return { major, minor, full: `${major}.${minor}.${parts[2] || '0'}` };
+  } catch (_) {
+    return { major: 0, minor: 9, full: '0.9.0' };
+  }
+}
+
 function resolveVersion(explicitVersion) {
   const raw = (explicitVersion || '').trim();
   if (raw) return raw.replace(/^v/i, '');
-  const runNum = process.env.GITHUB_RUN_NUMBER || '0';
-  return `1.0.${runNum}`;
+  const { major, minor, full } = readMajorMinorFromGameVersion();
+  const runNum = (process.env.GITHUB_RUN_NUMBER || '').trim();
+  if (runNum) return `${major}.${minor}.${runNum}`;
+  return full;
 }
 
 function resolveDesc(explicitDesc) {

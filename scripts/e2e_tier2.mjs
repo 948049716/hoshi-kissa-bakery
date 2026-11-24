@@ -154,7 +154,7 @@ async function syncClearBoardExcept(ctx, keepCoords = []) {
       const s = dbg.getState();
       if (s && Array.isArray(s.tray)) {
         for (let i = 0; i < s.tray.length; i++) {
-          if (s.tray[i] !== null) dbg.doubleTapTray(i);
+          if (s.tray[i] !== null) dbg.doubleTapTray(i, { ignoreCooldown: true });
         }
       }
     };
@@ -209,7 +209,7 @@ async function sculptRow0OnLevel1_7(ctx, targetRow0Tiers) {
         dbg.tapBoardCell(0, col);
         const s = dbg.getState();
         for (let i = 0; i < s.tray.length; i++) {
-          if (s.tray[i]) dbg.doubleTapTray(i);
+          if (s.tray[i]) dbg.doubleTapTray(i, { ignoreCooldown: true });
         }
       }, c);
       await ctx.advanceBothClocks(145);
@@ -343,7 +343,7 @@ async function serveOneOrderOrganically(ctx, preferredSeat = null, opts = {}) {
     const dbg = globalThis.__HOSHI_DEBUG__;
     const s = dbg.getState();
     for (let i = 0; i < s.tray.length; i++) {
-      if (s.tray[i]) dbg.doubleTapTray(i);
+      if (s.tray[i]) dbg.doubleTapTray(i, { ignoreCooldown: true });
     }
   });
 
@@ -525,7 +525,7 @@ async function serveOneOrderOrganically(ctx, preferredSeat = null, opts = {}) {
         dbg.tapBoardCell(cands[0].r, cands[0].c);
         const s2 = dbg.getState();
         for (let i = 0; i < s2.tray.length; i++) {
-          if (s2.tray[i]) dbg.doubleTapTray(i);
+          if (s2.tray[i]) dbg.doubleTapTray(i, { ignoreCooldown: true });
         }
       }
     }, Array.from(usedKey));
@@ -1500,7 +1500,7 @@ const TIER2_F01_TO_F08 = [
         deviceUpgrades: { dev_tray: 1, dev_flour: 0, dev_teapot: 0, dev_tools: 3 },
         seenTutorials: DEFAULT_TUTORIALS_SEEN,
       });
-      await ctx.useToolOnCell('fork', 2, 1);
+      await ctx.useToolOnCell('fork', 2, 1, 'trash');
       await syncClearBoardExcept(ctx, [[2, 2]]);
       await ctx.slide('left');
       await syncClearBoardExcept(ctx, [[2, 0]]);
@@ -1644,7 +1644,7 @@ const TIER2_F01_TO_F08 = [
             dbg.tapBoardCell(r, 1);
             const s = dbg.getState();
             for (let i = 0; i < s.tray.length; i++) {
-              if (s.tray[i]) dbg.doubleTapTray(i);
+              if (s.tray[i]) dbg.doubleTapTray(i, { ignoreCooldown: true });
             }
           }
         }
@@ -1912,7 +1912,7 @@ const TIER2_F01_TO_F08 = [
         dbg.tapBoardCell(2, 2);
         const s = dbg.getState();
         for (let i = 0; i < s.tray.length; i++) {
-          if (s.tray[i]) dbg.doubleTapTray(i);
+          if (s.tray[i]) dbg.doubleTapTray(i, { ignoreCooldown: true });
         }
       });
       ctx.assertEq((await ctx.getState()).grid.cells[2][2].tile, null, '(2,2) freed to null');
@@ -2485,13 +2485,13 @@ const TIER2_F01_TO_F08 = [
       const seat6 = stBefore6.seats[seatIdx6];
       const feverBefore6 = stBefore6.feverActive;
       const pRatio6 = seat6.patience / seat6.maxPatience;
-      const tipMult6 = pRatio6 > 0.55 ? 1.30 : pRatio6 >= 0.25 ? 1.00 : 0.85;
-      const baseMap = { R01: 30, R02: 70, R03: 118 };
-      const expected6 = Math.round(baseMap[seat6.recipeId] * tipMult6 * 1.50 * (feverBefore6 ? 1.35 : 1.00));
+      const tipMult6 = pRatio6 >= 0.60 ? 1.20 : pRatio6 >= 0.25 ? 1.00 : 0.80;
+      const baseMap = { R01: 30, R02: 70, R03: 112 };
+      const expected6 = Math.round(baseMap[seat6.recipeId] * tipMult6 * 1.28 * (feverBefore6 ? 1.25 : 1.00));
 
       const stAfter6 = await serveOneOrderOrganically(ctx, seatIdx6, { useHarness: false, allowSpoon: false });
       ctx.assertEq(stAfter6.comboCount, 6, 'comboCount reaches 6');
-      ctx.assertClose(stAfter6.score - stBefore6.score, expected6, 2, '6th serve combo multiplier must cap at x1.50');
+      ctx.assertClose(stAfter6.score - stBefore6.score, expected6, 2, '6th serve combo multiplier must cap at x1.28');
 
       // Ensure all seated customers have ample patience (>14s with dev_teapot Lv.3) so 10.5s idle causes ZERO walkouts
       const stPreIdle = await ctx.getState();
@@ -2537,12 +2537,12 @@ const TIER2_F01_TO_F08 = [
       ctx.assertEq(st.feverActive, false);
       ctx.assertEq(st.score, 0);
 
-      // 4 green serves -> 4 * 25% = 100% -> feverActive = true
-      for (let i = 0; i < 4; i++) {
+      // 5 green serves -> 5 * 20% = 100% -> feverActive = true
+      for (let i = 0; i < 5; i++) {
         await serveOneOrderOrganically(ctx, null, { useHarness: false });
       }
       st = await ctx.getState();
-      ctx.assertEq(st.feverActive, true, '4 green serves must activate Starlight Fever');
+      ctx.assertEq(st.feverActive, true, '5 green serves must activate Starlight Fever');
 
       // Advance 10.5s (> 10.0s Fever duration)
       st = await ctx.advanceTime(10.5);
@@ -2578,14 +2578,14 @@ const TIER2_F01_TO_F08 = [
       st = await ctx.advanceTime(maxP * 0.58); // pRatio ~ 0.40 (yellow band <= 0.55)
       ctx.assert(st.seats[0].patience / st.seats[0].maxPatience <= 0.54 && st.seats[0].patience / st.seats[0].maxPatience >= 0.28);
       st = await serveOneOrderOrganically(ctx, 0, { useHarness: false });
-      ctx.assertEq(st.feverEnergy, 20, 'Yellow-band normal serve must grant +20% Fever energy (not +25%)');
+      ctx.assertEq(st.feverEnergy, 16, 'Yellow-band normal serve must grant +16% Fever energy (not +20%)');
 
-      // 2) Green-band normal serve -> +25% (20 + 25 = 45): wait 2.3s so vacated seat_0 respawns at >90% green patience
+      // 2) Green-band normal serve -> +20% (16 + 20 = 36): wait 2.3s so vacated seat_0 respawns at >90% green patience
       st = await ctx.advanceTime(2.3);
-      const greenIdx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.60);
+      const greenIdx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
       ctx.assert(greenIdx >= 0, 'Expected fresh green-band customer after seat_0 turnover');
       st = await serveOneOrderOrganically(ctx, greenIdx, { useHarness: false });
-      ctx.assertEq(st.feverEnergy, 45, 'Green-band normal serve must grant +25% Fever energy');
+      ctx.assertEq(st.feverEnergy, 36, 'Green-band normal serve must grant +20% Fever energy');
 
       // 3) VIP Critic (cust_critic) on 1-10 (vipFixedRecipeId: 'R14' = C4 + C5) -> +35% & vipServed++
       // Use dev_teapot: 0 so seat waves turn over 7-9 times before <8.0s closing guard, with up to 3 restarts
@@ -2614,7 +2614,7 @@ const TIER2_F01_TO_F08 = [
 
       const afterVip = await serveOneOrderOrganically(ctx, vipIdx, { useHarness: false });
       ctx.assertEq(afterVip.vipServed, vipBefore + 1, 'Serving cust_critic must increment vipServed by +1');
-      ctx.assertEq(afterVip.feverEnergy, feBefore + 35, 'Serving VIP cust_critic must grant exact +35% Fever energy');
+      ctx.assertEq(afterVip.feverEnergy, feBefore + 30, 'Serving VIP cust_critic must grant exact +30% Fever energy');
     },
   },
 
@@ -2670,7 +2670,7 @@ const TIER2_F01_TO_F08 = [
       const seat2 = stAfter1.seats[r15Idx];
       ctx.assert(seat2.patience / seat2.maxPatience > 0.60, 'R15 seat must still be in green patience band');
       const custMult = seat2.isVip ? 1.50 : seat2.isUrgent ? 1.25 : 1.00;
-      const expectedExact = Math.round((84 + 202.5) * 1.18 * 1.30 * 1.10 * custMult);
+      const expectedExact = Math.round((81 + 187.5) * 1.12 * 1.20 * 1.06 * custMult);
 
       // Now serve R15 using untouched presets (0,1):C2(plain) + (1,1):C3(matcha)
       await ctx.eval((sIdx) => {
@@ -2749,35 +2749,35 @@ const TIER2_F01_TO_F08 = [
         'Luna active skill must clear all unfrozen C1 tiles'
       );
 
-      // Serve #1 post-Luna (combo=1, green patience >0.60, fever=false) -> x1.50!
-      if (!stAfterLunaCast.seats.some((s) => s && s.patience / s.maxPatience > 0.60)) {
+      // Serve #1 post-Luna (combo=1, green patience >0.65, fever=false) -> x1.50!
+      if (!stAfterLunaCast.seats.some((s) => s && s.patience / s.maxPatience > 0.65)) {
         const minP = Math.min(...stAfterLunaCast.seats.filter(Boolean).map((s) => s.patience));
         await ctx.advanceTime(minP + 2.5);
       }
       const pre1 = await ctx.getState();
-      const idx1 = pre1.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.60);
+      const idx1 = pre1.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
       const rec1 = pre1.seats[idx1].recipeId;
-      const baseMap = { R01: 30, R02: 70, R03: 118 };
+      const baseMap = { R01: 30, R02: 70, R03: 100 * 1.12 };
       const post1 = await serveOneOrderOrganically(ctx, idx1, { useHarness: false, allowSpoon: false });
       ctx.assertEq(
         post1.score - pre1.score,
-        Math.round(baseMap[rec1] * 1.30 * 1.50),
+        Math.round(baseMap[rec1] * 1.20 * 1.50),
         `1st post-Luna serve (${rec1}) must receive x1.50 burst`
       );
 
       // Wait 10.5s to reset comboCount=0, then Serve #2 post-Luna -> reverts to x1.00!
       await ctx.advanceTime(10.5);
       let pre2 = await ctx.getState();
-      if (!pre2.seats.some((s) => s && s.patience / s.maxPatience > 0.60)) {
+      if (!pre2.seats.some((s) => s && s.patience / s.maxPatience > 0.65)) {
         const minP = Math.min(...pre2.seats.filter(Boolean).map((s) => s.patience));
         pre2 = await ctx.advanceTime(minP + 2.5);
       }
-      const idx2 = pre2.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.60);
+      const idx2 = pre2.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
       const rec2 = pre2.seats[idx2].recipeId;
       const post2 = await serveOneOrderOrganically(ctx, idx2, { useHarness: false, allowSpoon: false });
       ctx.assertEq(
         post2.score - pre2.score,
-        Math.round(baseMap[rec2] * 1.30 * 1.00),
+        Math.round(baseMap[rec2] * 1.20 * 1.00),
         `2nd post-Luna serve (${rec2}) must revert to x1.00`
       );
 
@@ -3449,7 +3449,7 @@ const TIER2_F09_TO_F16 = [
                 const dbg = globalThis.__HOSHI_DEBUG__;
                 dbg.tapBoardCell(lr, lc);
                 const idx = (dbg.getState().tray || []).findIndex((x) => x !== null);
-                if (idx >= 0) dbg.doubleTapTray(idx);
+                if (idx >= 0) dbg.doubleTapTray(idx, { ignoreCooldown: true });
               }, low.r, low.c);
             }
           }
@@ -3462,27 +3462,27 @@ const TIER2_F09_TO_F16 = [
         findUnfrozen(preJump, (t) => t.tier === 6);
       ctx.assert(!!c6Cell, 'Expected unfrozen C6 tile dynamically located on 2-2 before serving R17');
 
-      const starsBeforeJump = [6600, 9100, 11600].filter((t) => preJump.score >= t).length;
+      const starsBeforeJump = [7800, 11200, 14500].filter((t) => preJump.score >= t).length;
       await resetAudioCounters(ctx);
       await ctx.eval((idx, tr, tc) => {
         const dbg = globalThis.__HOSHI_DEBUG__;
         for (let i = 0; i < (dbg.getState().tray || []).length; i++) {
-          if (dbg.getState().tray[i]) dbg.doubleTapTray(i);
+          if (dbg.getState().tray[i]) dbg.doubleTapTray(i, { ignoreCooldown: true });
         }
         dbg.clickHit(`seat_${idx}`);
         dbg.tapBoardCell(tr, tc);
       }, r17Idx, c6Cell.r, c6Cell.c);
       let postJump = await ctx.advanceTime(0.65);
-      const starsAfterJump = [6600, 9100, 11600].filter((t) => postJump.score >= t).length;
+      const starsAfterJump = [7800, 11200, 14500].filter((t) => postJump.score >= t).length;
       ctx.assert(
-        starsAfterJump - starsBeforeJump >= 2 || starsAfterJump >= 2,
-        `Expected multi-star jump on 2-2 (before=${preJump.score} [${starsBeforeJump}★] -> after=${postJump.score} [${starsAfterJump}★])`
+        starsAfterJump - starsBeforeJump >= 1 || starsAfterJump >= 2,
+        `Expected star unlock on 2-2 (before=${preJump.score} [${starsBeforeJump}★] -> after=${postJump.score} [${starsAfterJump}★])`
       );
       const jumpAudio = await readAudioStats(ctx);
-      ctx.assert(countSynthStarts(jumpAudio) >= 2, 'Multi-star jump must synthesize serve + star unlock chimes cleanly');
+      ctx.assert(countSynthStarts(jumpAudio) >= 1, 'Star unlock serve must synthesize chimes cleanly');
 
-      // Ensure score >= 11600 (3★), then serve one more order and settle -> starsEarned stays clamped to 3!
-      while ((await ctx.getState()).score < 11600) {
+      // Ensure score >= 14500 (3★), then serve one more order and settle -> starsEarned stays clamped to 3!
+      while ((await ctx.getState()).score < 14500) {
         await serveOneOrderOrganically(ctx, null, { useHarness: false });
       }
       await serveOneOrderOrganically(ctx, null, { useHarness: false });
@@ -3544,8 +3544,8 @@ const TIER2_F09_TO_F16 = [
           await ctx.navigate('?safeTop=47&safeBottom=34&capsule=1&cloud=0');
           const save = await ctx.getSaveData();
           ctx.assertEq(save.schemaVersion, 2, `Corrupted payload ${raw} must initialize schemaVersion=2`);
-          ctx.assertEq(save.bankStardust, 30, `Corrupted payload ${raw} must initialize bankStardust=30`);
-          ctx.assertEq(save.totalEarnedStardust, 30, `Corrupted payload ${raw} must initialize totalEarnedStardust=30`);
+          ctx.assertEq(save.bankStardust, 15, `Corrupted payload ${raw} must initialize bankStardust=15`);
+          ctx.assertEq(save.totalEarnedStardust, 15, `Corrupted payload ${raw} must initialize totalEarnedStardust=15`);
           ctx.assertEq(save.highestUnlockedLevel, '1-1');
           ctx.assertEq(ctx.cdp.errors.length, 0, `Unhandled error on payload ${raw}`);
         }
@@ -3610,19 +3610,19 @@ const TIER2_F09_TO_F16 = [
 
         let save = await ctx.getSaveData();
         ctx.assertEq(save.schemaVersion, 2);
-        ctx.assertEq(save.totalEarnedStardust, 390);
+        ctx.assertEq(save.totalEarnedStardust, 430);
         ctx.assertEq(save.bankStardust, 230);
 
         for (let r = 1; r <= 3; r++) {
           await ctx.reload();
           save = await ctx.getSaveData();
-          ctx.assertEq(save.totalEarnedStardust, 390, `Reload #${r} double-counted migration stardust`);
+          ctx.assertEq(save.totalEarnedStardust, 430, `Reload #${r} double-counted migration stardust`);
           ctx.assertEq(save.bankStardust, 230, `Reload #${r} mutated bankStardust`);
         }
 
         await ctx.setSaveData(save);
         save = await ctx.getSaveData();
-        ctx.assertEq(save.totalEarnedStardust, 390);
+        ctx.assertEq(save.totalEarnedStardust, 430);
         ctx.assertEq(save.bankStardust, 230);
       } finally {
         await ctx.navigate('?safeTop=47&safeBottom=34&capsule=1&cloud=1');
@@ -3718,8 +3718,8 @@ const TIER2_F09_TO_F16 = [
         ctx.assertEq(save.deviceUpgrades.dev_tray, 2, 'dev_tray 9 must clamp to 2');
         ctx.assertEq(save.deviceUpgrades.dev_flour, 0, 'dev_flour -2 must clamp to 0');
 
-        // Spent = C1 Lv.4 (240) + dev_tray Lv.2 (210) = 450
-        const expectedBank = Math.max(0, save.totalEarnedStardust - 450);
+        // Spent = C1 Lv.4 (275) + dev_tray Lv.2 (240) = 515
+        const expectedBank = Math.max(0, save.totalEarnedStardust - 515);
         ctx.assert(save.bankStardust >= 0 && save.bankStardust < 99999, `Tampered bankStardust must not remain 99999 or go negative (${save.bankStardust})`);
         ctx.assertEq(save.bankStardust, expectedBank, 'bankStardust must obey Math.max(0, totalEarned - spent)');
       } finally {
@@ -3871,8 +3871,8 @@ const TIER2_F09_TO_F16 = [
       const pullRes = await callKissaSync(ctx, { action: 'pull' });
       ctx.assertEq(pullRes.ok, true);
       ctx.assertEq(pullRes.metaSave.schemaVersion, 2, 'Server pull must migrate legacy v1 cloud doc to schemaVersion=2');
-      ctx.assertEq(pullRes.metaSave.bankStardust, 230, 'Server migrateV1ToV2 must refund up_tools + luna diff + 50 gift -> 230');
-      ctx.assertEq(pullRes.metaSave.totalEarnedStardust, 390);
+      ctx.assertEq(pullRes.metaSave.bankStardust, 230, 'Server migrateV1ToV2 must refund up_tools + luna/sakura diff + 50 gift -> 230');
+      ctx.assertEq(pullRes.metaSave.totalEarnedStardust, 430);
       ctx.assertEq(pullRes.metaSave.activeRun, undefined, 'Legacy activeRun must be stripped');
       ctx.assertEq(pullRes.metaSave.savedRuns, undefined, 'Legacy savedRuns must be stripped');
 
@@ -4173,13 +4173,13 @@ const TIER2_F09_TO_F16 = [
         seenTutorials: DEFAULT_TUTORIALS_SEEN,
       });
 
-      for (let i = 0; i < 15; i++) {
+      for (let i = 0; i < 18; i++) {
         const s = await ctx.getState();
-        if (s.score >= 760) break;
+        if (s.score >= 860) break;
         await serveOneOrderOrganically(ctx, null, { useHarness: false });
       }
       let mid = await ctx.getState();
-      ctx.assert(mid.score >= 750 && mid.score < 1400, `Expected 1★/2★ replay score (<1920), got ${mid.score}`);
+      ctx.assert(mid.score >= 850 && mid.score < 1750, `Expected 1★/2★ replay score (<1920), got ${mid.score}`);
       const resA = await ctx.advanceTime(mid.timeLeft + 0.6);
       ctx.assertEq(resA.lastResult?.firstStarDustAward, 0, 'Replay below historical 3★ must award 0 firstStarDust');
 
@@ -4207,18 +4207,18 @@ const TIER2_F09_TO_F16 = [
       const orderMod = await ctx.requireBundledModule('./src/order_service.js');
       const lv1_1 = levelsMod.getLevelById('1-1');
       if (orderMod && typeof orderMod.computeLevelSettlement === 'function') {
-        const s749 = orderMod.computeLevelSettlement(lv1_1, { score: 749, ordersServed: 6, vipServed: 0 }, 0);
-        const s750 = orderMod.computeLevelSettlement(lv1_1, { score: 750, ordersServed: 6, vipServed: 0 }, 0);
-        ctx.assertEq(s749.cleared, false, 'Exact 749 on 1-1 must have cleared=false');
-        ctx.assertEq(s749.starsEarned, 0, 'Exact 749 on 1-1 must earn 0 stars');
-        ctx.assertEq(s750.cleared, true, 'Exact 750 on 1-1 must have cleared=true');
-        ctx.assertEq(s750.starsEarned, 1, 'Exact 750 on 1-1 must earn 1 star');
+        const s849 = orderMod.computeLevelSettlement(lv1_1, { score: 849, ordersServed: 6, vipServed: 0 }, 0);
+        const s850 = orderMod.computeLevelSettlement(lv1_1, { score: 850, ordersServed: 6, vipServed: 0 }, 0);
+        ctx.assertEq(s849.cleared, false, 'Exact 849 on 1-1 must have cleared=false');
+        ctx.assertEq(s849.starsEarned, 0, 'Exact 849 on 1-1 must earn 0 stars');
+        ctx.assertEq(s850.cleared, true, 'Exact 850 on 1-1 must have cleared=true');
+        ctx.assertEq(s850.starsEarned, 1, 'Exact 850 on 1-1 must earn 1 star');
       }
 
-      // 2) Live E2E Shift A: 0 < score < 750 -> fail, 1-2 stays locked
+      // 2) Live E2E Shift A: 0 < score < 850 -> fail, 1-2 stays locked
       await ctx.setupSaveAndStart('1-1', {
-        bankStardust: 30,
-        totalEarnedStardust: 30,
+        bankStardust: 15,
+        totalEarnedStardust: 15,
         levelStars: {},
         levelBestScores: {},
         unlockedPatrons: ['mikan', 'luna'],
@@ -4229,17 +4229,17 @@ const TIER2_F09_TO_F16 = [
         await serveOneOrderOrganically(ctx, null, { useHarness: false });
       }
       let stFail = await ctx.getState();
-      ctx.assert(stFail.score > 0 && stFail.score < 750, `Expected 0 < score < 750, got ${stFail.score}`);
+      ctx.assert(stFail.score > 0 && stFail.score < 850, `Expected 0 < score < 850, got ${stFail.score}`);
       stFail = await ctx.advanceTime(stFail.timeLeft + 0.6);
       ctx.assertEq(stFail.lastResult?.cleared, false);
       ctx.assertEq(stFail.lastResult?.starsEarned, 0);
       const saveFail = await ctx.getSaveData();
-      ctx.assertEq(levelsMod.isLevelUnlocked('1-2', saveFail.levelStars).unlocked, false, '1-2 must stay locked when score < 750');
+      ctx.assertEq(levelsMod.isLevelUnlocked('1-2', saveFail.levelStars).unlocked, false, '1-2 must stay locked when score < 850');
 
-      // 3) Live E2E Shift B: 750 <= score < 1050 -> 1★ clear, 1-2 unlocks!
+      // 3) Live E2E Shift B: 850 <= score < 1250 -> 1★ clear, 1-2 unlocks!
       await ctx.setupSaveAndStart('1-1', {
-        bankStardust: 30,
-        totalEarnedStardust: 30,
+        bankStardust: 15,
+        totalEarnedStardust: 15,
         levelStars: {},
         levelBestScores: {},
         catcakeLevels: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 },
@@ -4247,15 +4247,15 @@ const TIER2_F09_TO_F16 = [
         selectedPatron: 'luna',
         seenTutorials: DEFAULT_TUTORIALS_SEEN,
       });
-      while ((await ctx.getState()).score < 750) {
+      while ((await ctx.getState()).score < 850) {
         const cur = await ctx.getState();
-        if (cur.score >= 580 && (cur.comboCount >= 2 || cur.feverActive)) {
-          await ctx.advanceTime(10.5);
+        if (cur.score >= 680 && (cur.comboCount >= 2 || cur.feverActive)) {
+          await ctx.advanceTime(8.5);
         }
         await serveOneOrderOrganically(ctx, null, { useHarness: false });
       }
       let stPass = await ctx.getState();
-      ctx.assert(stPass.score >= 750 && stPass.score < 1050, `Expected 1★ band [750, 1049], got ${stPass.score}`);
+      ctx.assert(stPass.score >= 850 && stPass.score < 1250, `Expected 1★ band [850, 1249], got ${stPass.score}`);
       stPass = await ctx.advanceTime(stPass.timeLeft + 0.6);
       ctx.assertEq(stPass.lastResult?.cleared, true);
       ctx.assertEq(stPass.lastResult?.starsEarned, 1);
@@ -4357,11 +4357,11 @@ const TIER2_F09_TO_F16 = [
     title: 'Max-level purchase ceiling (C1 Lv.4, dev_tray Lv.2, dev_tools Lv.3) prevents over-leveling and preserves 500 ⭐ bank',
     run: async (ctx) => {
       await ctx.resetGame();
-      // Spent = C1 Lv.4 (240) + dev_tray Lv.2 (210) + dev_tools Lv.3 (290) = 740; totalEarned = 1240 -> bank = 500
+      // Spent = C1 Lv.4 (275) + dev_tray Lv.2 (240) + dev_tools Lv.3 (300) = 815; totalEarned = 1315 -> bank = 500
       await ctx.setSaveData({
         schemaVersion: 2,
         bankStardust: 500,
-        totalEarnedStardust: 1240,
+        totalEarnedStardust: 1315,
         catcakeLevels: { 1: 4, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 },
         deviceUpgrades: { dev_tray: 2, dev_flour: 0, dev_teapot: 0, dev_tools: 3 },
       });
@@ -4751,27 +4751,27 @@ const TIER2_F09_TO_F16 = [
         seenTutorials: DEFAULT_TUTORIALS_SEEN,
       });
 
-      // Spend free fork on (0,0):C1
-      await ctx.useToolOnCell('fork', 0, 0);
+      // Spend free fork on (0,0):C1 -> trash
+      await ctx.useToolOnCell('fork', 0, 0, 'trash');
       ctx.assertEq((await ctx.getState()).toolCounts.fork, 0);
       ctx.assertEq((await ctx.getSaveData()).bankStardust, 100);
 
-      // Buy 1st emergency fork (-15⭐ -> bank=85) and use it on (0,1):C1
+      // Buy 1st emergency fork (-20⭐ -> bank=80) and use it on (0,1):C1
       const buy1 = await tryBuyEmergencyUtensil(ctx, 'fork');
-      ctx.assertEq(buy1.save.bankStardust, 85, '1st emergency fork costs 15⭐');
+      ctx.assertEq(buy1.save.bankStardust, 80, '1st emergency fork costs 20⭐');
       if (buy1.st.toolCounts.fork > 0 || buy1.st.activeTool === 'fork') {
-        await ctx.useToolOnCell('fork', 0, 1);
+        await ctx.useToolOnCell('fork', 0, 1, 'trash');
       }
       ctx.assertEq((await ctx.getState()).toolCounts.fork, 0);
 
       // Attempt 2nd emergency fork in the SAME level -> MUST be rejected!
       const buy2 = await tryBuyEmergencyUtensil(ctx, 'fork');
       ctx.assertEq(buy2.st.toolCounts.fork, 0, '2nd emergency fork in same level must be rejected (maxBuyPerLevel=1)');
-      ctx.assertEq(buy2.save.bankStardust, 85, 'Rejected 2nd emergency fork must deduct 0⭐');
+      ctx.assertEq(buy2.save.bankStardust, 80, 'Rejected 2nd emergency fork must deduct 0⭐');
 
-      // Buy 1st emergency spoon (-20⭐ -> bank=65), use on (1,1):C2 -> C3, then attempt 2nd emergency spoon -> rejected!
+      // Buy 1st emergency spoon (-25⭐ -> bank=55), use on (1,1):C2 -> C3, then attempt 2nd emergency spoon -> rejected!
       const spoon1 = await tryBuyEmergencyUtensil(ctx, 'spoon');
-      ctx.assertEq(spoon1.save.bankStardust, 65, '1st emergency spoon costs 20⭐');
+      ctx.assertEq(spoon1.save.bankStardust, 55, '1st emergency spoon costs 25⭐');
       if (spoon1.st.toolCounts.spoon > 0 || spoon1.st.activeTool === 'spoon') {
         await ctx.useToolOnCell('spoon', 1, 1);
       }
@@ -4779,24 +4779,24 @@ const TIER2_F09_TO_F16 = [
 
       const spoon2 = await tryBuyEmergencyUtensil(ctx, 'spoon');
       ctx.assertEq(spoon2.st.toolCounts.spoon, 0, '2nd emergency spoon in same level must be rejected (maxBuyPerLevel=1)');
-      ctx.assertEq(spoon2.save.bankStardust, 65);
+      ctx.assertEq(spoon2.save.bankStardust, 55);
 
-      // Part B: Insufficient stardust (bankStardust = 14 < 15⭐) on 1-2
+      // Part B: Insufficient stardust (bankStardust = 19 < 20⭐) on 1-2
       await ctx.setupSaveAndStart('1-2', {
         schemaVersion: 2,
-        bankStardust: 14,
-        totalEarnedStardust: 34,
+        bankStardust: 19,
+        totalEarnedStardust: 39,
         consumableSpentStardust: 20,
         levelStars: { '1-1': 1 },
         deviceUpgrades: { dev_tray: 0, dev_flour: 0, dev_teapot: 0, dev_tools: 0 },
         seenTutorials: DEFAULT_TUTORIALS_SEEN,
       });
-      await ctx.useToolOnCell('fork', 0, 0); // use free fork
+      await ctx.useToolOnCell('fork', 0, 0, 'trash'); // use free fork
       const lowFork = await tryBuyEmergencyUtensil(ctx, 'fork');
       const lowSpoon = await tryBuyEmergencyUtensil(ctx, 'spoon');
-      ctx.assertEq(lowFork.st.toolCounts.fork, 0, '14⭐ (<15⭐) must reject emergency fork');
-      ctx.assertEq(lowSpoon.st.toolCounts.spoon, 0, '14⭐ (<20⭐) must reject emergency spoon');
-      ctx.assertEq(lowSpoon.save.bankStardust, 14);
+      ctx.assertEq(lowFork.st.toolCounts.fork, 0, '19⭐ (<20⭐) must reject emergency fork');
+      ctx.assertEq(lowSpoon.st.toolCounts.spoon, 0, '19⭐ (<25⭐) must reject emergency spoon');
+      ctx.assertEq(lowSpoon.save.bankStardust, 19);
     },
   },
 
@@ -4840,12 +4840,12 @@ const TIER2_F09_TO_F16 = [
           const t0 = s0.grid?.cells?.[r]?.[c]?.tile;
           if (!t0 || t0.frozenHp > 0) return;
           for (let i = 0; i < (s0.tray || []).length; i++) {
-            if (s0.tray[i]) dbg.doubleTapTray(i);
+            if (s0.tray[i]) dbg.doubleTapTray(i, { ignoreCooldown: true });
           }
           dbg.tapBoardCell(r, c);
           const s1 = dbg.getState();
           for (let i = 0; i < (s1.tray || []).length; i++) {
-            if (s1.tray[i]) dbg.doubleTapTray(i);
+            if (s1.tray[i]) dbg.doubleTapTray(i, { ignoreCooldown: true });
           }
         };
 

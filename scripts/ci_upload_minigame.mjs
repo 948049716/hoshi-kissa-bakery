@@ -14,10 +14,16 @@ const __dirname = path.dirname(__filename);
 const REPO_ROOT = path.resolve(__dirname, '..');
 const PROJECT_DIR = path.join(REPO_ROOT, '05-微信小游戏版本');
 
+const { GAME_VERSION } = require(path.join(PROJECT_DIR, 'src', 'constants.js'));
+const verParts = String(GAME_VERSION || '0.9.0').replace(/^v/i, '').split('.');
+const majorMinor = `${verParts[0] || '0'}.${verParts[1] || '9'}`;
+
 const appid = process.env.WX_APPID || 'wx923bf8440b65a1af';
 const privateKey = process.env.WX_PRIVATE_KEY || '';
-const version = process.env.WX_VERSION || `4.0.${process.env.GITHUB_RUN_NUMBER || '1'}`;
-const desc = process.env.WX_DESC || 'GitHub Actions 自动上传（星夜吃茶微信小游戏）';
+const version =
+  process.env.WX_VERSION ||
+  (process.env.GITHUB_RUN_NUMBER ? `${majorMinor}.${process.env.GITHUB_RUN_NUMBER}` : GAME_VERSION || '0.9.0');
+const desc = process.env.WX_DESC || `GitHub Actions 自动上传（一起做猫饼 v${GAME_VERSION || '0.9.0'}）`;
 
 if (!privateKey.trim()) {
   console.error('Missing WX_PRIVATE_KEY environment variable.');

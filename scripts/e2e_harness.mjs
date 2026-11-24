@@ -121,22 +121,22 @@ export const RECIPE_SLOTS_MAP = Object.freeze({
 
 export const V2_SHOP_COSTS = Object.freeze({
   catcake: {
-    1: [20, 40, 70, 110],
-    2: [25, 50, 85, 130],
-    3: [35, 65, 105, 160],
-    4: [45, 85, 135, 200],
-    5: [60, 110, 170, 250],
-    6: [80, 140, 220, 320],
-    7: [100, 180, 280, 400]
+    1: [25, 50, 80, 120],
+    2: [30, 60, 95, 145],
+    3: [40, 75, 115, 175],
+    4: [50, 95, 145, 215],
+    5: [65, 120, 185, 270],
+    6: [85, 150, 235, 340],
+    7: [105, 185, 280, 385]
   },
   device: {
-    dev_tray: [60, 150],
-    dev_flour: [45, 95, 170],
-    dev_teapot: [50, 105, 185],
-    dev_tools: [40, 90, 160]
+    dev_tray: [75, 165],
+    dev_flour: [55, 110, 180],
+    dev_teapot: [60, 115, 190],
+    dev_tools: [50, 95, 155]
   },
-  patron: { mikan: 0, luna: 80, mugi: 120 },
-  theme: { amber: 0, sakura: 80, moonlight: 120 }
+  patron: { mikan: 0, luna: 100, mugi: 140 },
+  theme: { amber: 0, sakura: 100, moonlight: 140 }
 });
 
 export function sleep(ms) {
@@ -245,12 +245,13 @@ export function createCanonicalDefaultSaveV2({ seenAllTutorials = false } = {}) 
     schemaVersion: 2,
     bgmTrack: 'waltz',
     sfxEnabled: true,
-    bankStardust: 30,
-    totalEarnedStardust: 30,
-    lastSyncedEarnedStardust: 30,
+    bankStardust: 15,
+    totalEarnedStardust: 15,
+    lastSyncedEarnedStardust: 15,
     consumableSpentStardust: 0,
     levelStars: {},
     levelBestScores: {},
+    levelFailStreaks: {},
     highestUnlockedLevel: '1-1',
     catcakeLevels: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 },
     deviceUpgrades: { dev_tray: 0, dev_flour: 0, dev_teapot: 0, dev_tools: 0 },
@@ -1097,7 +1098,7 @@ export function createCloudSdkStore({ minigameDir = DEFAULT_MINIGAME_DIR } = {})
         profile: { nickName: `星夜店长#${state.openid.slice(-4).toUpperCase()}`, avatarUrl: '', avatarPreset: 'mikan', authorized: false, updatedAt: Date.now() },
         totalStars: 0,
         totalCumulativeScore: 0,
-        metaSave: { schemaVersion: 2, bankStardust: 30, totalEarnedStardust: 30, lastSyncedEarnedStardust: 30, levelStars: {}, levelBestScores: {} },
+        metaSave: { schemaVersion: 2, bankStardust: 15, totalEarnedStardust: 15, lastSyncedEarnedStardust: 15, levelStars: {}, levelBestScores: {}, levelFailStreaks: {} },
         revision: 1
       };
       cur.revision = (cur.revision || 1) + (Number(bumpOpts.delta) || 1);
@@ -1706,23 +1707,24 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
   const MAX_TOTAL_SCORE = 3450000;
   const MAX_OFFLINE_DELTA = 1500;
   const CATCAKE_COSTS = {
-    1: [20, 40, 70, 110],
-    2: [25, 50, 85, 130],
-    3: [35, 65, 105, 160],
-    4: [45, 85, 135, 200],
-    5: [60, 110, 170, 250],
-    6: [80, 140, 220, 320],
-    7: [100, 180, 280, 400]
+    1: [25, 50, 80, 120],
+    2: [30, 60, 95, 145],
+    3: [40, 75, 115, 175],
+    4: [50, 95, 145, 215],
+    5: [65, 120, 185, 270],
+    6: [85, 150, 235, 340],
+    7: [105, 185, 280, 385]
   };
   const DEVICE_COSTS = {
-    dev_tray: [60, 150],
-    dev_flour: [45, 95, 170],
-    dev_teapot: [50, 105, 185],
-    dev_tools: [40, 90, 160]
+    dev_tray: [75, 165],
+    dev_flour: [55, 110, 180],
+    dev_teapot: [60, 115, 190],
+    dev_tools: [50, 95, 155]
   };
-  const V2_PATRON_COSTS = { mikan: 0, luna: 80, mugi: 120 };
-  const V2_THEME_COSTS = { amber: 0, sakura: 80, moonlight: 120 };
+  const V2_PATRON_COSTS = { mikan: 0, luna: 100, mugi: 140 };
+  const V2_THEME_COSTS = { amber: 0, sakura: 100, moonlight: 140 };
   const V1_PATRON_COSTS = { mikan: 0, luna: 60, mugi: 100 };
+  const V1_THEME_COSTS = { amber: 0, sakura: 80, moonlight: 120 };
   const V1_UPGRADE_COSTS = {
     up_tools: [40, 90, 160],
     up_fever: [50, 100, 180],
@@ -1791,7 +1793,10 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
     return s;
   }
   function migrateV1ToV2Mock(raw) {
-    const src = raw && typeof raw === 'object' ? raw : {};
+    if (!raw || typeof raw !== 'object' || Object.keys(raw).length === 0) {
+      return sanitizeV2Mock({ schemaVersion: 2, bankStardust: 15, totalEarnedStardust: 15, lastSyncedEarnedStardust: 0 });
+    }
+    const src = raw;
     const unlockedPatrons = ['mikan'];
     for (const p of src.unlockedPatrons || []) {
       const np = normPatron(p);
@@ -1803,7 +1808,7 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
     }
     let v1Spent = 0;
     for (const p of unlockedPatrons) v1Spent += V1_PATRON_COSTS[p] || 0;
-    for (const th of unlockedThemes) v1Spent += V2_THEME_COSTS[th] || 0;
+    for (const th of unlockedThemes) v1Spent += V1_THEME_COSTS[th] || 0;
     const ups = src.shopUpgrades || {};
     for (const k of Object.keys(V1_UPGRADE_COSTS)) {
       const lv = clampInt(ups[k], 0, 3);
@@ -1811,8 +1816,12 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
     }
     const rawBank = typeof src.bankStardust === 'number' ? Math.max(0, Math.floor(src.bankStardust)) : 30;
     let totalEarned = Math.max(30, clampInt(src.totalEarnedStardust, 0, 999999), rawBank + v1Spent);
-    if (unlockedPatrons.includes('luna')) totalEarned += 20;
-    if (unlockedPatrons.includes('mugi')) totalEarned += 20;
+    for (const p of unlockedPatrons) {
+      totalEarned += Math.max(0, (V2_PATRON_COSTS[p] || 0) - (V1_PATRON_COSTS[p] || 0));
+    }
+    for (const th of unlockedThemes) {
+      totalEarned += Math.max(0, (V2_THEME_COSTS[th] || 0) - (V1_THEME_COSTS[th] || 0));
+    }
     if ((Number(src.bestChef) || 0) > 0 || (Number(src.bestRush) || 0) > 0 || (Number(src.bestZen) || 0) > 0) {
       totalEarned += 50;
     }
@@ -1826,6 +1835,7 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
       consumableSpentStardust: 0,
       levelStars: {},
       levelBestScores: {},
+      levelFailStreaks: {},
       highestUnlockedLevel: '1-1',
       catcakeLevels: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 },
       deviceUpgrades: { dev_tray: 0, dev_flour: 0, dev_teapot: 0, dev_tools: 0 },
@@ -1853,8 +1863,11 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
   }
 
   function sanitizeV2Mock(raw, warnings = []) {
-    if (!raw || typeof raw !== 'object') return migrateV1ToV2Mock(null);
+    if (!raw || typeof raw !== 'object' || Object.keys(raw).length === 0) {
+      return sanitizeV2Mock({ schemaVersion: 2, bankStardust: 15, totalEarnedStardust: 15, lastSyncedEarnedStardust: 0 });
+    }
     if (!raw.schemaVersion || raw.schemaVersion < 2) return migrateV1ToV2Mock(raw);
+    const higherSchemaDetected = Number(raw.schemaVersion) > 2;
     const unlockedPatrons = ['mikan'];
     for (const p of raw.unlockedPatrons || []) {
       const np = normPatron(p);
@@ -1866,8 +1879,10 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
     }
     const levelBestScores = {};
     const levelStars = {};
+    const levelFailStreaks = {};
     const inScores = raw.levelBestScores || {};
     const inStars = raw.levelStars || {};
+    const inStreaks = raw.levelFailStreaks || {};
     for (const id of VALID_IDS) {
       const cap = CHAPTER_CAPS[id[0]] || 35000;
       const rawSc = Math.max(0, Math.floor(Number(inScores[id]) || 0));
@@ -1880,6 +1895,10 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
         st = 0;
       }
       if (st > 0) levelStars[id] = st;
+      else {
+        const fs = clampInt(inStreaks[id], 0, 999);
+        if (fs > 0) levelFailStreaks[id] = fs;
+      }
     }
     const totalStars = Math.min(90, Object.values(levelStars).reduce((s, v) => s + v, 0));
     const totalCumulativeScore = Math.min(MAX_TOTAL_SCORE, Object.values(levelBestScores).reduce((s, v) => s + v, 0));
@@ -1900,11 +1919,12 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
       bgmTrack: raw.bgmTrack === 'bossa' || raw.bgmTrack === 'off' ? raw.bgmTrack : 'waltz',
       sfxEnabled: typeof raw.sfxEnabled === 'boolean' ? raw.sfxEnabled : true,
       bankStardust: 0,
-      totalEarnedStardust: 30,
+      totalEarnedStardust: 15,
       lastSyncedEarnedStardust: clampInt(raw.lastSyncedEarnedStardust, 0, 999999),
       consumableSpentStardust: clampInt(raw.consumableSpentStardust, 0, 999999),
       levelStars,
       levelBestScores,
+      levelFailStreaks,
       highestUnlockedLevel: computeHighestUnlocked(levelStars),
       catcakeLevels,
       deviceUpgrades,
@@ -1930,10 +1950,11 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
       },
       updatedAt: clampInt(raw.updatedAt || Date.now(), 0, 9999999999999)
     };
+    if (higherSchemaDetected) out.higherSchemaDetected = true;
     const spent = computeSpentV2(out);
-    const rawBank = typeof raw.bankStardust === 'number' ? Math.max(0, Math.floor(raw.bankStardust)) : 30;
+    const rawBank = typeof raw.bankStardust === 'number' ? Math.max(0, Math.floor(raw.bankStardust)) : 15;
     const rawEarned = clampInt(raw.totalEarnedStardust, 0, 999999);
-    out.totalEarnedStardust = Math.max(30, rawEarned > 0 ? rawEarned : rawBank + spent, spent);
+    out.totalEarnedStardust = Math.max(15, rawEarned > 0 ? rawEarned : rawBank + spent, spent);
     out.bankStardust = Math.max(0, out.totalEarnedStardust - spent);
     return out;
   }
@@ -1948,9 +1969,28 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
       myDoc = raw ? JSON.parse(raw) : null;
     } catch (_) {}
 
+    const isHigherCloudDoc = Boolean(
+      myDoc &&
+        ((Number(myDoc.schemaVersion) || 0) > 2 ||
+          (myDoc.metaSave && (Number(myDoc.metaSave.schemaVersion) || 0) > 2))
+    );
+
     if (action === 'pull') {
+      if (isHigherCloudDoc) {
+        return {
+          ok: true,
+          isNewUser: false,
+          higherSchemaDetected: true,
+          openidSuffix: myDoc.openidSuffix || openidSuffix,
+          profile: myDoc.profile || { nickName: '星夜店长#' + openidSuffix, avatarUrl: '', avatarPreset: 'mikan', authorized: false, updatedAt: 0 },
+          totalStars: myDoc.totalStars || 0,
+          totalCumulativeScore: myDoc.totalCumulativeScore || 0,
+          metaSave: myDoc.metaSave || myDoc,
+          revision: myDoc.revision || 1
+        };
+      }
       if (!myDoc) {
-        const initMeta = sanitizeV2Mock({ schemaVersion: 2, bankStardust: 30, totalEarnedStardust: 30, lastSyncedEarnedStardust: 30 });
+        const initMeta = sanitizeV2Mock({ schemaVersion: 2, bankStardust: 15, totalEarnedStardust: 15, lastSyncedEarnedStardust: 15 });
         myDoc = {
           openidSuffix,
           profile: { nickName: '星夜店长#' + openidSuffix, avatarUrl: '', avatarPreset: 'mikan', authorized: false, updatedAt: 0 },
@@ -1987,6 +2027,9 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
     }
 
     if (action === 'push') {
+      if (isHigherCloudDoc) {
+        return { ok: false, blocked: true, higherSchemaDetected: true, reason: 'higher_schema_version_on_cloud' };
+      }
       if (cloudConfig.exhaustRevisionLock) {
         return { ok: false, conflict: true, reason: 'revision_conflict_retry_exhausted' };
       }
@@ -2024,10 +2067,15 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
       if (baseMeta) {
         const mStars = {};
         const mScores = {};
+        const mStreaks = {};
         for (const id of VALID_IDS) {
           const st = Math.max(baseMeta.levelStars[id] || 0, clientMeta.levelStars[id] || 0);
           const sc = Math.max(baseMeta.levelBestScores[id] || 0, clientMeta.levelBestScores[id] || 0);
           if (st > 0 && sc > 0) mStars[id] = st;
+          else {
+            const fs = clientMeta.levelFailStreaks[id] ?? baseMeta.levelFailStreaks[id] ?? 0;
+            if (fs > 0) mStreaks[id] = fs;
+          }
           if (sc > 0) mScores[id] = sc;
         }
         const mCat = {};
@@ -2040,6 +2088,7 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
           ...clientMeta,
           levelStars: mStars,
           levelBestScores: mScores,
+          levelFailStreaks: mStreaks,
           highestUnlockedLevel: computeHighestUnlocked(mStars),
           catcakeLevels: mCat,
           deviceUpgrades: mDev,
@@ -2056,7 +2105,7 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
         const spent = computeSpentV2(merged);
         const syncBase = clientMeta.lastSyncedEarnedStardust || 0;
         let totalEarned;
-        if (syncBase >= 30 && clientMeta.totalEarnedStardust > syncBase && baseMeta.totalEarnedStardust > syncBase) {
+        if (syncBase >= 15 && clientMeta.totalEarnedStardust > syncBase && baseMeta.totalEarnedStardust > syncBase) {
           const rawDelta = clientMeta.totalEarnedStardust - syncBase;
           if (rawDelta > MAX_OFFLINE_DELTA) warnings.push('stardust_delta_clamped');
           const delta = Math.min(MAX_OFFLINE_DELTA, rawDelta);
@@ -2339,7 +2388,7 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
             profile: { nickName: '星夜店长#88A6', avatarUrl: '', avatarPreset: 'mikan', authorized: false, updatedAt: 0 },
             totalStars: 0,
             totalCumulativeScore: 0,
-            metaSave: sanitizeV2Mock({ schemaVersion: 2, bankStardust: 30, totalEarnedStardust: 30, lastSyncedEarnedStardust: 30 }),
+            metaSave: sanitizeV2Mock({ schemaVersion: 2, bankStardust: 15, totalEarnedStardust: 15, lastSyncedEarnedStardust: 15 }),
             revision: 1
           };
           cur.revision = (cur.revision || 1) + (Number(bumpOpts.delta) || 1);
@@ -2887,12 +2936,13 @@ ${shimScript}
     schemaVersion: 2,
     bgmTrack: 'waltz',
     sfxEnabled: true,
-    bankStardust: 30,
-    totalEarnedStardust: 30,
-    lastSyncedEarnedStardust: 30,
+    bankStardust: 15,
+    totalEarnedStardust: 15,
+    lastSyncedEarnedStardust: 15,
     consumableSpentStardust: 0,
     levelStars: {},
     levelBestScores: {},
+    levelFailStreaks: {},
     highestUnlockedLevel: '1-1',
     catcakeLevels: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 },
     deviceUpgrades: { dev_tray: 0, dev_flour: 0, dev_teapot: 0, dev_tools: 0 },
@@ -3233,7 +3283,7 @@ ${shimScript}
   wx.onWindowResize(() => render());
 
   const debugApi = {
-    version: '2.0',
+    version: '0.9.0',
     getState: () => ({
       ...state,
       metrics: getMetrics(),
@@ -4043,13 +4093,13 @@ export function createTestContext({
 
       if (ov.totalEarnedStardust === undefined) {
         let spent = computeSpentStardustV2(savePayload);
-        const targetBank = typeof savePayload.bankStardust === 'number' ? Math.max(0, Math.floor(savePayload.bankStardust)) : 30;
-        if (typeof ov.bankStardust === 'number' && ov.consumableSpentStardust === undefined && targetBank + spent < 30) {
-          const pad = 30 - (targetBank + spent);
+        const targetBank = typeof savePayload.bankStardust === 'number' ? Math.max(0, Math.floor(savePayload.bankStardust)) : 15;
+        if (typeof ov.bankStardust === 'number' && ov.consumableSpentStardust === undefined && targetBank + spent < 15) {
+          const pad = 15 - (targetBank + spent);
           savePayload.consumableSpentStardust = (Number(savePayload.consumableSpentStardust) || 0) + pad;
           spent += pad;
         }
-        savePayload.totalEarnedStardust = Math.max(30, targetBank + spent);
+        savePayload.totalEarnedStardust = Math.max(15, targetBank + spent);
       }
       if (ov.lastSyncedEarnedStardust === undefined) {
         savePayload.lastSyncedEarnedStardust = savePayload.totalEarnedStardust;
@@ -4468,7 +4518,8 @@ export function createTestContext({
         await ctx.doubleTapCanvas(hit.x + hit.w * 0.5, hit.y + hit.h * 0.5, opts);
         return { viaCdp: true };
       }
-      const res = await ctx.eval((idx) => globalThis.__HOSHI_DEBUG__.doubleTapTray(idx), slotIdx);
+      const passOpts = opts && opts.ignoreCooldown ? { ignoreCooldown: true } : undefined;
+      const res = await ctx.eval((idx, o) => globalThis.__HOSHI_DEBUG__.doubleTapTray(idx, o), slotIdx, passOpts);
       await waitRaf(1);
       return res;
     },
@@ -4509,8 +4560,16 @@ export function createTestContext({
       return res;
     },
 
-    async useToolOnCell(kind, r, c) {
-      const res = await ctx.eval((k, row, col) => globalThis.__HOSHI_DEBUG__.useToolOnCell(k, row, col), kind, r, c);
+    async useToolOnCell(kind, r, c, r2 = undefined, c2 = undefined, opts = null) {
+      const res = await ctx.eval(
+        (k, row, col, row2, col2, toolOpts) => globalThis.__HOSHI_DEBUG__.useToolOnCell(k, row, col, row2, col2, toolOpts),
+        kind,
+        r,
+        c,
+        r2,
+        c2,
+        opts
+      );
       await waitRaf(1);
       return res;
     },
@@ -4557,9 +4616,9 @@ export function createTestContext({
         const keep = new Set(keepKeys);
         const dbg = globalThis.__HOSHI_DEBUG__;
         const st = dbg.getState();
-        // Clear tray first if occupied
+        // Clear tray first if occupied (bypassing 8s cooldown in test helper)
         for (let i = 0; i < (st.tray || []).length; i++) {
-          if (st.tray[i]) dbg.doubleTapTray(i);
+          if (st.tray[i]) dbg.doubleTapTray(i, { ignoreCooldown: true });
         }
         const cells = st.grid && st.grid.cells ? st.grid.cells : [];
         for (let r = 0; r < cells.length; r++) {
@@ -4569,7 +4628,7 @@ export function createTestContext({
               dbg.tapBoardCell(r, c);
               const curTray = dbg.getState().tray || [];
               const placedIdx = curTray.findIndex((t) => t !== null);
-              if (placedIdx >= 0) dbg.doubleTapTray(placedIdx);
+              if (placedIdx >= 0) dbg.doubleTapTray(placedIdx, { ignoreCooldown: true });
             }
           }
         }
@@ -4631,7 +4690,7 @@ export function createTestContext({
       // Clear existing tray items so partial matches never prematurely trigger another seat while crafting
       for (let i = 0; i < (st.tray || []).length; i++) {
         if (st.tray[i]) {
-          await ctx.doubleTapTray(i, { viaCdp: false });
+          await ctx.doubleTapTray(i, { viaCdp: false, ignoreCooldown: true });
         }
       }
       st = await ctx.getState();
@@ -4741,7 +4800,7 @@ export function createTestContext({
             const dbg = globalThis.__HOSHI_DEBUG__;
             dbg.tapBoardCell(vr, vc);
             const tIdx = (dbg.getState().tray || []).findIndex((x) => x !== null);
-            if (tIdx >= 0) dbg.doubleTapTray(tIdx);
+            if (tIdx >= 0) dbg.doubleTapTray(tIdx, { ignoreCooldown: true });
           }, victim.r, victim.c);
           st = await ctx.getState();
         } else {

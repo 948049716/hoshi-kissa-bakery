@@ -11,8 +11,8 @@ const CHAPTERS = [
     subtitle: '基础异形盘格与原味猫饼套餐',
     unlockStars: 0,
     prevLevelReq: null,
-    firstStarDust: [15, 20, 30],
-    baseClearDust: 10,
+    firstStarDust: [10, 15, 22],
+    baseClearDust: 6,
     themeHint: 'amber',
     maxScoreAntiCheatCap: 35000,
     levelIds: ['1-1', '1-2', '1-3', '1-4', '1-5', '1-6', '1-7', '1-8', '1-9', '1-10']
@@ -23,8 +23,8 @@ const CHAPTERS = [
     subtitle: '宇治抹茶、星光镀金与美食家评委',
     unlockStars: 18,
     prevLevelReq: '1-10',
-    firstStarDust: [20, 25, 35],
-    baseClearDust: 14,
+    firstStarDust: [16, 22, 32],
+    baseClearDust: 10,
     themeHint: 'sakura',
     maxScoreAntiCheatCap: 90000,
     levelIds: ['2-1', '2-2', '2-3', '2-4', '2-5', '2-6', '2-7', '2-8', '2-9', '2-10']
@@ -35,8 +35,8 @@ const CHAPTERS = [
     subtitle: '甜心草莓、破冰机制与猫神满汉席',
     unlockStars: 40,
     prevLevelReq: '2-10',
-    firstStarDust: [25, 35, 45],
-    baseClearDust: 18,
+    firstStarDust: [22, 30, 42],
+    baseClearDust: 14,
     themeHint: 'moonlight',
     maxScoreAntiCheatCap: 220000,
     levelIds: ['3-1', '3-2', '3-3', '3-4', '3-5', '3-6', '3-7', '3-8', '3-9', '3-10']
@@ -67,8 +67,8 @@ const RECIPE_LIST = [
       { tier: 1, flavor: 'any' },
       { tier: 2, flavor: 'any' }
     ],
-    comboMult: 1.18,
-    baseScoreLv0: 118,
+    comboMult: 1.12,
+    baseScoreLv0: 112,
     unlockLevel: '1-1'
   },
   {
@@ -86,8 +86,8 @@ const RECIPE_LIST = [
       { tier: 2, flavor: 'any' },
       { tier: 3, flavor: 'any' }
     ],
-    comboMult: 1.18,
-    baseScoreLv0: 260,
+    comboMult: 1.12,
+    baseScoreLv0: 246,
     unlockLevel: '1-2'
   },
   {
@@ -97,8 +97,8 @@ const RECIPE_LIST = [
       { tier: 2, flavor: 'any' },
       { tier: 2, flavor: 'any' }
     ],
-    comboMult: 1.18,
-    baseScoreLv0: 165,
+    comboMult: 1.12,
+    baseScoreLv0: 157,
     unlockLevel: '1-2'
   },
   {
@@ -117,8 +117,8 @@ const RECIPE_LIST = [
       { tier: 2, flavor: 'any' },
       { tier: 3, flavor: 'any' }
     ],
-    comboMult: 1.35,
-    baseScoreLv0: 338,
+    comboMult: 1.25,
+    baseScoreLv0: 313,
     unlockLevel: '1-3'
   },
   {
@@ -128,8 +128,8 @@ const RECIPE_LIST = [
       { tier: 3, flavor: 'any' },
       { tier: 4, flavor: 'any' }
     ],
-    comboMult: 1.18,
-    baseScoreLv0: 555,
+    comboMult: 1.12,
+    baseScoreLv0: 526,
     unlockLevel: '1-4'
   },
   {
@@ -140,8 +140,8 @@ const RECIPE_LIST = [
       { tier: 3, flavor: 'any' },
       { tier: 4, flavor: 'any' }
     ],
-    comboMult: 1.35,
-    baseScoreLv0: 729,
+    comboMult: 1.25,
+    baseScoreLv0: 675,
     unlockLevel: '1-5'
   },
   {
@@ -159,8 +159,8 @@ const RECIPE_LIST = [
       { tier: 3, flavor: 'any' },
       { tier: 5, flavor: 'any' }
     ],
-    comboMult: 1.18,
-    baseScoreLv0: 979,
+    comboMult: 1.12,
+    baseScoreLv0: 930,
     unlockLevel: '1-7'
   },
   {
@@ -171,8 +171,8 @@ const RECIPE_LIST = [
       { tier: 4, flavor: 'any' },
       { tier: 5, flavor: 'any' }
     ],
-    comboMult: 1.35,
-    baseScoreLv0: 1445,
+    comboMult: 1.25,
+    baseScoreLv0: 1338,
     unlockLevel: '1-8'
   },
   {
@@ -182,8 +182,8 @@ const RECIPE_LIST = [
       { tier: 4, flavor: 'any' },
       { tier: 5, flavor: 'any' }
     ],
-    comboMult: 1.18,
-    baseScoreLv0: 1180,
+    comboMult: 1.12,
+    baseScoreLv0: 1120,
     unlockLevel: '1-9'
   },
   {
@@ -193,8 +193,8 @@ const RECIPE_LIST = [
       { tier: 2, flavor: 'any' },
       { tier: 3, flavor: 'matcha' }
     ],
-    comboMult: 1.18,
-    baseScoreLv0: 322,
+    comboMult: 1.12,
+    baseScoreLv0: 288,
     unlockLevel: '2-1'
   },
   {
@@ -204,8 +204,8 @@ const RECIPE_LIST = [
       { tier: 4, flavor: 'matcha' },
       { tier: 3, flavor: 'any' }
     ],
-    comboMult: 1.18,
-    baseScoreLv0: 687,
+    comboMult: 1.12,
+    baseScoreLv0: 616,
     unlockLevel: '2-2'
   },
   {
@@ -223,8 +223,8 @@ const RECIPE_LIST = [
       { tier: 3, flavor: 'matcha' },
       { tier: 6, flavor: 'any' }
     ],
-    comboMult: 1.18,
-    baseScoreLv0: 1891,
+    comboMult: 1.12,
+    baseScoreLv0: 1778,
     unlockLevel: '2-4'
   },
   {
@@ -235,8 +235,8 @@ const RECIPE_LIST = [
       { tier: 5, flavor: 'any' },
       { tier: 6, flavor: 'any' }
     ],
-    comboMult: 1.35,
-    baseScoreLv0: 3240,
+    comboMult: 1.25,
+    baseScoreLv0: 3000,
     unlockLevel: '2-6'
   },
   {
@@ -246,8 +246,8 @@ const RECIPE_LIST = [
       { tier: 2, flavor: 'any' },
       { tier: 4, flavor: 'berry' }
     ],
-    comboMult: 1.18,
-    baseScoreLv0: 592,
+    comboMult: 1.12,
+    baseScoreLv0: 526,
     unlockLevel: '3-1'
   },
   {
@@ -265,8 +265,8 @@ const RECIPE_LIST = [
       { tier: 5, flavor: 'berry' },
       { tier: 6, flavor: 'any' }
     ],
-    comboMult: 1.18,
-    baseScoreLv0: 2735,
+    comboMult: 1.12,
+    baseScoreLv0: 2520,
     unlockLevel: '3-2'
   },
   {
@@ -276,8 +276,8 @@ const RECIPE_LIST = [
       { tier: 4, flavor: 'matcha' },
       { tier: 5, flavor: 'berry' }
     ],
-    comboMult: 1.18,
-    baseScoreLv0: 1593,
+    comboMult: 1.12,
+    baseScoreLv0: 1400,
     unlockLevel: '3-4'
   },
   {
@@ -288,8 +288,8 @@ const RECIPE_LIST = [
       { tier: 6, flavor: 'matcha' },
       { tier: 7, flavor: 'any' }
     ],
-    comboMult: 1.35,
-    baseScoreLv0: 7571,
+    comboMult: 1.25,
+    baseScoreLv0: 6750,
     unlockLevel: '3-7'
   }
 ];
@@ -310,9 +310,9 @@ const LEVELS = [
     indexInChapter: 1,
     name: '初开夜灯',
     durationSec: 90,
-    stars: [750, 1050, 1400],
-    baseClearDust: 10,
-    firstStarDust: [15, 20, 30],
+    stars: [850, 1250, 1750],
+    baseClearDust: 6,
+    firstStarDust: [10, 15, 22],
     matrix: ['...', '...', '...'],
     presets: [
       { r: 0, c: 0, tier: 1, flavor: 'plain', frozen: false },
@@ -333,9 +333,9 @@ const LEVELS = [
     indexInChapter: 2,
     name: '单缺角吧台',
     durationSec: 95,
-    stars: [1100, 1520, 1950],
-    baseClearDust: 10,
-    firstStarDust: [15, 20, 30],
+    stars: [1250, 1820, 2500],
+    baseClearDust: 6,
+    firstStarDust: [10, 15, 22],
     matrix: ['...#', '....', '...#'],
     presets: [
       { r: 0, c: 0, tier: 1, flavor: 'plain', frozen: false },
@@ -357,9 +357,9 @@ const LEVELS = [
     indexInChapter: 3,
     name: '蜂蜜午茶角',
     durationSec: 100,
-    stars: [1650, 2280, 2900],
-    baseClearDust: 10,
-    firstStarDust: [15, 20, 30],
+    stars: [1850, 2700, 3700],
+    baseClearDust: 6,
+    firstStarDust: [10, 15, 22],
     matrix: ['..##', '...#', '....', '....'],
     presets: [
       { r: 0, c: 0, tier: 2, flavor: 'plain', frozen: false },
@@ -381,9 +381,9 @@ const LEVELS = [
     indexInChapter: 4,
     name: '星夜十字盘',
     durationSec: 100,
-    stars: [2000, 2750, 3500],
-    baseClearDust: 10,
-    firstStarDust: [15, 20, 30],
+    stars: [2250, 3280, 4450],
+    baseClearDust: 6,
+    firstStarDust: [10, 15, 22],
     matrix: ['#..#', '....', '....', '#..#'],
     presets: [
       { r: 0, c: 1, tier: 2, flavor: 'plain', frozen: false },
@@ -405,9 +405,9 @@ const LEVELS = [
     indexInChapter: 5,
     name: '双凹烘焙槽',
     durationSec: 105,
-    stars: [2400, 3300, 4200],
-    baseClearDust: 10,
-    firstStarDust: [15, 20, 30],
+    stars: [2700, 3920, 5350],
+    baseClearDust: 6,
+    firstStarDust: [10, 15, 22],
     matrix: ['.##.', '....', '....', '.##.'],
     presets: [
       { r: 0, c: 0, tier: 2, flavor: 'plain', frozen: false },
@@ -429,9 +429,9 @@ const LEVELS = [
     indexInChapter: 6,
     name: '草莓大福首秀',
     durationSec: 105,
-    stars: [2900, 4000, 5100],
-    baseClearDust: 10,
-    firstStarDust: [15, 20, 30],
+    stars: [3250, 4750, 6450],
+    baseClearDust: 6,
+    firstStarDust: [10, 15, 22],
     matrix: ['...#', '....', '....', '#...'],
     presets: [
       { r: 0, c: 1, tier: 3, flavor: 'plain', frozen: false },
@@ -453,9 +453,9 @@ const LEVELS = [
     indexInChapter: 7,
     name: '满格标准炉',
     durationSec: 110,
-    stars: [3500, 4850, 6150],
-    baseClearDust: 10,
-    firstStarDust: [15, 20, 30],
+    stars: [3950, 5750, 7800],
+    baseClearDust: 6,
+    firstStarDust: [10, 15, 22],
     matrix: ['....', '....', '....', '....'],
     presets: [
       { r: 0, c: 0, tier: 2, flavor: 'plain', frozen: false },
@@ -477,9 +477,9 @@ const LEVELS = [
     indexInChapter: 8,
     name: '独柱分流炉',
     durationSec: 110,
-    stars: [3800, 5250, 6650],
-    baseClearDust: 10,
-    firstStarDust: [15, 20, 30],
+    stars: [4300, 6250, 8450],
+    baseClearDust: 6,
+    firstStarDust: [10, 15, 22],
     matrix: ['....', '.X..', '....', '....'],
     presets: [
       { r: 0, c: 1, tier: 3, flavor: 'plain', frozen: false },
@@ -501,9 +501,9 @@ const LEVELS = [
     indexInChapter: 9,
     name: '双柱回廊',
     durationSec: 115,
-    stars: [4200, 5800, 7350],
-    baseClearDust: 10,
-    firstStarDust: [15, 20, 30],
+    stars: [4750, 6900, 9350],
+    baseClearDust: 6,
+    firstStarDust: [10, 15, 22],
     matrix: ['....', '.X..', '..X.', '....'],
     presets: [
       { r: 0, c: 0, tier: 3, flavor: 'plain', frozen: false },
@@ -525,9 +525,9 @@ const LEVELS = [
     indexInChapter: 10,
     name: '星夜店考核',
     durationSec: 115,
-    stars: [4800, 6600, 8400],
-    baseClearDust: 10,
-    firstStarDust: [15, 20, 30],
+    stars: [5400, 7850, 10600],
+    baseClearDust: 6,
+    firstStarDust: [10, 15, 22],
     matrix: ['....', '#..#', '....', '.X..', '....'],
     presets: [
       { r: 0, c: 1, tier: 3, flavor: 'plain', frozen: false },
@@ -553,9 +553,9 @@ const LEVELS = [
     indexInChapter: 1,
     name: '抹茶初绽',
     durationSec: 110,
-    stars: [5800, 8000, 10200],
-    baseClearDust: 14,
-    firstStarDust: [20, 25, 35],
+    stars: [6500, 9450, 12900],
+    baseClearDust: 10,
+    firstStarDust: [16, 22, 32],
     matrix: ['...#', '.M..', '..M.', '#...'],
     presets: [
       { r: 0, c: 1, tier: 2, flavor: 'plain', frozen: false },
@@ -577,9 +577,9 @@ const LEVELS = [
     indexInChapter: 2,
     name: '金光微露',
     durationSec: 115,
-    stars: [6600, 9100, 11600],
-    baseClearDust: 14,
-    firstStarDust: [20, 25, 35],
+    stars: [7400, 10750, 14700],
+    baseClearDust: 10,
+    firstStarDust: [16, 22, 32],
     matrix: ['#..#', '.G..', '..M.', '....'],
     presets: [
       { r: 0, c: 1, tier: 3, flavor: 'plain', frozen: false },
@@ -593,7 +593,7 @@ const LEVELS = [
     vipQuotaRange: [1, 2],
     vipFixedRecipeId: null,
     rushEndSec: null,
-    desc: '镀金烘焙格教学 · 万能风味顶替且享 1.5 倍加价'
+    desc: '镀金烘焙格教学 · 万能风味顶替且享 1.35 倍加价'
   },
   {
     id: '2-3',
@@ -601,9 +601,9 @@ const LEVELS = [
     indexInChapter: 3,
     name: '樱花回字廊',
     durationSec: 115,
-    stars: [7500, 10350, 13200],
-    baseClearDust: 14,
-    firstStarDust: [20, 25, 35],
+    stars: [8400, 12200, 16700],
+    baseClearDust: 10,
+    firstStarDust: [16, 22, 32],
     matrix: ['....', '.XX.', '.GM.', '....'],
     presets: [
       { r: 0, c: 0, tier: 3, flavor: 'plain', frozen: false },
@@ -625,9 +625,9 @@ const LEVELS = [
     indexInChapter: 4,
     name: '露台双岛桥',
     durationSec: 120,
-    stars: [8400, 11600, 14800],
-    baseClearDust: 14,
-    firstStarDust: [20, 25, 35],
+    stars: [9400, 13650, 18700],
+    baseClearDust: 10,
+    firstStarDust: [16, 22, 32],
     matrix: ['..#..', '.M.G.', '..#..', '..#..'],
     presets: [
       { r: 0, c: 0, tier: 3, flavor: 'plain', frozen: false },
@@ -649,9 +649,9 @@ const LEVELS = [
     indexInChapter: 5,
     name: '抹茶星塔',
     durationSec: 120,
-    stars: [9500, 13100, 16700],
-    baseClearDust: 14,
-    firstStarDust: [20, 25, 35],
+    stars: [10650, 15450, 21100],
+    baseClearDust: 10,
+    firstStarDust: [16, 22, 32],
     matrix: ['.M..', '...G', 'G...', '..M.'],
     presets: [
       { r: 0, c: 1, tier: 3, flavor: 'matcha', frozen: false },
@@ -673,9 +673,9 @@ const LEVELS = [
     indexInChapter: 6,
     name: '美食家之夜',
     durationSec: 125,
-    stars: [10600, 14600, 18600],
-    baseClearDust: 14,
-    firstStarDust: [20, 25, 35],
+    stars: [11900, 17300, 23600],
+    baseClearDust: 10,
+    firstStarDust: [16, 22, 32],
     matrix: ['#...#', '.M.G.', '..X..', '.....'],
     presets: [
       { r: 0, c: 2, tier: 4, flavor: 'plain', frozen: false },
@@ -698,9 +698,9 @@ const LEVELS = [
     indexInChapter: 7,
     name: '十字交错廊',
     durationSec: 125,
-    stars: [11600, 16000, 20300],
-    baseClearDust: 14,
-    firstStarDust: [20, 25, 35],
+    stars: [13000, 18900, 25800],
+    baseClearDust: 10,
+    firstStarDust: [16, 22, 32],
     matrix: ['..X..', '.G.M.', '..#..', '.....'],
     presets: [
       { r: 0, c: 0, tier: 4, flavor: 'plain', frozen: false },
@@ -722,9 +722,9 @@ const LEVELS = [
     indexInChapter: 8,
     name: '五行大烤盘',
     durationSec: 130,
-    stars: [12800, 17650, 22500],
-    baseClearDust: 14,
-    firstStarDust: [20, 25, 35],
+    stars: [14400, 20900, 28600],
+    baseClearDust: 10,
+    firstStarDust: [16, 22, 32],
     matrix: ['#...#', '..M..', '.XGX.', '..M..', '#...#'],
     presets: [
       { r: 0, c: 2, tier: 3, flavor: 'plain', frozen: false },
@@ -746,9 +746,9 @@ const LEVELS = [
     indexInChapter: 9,
     name: '双桥花坊',
     durationSec: 130,
-    stars: [13800, 19000, 24200],
-    baseClearDust: 14,
-    firstStarDust: [20, 25, 35],
+    stars: [15500, 22500, 30800],
+    baseClearDust: 10,
+    firstStarDust: [16, 22, 32],
     matrix: ['..#..', '.MXG.', '..#..', '.GXM.', '.....'],
     presets: [
       { r: 0, c: 1, tier: 4, flavor: 'plain', frozen: false },
@@ -770,9 +770,9 @@ const LEVELS = [
     indexInChapter: 10,
     name: '樱花露台大赏',
     durationSec: 135,
-    stars: [15000, 20700, 26400],
-    baseClearDust: 14,
-    firstStarDust: [20, 25, 35],
+    stars: [16800, 24400, 33500],
+    baseClearDust: 10,
+    firstStarDust: [16, 22, 32],
     matrix: ['#...#', '.G.G.', '..X..', '.M.M.', '.....'],
     presets: [
       { r: 0, c: 2, tier: 4, flavor: 'plain', frozen: false },
@@ -799,9 +799,9 @@ const LEVELS = [
     indexInChapter: 1,
     name: '草莓雪夜',
     durationSec: 120,
-    stars: [16500, 22800, 29000],
-    baseClearDust: 18,
-    firstStarDust: [25, 35, 45],
+    stars: [18500, 26800, 36600],
+    baseClearDust: 14,
+    firstStarDust: [22, 30, 42],
     matrix: ['.....', '.BI..', '..IM.', '#...#'],
     presets: [
       { r: 0, c: 1, tier: 3, flavor: 'plain', frozen: false },
@@ -825,9 +825,9 @@ const LEVELS = [
     indexInChapter: 2,
     name: '双果风味台',
     durationSec: 125,
-    stars: [18200, 25100, 32000],
-    baseClearDust: 18,
-    firstStarDust: [25, 35, 45],
+    stars: [20400, 29600, 40400],
+    baseClearDust: 14,
+    firstStarDust: [22, 30, 42],
     matrix: ['#...#', '.M.B.', '..I..', '.I..#', '#..##'],
     presets: [
       { r: 0, c: 2, tier: 4, flavor: 'plain', frozen: false },
@@ -850,9 +850,9 @@ const LEVELS = [
     indexInChapter: 3,
     name: '冰封双塔',
     durationSec: 125,
-    stars: [20000, 27600, 35200],
-    baseClearDust: 18,
-    firstStarDust: [25, 35, 45],
+    stars: [22400, 32500, 44400],
+    baseClearDust: 14,
+    firstStarDust: [22, 30, 42],
     matrix: ['..#..', '.IXI.', '.M.B.', '..G..', '#...#'],
     presets: [
       { r: 0, c: 0, tier: 2, flavor: 'plain', frozen: false },
@@ -876,9 +876,9 @@ const LEVELS = [
     indexInChapter: 4,
     name: '风味调色板',
     durationSec: 130,
-    stars: [21800, 30100, 38400],
-    baseClearDust: 18,
-    firstStarDust: [25, 35, 45],
+    stars: [24400, 35400, 48400],
+    baseClearDust: 14,
+    firstStarDust: [22, 30, 42],
     matrix: ['.M.B.', '..I..', '.XGX.', '..I..', '.B.M.'],
     presets: [
       { r: 0, c: 1, tier: 3, flavor: 'matcha', frozen: false },
@@ -901,9 +901,9 @@ const LEVELS = [
     indexInChapter: 5,
     name: '星冠天台',
     durationSec: 135,
-    stars: [23800, 32850, 41900],
-    baseClearDust: 18,
-    firstStarDust: [25, 35, 45],
+    stars: [26700, 38700, 52800],
+    baseClearDust: 14,
+    firstStarDust: [22, 30, 42],
     matrix: ['##.##', '#.I.#', '.MGB.', '.I.I.', '.....'],
     presets: [
       { r: 0, c: 2, tier: 3, flavor: 'plain', frozen: false },
@@ -928,9 +928,9 @@ const LEVELS = [
     indexInChapter: 6,
     name: '猫神降临礼',
     durationSec: 135,
-    stars: [25800, 35600, 45400],
-    baseClearDust: 18,
-    firstStarDust: [25, 35, 45],
+    stars: [28900, 41900, 57200],
+    baseClearDust: 14,
+    firstStarDust: [22, 30, 42],
     matrix: ['#...#', '.GIM.', '..X..', '.BIG.', '#...#'],
     presets: [
       { r: 0, c: 2, tier: 4, flavor: 'plain', frozen: false },
@@ -954,9 +954,9 @@ const LEVELS = [
     indexInChapter: 7,
     name: '满汉极速流',
     durationSec: 140,
-    stars: [28000, 38600, 49200],
-    baseClearDust: 18,
-    firstStarDust: [25, 35, 45],
+    stars: [31400, 45500, 62000],
+    baseClearDust: 14,
+    firstStarDust: [22, 30, 42],
     matrix: ['..XM.', '.I...', 'X.G.X', '...I.', '.BX..'],
     presets: [
       { r: 0, c: 1, tier: 3, flavor: 'plain', frozen: false },
@@ -980,9 +980,9 @@ const LEVELS = [
     indexInChapter: 8,
     name: '碎冰三重奏',
     durationSec: 140,
-    stars: [30200, 41700, 53200],
-    baseClearDust: 18,
-    firstStarDust: [25, 35, 45],
+    stars: [33800, 49000, 66800],
+    baseClearDust: 14,
+    firstStarDust: [22, 30, 42],
     matrix: ['.I.I.', '.M.B.', '#.G.#', '.B.M.', '.I.I.'],
     presets: [
       { r: 0, c: 1, tier: 3, flavor: 'plain', frozen: true },
@@ -1007,9 +1007,9 @@ const LEVELS = [
     indexInChapter: 9,
     name: '星海终曲前夜',
     durationSec: 145,
-    stars: [32500, 44850, 57200],
-    baseClearDust: 18,
-    firstStarDust: [25, 35, 45],
+    stars: [36400, 52800, 72000],
+    baseClearDust: 14,
+    firstStarDust: [22, 30, 42],
     matrix: ['..#..', '.GXM.', '.I.I.', '.BXG.', '..#..'],
     presets: [
       { r: 0, c: 1, tier: 4, flavor: 'plain', frozen: false },
@@ -1033,9 +1033,9 @@ const LEVELS = [
     indexInChapter: 10,
     name: '星冠夜宴终章',
     durationSec: 150,
-    stars: [35000, 48300, 61600],
-    baseClearDust: 18,
-    firstStarDust: [25, 35, 45],
+    stars: [39200, 56800, 77500],
+    baseClearDust: 14,
+    firstStarDust: [22, 30, 42],
     matrix: ['#...#', '.MIB.', '.IGI.', '.BXM.', '#...#'],
     presets: [
       { r: 0, c: 2, tier: 4, flavor: 'plain', frozen: false },
@@ -1062,6 +1062,8 @@ for (let i = 0; i < LEVELS.length; i++) {
   LEVEL_MAP[lvl.id] = lvl;
   VALID_LEVEL_IDS.push(lvl.id);
 }
+
+const MAX_CAMPAIGN_STARS = LEVELS.length * 3;
 
 function toSafeNum(x) {
   if (typeof x === 'number') return x;
@@ -1172,6 +1174,7 @@ module.exports = {
   LEVELS,
   LEVEL_MAP,
   VALID_LEVEL_IDS,
+  MAX_CAMPAIGN_STARS,
   getLevelById,
   getNextLevelId,
   computeTotalStars,

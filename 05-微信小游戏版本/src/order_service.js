@@ -13,11 +13,13 @@ const {
   SERVE_COMBO_WINDOW_SEC,
   PATIENCE_TIP_BANDS,
   FEVER_CONFIG,
+  TRASH_CONFIG,
   CUSTOMER_MAP,
   normalizePatronId
 } = require('./constants');
 
 const {
+  CHAPTERS,
   RECIPES,
   getLevelById
 } = require('./levels_data');
@@ -387,9 +389,9 @@ function resolveLevelConfig(levelCfgOrId) {
   const baseId = getOwn(baseById, 'id', '1-1');
   const baseChapter = getOwn(baseById, 'chapter', 1);
   const baseDuration = getOwn(baseById, 'durationSec', 90);
-  const baseStars = getOwn(baseById, 'stars', [750, 1050, 1400]);
-  const baseClearDust = getOwn(baseById, 'baseClearDust', 10);
-  const baseFirstStarDust = getOwn(baseById, 'firstStarDust', [15, 20, 30]);
+  const baseStars = getOwn(baseById, 'stars', [850, 1250, 1750]);
+  const baseClearDust = getOwn(baseById, 'baseClearDust', 6);
+  const baseFirstStarDust = getOwn(baseById, 'firstStarDust', [10, 15, 22]);
   const baseAllowedRecipes = getOwn(baseById, 'allowedRecipes', ['R01', 'R02', 'R03']);
   const baseUrgentRate = toSafeNum(getOwn(baseById, 'urgentRate', 0), 0);
   const baseVipQuota = getOwn(baseById, 'vipQuota', 0);
@@ -410,11 +412,12 @@ function resolveLevelConfig(levelCfgOrId) {
   const rawVipRange = vipRangeRead.exists && !vipRangeRead.threw ? vipRangeRead.value : null;
   const vipFixedRead = readOwnPropOnce(levelCfgOrId, 'vipFixedRecipeId');
   const rushEndRead = readOwnPropOnce(levelCfgOrId, 'rushEndSec');
+  const maxChapterNum = Math.max(3, safeArrayLen(CHAPTERS, 32));
 
   return {
     id: trimmedId !== null ? trimmedId : baseId,
     chapter: chapterRead.exists
-      ? safeInt(!chapterRead.threw ? chapterRead.value : baseChapter, baseChapter, 1, 3)
+      ? safeInt(!chapterRead.threw ? chapterRead.value : baseChapter, baseChapter, 1, maxChapterNum)
       : baseChapter,
     durationSec: durRead.exists
       ? safeInt(!durRead.threw ? durRead.value : baseDuration, baseDuration, 10, 3600)
@@ -578,18 +581,29 @@ function writeVerifiedFreezeMirrors(state, nextVal, freezeSnap) {
 /**
  * Creates a fresh 3-seat OrderState for a level run.
  * Initializes state.score strictly to 0.
+ * Supports optional modeOverrides for fair challenge / event modes without mutating saveData.
  */
-function createOrderState(levelCfgOrId, saveData, rng) {
+function createOrderState(levelCfgOrId, saveData, rng, modeOverrides) {
   let resolvedSave = saveData;
   let resolvedRng = rng;
+  let resolvedOverrides = isPlainObj(modeOverrides) ? modeOverrides : null;
   if (typeof saveData === 'function') {
     resolvedRng = saveData;
     resolvedSave = null;
+    if (!resolvedOverrides && isPlainObj(rng)) {
+      resolvedOverrides = rng;
+    }
+  } else if (isPlainObj(rng) && modeOverrides === undefined) {
+    resolvedRng = null;
+    resolvedOverrides = rng;
   }
   const safeRng = wrapRng(resolvedRng);
   const lvl = resolveLevelConfig(levelCfgOrId);
 
-  const durationSec = safeInt(lvl.durationSec, 90, 10, 3600);
+  const ovDurRead = resolvedOverrides ? readOwnPropOnce(resolvedOverrides, 'durationSec') : { exists: false };
+  const durationSec = ovDurRead.exists
+    ? safeInt(!ovDurRead.threw ? ovDurRead.value : lvl.durationSec, safeInt(lvl.durationSec, 90, 10, 3600), 10, 3600)
+    : safeInt(lvl.durationSec, 90, 10, 3600);
   const rushStartSec = Math.round(durationSec * 0.55 * 100) / 100;
   const rawRushEnd = lvl.rushEndSec !== null && lvl.rushEndSec !== undefined ? toSafeNum(lvl.rushEndSec) : NaN;
   const rushEndSec =
@@ -597,10 +611,15 @@ function createOrderState(levelCfgOrId, saveData, rng) {
       ? Math.min(rushStartSec, rawRushEnd)
       : Math.round(durationSec * 0.15 * 100) / 100;
 
+  const ovRecipesRead = resolvedOverrides ? readOwnPropOnce(resolvedOverrides, 'allowedRecipes') : { exists: false };
+  const rawRecipesSource =
+    ovRecipesRead.exists && !ovRecipesRead.threw && Array.isArray(ovRecipesRead.value)
+      ? ovRecipesRead.value
+      : lvl.allowedRecipes;
   const validRecipes = [];
-  const allowedLen = safeArrayLen(lvl.allowedRecipes, MAX_LIST_CAP);
+  const allowedLen = safeArrayLen(rawRecipesSource, MAX_LIST_CAP);
   for (let i = 0; i < allowedLen; i++) {
-    const rId = getOwn(lvl.allowedRecipes, i, null);
+    const rId = getOwn(rawRecipesSource, i, null);
     if (typeof rId === 'string' && hasOwn(RECIPES, rId.trim())) {
       safePush(validRecipes, rId.trim());
     }
@@ -627,16 +646,19 @@ function createOrderState(levelCfgOrId, saveData, rng) {
   const vipScheduleTimes = buildVipScheduleTimes(vipQuotaTarget, durationSec, CLOSING_GUARD_SEC);
 
   const saveObj = isPlainObj(resolvedSave) ? resolvedSave : null;
-  const catcakeLevels = extractCatcakeLevels(
+  let catcakeLevels = extractCatcakeLevels(
     saveObj ? getOwn(saveObj, 'catcakeLevels', null) : null
   );
+  if (resolvedOverrides && hasOwn(resolvedOverrides, 'catcakeLevels')) {
+    catcakeLevels = extractCatcakeLevels(getOwn(resolvedOverrides, 'catcakeLevels', null));
+  }
 
   const rawDevUpgrades = saveObj ? getOwn(saveObj, 'deviceUpgrades', null) : null;
   const devUpgrades = isPlainObj(rawDevUpgrades) ? rawDevUpgrades : null;
 
   const devTrayRead = devUpgrades ? readOwnPropOnce(devUpgrades, 'dev_tray') : { exists: false };
   const saveDevTrayRead = !devTrayRead.exists && saveObj ? readOwnPropOnce(saveObj, 'devTrayLv') : { exists: false };
-  const devTrayLv = devTrayRead.exists
+  let devTrayLv = devTrayRead.exists
     ? safeInt(!devTrayRead.threw ? devTrayRead.value : 0, 0, 0, 2)
     : saveDevTrayRead.exists
       ? safeInt(!saveDevTrayRead.threw ? saveDevTrayRead.value : 0, 0, 0, 2)
@@ -644,11 +666,35 @@ function createOrderState(levelCfgOrId, saveData, rng) {
 
   const devTeapotRead = devUpgrades ? readOwnPropOnce(devUpgrades, 'dev_teapot') : { exists: false };
   const saveDevTeapotRead = !devTeapotRead.exists && saveObj ? readOwnPropOnce(saveObj, 'devTeapotLv') : { exists: false };
-  const devTeapotLv = devTeapotRead.exists
+  let devTeapotLv = devTeapotRead.exists
     ? safeInt(!devTeapotRead.threw ? devTeapotRead.value : 0, 0, 0, 3)
     : saveDevTeapotRead.exists
       ? safeInt(!saveDevTeapotRead.threw ? saveDevTeapotRead.value : 0, 0, 0, 3)
       : 0;
+
+  if (resolvedOverrides) {
+    const ovDevUpRaw = getOwn(resolvedOverrides, 'deviceUpgrades', null);
+    const ovDevUp = isPlainObj(ovDevUpRaw) ? ovDevUpRaw : null;
+    const ovTrayDirect = readOwnPropOnce(resolvedOverrides, 'devTrayLv');
+    if (ovTrayDirect.exists) {
+      devTrayLv = safeInt(!ovTrayDirect.threw ? ovTrayDirect.value : 0, 0, 0, 2);
+    } else if (ovDevUp) {
+      const ovTrayUp = readOwnPropOnce(ovDevUp, 'dev_tray');
+      if (ovTrayUp.exists) {
+        devTrayLv = safeInt(!ovTrayUp.threw ? ovTrayUp.value : 0, 0, 0, 2);
+      }
+    }
+
+    const ovTeapotDirect = readOwnPropOnce(resolvedOverrides, 'devTeapotLv');
+    if (ovTeapotDirect.exists) {
+      devTeapotLv = safeInt(!ovTeapotDirect.threw ? ovTeapotDirect.value : 0, 0, 0, 3);
+    } else if (ovDevUp) {
+      const ovTeapotUp = readOwnPropOnce(ovDevUp, 'dev_teapot');
+      if (ovTeapotUp.exists) {
+        devTeapotLv = safeInt(!ovTeapotUp.threw ? ovTeapotUp.value : 0, 0, 0, 3);
+      }
+    }
+  }
 
   let patronId = 'mikan';
   const selPatRead = saveObj ? readOwnPropOnce(saveObj, 'selectedPatron') : { exists: false };
@@ -668,6 +714,18 @@ function createOrderState(levelCfgOrId, saveData, rng) {
       } else {
         patronId = normalizePatronId(typeof rawPat === 'string' ? rawPat : '');
       }
+    }
+  }
+
+  if (resolvedOverrides) {
+    const ovSelPat = readOwnPropOnce(resolvedOverrides, 'selectedPatron');
+    const ovPat = !ovSelPat.exists ? readOwnPropOnce(resolvedOverrides, 'patronId') : { exists: false };
+    if (ovSelPat.exists) {
+      const v = !ovSelPat.threw ? ovSelPat.value : undefined;
+      patronId = v === null || v === 'none' ? null : normalizePatronId(typeof v === 'string' ? v : '');
+    } else if (ovPat.exists) {
+      const v = !ovPat.threw ? ovPat.value : undefined;
+      patronId = v === null || v === 'none' ? null : normalizePatronId(typeof v === 'string' ? v : '');
     }
   }
 
@@ -699,6 +757,8 @@ function createOrderState(levelCfgOrId, saveData, rng) {
     preferredSeatIdx: null,
     trayCapacity,
     tray,
+    trashCooldown: 0,
+    trashDiscards: 0,
     nextOrderUid: 1,
     nextTrayUid: 10001,
     comboCount: 0,
@@ -718,7 +778,12 @@ function createOrderState(levelCfgOrId, saveData, rng) {
     catcakeLevels,
     devTrayLv,
     devTeapotLv,
-    patronId
+    patronId,
+    disableTutorial: Boolean(resolvedOverrides && getOwn(resolvedOverrides, 'disableTutorial', false)),
+    customModeTag:
+      resolvedOverrides && typeof getOwn(resolvedOverrides, 'customModeTag', null) === 'string'
+        ? getOwn(resolvedOverrides, 'customModeTag', '').slice(0, 64)
+        : null
   };
 
   syncFreezeMirrors(state, 0);
@@ -1034,7 +1099,7 @@ function snapshotOrderMetaOnce(order) {
       hasBountyMult: false,
       bountyMult: NaN,
       hasRewardDustBonus: false,
-      rewardDustBonus: 5
+      rewardDustBonus: 4
     };
   }
 
@@ -1081,8 +1146,8 @@ function snapshotOrderMetaOnce(order) {
 
   const dustRead = readOwnPropOnce(order, 'rewardDustBonus');
   const rewardDustBonus = dustRead.exists && !dustRead.threw
-    ? safeInt(dustRead.value, 5, 0, 50)
-    : 5;
+    ? safeInt(dustRead.value, 4, 0, 50)
+    : 4;
 
   return {
     isObj: true,
@@ -1382,9 +1447,10 @@ function tryPlaceToTray(state, tile) {
 }
 
 /**
- * Discards a Cat-Cake from a tray slot into the trash basket (0 score penalty, 0 combo change).
+ * Discards a Cat-Cake from a tray slot into the trash basket (0 score penalty;
+ * triggers 8.0s trash cooldown, resets serve combo, and deducts 15% fever energy).
  */
-function discardTraySlot(state, slotIdx) {
+function discardTraySlot(state, slotIdx, opts) {
   if (safeIsFrozen(state)) {
     return { discarded: false, tile: null };
   }
@@ -1407,9 +1473,72 @@ function discardTraySlot(state, slotIdx) {
     return { discarded: false, tile: null };
   }
 
+  const ignoreCooldown = isPlainObj(opts) && Boolean(getOwn(opts, 'ignoreCooldown', false));
+  const prevTrashCdRead = readOwnPropOnce(state, 'trashCooldown');
+  const rawCurCd = prevTrashCdRead.exists && !prevTrashCdRead.threw
+    ? toSafeNum(prevTrashCdRead.value, 0)
+    : 0;
+  const curCd = Number.isFinite(rawCurCd) && rawCurCd > 0 ? rawCurCd : 0;
+  if (!ignoreCooldown && curCd > 1e-6) {
+    return {
+      discarded: false,
+      tile: null,
+      reason: 'cooldown',
+      cooldownLeft: curCd
+    };
+  }
+
   if (!verifiedWriteProp(tray, idx, null)) {
     restorePropSnapshot(tray, idx, existingRead);
     return { discarded: false, tile: null };
+  }
+
+  // Commit trashCooldown = 8.0s & trashDiscards += 1
+  if (prevTrashCdRead.exists || safeIsExtensible(state)) {
+    if (!verifiedWriteProp(state, 'trashCooldown', TRASH_CONFIG.cooldownSec)) {
+      restorePropSnapshot(state, 'trashCooldown', prevTrashCdRead);
+    }
+  }
+  const prevTrashDiscardsRead = readOwnPropOnce(state, 'trashDiscards');
+  if (prevTrashDiscardsRead.exists || safeIsExtensible(state)) {
+    const prevDiscards = prevTrashDiscardsRead.exists && !prevTrashDiscardsRead.threw
+      ? safeInt(prevTrashDiscardsRead.value, 0, 0, 100000)
+      : 0;
+    if (!verifiedWriteProp(state, 'trashDiscards', prevDiscards + 1)) {
+      restorePropSnapshot(state, 'trashDiscards', prevTrashDiscardsRead);
+    }
+  }
+
+  // Reset serve combo (comboCount = 0, comboTimer = 0)
+  const prevComboRead = readOwnPropOnce(state, 'comboCount');
+  const prevCombo = prevComboRead.exists && !prevComboRead.threw
+    ? safeInt(prevComboRead.value, 0, 0, 9999)
+    : 0;
+  const comboBroken = Boolean(TRASH_CONFIG.resetCombo && prevCombo > 0);
+  if (TRASH_CONFIG.resetCombo) {
+    if (prevComboRead.exists || safeIsExtensible(state)) {
+      if (!verifiedWriteProp(state, 'comboCount', 0)) {
+        restorePropSnapshot(state, 'comboCount', prevComboRead);
+      }
+    }
+    const prevComboTimerRead = readOwnPropOnce(state, 'comboTimer');
+    if (prevComboTimerRead.exists || safeIsExtensible(state)) {
+      if (!verifiedWriteProp(state, 'comboTimer', 0)) {
+        restorePropSnapshot(state, 'comboTimer', prevComboTimerRead);
+      }
+    }
+  }
+
+  // Deduct feverEnergy by 15% without interrupting an already active Fever
+  const prevFeverEnergyRead = readOwnPropOnce(state, 'feverEnergy');
+  if (prevFeverEnergyRead.exists || safeIsExtensible(state)) {
+    const prevEnergy = prevFeverEnergyRead.exists && !prevFeverEnergyRead.threw
+      ? safeInt(prevFeverEnergyRead.value, 0, 0, 100)
+      : 0;
+    const nextEnergy = Math.max(0, prevEnergy - TRASH_CONFIG.feverPenalty);
+    if (!verifiedWriteProp(state, 'feverEnergy', nextEnergy)) {
+      restorePropSnapshot(state, 'feverEnergy', prevFeverEnergyRead);
+    }
   }
 
   const seenTiles = new Map();
@@ -1433,7 +1562,8 @@ function discardTraySlot(state, slotIdx) {
 
   return {
     discarded: true,
-    tile: existing
+    tile: existing,
+    comboBroken
   };
 }
 
@@ -2062,7 +2192,7 @@ function matchTrayToCustomer(state, arg2, arg3) {
     }
   }
 
-  // 7. VIP bonus stardust envelope (+5 per VIP critic, using snapshotted orderMeta)
+  // 7. VIP bonus stardust envelope (+4 per VIP critic, using snapshotted orderMeta)
   let dustBonus = 0;
   if (winner.isVip) {
     const vipServedRead = readOwnPropOnce(state, 'vipServed');
@@ -2072,7 +2202,7 @@ function matchTrayToCustomer(state, arg2, arg3) {
     if (!verifiedWriteProp(state, 'vipServed', prevVipServed + 1)) {
       restorePropSnapshot(state, 'vipServed', vipServedRead);
     }
-    dustBonus = winner.orderMeta.hasRewardDustBonus ? winner.orderMeta.rewardDustBonus : 5;
+    dustBonus = winner.orderMeta.hasRewardDustBonus ? winner.orderMeta.rewardDustBonus : 4;
     const bonusDustRead = readOwnPropOnce(state, 'bonusDustEarned');
     const prevBonusDust = bonusDustRead.exists && !bonusDustRead.threw
       ? safeInt(bonusDustRead.value, 0, 0, 100000)
@@ -2845,6 +2975,16 @@ function stepCustomers(state, dt, arg3, arg4) {
   const nextFreeze = prevFreeze > safeDt + EPS ? prevFreeze - safeDt : 0;
   writeVerifiedFreezeMirrors(state, nextFreeze, freezeSnap);
 
+  const prevTrashCdRead = readOwnPropOnce(state, 'trashCooldown');
+  if (prevTrashCdRead.exists) {
+    const rawTrashCd = !prevTrashCdRead.threw ? toSafeNum(prevTrashCdRead.value, 0) : 0;
+    const nextTrashCd =
+      Number.isFinite(rawTrashCd) && rawTrashCd > safeDt + EPS ? rawTrashCd - safeDt : 0;
+    if (!verifiedWriteProp(state, 'trashCooldown', nextTrashCd)) {
+      restorePropSnapshot(state, 'trashCooldown', prevTrashCdRead);
+    }
+  }
+
   // 3. Snapshot seats ONCE at entry, decay patience & handle 0-patience angry walkouts
   const {
     seatRecords,
@@ -3099,15 +3239,30 @@ function applyMikanComfortTea(state) {
  * Enforces Pure Serve-Only Scoring Iron Law: 0 serves => 0 valid score and 0 consolation dust.
  */
 function computeLevelSettlement(levelCfgOrId, orderState, prevStarsOrSave) {
-  const lvl = resolveLevelConfig(levelCfgOrId);
-  const stars = safeArrayLen(lvl.stars, 8) >= 3 ? lvl.stars : [750, 1050, 1400];
+  let rawLvlArg = levelCfgOrId;
+  let rawOsArg = orderState;
+  let rawPrevArg = prevStarsOrSave;
+  if (
+    prevStarsOrSave === undefined &&
+    isPlainObj(levelCfgOrId) &&
+    hasOwn(levelCfgOrId, 'levelId') &&
+    !hasOwn(levelCfgOrId, 'matrix') &&
+    (hasOwn(levelCfgOrId, 'ordersServed') || hasOwn(levelCfgOrId, 'score') || hasOwn(levelCfgOrId, 'tray'))
+  ) {
+    rawLvlArg = getOwn(levelCfgOrId, 'levelId', '1-1');
+    rawOsArg = levelCfgOrId;
+    rawPrevArg = orderState;
+  }
+
+  const lvl = resolveLevelConfig(rawLvlArg);
+  const stars = safeArrayLen(lvl.stars, 8) >= 3 ? lvl.stars : [850, 1250, 1750];
   const firstStarDust =
     safeArrayLen(lvl.firstStarDust, 8) >= 3
       ? lvl.firstStarDust
-      : [15, 20, 30];
-  const baseClearDust = safeInt(lvl.baseClearDust, 10, 0, 200);
+      : [10, 15, 22];
+  const baseClearDust = safeInt(lvl.baseClearDust, 6, 0, 200);
 
-  const os = isPlainObj(orderState) ? orderState : null;
+  const os = isPlainObj(rawOsArg) ? rawOsArg : null;
   const ordersServed = os ? safeInt(getOwn(os, 'ordersServed', 0), 0, 0, 100000) : 0;
   const rawScore = os ? safeInt(getOwn(os, 'score', 0), 0, 0, 100000000) : 0;
   const score = ordersServed >= 1 ? rawScore : 0;
@@ -3115,19 +3270,19 @@ function computeLevelSettlement(levelCfgOrId, orderState, prevStarsOrSave) {
     ordersServed >= 1 && os ? safeInt(getOwn(os, 'vipServed', 0), 0, 0, 1000) : 0;
 
   let prevStars = 0;
-  if (typeof prevStarsOrSave === 'number' || typeof prevStarsOrSave === 'string') {
-    prevStars = safeInt(prevStarsOrSave, 0, 0, 3);
-  } else if (isPlainObj(prevStarsOrSave)) {
-    const rawLevelStars = getOwn(prevStarsOrSave, 'levelStars', null);
-    const map = isPlainObj(rawLevelStars) ? rawLevelStars : prevStarsOrSave;
+  if (typeof rawPrevArg === 'number' || typeof rawPrevArg === 'string') {
+    prevStars = safeInt(rawPrevArg, 0, 0, 3);
+  } else if (isPlainObj(rawPrevArg)) {
+    const rawLevelStars = getOwn(rawPrevArg, 'levelStars', null);
+    const map = isPlainObj(rawLevelStars) ? rawLevelStars : rawPrevArg;
     if (lvl && typeof lvl.id === 'string' && hasOwn(map, lvl.id)) {
       prevStars = safeInt(getOwn(map, lvl.id, 0), 0, 0, 3);
     }
   }
 
-  const star1 = Math.max(1, safeInt(getOwn(stars, 0, 750), 750, 1, 100000000));
-  const star2 = Math.max(star1 + 1, safeInt(getOwn(stars, 1, 1050), 1050, 1, 100000000));
-  const star3 = Math.max(star2 + 1, safeInt(getOwn(stars, 2, 1400), 1400, 1, 100000000));
+  const star1 = Math.max(1, safeInt(getOwn(stars, 0, 850), 850, 1, 100000000));
+  const star2 = Math.max(star1 + 1, safeInt(getOwn(stars, 1, 1250), 1250, 1, 100000000));
+  const star3 = Math.max(star2 + 1, safeInt(getOwn(stars, 2, 1750), 1750, 1, 100000000));
 
   const starsEarned = score >= star3 ? 3 : score >= star2 ? 2 : score >= star1 ? 1 : 0;
   const cleared = starsEarned >= 1;
@@ -3142,14 +3297,20 @@ function computeLevelSettlement(levelCfgOrId, orderState, prevStarsOrSave) {
   let vipDustAward = 0;
   let threeStarBonusDust = 0;
   let consolationDust = 0;
+  let isReplayDecay = false;
 
-  if (cleared) {
+  if (cleared && newStarsDelta > 0) {
     clearDustAward = baseClearDust;
-    vipDustAward = vipServed * 5;
-    threeStarBonusDust = starsEarned === 3 ? 8 : 0;
+    vipDustAward = vipServed * 4;
+    threeStarBonusDust = starsEarned === 3 ? 4 : 0;
+  } else if (cleared) {
+    isReplayDecay = true;
+    clearDustAward = Math.ceil(baseClearDust * 0.5);
+    vipDustAward = vipServed * 3;
+    threeStarBonusDust = starsEarned === 3 ? 2 : 0;
   } else if (ordersServed >= 1) {
-    consolationDust = Math.max(5, Math.floor((score / star1) * 8));
-    vipDustAward = vipServed * 5;
+    consolationDust = Math.max(1, Math.floor((score / star1) * 4));
+    vipDustAward = vipServed * 1;
   }
 
   const totalDustAward =
@@ -3163,6 +3324,7 @@ function computeLevelSettlement(levelCfgOrId, orderState, prevStarsOrSave) {
     cleared,
     starsEarned,
     newStarsDelta,
+    isReplayDecay,
     firstStarDustAward,
     clearDustAward,
     vipDustAward,

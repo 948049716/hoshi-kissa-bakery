@@ -544,15 +544,32 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
 
   const parts = [];
   if (res.cleared) {
+    if (res.isReplayDecay || (res.newStarsDelta || 0) === 0) {
+      parts.push('重温营业奖励（首星突破奖已领）');
+    }
     if (res.firstStarDustAward > 0) parts.push(`首星突破 +${res.firstStarDustAward}`);
     if (res.clearDustAward > 0) parts.push(`过关基础 +${res.clearDustAward}`);
     if (res.vipDustAward > 0) parts.push(`VIP红包 +${res.vipDustAward}`);
     if (res.threeStarBonusDust > 0) parts.push(`三星奖 +${res.threeStarBonusDust}`);
-  } else if ((res.consolationDust || 0) > 0) {
-    parts.push(`营业安慰奖 +${res.consolationDust}`);
-    parts.push('前往小铺升级猫饼菜价可大幅提分');
   } else {
-    parts.push('完成至少 1 单顾客上菜即可获得营业星尘');
+    const streak =
+      Number(res.failStreak) ||
+      (saveData.levelFailStreaks && Number(saveData.levelFailStreaks[res.levelId])) ||
+      0;
+    const hasSoftPity = Boolean(res.softPityNextRun || streak >= 2);
+    if ((res.consolationDust || 0) > 0) {
+      parts.push(`营业安慰奖 +${res.consolationDust}`);
+    }
+    if ((res.vipDustAward || 0) > 0) {
+      parts.push(`VIP慰问 +${res.vipDustAward}`);
+    }
+    if (hasSoftPity) {
+      parts.push('下局小蜜柑将为你预充 40% 技能能量！');
+    } else if ((res.consolationDust || 0) > 0) {
+      parts.push('前往小铺升级猫饼菜价可大幅提分');
+    } else {
+      parts.push('完成至少 1 单顾客上菜即可获得营业星尘');
+    }
   }
 
   UI.drawWrappedText(
@@ -613,6 +630,36 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
   hits.add('result_next_btn', nextBtnX, btnY, bw, btnH, () => app.onResultNext());
 }
 
+function setupAdaptiveGridScroll(app, ix, iw, bodyY, bodyH, rows, gy, minRowH) {
+  const safeRows = Math.max(1, rows);
+  const rawCh = Math.floor((bodyH - gy * (safeRows - 1)) / safeRows);
+  const ch = Math.max(minRowH, rawCh);
+  const contentH = safeRows * ch + Math.max(0, safeRows - 1) * gy;
+  const maxScroll = Math.max(0, contentH - bodyH);
+  const scrollY = maxScroll > 0 ? clamp(Number(app.modalScrollY) || 0, 0, maxScroll) : 0;
+  if (maxScroll > 0) {
+    app.modalScrollRect = { x: ix, y: bodyY, w: iw, h: bodyH };
+    app.modalMaxScroll = maxScroll;
+  } else {
+    app.modalScrollRect = null;
+    app.modalMaxScroll = 0;
+  }
+  return { ch, scrollY, maxScroll };
+}
+
+function addScrollClippedHit(hits, id, x, y, w, h, scrollY, bodyY, bodyH, onClick) {
+  if (scrollY === 0 && y >= bodyY - 1 && y + h <= bodyY + bodyH + 1) {
+    hits.add(id, x, y, w, h, onClick);
+    return;
+  }
+  const screenY = y - scrollY;
+  const visTop = Math.max(bodyY, screenY);
+  const visBot = Math.min(bodyY + bodyH, screenY + h);
+  if (visBot - visTop >= 12) {
+    hits.add(id, x, visTop, w, visBot - visTop, onClick);
+  }
+}
+
 function renderShopModal(ctx, metrics, app, hits) {
   const c = getSafeCtx(ctx);
   const f = renderModalFrame(c, metrics, app, 660, 568, true);
@@ -671,248 +718,440 @@ function renderShopModal(ctx, metrics, app, hits) {
 
   if (activeTab === 'catcakes') {
     const cols = 2;
-    const rows = 4;
+    const rows = Math.ceil((CATCAKES.length + 1) / cols);
     const gx = 6;
     const gy = 6;
-    const cw = Math.floor((f.iw - gx * (cols - 1)) / cols);
-    const ch = Math.floor((bodyH - gy * (rows - 1)) / rows);
+    const { ch, scrollY, maxScroll } = setupAdaptiveGridScroll(
+      app,
+      f.ix,
+      f.iw,
+      bodyY,
+      bodyH,
+      rows,
+      gy,
+      68
+    );
+    const gridW = f.iw - (maxScroll > 0 ? 6 : 0);
+    const cw = Math.floor((gridW - gx * (cols - 1)) / cols);
 
-    for (let i = 0; i < CATCAKES.length; i++) {
-      const cake = CATCAKES[i];
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      const cx = f.ix + col * (cw + gx);
-      const cy = bodyY + row * (ch + gy);
+    c.save();
+    try {
+      if (maxScroll > 0) {
+        c.beginPath();
+        c.rect(f.ix, bodyY, f.iw, bodyH);
+        c.clip();
+        c.translate(0, -scrollY);
+      }
 
-      const rawLv = saveData.catcakeLevels && saveData.catcakeLevels[cake.tier];
-      const lv = clamp(Math.floor(Number(rawLv) || 0), 0, 4);
-      const isMax = lv >= 4;
-      const cost = isMax ? 0 : cake.upgradeCosts[lv];
-      const canBuy = !isMax && bank >= cost;
-      const curP = getCatcakePrice(cake.tier, lv);
-      const nextP = isMax ? curP : getCatcakePrice(cake.tier, lv + 1);
+      for (let i = 0; i < CATCAKES.length; i++) {
+        const cake = CATCAKES[i];
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const cx = f.ix + col * (cw + gx);
+        const cy = bodyY + row * (ch + gy);
 
-      UI.drawKissaCard(c, cx, cy, cw, ch, {
-        tone: isMax ? 'equipped' : canBuy ? 'cream' : 'soft',
-        radius: 10
-      });
+        const isUnlocked =
+          typeof app.isCatcakeUnlocked === 'function'
+            ? app.isCatcakeUnlocked(cake)
+            : isLevelUnlocked(cake.unlockLevel, saveData.levelStars).unlocked;
+        const rawLv = saveData.catcakeLevels && saveData.catcakeLevels[cake.tier];
+        const lv = clamp(Math.floor(Number(rawLv) || 0), 0, 4);
+        const isMax = lv >= 4;
+        const cost = isMax ? 0 : cake.upgradeCosts[lv];
+        const canBuy = isUnlocked && !isMax && bank >= cost;
+        const curP = getCatcakePrice(cake.tier, lv);
+        const nextP = isMax ? curP : getCatcakePrice(cake.tier, lv + 1);
 
-      const iconS = Math.min(38, ch - 36);
-      UI.drawCatcakeSprite(c, sprites, cake.tier, cx + 22, cy + (ch - 26) * 0.5 + 2, iconS, {
-        happy: isMax
-      });
+        UI.drawKissaCard(c, cx, cy, cw, ch, {
+          tone: !isUnlocked ? 'soft' : isMax ? 'equipped' : canBuy ? 'cream' : 'soft',
+          radius: 10
+        });
 
-      const tx = cx + 42;
-      const tw = Math.max(48, cx + cw - 6 - tx);
-      UI.drawFitText(
-        c,
-        `${cake.name}`,
-        tx,
-        cy + 15,
-        tw,
-        10.6,
-        8.2,
-        900,
-        '#4A2C2A',
-        'left',
-        'middle'
-      );
-      UI.drawFitText(
-        c,
-        `Lv.${lv}/4 · 菜价 ${curP}${isMax ? '' : ' -> ' + nextP}`,
-        tx,
-        cy + 33,
-        tw,
-        9.4,
-        7.4,
-        700,
-        '#7A5438',
-        'left',
-        'middle'
-      );
+        const iconS = Math.min(38, ch - 36);
+        UI.drawCatcakeSprite(c, sprites, cake.tier, cx + 22, cy + (ch - 26) * 0.5 + 2, iconS, {
+          happy: isUnlocked && isMax,
+          silhouette: !isUnlocked
+        });
+        if (!isUnlocked) {
+          drawLockIcon(c, cx + 22, cy + (ch - 26) * 0.5 + 10, 11.5);
+        }
 
-      const btnH = Math.min(24, Math.max(20, Math.floor(ch * 0.25)));
-      const btnY = cy + ch - btnH - 5;
-      const btnX = cx + 6;
-      const btnW = cw - 12;
-      UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
-        style: isMax ? 'equipped' : canBuy ? 'cta' : 'wood',
-        disabled: !isMax && !canBuy,
-        icon: isMax ? '' : 'icon_stardust',
-        sprites,
-        iconSize: 13,
-        text: isMax ? '已满级' : `${cost} 升级`,
-        fontSize: 9.8,
-        radius: 8
-      });
-      const tierCopy = cake.tier;
-      hits.add(`shop_buy_catcake_${tierCopy}`, btnX, btnY, btnW, btnH, () =>
-        app.buyCatcakeUpgrade(tierCopy)
-      );
+        const tx = cx + 42;
+        const tw = Math.max(48, cx + cw - 6 - tx);
+        UI.drawFitText(
+          c,
+          `${cake.name}`,
+          tx,
+          cy + 15,
+          tw,
+          10.6,
+          8.2,
+          900,
+          isUnlocked ? '#4A2C2A' : '#7D6A58',
+          'left',
+          'middle'
+        );
+        UI.drawFitText(
+          c,
+          `Lv.${lv}/4 · 菜价 ${curP}${isMax ? '' : ' -> ' + nextP}`,
+          tx,
+          cy + 33,
+          tw,
+          9.4,
+          7.4,
+          700,
+          '#7A5438',
+          'left',
+          'middle'
+        );
+
+        const btnH = Math.min(24, Math.max(20, Math.floor(ch * 0.25)));
+        const btnY = cy + ch - btnH - 5;
+        const btnX = cx + 6;
+        const btnW = cw - 12;
+        UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
+          style: !isUnlocked ? 'card' : isMax ? 'equipped' : canBuy ? 'cta' : 'wood',
+          disabled: !isUnlocked || (!isMax && !canBuy),
+          icon: !isUnlocked || isMax ? '' : 'icon_stardust',
+          sprites,
+          iconSize: 13,
+          text: !isUnlocked ? `${cake.unlockLevel} 解锁` : isMax ? '已满级' : `${cost} 升级`,
+          fontSize: 9.8,
+          radius: 8
+        });
+        const tierCopy = cake.tier;
+        addScrollClippedHit(
+          hits,
+          `shop_buy_catcake_${tierCopy}`,
+          btnX,
+          btnY,
+          btnW,
+          btnH,
+          scrollY,
+          bodyY,
+          bodyH,
+          () => app.buyCatcakeUpgrade(tierCopy)
+        );
+      }
+
+      // Summary slot showing total R&D progress
+      const sIdx = CATCAKES.length;
+      const sCol = sIdx % cols;
+      const sRow = Math.floor(sIdx / cols);
+      const sx = f.ix + sCol * (cw + gx);
+      const sy = bodyY + sRow * (ch + gy);
+      let totalCakeLv = 0;
+      const maxCakeLv = CATCAKES.length * 4;
+      for (let t = 1; t <= CATCAKES.length; t++) {
+        totalCakeLv += clamp(Math.floor(Number(saveData.catcakeLevels && saveData.catcakeLevels[t]) || 0), 0, 4);
+      }
+      UI.drawKissaCard(c, sx, sy, cw, ch, { tone: 'amber', radius: 10 });
+      UI.drawFitText(c, '研发加成总览', sx + cw * 0.5, sy + ch * 0.34, cw - 14, 11.0, 8.8, 900, '#5A341E', 'center', 'middle');
+      UI.drawFitText(c, `已升 ${totalCakeLv} / ${maxCakeLv} 级`, sx + cw * 0.5, sy + ch * 0.62, cw - 14, 10.2, 8.2, 800, '#7A4818', 'center', 'middle');
+      UI.drawFitText(c, '每级单品菜价 +15%', sx + cw * 0.5, sy + ch * 0.82, cw - 14, 9.0, 7.5, 700, '#8A5A28', 'center', 'middle');
+    } finally {
+      c.restore();
     }
-
-    // 8th summary slot showing total研发 progress
-    const sCol = 7 % cols;
-    const sRow = Math.floor(7 / cols);
-    const sx = f.ix + sCol * (cw + gx);
-    const sy = bodyY + sRow * (ch + gy);
-    let totalCakeLv = 0;
-    for (let t = 1; t <= 7; t++) {
-      totalCakeLv += clamp(Math.floor(Number(saveData.catcakeLevels && saveData.catcakeLevels[t]) || 0), 0, 4);
-    }
-    UI.drawKissaCard(c, sx, sy, cw, ch, { tone: 'amber', radius: 10 });
-    UI.drawFitText(c, '研发加成总览', sx + cw * 0.5, sy + ch * 0.34, cw - 14, 11.0, 8.8, 900, '#5A341E', 'center', 'middle');
-    UI.drawFitText(c, `已升 ${totalCakeLv} / 28 级`, sx + cw * 0.5, sy + ch * 0.62, cw - 14, 10.2, 8.2, 800, '#7A4818', 'center', 'middle');
-    UI.drawFitText(c, '每级单品菜价 +20%', sx + cw * 0.5, sy + ch * 0.82, cw - 14, 9.0, 7.5, 700, '#8A5A28', 'center', 'middle');
     return;
   }
 
   if (activeTab === 'devices') {
     const cols = 1;
-    const rows = 4;
+    const rows = Math.max(1, SHOP_DEVICES.length);
     const gx = 8;
     const gy = 6;
-    const cw = Math.floor((f.iw - gx * (cols - 1)) / cols);
-    const ch = Math.floor((bodyH - gy * (rows - 1)) / rows);
+    const { ch, scrollY, maxScroll } = setupAdaptiveGridScroll(
+      app,
+      f.ix,
+      f.iw,
+      bodyY,
+      bodyH,
+      rows,
+      gy,
+      68
+    );
+    const cw = Math.floor((f.iw - (maxScroll > 0 ? 6 : 0) - gx * (cols - 1)) / cols);
 
-    for (let i = 0; i < SHOP_DEVICES.length; i++) {
-      const dev = SHOP_DEVICES[i];
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      const cx = f.ix + col * (cw + gx);
-      const cy = bodyY + row * (ch + gy);
+    c.save();
+    try {
+      if (maxScroll > 0) {
+        c.beginPath();
+        c.rect(f.ix, bodyY, f.iw, bodyH);
+        c.clip();
+        c.translate(0, -scrollY);
+      }
 
-      const rawLv = saveData.deviceUpgrades && saveData.deviceUpgrades[dev.id];
-      const lv = clamp(Math.floor(Number(rawLv) || 0), 0, dev.maxLv);
-      const isMax = lv >= dev.maxLv;
-      const cost = isMax ? 0 : dev.costs[lv];
-      const canBuy = !isMax && bank >= cost;
+      for (let i = 0; i < SHOP_DEVICES.length; i++) {
+        const dev = SHOP_DEVICES[i];
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const cx = f.ix + col * (cw + gx);
+        const cy = bodyY + row * (ch + gy);
 
-      UI.drawKissaCard(c, cx, cy, cw, ch, {
-        tone: isMax ? 'equipped' : 'cream',
-        radius: 11
-      });
+        const rawLv = saveData.deviceUpgrades && saveData.deviceUpgrades[dev.id];
+        const lv = clamp(Math.floor(Number(rawLv) || 0), 0, dev.maxLv);
+        const isMax = lv >= dev.maxLv;
+        const cost = isMax ? 0 : dev.costs[lv];
+        const canBuy = !isMax && bank >= cost;
 
-      UI.drawUiIcon(c, sprites, dev.icon, cx + 26, cy + ch * 0.5, 30);
+        UI.drawKissaCard(c, cx, cy, cw, ch, {
+          tone: isMax ? 'equipped' : 'cream',
+          radius: 11
+        });
 
-      const btnW = 86;
-      const btnH = Math.min(30, ch - 18);
-      const btnX = cx + cw - 8 - btnW;
-      const btnY = Math.round(cy + (ch - btnH) * 0.5);
+        UI.drawUiIcon(c, sprites, dev.icon, cx + 26, cy + ch * 0.5, 30);
 
-      const tx = cx + 48;
-      const tw = Math.max(60, btnX - 8 - tx);
-      UI.drawFitText(
-        c,
-        `${dev.name}  Lv.${lv}/${dev.maxLv}`,
-        tx,
-        cy + ch * 0.33,
-        tw,
-        11.8,
-        9.2,
-        900,
-        '#4A2C2A',
-        'left',
-        'middle'
-      );
-      UI.drawWrappedText(
-        c,
-        dev.getDesc(lv),
-        tx,
-        cy + ch * 0.52,
-        tw,
-        13.5,
-        UI.fontStr(9.4, 700),
-        '#6E463B',
-        'left',
-        2
-      );
+        const btnW = 86;
+        const btnH = Math.min(30, ch - 18);
+        const btnX = cx + cw - 8 - btnW;
+        const btnY = Math.round(cy + (ch - btnH) * 0.5);
 
-      UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
-        style: isMax ? 'equipped' : canBuy ? 'cta' : 'wood',
-        disabled: !isMax && !canBuy,
-        icon: isMax ? '' : 'icon_stardust',
-        sprites,
-        iconSize: 14,
-        text: isMax ? '已满级' : `${cost} 升级`,
-        fontSize: 10.2,
-        radius: 9
-      });
-      const devIdCopy = dev.id;
-      hits.add(`shop_buy_${devIdCopy}`, btnX, btnY, btnW, btnH, () =>
-        app.buyDeviceUpgrade(devIdCopy)
-      );
+        const tx = cx + 48;
+        const tw = Math.max(60, btnX - 8 - tx);
+        UI.drawFitText(
+          c,
+          `${dev.name}  Lv.${lv}/${dev.maxLv}`,
+          tx,
+          cy + ch * 0.33,
+          tw,
+          11.8,
+          9.2,
+          900,
+          '#4A2C2A',
+          'left',
+          'middle'
+        );
+        UI.drawWrappedText(
+          c,
+          dev.getDesc(lv),
+          tx,
+          cy + ch * 0.52,
+          tw,
+          13.5,
+          UI.fontStr(9.4, 700),
+          '#6E463B',
+          'left',
+          2
+        );
+
+        UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
+          style: isMax ? 'equipped' : canBuy ? 'cta' : 'wood',
+          disabled: !isMax && !canBuy,
+          icon: isMax ? '' : 'icon_stardust',
+          sprites,
+          iconSize: 14,
+          text: isMax ? '已满级' : `${cost} 升级`,
+          fontSize: 10.2,
+          radius: 9
+        });
+        const devIdCopy = dev.id;
+        addScrollClippedHit(
+          hits,
+          `shop_buy_${devIdCopy}`,
+          btnX,
+          btnY,
+          btnW,
+          btnH,
+          scrollY,
+          bodyY,
+          bodyH,
+          () => app.buyDeviceUpgrade(devIdCopy)
+        );
+      }
+    } finally {
+      c.restore();
     }
     return;
   }
 
   if (activeTab === 'patrons') {
     const cols = 1;
-    const rows = 3;
+    const rows = Math.max(1, PATRONS.length);
     const gx = 8;
     const gy = 7;
-    const cw = Math.floor((f.iw - gx * (cols - 1)) / cols);
-    const ch = Math.floor((bodyH - gy * (rows - 1)) / rows);
+    const { ch, scrollY, maxScroll } = setupAdaptiveGridScroll(
+      app,
+      f.ix,
+      f.iw,
+      bodyY,
+      bodyH,
+      rows,
+      gy,
+      74
+    );
+    const cw = Math.floor((f.iw - (maxScroll > 0 ? 6 : 0) - gx * (cols - 1)) / cols);
     const unlocked = Array.isArray(saveData.unlockedPatrons) ? saveData.unlockedPatrons : ['mikan'];
     const selected = normalizePatronId(saveData.selectedPatron);
 
-    for (let i = 0; i < PATRONS.length; i++) {
-      const p = PATRONS[i];
+    c.save();
+    try {
+      if (maxScroll > 0) {
+        c.beginPath();
+        c.rect(f.ix, bodyY, f.iw, bodyH);
+        c.clip();
+        c.translate(0, -scrollY);
+      }
+
+      for (let i = 0; i < PATRONS.length; i++) {
+        const p = PATRONS[i];
+        const cx = f.ix;
+        const cy = bodyY + i * (ch + gy);
+        const owned = unlocked.includes(p.id);
+        const isSelected = owned && selected === p.id;
+        const canBuy = !owned && bank >= p.cost;
+
+        UI.drawKissaCard(c, cx, cy, cw, ch, {
+          tone: isSelected ? 'selected' : owned ? 'cream' : 'soft',
+          radius: 12
+        });
+
+        const avatarS = Math.min(54, ch - 20);
+        UI.drawUiIcon(
+          c,
+          sprites,
+          p.id,
+          cx + 34,
+          cy + ch * 0.5,
+          avatarS
+        );
+
+        const btnW = 92;
+        const btnH = 30;
+        const btnX = cx + cw - 10 - btnW;
+        const btnY = Math.round(cy + (ch - btnH) * 0.5);
+
+        const tx = cx + 66;
+        const tw = Math.max(60, btnX - 8 - tx);
+        UI.drawFitText(
+          c,
+          `${p.name} · 【${p.skillName}】`,
+          tx,
+          cy + 24,
+          tw,
+          11.8,
+          9.2,
+          900,
+          '#4A2C2A',
+          'left',
+          'middle'
+        );
+        UI.drawWrappedText(
+          c,
+          p.passiveDesc,
+          tx,
+          cy + 40,
+          tw,
+          14,
+          UI.fontStr(9.4, 700),
+          '#6E463B',
+          'left',
+          3
+        );
+
+        const pidCopy = p.id;
+        if (!owned) {
+          UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
+            style: canBuy ? 'cta' : 'wood',
+            disabled: !canBuy,
+            icon: 'icon_stardust',
+            sprites,
+            iconSize: 14,
+            text: `${p.cost} 邀请`,
+            fontSize: 10.4,
+            radius: 9
+          });
+          addScrollClippedHit(
+            hits,
+            `shop_buy_patron_${pidCopy}`,
+            btnX,
+            btnY,
+            btnW,
+            btnH,
+            scrollY,
+            bodyY,
+            bodyH,
+            () => app.buyPatron(pidCopy)
+          );
+        } else {
+          UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
+            style: isSelected ? 'equipped' : 'walnut',
+            text: isSelected ? '出战中' : '切换出战',
+            fontSize: 10.4,
+            radius: 9
+          });
+          addScrollClippedHit(
+            hits,
+            `shop_equip_patron_${pidCopy}`,
+            btnX,
+            btnY,
+            btnW,
+            btnH,
+            scrollY,
+            bodyY,
+            bodyH,
+            () => app.equipPatron(pidCopy)
+          );
+        }
+      }
+    } finally {
+      c.restore();
+    }
+    return;
+  }
+
+  // activeTab === 'themes'
+  const cols = 1;
+  const rows = Math.max(1, BOARD_THEME_LIST.length);
+  const gx = 8;
+  const gy = 7;
+  const { ch, scrollY, maxScroll } = setupAdaptiveGridScroll(
+    app,
+    f.ix,
+    f.iw,
+    bodyY,
+    bodyH,
+    rows,
+    gy,
+    74
+  );
+  const cw = Math.floor((f.iw - (maxScroll > 0 ? 6 : 0) - gx * (cols - 1)) / cols);
+  const unlockedThemes = Array.isArray(saveData.unlockedThemes) ? saveData.unlockedThemes : ['amber'];
+  const equippedId = saveData.equippedTheme || 'amber';
+
+  c.save();
+  try {
+    if (maxScroll > 0) {
+      c.beginPath();
+      c.rect(f.ix, bodyY, f.iw, bodyH);
+      c.clip();
+      c.translate(0, -scrollY);
+    }
+
+    for (let i = 0; i < BOARD_THEME_LIST.length; i++) {
+      const th = BOARD_THEME_LIST[i];
       const cx = f.ix;
       const cy = bodyY + i * (ch + gy);
-      const owned = unlocked.includes(p.id);
-      const isSelected = owned && selected === p.id;
-      const canBuy = !owned && bank >= p.cost;
+      const owned = unlockedThemes.includes(th.id);
+      const isEquipped = owned && equippedId === th.id;
+      const canBuy = !owned && bank >= th.cost;
 
       UI.drawKissaCard(c, cx, cy, cw, ch, {
-        tone: isSelected ? 'selected' : owned ? 'cream' : 'soft',
+        tone: isEquipped ? 'selected' : owned ? 'cream' : 'soft',
         radius: 12
       });
-
-      const avatarS = Math.min(54, ch - 20);
-      UI.drawUiIcon(
-        c,
-        sprites,
-        p.id,
-        cx + 34,
-        cy + ch * 0.5,
-        avatarS
-      );
 
       const btnW = 92;
       const btnH = 30;
       const btnX = cx + cw - 10 - btnW;
       const btnY = Math.round(cy + (ch - btnH) * 0.5);
 
-      const tx = cx + 66;
+      UI.drawThemeSwatch(c, cx + 10, cy + 14, 58, ch - 28, th.id);
+      const tx = cx + 76;
       const tw = Math.max(60, btnX - 8 - tx);
-      UI.drawFitText(
-        c,
-        `${p.name} · 【${p.skillName}】`,
-        tx,
-        cy + 24,
-        tw,
-        11.8,
-        9.2,
-        900,
-        '#4A2C2A',
-        'left',
-        'middle'
-      );
-      UI.drawWrappedText(
-        c,
-        p.passiveDesc,
-        tx,
-        cy + 40,
-        tw,
-        14,
-        UI.fontStr(9.4, 700),
-        '#6E463B',
-        'left',
-        3
-      );
+      UI.drawFitText(c, th.name, tx, cy + 26, tw, 12.0, 9.5, 900, '#4A2C2A', 'left', 'middle');
+      UI.drawWrappedText(c, th.desc, tx, cy + 44, tw, 14, UI.fontStr(9.4, 700), '#6E463B', 'left', 3);
 
-      const pidCopy = p.id;
+      const tidCopy = th.id;
       if (!owned) {
         UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
           style: canBuy ? 'cta' : 'wood',
@@ -920,88 +1159,45 @@ function renderShopModal(ctx, metrics, app, hits) {
           icon: 'icon_stardust',
           sprites,
           iconSize: 14,
-          text: `${p.cost} 邀请`,
+          text: `${th.cost} 解锁`,
           fontSize: 10.4,
           radius: 9
         });
-        hits.add(`shop_buy_patron_${pidCopy}`, btnX, btnY, btnW, btnH, () =>
-          app.buyPatron(pidCopy)
+        addScrollClippedHit(
+          hits,
+          `shop_buy_theme_${tidCopy}`,
+          btnX,
+          btnY,
+          btnW,
+          btnH,
+          scrollY,
+          bodyY,
+          bodyH,
+          () => app.buyTheme(tidCopy)
         );
       } else {
         UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
-          style: isSelected ? 'equipped' : 'walnut',
-          text: isSelected ? '出战中' : '切换出战',
+          style: isEquipped ? 'equipped' : 'walnut',
+          text: isEquipped ? '使用中' : '装备皮肤',
           fontSize: 10.4,
           radius: 9
         });
-        hits.add(`shop_equip_patron_${pidCopy}`, btnX, btnY, btnW, btnH, () =>
-          app.equipPatron(pidCopy)
+        addScrollClippedHit(
+          hits,
+          `shop_equip_theme_${tidCopy}`,
+          btnX,
+          btnY,
+          btnW,
+          btnH,
+          scrollY,
+          bodyY,
+          bodyH,
+          () => app.equipTheme(tidCopy)
         );
       }
     }
-    return;
-  }
-
-  // activeTab === 'themes'
-  const cols = 1;
-  const rows = 3;
-  const gx = 8;
-  const gy = 7;
-  const cw = Math.floor((f.iw - gx * (cols - 1)) / cols);
-  const ch = Math.floor((bodyH - gy * (rows - 1)) / rows);
-  const unlockedThemes = Array.isArray(saveData.unlockedThemes) ? saveData.unlockedThemes : ['amber'];
-  const equippedId = saveData.equippedTheme || 'amber';
-
-  for (let i = 0; i < BOARD_THEME_LIST.length; i++) {
-    const th = BOARD_THEME_LIST[i];
-    const cx = f.ix;
-    const cy = bodyY + i * (ch + gy);
-    const owned = unlockedThemes.includes(th.id);
-    const isEquipped = owned && equippedId === th.id;
-    const canBuy = !owned && bank >= th.cost;
-
-    UI.drawKissaCard(c, cx, cy, cw, ch, {
-      tone: isEquipped ? 'selected' : owned ? 'cream' : 'soft',
-      radius: 12
-    });
-
-    const btnW = 92;
-    const btnH = 30;
-    const btnX = cx + cw - 10 - btnW;
-    const btnY = Math.round(cy + (ch - btnH) * 0.5);
-
-    UI.drawThemeSwatch(c, cx + 10, cy + 14, 58, ch - 28, th.id);
-    const tx = cx + 76;
-    const tw = Math.max(60, btnX - 8 - tx);
-    UI.drawFitText(c, th.name, tx, cy + 26, tw, 12.0, 9.5, 900, '#4A2C2A', 'left', 'middle');
-    UI.drawWrappedText(c, th.desc, tx, cy + 44, tw, 14, UI.fontStr(9.4, 700), '#6E463B', 'left', 3);
-
-    const tidCopy = th.id;
-    if (!owned) {
-      UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
-        style: canBuy ? 'cta' : 'wood',
-        disabled: !canBuy,
-        icon: 'icon_stardust',
-        sprites,
-        iconSize: 14,
-        text: `${th.cost} 解锁`,
-        fontSize: 10.4,
-        radius: 9
-      });
-      hits.add(`shop_buy_theme_${tidCopy}`, btnX, btnY, btnW, btnH, () =>
-        app.buyTheme(tidCopy)
-      );
-    } else {
-      UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
-        style: isEquipped ? 'equipped' : 'walnut',
-        text: isEquipped ? '使用中' : '装备皮肤',
-        fontSize: 10.4,
-        radius: 9
-      });
-      hits.add(`shop_equip_theme_${tidCopy}`, btnX, btnY, btnW, btnH, () =>
-        app.equipTheme(tidCopy)
-      );
-    }
+  } finally {
+    c.restore();
   }
 }
 
@@ -1011,7 +1207,15 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
   const sprites = app.sprites || {};
   const saveData = app.saveData || {};
 
-  drawModalHeader(c, f, sprites, 'icon_book', '吃茶图鉴', '7 阶手绘猫饼与 24 道甜品套餐配方', 38);
+  drawModalHeader(
+    c,
+    f,
+    sprites,
+    'icon_book',
+    '吃茶图鉴',
+    `${CATCAKES.length} 阶手绘猫饼与 ${RECIPE_LIST.length} 道甜品套餐配方`,
+    38
+  );
   drawCloseButton(c, f, hits, app);
 
   const tabY = f.iy + 34;
@@ -1025,7 +1229,7 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
     icon: 'C1',
     sprites,
     iconSize: 17,
-    text: '7 阶猫饼',
+    text: `${CATCAKES.length} 阶猫饼`,
     fontSize: 11.2,
     radius: 9
   });
@@ -1036,7 +1240,7 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
     icon: 'serve_bell',
     sprites,
     iconSize: 17,
-    text: '24 道菜谱',
+    text: `${RECIPE_LIST.length} 道菜谱`,
     fontSize: 11.2,
     radius: 9
   });
@@ -1051,179 +1255,224 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
 
   if (activeTab === 'catcakes') {
     const cols = 2;
-    const rows = 4;
+    const rows = Math.ceil((CATCAKES.length + 1) / cols);
     const gx = 6;
     const gy = 6;
-    const cw = Math.floor((f.iw - gx * (cols - 1)) / cols);
-    const ch = Math.floor((bodyH - gy * (rows - 1)) / rows);
+    const { ch, scrollY, maxScroll } = setupAdaptiveGridScroll(
+      app,
+      f.ix,
+      f.iw,
+      bodyY,
+      bodyH,
+      rows,
+      gy,
+      68
+    );
+    const cw = Math.floor((f.iw - (maxScroll > 0 ? 6 : 0) - gx * (cols - 1)) / cols);
 
-    for (let i = 0; i < CATCAKES.length; i++) {
-      const cake = CATCAKES[i];
+    c.save();
+    try {
+      if (maxScroll > 0) {
+        c.beginPath();
+        c.rect(f.ix, bodyY, f.iw, bodyH);
+        c.clip();
+        c.translate(0, -scrollY);
+      }
+
+      for (let i = 0; i < CATCAKES.length; i++) {
+        const cake = CATCAKES[i];
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const cx = f.ix + col * (cw + gx);
+        const cy = bodyY + row * (ch + gy);
+        const unlocked = isLevelUnlocked(cake.unlockLevel, saveData.levelStars).unlocked;
+        const lv = clamp(Math.floor(Number(saveData.catcakeLevels && saveData.catcakeLevels[cake.tier]) || 0), 0, 4);
+        const price = getCatcakePrice(cake.tier, lv);
+
+        UI.drawKissaCard(c, cx, cy, cw, ch, {
+          tone: unlocked ? 'cream' : 'soft',
+          radius: 10
+        });
+
+        UI.drawCatcakeSprite(c, sprites, cake.tier, cx + 25, cy + ch * 0.46, Math.min(42, ch - 20), {
+          silhouette: !unlocked,
+          happy: unlocked && lv >= 2
+        });
+
+        const tx = cx + 48;
+        const tw = Math.max(48, cx + cw - 6 - tx);
+        UI.drawFitText(
+          c,
+          unlocked ? `${cake.id} ${cake.name}` : `${cake.id} 未解锁猫饼`,
+          tx,
+          cy + 18,
+          tw,
+          10.8,
+          8.2,
+          900,
+          unlocked ? '#4A2C2A' : '#7D6A58',
+          'left',
+          'middle'
+        );
+        UI.drawFitText(
+          c,
+          `菜价 ${price} · 解锁 ${cake.unlockLevel}`,
+          tx,
+          cy + 36,
+          tw,
+          9.2,
+          7.5,
+          800,
+          '#884A18',
+          'left',
+          'middle'
+        );
+        if (ch >= 74) {
+          UI.drawWrappedText(
+            c,
+            unlocked ? cake.desc : `推进至第 ${cake.unlockLevel} 关即可烘焙该猫饼`,
+            tx,
+            cy + 50,
+            tw,
+            12.5,
+            UI.fontStr(8.6, 700),
+            '#6E463B',
+            'left',
+            3
+          );
+        }
+      }
+
+      // Summary card: Achievements & Chef Honor Summary
+      const sIdx = CATCAKES.length;
+      const sCol = sIdx % cols;
+      const sRow = Math.floor(sIdx / cols);
+      const sx = f.ix + sCol * (cw + gx);
+      const sy = bodyY + sRow * (ch + gy);
+      let achDone = 0;
+      for (let i = 0; i < ACHIEVEMENTS.length; i++) {
+        if (ACHIEVEMENTS[i].check(saveData)) achDone++;
+      }
+      UI.drawKissaCard(c, sx, sy, cw, ch, { tone: 'amber', radius: 10 });
+      UI.drawUiIcon(c, sprites, 'icon_trophy', sx + cw * 0.5, sy + 24, 22);
+      UI.drawFitText(
+        c,
+        getChefRank(saveData),
+        sx + cw * 0.5,
+        sy + ch * 0.54,
+        cw - 12,
+        11.0,
+        8.5,
+        900,
+        '#4A2C2A',
+        'center',
+        'middle'
+      );
+      UI.drawFitText(
+        c,
+        `荣誉勋章 ${achDone}/${ACHIEVEMENTS.length}`,
+        sx + cw * 0.5,
+        sy + ch * 0.78,
+        cw - 12,
+        9.4,
+        7.8,
+        800,
+        '#7A4818',
+        'center',
+        'middle'
+      );
+    } finally {
+      c.restore();
+    }
+    return;
+  }
+
+  // Adaptive 24+ Recipes Matrix (3 cols, zero-scroll on standard viewports, scrollable when expanded)
+  const cols = 3;
+  const rows = Math.max(1, Math.ceil(RECIPE_LIST.length / cols));
+  const gx = 5;
+  const gy = 4;
+  const { ch, scrollY, maxScroll } = setupAdaptiveGridScroll(
+    app,
+    f.ix,
+    f.iw,
+    bodyY,
+    bodyH,
+    rows,
+    gy,
+    50
+  );
+  const cw = Math.floor((f.iw - (maxScroll > 0 ? 6 : 0) - gx * (cols - 1)) / cols);
+
+  c.save();
+  try {
+    if (maxScroll > 0) {
+      c.beginPath();
+      c.rect(f.ix, bodyY, f.iw, bodyH);
+      c.clip();
+      c.translate(0, -scrollY);
+    }
+
+    for (let i = 0; i < RECIPE_LIST.length; i++) {
+      const r = RECIPE_LIST[i];
       const col = i % cols;
       const row = Math.floor(i / cols);
       const cx = f.ix + col * (cw + gx);
       const cy = bodyY + row * (ch + gy);
-      const unlocked = isLevelUnlocked(cake.unlockLevel, saveData.levelStars).unlocked;
-      const lv = clamp(Math.floor(Number(saveData.catcakeLevels && saveData.catcakeLevels[cake.tier]) || 0), 0, 4);
-      const price = getCatcakePrice(cake.tier, lv);
+      if (maxScroll > 0 && (cy + ch < bodyY + scrollY || cy > bodyY + scrollY + bodyH)) continue;
+
+      const unlocked = isLevelUnlocked(r.unlockLevel, saveData.levelStars).unlocked;
 
       UI.drawKissaCard(c, cx, cy, cw, ch, {
         tone: unlocked ? 'cream' : 'soft',
-        radius: 10
+        radius: 8
       });
 
-      UI.drawCatcakeSprite(c, sprites, cake.tier, cx + 25, cy + ch * 0.46, Math.min(42, ch - 20), {
-        silhouette: !unlocked,
-        happy: unlocked && lv >= 2
-      });
-
-      const tx = cx + 48;
-      const tw = Math.max(48, cx + cw - 6 - tx);
       UI.drawFitText(
         c,
-        unlocked ? `${cake.id} ${cake.name}` : `${cake.id} 未解锁猫饼`,
-        tx,
-        cy + 18,
-        tw,
-        10.8,
-        8.2,
+        r.name,
+        cx + cw * 0.5,
+        cy + 10,
+        cw - 8,
+        9.4,
+        7.4,
         900,
         unlocked ? '#4A2C2A' : '#7D6A58',
-        'left',
+        'center',
         'middle'
       );
+
+      const slotCnt = r.slots.length;
+      const iconS = Math.min(19, Math.max(14, ch - 30));
+      const stepX = iconS + 4;
+      const startX = cx + cw * 0.5 - ((slotCnt - 1) * stepX) * 0.5;
+      const iconY = cy + ch * 0.52;
+
+      for (let s = 0; s < slotCnt; s++) {
+        const sl = r.slots[s];
+        UI.drawCatcakeSprite(c, sprites, sl.tier, startX + s * stepX, iconY, iconS, {
+          flavor: sl.flavor !== 'any' ? sl.flavor : 'plain',
+          showFlavorBadge: sl.flavor !== 'any',
+          alpha: unlocked ? 1 : 0.65
+        });
+      }
+
       UI.drawFitText(
         c,
-        `菜价 ${price} · 解锁 ${cake.unlockLevel}`,
-        tx,
-        cy + 36,
-        tw,
-        9.2,
-        7.5,
+        `×${r.comboMult.toFixed(2)} · ${r.baseScoreLv0}分`,
+        cx + cw * 0.5,
+        cy + ch - 8,
+        cw - 6,
+        8.4,
+        6.8,
         800,
         '#884A18',
-        'left',
+        'center',
         'middle'
       );
-      if (ch >= 74) {
-        UI.drawWrappedText(
-          c,
-          unlocked ? cake.desc : `推进至第 ${cake.unlockLevel} 关即可烘焙该猫饼`,
-          tx,
-          cy + 50,
-          tw,
-          12.5,
-          UI.fontStr(8.6, 700),
-          '#6E463B',
-          'left',
-          3
-        );
-      }
     }
-
-    // 8th card: Achievements & Chef Honor Summary
-    const sCol = 7 % cols;
-    const sRow = Math.floor(7 / cols);
-    const sx = f.ix + sCol * (cw + gx);
-    const sy = bodyY + sRow * (ch + gy);
-    let achDone = 0;
-    for (let i = 0; i < ACHIEVEMENTS.length; i++) {
-      if (ACHIEVEMENTS[i].check(saveData)) achDone++;
-    }
-    UI.drawKissaCard(c, sx, sy, cw, ch, { tone: 'amber', radius: 10 });
-    UI.drawUiIcon(c, sprites, 'icon_trophy', sx + cw * 0.5, sy + 24, 22);
-    UI.drawFitText(
-      c,
-      getChefRank(saveData),
-      sx + cw * 0.5,
-      sy + ch * 0.54,
-      cw - 12,
-      11.0,
-      8.5,
-      900,
-      '#4A2C2A',
-      'center',
-      'middle'
-    );
-    UI.drawFitText(
-      c,
-      `荣誉勋章 ${achDone}/${ACHIEVEMENTS.length}`,
-      sx + cw * 0.5,
-      sy + ch * 0.78,
-      cw - 12,
-      9.4,
-      7.8,
-      800,
-      '#7A4818',
-      'center',
-      'middle'
-    );
-    return;
-  }
-
-  // Zero-scroll 24 Recipes Matrix (3x8 portrait)
-  const cols = 3;
-  const rows = 8;
-  const gx = 5;
-  const gy = 4;
-  const cw = Math.floor((f.iw - gx * (cols - 1)) / cols);
-  const ch = Math.floor((bodyH - gy * (rows - 1)) / rows);
-
-  for (let i = 0; i < RECIPE_LIST.length; i++) {
-    const r = RECIPE_LIST[i];
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    const cx = f.ix + col * (cw + gx);
-    const cy = bodyY + row * (ch + gy);
-    const unlocked = isLevelUnlocked(r.unlockLevel, saveData.levelStars).unlocked;
-
-    UI.drawKissaCard(c, cx, cy, cw, ch, {
-      tone: unlocked ? 'cream' : 'soft',
-      radius: 8
-    });
-
-    UI.drawFitText(
-      c,
-      r.name,
-      cx + cw * 0.5,
-      cy + 10,
-      cw - 8,
-      9.4,
-      7.4,
-      900,
-      unlocked ? '#4A2C2A' : '#7D6A58',
-      'center',
-      'middle'
-    );
-
-    const slotCnt = r.slots.length;
-    const iconS = Math.min(19, Math.max(14, ch - 30));
-    const stepX = iconS + 4;
-    const startX = cx + cw * 0.5 - ((slotCnt - 1) * stepX) * 0.5;
-    const iconY = cy + ch * 0.52;
-
-    for (let s = 0; s < slotCnt; s++) {
-      const sl = r.slots[s];
-      UI.drawCatcakeSprite(c, sprites, sl.tier, startX + s * stepX, iconY, iconS, {
-        flavor: sl.flavor !== 'any' ? sl.flavor : 'plain',
-        showFlavorBadge: sl.flavor !== 'any',
-        alpha: unlocked ? 1 : 0.65
-      });
-    }
-
-    UI.drawFitText(
-      c,
-      `×${r.comboMult.toFixed(2)} · ${r.baseScoreLv0}分`,
-      cx + cw * 0.5,
-      cy + ch - 8,
-      cw - 6,
-      8.4,
-      6.8,
-      800,
-      '#884A18',
-      'center',
-      'middle'
-    );
+  } finally {
+    c.restore();
   }
 }
 
@@ -1628,18 +1877,18 @@ function renderHelpModal(ctx, metrics, app, hits) {
     },
     {
       icon: 'serve_bell',
-      title: '2. 单击装盘与双击厨余篮',
-      body: '轻点亮暖金圈的猫饼装进配餐托盘，凑齐任一在座顾客的全部需求即自动飞盘上菜！误放时快速双击托盘槽位即可丢进厨余篮腾位（不扣分）。'
+      title: '2. 单击装盘、厨余冷却与移位叉',
+      body: '轻点亮暖金圈猫饼装进配餐托盘，凑齐需求即自动上菜！双击托盘槽位可丢入厨余篮（冷却 8 秒、断连击但 0 扣分）；移位叉可跨障挪移、互换或合并。'
     },
     {
       icon: 'icon_stardust',
       title: '3. 纯上菜唯一得分与连击热潮',
-      body: '盘内滑动、合成、补料、厨具与技能均得 0 分，唯独完成顾客整单上菜结算营业分！10 秒内连续上菜享最高 1.50 倍连击与星光热潮。'
+      body: '盘内滑动、合成、补料、厨具与技能均得 0 分，唯独完成顾客整单上菜结算营业分！8 秒内连续上菜享最高 1.28 倍连击与 1.25 倍星光热潮。'
     },
     {
       icon: 'tile_matcha',
       title: '4. 风味染色、镀金王牌与正交破冰',
-      body: '停留在抹茶/草莓/镀金格自动染上风味（镀金永不降级且可万能顶替任意风味享 1.50 倍）；在冰封格上下左右相邻格合成即可震碎冰壳！'
+      body: '停留在抹茶/草莓/镀金格自动染上风味（镀金永不降级且可万能顶替任意风味享 1.35 倍）；在冰封格正交相邻格合成或用移位叉点冰即可破冰！'
     }
   ];
 

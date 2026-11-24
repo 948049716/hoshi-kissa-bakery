@@ -20,39 +20,63 @@ const db = cloud.database();
 const _ = db.command;
 
 const SCHEMA_VERSION = 2;
+const DEFAULT_INITIAL_STARDUST = 15;
 const PLAYERS_COL = 'players';
 
-// v2 吃茶小铺永久升级表：3670 + 1150 + 200 + 200 = 5,220 ⭐
+// v0.9.0 吃茶小铺永久升级表：3920 + 1250 + 240 + 240 = 5,650 星尘
 const CATCAKE_UPGRADE_COSTS = Object.freeze({
-  1: Object.freeze([20, 40, 70, 110]),
-  2: Object.freeze([25, 50, 85, 130]),
-  3: Object.freeze([35, 65, 105, 160]),
-  4: Object.freeze([45, 85, 135, 200]),
-  5: Object.freeze([60, 110, 170, 250]),
-  6: Object.freeze([80, 140, 220, 320]),
-  7: Object.freeze([100, 180, 280, 400])
+  1: Object.freeze([25, 50, 80, 120]),
+  2: Object.freeze([30, 60, 95, 145]),
+  3: Object.freeze([40, 75, 115, 175]),
+  4: Object.freeze([50, 95, 145, 215]),
+  5: Object.freeze([65, 120, 185, 270]),
+  6: Object.freeze([85, 150, 235, 340]),
+  7: Object.freeze([105, 185, 280, 385])
 });
 
 const DEVICE_UPGRADE_COSTS = Object.freeze({
-  dev_tray: Object.freeze([60, 150]),
-  dev_flour: Object.freeze([45, 95, 170]),
-  dev_teapot: Object.freeze([50, 105, 185]),
-  dev_tools: Object.freeze([40, 90, 160])
+  dev_tray: Object.freeze([75, 165]),
+  dev_flour: Object.freeze([55, 110, 180]),
+  dev_teapot: Object.freeze([60, 115, 190]),
+  dev_tools: Object.freeze([50, 95, 155])
 });
 
 const PATRON_COSTS = Object.freeze({
   mikan: 0,
-  luna: 80,
-  mugi: 120
+  luna: 100,
+  mugi: 140
 });
 
 const THEME_COSTS = Object.freeze({
   amber: 0,
-  sakura: 80,
-  moonlight: 120
+  sakura: 100,
+  moonlight: 140
 });
 
-const SHOP_TOTAL_CAP = 5220;
+function computeCloudShopTotalCap() {
+  let sum = 0;
+  const cakeKeys = Object.keys(CATCAKE_UPGRADE_COSTS);
+  for (let i = 0; i < cakeKeys.length; i++) {
+    const arr = CATCAKE_UPGRADE_COSTS[cakeKeys[i]];
+    for (let j = 0; j < arr.length; j++) sum += arr[j];
+  }
+  const devKeys = Object.keys(DEVICE_UPGRADE_COSTS);
+  for (let i = 0; i < devKeys.length; i++) {
+    const arr = DEVICE_UPGRADE_COSTS[devKeys[i]];
+    for (let j = 0; j < arr.length; j++) sum += arr[j];
+  }
+  const patronKeys = Object.keys(PATRON_COSTS);
+  for (let i = 0; i < patronKeys.length; i++) {
+    sum += PATRON_COSTS[patronKeys[i]];
+  }
+  const themeKeys = Object.keys(THEME_COSTS);
+  for (let i = 0; i < themeKeys.length; i++) {
+    sum += THEME_COSTS[themeKeys[i]];
+  }
+  return sum;
+}
+
+const SHOP_TOTAL_CAP = computeCloudShopTotalCap();
 
 // v1 历史成本表（仅用于老存档 v1 -> v2 总星尘无损还原）
 const V1_PATRON_COSTS = Object.freeze({
@@ -97,7 +121,8 @@ const CHAPTER_SCORE_CAPS = Object.freeze({
   '3': 220000
 });
 
-const MAX_TOTAL_STARS = 90;
+const MAX_CAMPAIGN_STARS = VALID_LEVEL_IDS.length * 3;
+const MAX_TOTAL_STARS = MAX_CAMPAIGN_STARS;
 const MAX_TOTAL_CUMULATIVE_SCORE = 3450000;
 const MAX_OFFLINE_STARDUST_DELTA = 1500;
 const MAX_INITIAL_UNSYNCED_STARDUST = 6000;
@@ -410,18 +435,47 @@ function normalizeMetaProfile(raw, fallbackPatron) {
   };
 }
 
+function sanitizeLevelFailStreaks(rawStreaks) {
+  const out = {};
+  if (!isPlainRecord(rawStreaks)) return out;
+  for (let i = 0; i < VALID_LEVEL_IDS.length; i++) {
+    const id = VALID_LEVEL_IDS[i];
+    if (!hasOwn(rawStreaks, id)) continue;
+    const cnt = clampInt(getOwn(rawStreaks, id), 0, 999, 0);
+    if (cnt > 0) {
+      out[id] = cnt;
+    }
+  }
+  return out;
+}
+
+function isHigherSchemaMeta(raw) {
+  if (!isPlainRecord(raw)) return false;
+  if (hasOwn(raw, 'higherSchemaDetected') && Boolean(getOwn(raw, 'higherSchemaDetected'))) {
+    return true;
+  }
+  if (hasOwn(raw, 'schemaVersion')) {
+    const sv = toSafeNum(getOwn(raw, 'schemaVersion'));
+    if (Number.isFinite(sv) && sv > SCHEMA_VERSION) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function createDefaultMetaSave() {
   return {
     schemaVersion: SCHEMA_VERSION,
     bgmTrack: 'waltz',
     sfxEnabled: true,
-    bankStardust: 30,
-    totalEarnedStardust: 30,
+    bankStardust: DEFAULT_INITIAL_STARDUST,
+    totalEarnedStardust: DEFAULT_INITIAL_STARDUST,
     lastSyncedEarnedStardust: 0,
     consumableSpentStardust: 0,
     migratedFromV1GiftPending: false,
     levelStars: {},
     levelBestScores: {},
+    levelFailStreaks: {},
     highestUnlockedLevel: '1-1',
     catcakeLevels: {
       '1': 0,
@@ -473,7 +527,9 @@ function createDefaultMetaSave() {
  * 同时兼容老版云数据库文档顶层存有 `bestChef` / `bestRush` / `bestZen` 而 `metaSave` 省略该字段的情形。
  */
 function migrateV1ToV2(raw, wrapperDoc) {
-  if (!isPlainRecord(raw) && !isPlainRecord(wrapperDoc)) {
+  const hasRawKeys = isPlainRecord(raw) && Object.keys(raw).length > 0;
+  const hasWrapKeys = isPlainRecord(wrapperDoc) && Object.keys(wrapperDoc).length > 0;
+  if (!hasRawKeys && !hasWrapKeys) {
     return createDefaultMetaSave();
   }
   const src = isPlainRecord(raw) ? raw : {};
@@ -537,8 +593,18 @@ function migrateV1ToV2(raw, wrapperDoc) {
   const v1TotalEarned = Math.max(30, rawEarned, rawBank + v1Spent);
 
   let bonusOffset = 0;
-  if (unlockedPatrons.indexOf('luna') !== -1) bonusOffset += 20;
-  if (unlockedPatrons.indexOf('mugi') !== -1) bonusOffset += 20;
+  for (let i = 0; i < unlockedPatrons.length; i++) {
+    const pid = unlockedPatrons[i];
+    if (hasOwn(PATRON_COSTS, pid) && hasOwn(V1_PATRON_COSTS, pid)) {
+      bonusOffset += Math.max(0, (PATRON_COSTS[pid] || 0) - (V1_PATRON_COSTS[pid] || 0));
+    }
+  }
+  for (let i = 0; i < unlockedThemes.length; i++) {
+    const tid = unlockedThemes[i];
+    if (hasOwn(THEME_COSTS, tid) && hasOwn(V1_THEME_COSTS, tid)) {
+      bonusOffset += Math.max(0, (THEME_COSTS[tid] || 0) - (V1_THEME_COSTS[tid] || 0));
+    }
+  }
   const hasV1Scores = bestChef > 0 || bestRush > 0 || bestZen > 0;
   if (hasV1Scores) bonusOffset += 50;
 
@@ -606,6 +672,7 @@ function migrateV1ToV2(raw, wrapperDoc) {
     migratedFromV1GiftPending,
     levelStars: {},
     levelBestScores: {},
+    levelFailStreaks: {},
     highestUnlockedLevel: '1-1',
     catcakeLevels: {
       '1': 0,
@@ -664,6 +731,8 @@ function sanitizeMetaSave(raw, warnings, wrapperDoc) {
   if (!Number.isFinite(sv) || sv < SCHEMA_VERSION) {
     return migrateV1ToV2(raw, wrapperDoc);
   }
+
+  const higherSchema = isHigherSchemaMeta(raw);
 
   const rawBgmVal = getOwn(raw, 'bgmTrack');
   const bgmTrack =
@@ -724,6 +793,8 @@ function sanitizeMetaSave(raw, warnings, wrapperDoc) {
       levelStars[id] = st;
     }
   }
+
+  const levelFailStreaks = sanitizeLevelFailStreaks(getOwn(raw, 'levelFailStreaks'));
 
   const rawClObj = getOwn(raw, 'catcakeLevels');
   const clRaw = isPlainRecord(rawClObj) ? rawClObj : {};
@@ -802,12 +873,13 @@ function sanitizeMetaSave(raw, warnings, wrapperDoc) {
     bgmTrack,
     sfxEnabled,
     bankStardust: 0,
-    totalEarnedStardust: 30,
+    totalEarnedStardust: DEFAULT_INITIAL_STARDUST,
     lastSyncedEarnedStardust: 0,
     consumableSpentStardust,
     migratedFromV1GiftPending,
     levelStars,
     levelBestScores,
+    levelFailStreaks,
     highestUnlockedLevel,
     catcakeLevels,
     deviceUpgrades,
@@ -821,6 +893,10 @@ function sanitizeMetaSave(raw, warnings, wrapperDoc) {
     updatedAt
   };
 
+  if (higherSchema) {
+    out.higherSchemaDetected = true;
+  }
+
   const spent = computeSpentStardust(out);
   const rawEarnedNum = hasOwn(raw, 'totalEarnedStardust') ? toSafeNum(getOwn(raw, 'totalEarnedStardust')) : NaN;
   const hasExplicitEarned = hasOwn(raw, 'totalEarnedStardust') && Number.isFinite(rawEarnedNum);
@@ -829,13 +905,13 @@ function sanitizeMetaSave(raw, warnings, wrapperDoc) {
 
   let baseEarned;
   if (hasExplicitEarned) {
-    const cleanEarned = clampInt(rawEarnedNum, 0, MAX_SAFE_EARNED_STARDUST, 30);
-    baseEarned = Math.max(30, cleanEarned, spent);
+    const cleanEarned = clampInt(rawEarnedNum, 0, MAX_SAFE_EARNED_STARDUST, DEFAULT_INITIAL_STARDUST);
+    baseEarned = Math.max(DEFAULT_INITIAL_STARDUST, cleanEarned, spent);
   } else if (hasExplicitBank) {
     const cleanBank = clampInt(rawBankNum, 0, MAX_SAFE_EARNED_STARDUST, 0);
-    baseEarned = Math.max(30, cleanBank + spent, spent);
+    baseEarned = Math.max(DEFAULT_INITIAL_STARDUST, cleanBank + spent, spent);
   } else {
-    baseEarned = Math.max(30, 30 + spent);
+    baseEarned = Math.max(DEFAULT_INITIAL_STARDUST, DEFAULT_INITIAL_STARDUST + spent);
   }
 
   out.totalEarnedStardust = Math.min(MAX_SAFE_EARNED_STARDUST, baseEarned);
@@ -989,7 +1065,7 @@ function isPlaceholderCloudProfile(prof, defaultName) {
 function isUntouchedDefaultMeta(s) {
   return Boolean(
     isPlainRecord(s) &&
-      s.totalEarnedStardust === 30 &&
+      s.totalEarnedStardust === DEFAULT_INITIAL_STARDUST &&
       computeSpentStardust(s) === 0 &&
       s.lifetimeStats &&
       s.lifetimeStats.runsPlayed === 0 &&
@@ -997,6 +1073,7 @@ function isUntouchedDefaultMeta(s) {
       s.lifetimeStats.vipServed === 0 &&
       s.lifetimeStats.totalStars === 0 &&
       s.lifetimeStats.totalCumulativeScore === 0 &&
+      (!isPlainRecord(s.levelFailStreaks) || Object.keys(s.levelFailStreaks).length === 0) &&
       !s.migratedFromV1GiftPending &&
       s.selectedPatron === 'mikan' &&
       s.equippedTheme === 'amber' &&
@@ -1015,7 +1092,7 @@ function isUntouchedInitialServerMeta(s, prevRevision) {
   return Boolean(
     prevRevision <= 1 &&
       isPlainRecord(s) &&
-      s.totalEarnedStardust === 30 &&
+      s.totalEarnedStardust === DEFAULT_INITIAL_STARDUST &&
       computeSpentStardust(s) === 0 &&
       s.lifetimeStats &&
       s.lifetimeStats.runsPlayed === 0 &&
@@ -1023,6 +1100,7 @@ function isUntouchedInitialServerMeta(s, prevRevision) {
       s.lifetimeStats.vipServed === 0 &&
       s.lifetimeStats.totalStars === 0 &&
       s.lifetimeStats.totalCumulativeScore === 0 &&
+      (!isPlainRecord(s.levelFailStreaks) || Object.keys(s.levelFailStreaks).length === 0) &&
       !s.migratedFromV1GiftPending
   );
 }
@@ -1039,7 +1117,7 @@ function mergeMetaSaves(serverRaw, clientRaw, warnings, serverWrapperDoc) {
       pushUniqueWarning(warnings, 'stardust_delta_clamped');
       firstEarned = maxFirstPush;
     } else {
-      firstEarned = Math.max(30, b.totalEarnedStardust, spentOnly);
+      firstEarned = Math.max(DEFAULT_INITIAL_STARDUST, b.totalEarnedStardust, spentOnly);
     }
     b.totalEarnedStardust = Math.min(MAX_SAFE_EARNED_STARDUST, firstEarned);
     b.lastSyncedEarnedStardust = b.totalEarnedStardust;
@@ -1073,6 +1151,7 @@ function mergeMetaSaves(serverRaw, clientRaw, warnings, serverWrapperDoc) {
 
   const levelBestScores = {};
   const levelStars = {};
+  const levelFailStreaks = {};
   for (let i = 0; i < VALID_LEVEL_IDS.length; i++) {
     const id = VALID_LEVEL_IDS[i];
     const scA = hasOwn(a.levelBestScores, id) ? a.levelBestScores[id] : 0;
@@ -1087,6 +1166,17 @@ function mergeMetaSaves(serverRaw, clientRaw, warnings, serverWrapperDoc) {
     const stars = Math.max(stA, stB);
     if (stars > 0 && best > 0) {
       levelStars[id] = stars;
+    } else {
+      const fs =
+        isPlainRecord(latest.levelFailStreaks) && hasOwn(latest.levelFailStreaks, id)
+          ? latest.levelFailStreaks[id]
+          : Math.max(
+              isPlainRecord(a.levelFailStreaks) && hasOwn(a.levelFailStreaks, id) ? a.levelFailStreaks[id] : 0,
+              isPlainRecord(b.levelFailStreaks) && hasOwn(b.levelFailStreaks, id) ? b.levelFailStreaks[id] : 0
+            );
+      if (fs > 0) {
+        levelFailStreaks[id] = fs;
+      }
     }
   }
 
@@ -1127,7 +1217,7 @@ function mergeMetaSaves(serverRaw, clientRaw, warnings, serverWrapperDoc) {
     bgmTrack: latest.bgmTrack,
     sfxEnabled: latest.sfxEnabled,
     bankStardust: 0,
-    totalEarnedStardust: 30,
+    totalEarnedStardust: DEFAULT_INITIAL_STARDUST,
     lastSyncedEarnedStardust: 0,
     consumableSpentStardust,
     migratedFromV1GiftPending:
@@ -1136,6 +1226,7 @@ function mergeMetaSaves(serverRaw, clientRaw, warnings, serverWrapperDoc) {
         : Boolean(b.migratedFromV1GiftPending),
     levelStars,
     levelBestScores,
+    levelFailStreaks,
     highestUnlockedLevel,
     catcakeLevels,
     deviceUpgrades,
@@ -1165,6 +1256,10 @@ function mergeMetaSaves(serverRaw, clientRaw, warnings, serverWrapperDoc) {
     updatedAt: Date.now()
   };
 
+  if (isHigherSchemaMeta(serverRaw) || isHigherSchemaMeta(clientRaw) || a.higherSchemaDetected || b.higherSchemaDetected) {
+    merged.higherSchemaDetected = true;
+  }
+
   const spent = computeSpentStardust(merged);
   const syncBase = b.lastSyncedEarnedStardust || 0;
   let totalEarned;
@@ -1178,20 +1273,24 @@ function mergeMetaSaves(serverRaw, clientRaw, warnings, serverWrapperDoc) {
       pushUniqueWarning(warnings, 'stardust_delta_clamped');
       totalEarned = maxFirstPush;
     } else {
-      totalEarned = Math.max(30, b.totalEarnedStardust, spent);
+      totalEarned = Math.max(DEFAULT_INITIAL_STARDUST, b.totalEarnedStardust, spent);
     }
-  } else if (syncBase >= 30 && b.totalEarnedStardust > syncBase && a.totalEarnedStardust > syncBase) {
+  } else if (
+    syncBase >= DEFAULT_INITIAL_STARDUST &&
+    b.totalEarnedStardust > syncBase &&
+    a.totalEarnedStardust > syncBase
+  ) {
     const rawDelta = b.totalEarnedStardust - syncBase;
     if (rawDelta > MAX_OFFLINE_STARDUST_DELTA) {
       pushUniqueWarning(warnings, 'stardust_delta_clamped');
     }
     const clampedDelta = Math.min(MAX_OFFLINE_STARDUST_DELTA, rawDelta);
-    totalEarned = Math.max(30, spent, a.totalEarnedStardust + clampedDelta);
+    totalEarned = Math.max(DEFAULT_INITIAL_STARDUST, spent, a.totalEarnedStardust + clampedDelta);
   } else if (b.totalEarnedStardust - a.totalEarnedStardust > MAX_OFFLINE_STARDUST_DELTA) {
     pushUniqueWarning(warnings, 'stardust_delta_clamped');
-    totalEarned = Math.max(30, spent, a.totalEarnedStardust + MAX_OFFLINE_STARDUST_DELTA);
+    totalEarned = Math.max(DEFAULT_INITIAL_STARDUST, spent, a.totalEarnedStardust + MAX_OFFLINE_STARDUST_DELTA);
   } else {
-    totalEarned = Math.max(30, a.totalEarnedStardust, b.totalEarnedStardust, spent);
+    totalEarned = Math.max(DEFAULT_INITIAL_STARDUST, a.totalEarnedStardust, b.totalEarnedStardust, spent);
   }
 
   merged.totalEarnedStardust = Math.min(MAX_SAFE_EARNED_STARDUST, totalEarned);
@@ -1610,6 +1709,33 @@ exports.main = async (rawEvent = {}, rawContext = {}) => {
 
     const rawExistingMeta = getOwn(existing, 'metaSave');
     const existingMetaObj = isPlainRecord(rawExistingMeta) ? rawExistingMeta : null;
+    if (isHigherSchemaMeta(existingMetaObj) || isHigherSchemaMeta(existing)) {
+      const cleanReadMeta = sanitizeMetaSave(existingMetaObj || existing);
+      cleanReadMeta.higherSchemaDetected = true;
+      const rev = Math.max(
+        1,
+        toFiniteInt(hasOwn(existing, 'revision') ? getOwn(existing, 'revision') : 1, 1)
+      );
+      const readProfile = resolveStoredDocProfile(
+        existing,
+        existingMetaObj,
+        docSuffix,
+        cleanReadMeta.selectedPatron
+      );
+      return {
+        ok: true,
+        isNewUser: false,
+        migratedFromV1: false,
+        higherSchemaDetected: true,
+        openidSuffix: docSuffix,
+        profile: readProfile,
+        totalStars: cleanReadMeta.lifetimeStats.totalStars,
+        totalCumulativeScore: cleanReadMeta.lifetimeStats.totalCumulativeScore,
+        metaSave: existingMetaObj || cleanReadMeta,
+        revision: rev
+      };
+    }
+
     const existingSv = existingMetaObj && hasOwn(existingMetaObj, 'schemaVersion')
       ? toSafeNum(getOwn(existingMetaObj, 'schemaVersion'))
       : 0;
@@ -1741,6 +1867,19 @@ exports.main = async (rawEvent = {}, rawContext = {}) => {
     for (let attempt = 0; attempt < 2; attempt++) {
       if (attempt > 0) {
         existing = await readExisting();
+      }
+
+      if (existing) {
+        const rawExistingPushMeta = getOwn(existing, 'metaSave');
+        const existingPushMetaObj = isPlainRecord(rawExistingPushMeta) ? rawExistingPushMeta : null;
+        if (isHigherSchemaMeta(existingPushMetaObj) || isHigherSchemaMeta(existing)) {
+          return {
+            ok: false,
+            blocked: true,
+            higherSchemaDetected: true,
+            reason: 'higher_schema_version_on_cloud'
+          };
+        }
       }
 
       const rawExistingRev = existing ? getOwn(existing, 'revision') : undefined;
@@ -2307,8 +2446,10 @@ exports.main = async (rawEvent = {}, rawContext = {}) => {
 
 exports._internal = Object.freeze({
   SCHEMA_VERSION,
+  DEFAULT_INITIAL_STARDUST,
   VALID_LEVEL_IDS,
   CHAPTER_SCORE_CAPS,
+  MAX_CAMPAIGN_STARS,
   MAX_TOTAL_STARS,
   MAX_TOTAL_CUMULATIVE_SCORE,
   MAX_OFFLINE_STARDUST_DELTA,

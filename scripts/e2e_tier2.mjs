@@ -5259,8 +5259,10 @@ const TIER2_F09_TO_F16 = [
         );
         const seat0Desktop = findHit(st1280, 'seat_0');
         const skillDesktop = findHit(st1280, 'patron_skill_btn');
-        ctx.assert(seat0Desktop && seat0Desktop.x < 360, 'Desktop 1280x760 places seat_0 in left column');
-        ctx.assert(skillDesktop && skillDesktop.x > 840, 'Desktop 1280x760 places patron_skill_btn in right column');
+        ctx.assert(
+          seat0Desktop && skillDesktop && seat0Desktop.y < st1280.boardLayout.y,
+          'Unified layout places seat_0 above board at 1280x760'
+        );
         await ctx.checkBounds('live_resize_2_4_1280', { safeBottom: 0 });
 
         // Resize live to Compact 375x667

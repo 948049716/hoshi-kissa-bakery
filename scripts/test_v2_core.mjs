@@ -34,6 +34,7 @@ const GridEngine = require(path.join(SRC_DIR, 'grid_engine.js'));
 const OrderService = require(path.join(SRC_DIR, 'order_service.js'));
 const SaveSync = require(path.join(SRC_DIR, 'save_sync.js'));
 const Platform = require(path.join(SRC_DIR, 'platform.js'));
+const UI = require(path.join(SRC_DIR, 'ui_draw.js'));
 
 // ============================================================================
 // Deterministic PRNG & Test Runner Harness
@@ -719,6 +720,41 @@ function bootMockApp(viewportOpts = {}, initialStorage = {}) {
   globalThis.cancelAnimationFrame = () => {};
 
   let mainMockCanvas = null;
+  const wxImgState = new WeakMap();
+  const wxImgProto = {
+    get width() {
+      return (wxImgState.get(this) || {}).w || 0;
+    },
+    get height() {
+      return (wxImgState.get(this) || {}).h || 0;
+    },
+    get naturalWidth() {
+      return (wxImgState.get(this) || {}).nw || 0;
+    },
+    get naturalHeight() {
+      return (wxImgState.get(this) || {}).nh || 0;
+    },
+    get complete() {
+      return Boolean((wxImgState.get(this) || {}).complete);
+    },
+    get src() {
+      return (wxImgState.get(this) || {}).src || '';
+    },
+    set src(v) {
+      const st = wxImgState.get(this);
+      if (!st) return;
+      st.src = String(v || '');
+      const dims = inferSpriteDims(st.src);
+      st.w = dims.w;
+      st.h = dims.h;
+      st.nw = dims.w;
+      st.nh = dims.h;
+      st.complete = true;
+      queueMicrotask(() => {
+        if (typeof this.onload === 'function') this.onload();
+      });
+    }
+  };
 
   globalThis.wx = {
     getWindowInfo() {
@@ -771,31 +807,10 @@ function bootMockApp(viewportOpts = {}, initialStorage = {}) {
       return canvas;
     },
     createImage() {
-      let srcVal = '';
-      const img = {
-        width: 192,
-        height: 192,
-        naturalWidth: 192,
-        naturalHeight: 192,
-        complete: false,
-        onload: null,
-        onerror: null,
-        get src() {
-          return srcVal;
-        },
-        set src(v) {
-          srcVal = String(v || '');
-          const dims = inferSpriteDims(srcVal);
-          this.width = dims.w;
-          this.height = dims.h;
-          this.naturalWidth = dims.w;
-          this.naturalHeight = dims.h;
-          this.complete = true;
-          queueMicrotask(() => {
-            if (typeof this.onload === 'function') this.onload();
-          });
-        }
-      };
+      const img = Object.create(wxImgProto);
+      wxImgState.set(img, { w: 192, h: 192, nw: 192, nh: 192, complete: false, src: '' });
+      img.onload = null;
+      img.onerror = null;
       return img;
     },
     getStorageSync(key) {
@@ -2942,12 +2957,24 @@ async function runSectionE() {
       assert.ok(dbg.getState().tray[0] !== null);
       dbg.closeModal();
 
-      // 5) W2-F08a: Object.prototype pollution immunity on keyboard & catalog lookups
+      // 5) W2-F08a: Object.prototype pollution immunity on keyboard, catalog & image lookups
       dbg.startLevel('1-1', { skipTutorial: true, rng: mulberry32(706) });
       const tilesBeforeSpace = countBoardTiles(dbg.getState().grid);
+      const wxImg = globalThis.wx.createImage();
+      assert.equal(UI.isReadyImage(wxImg), false, 'Unloaded wx.createImage() must not be ready');
+      await new Promise((resolve) => {
+        wxImg.onload = resolve;
+        wxImg.src = 'assets/catcake_1.png';
+      });
+      assert.equal(Object.prototype.hasOwnProperty.call(wxImg, 'width'), false, 'wxImg.width must live on prototype');
+      assert.equal(UI.isReadyImage(wxImg), true, 'Loaded prototype-getter wx.createImage() must be ready');
       try {
         Object.prototype[' '] = 'left';
         Object.prototype['1'] = 'up';
+        Object.prototype.width = 512;
+        Object.prototype.height = 512;
+        assert.equal(UI.isReadyImage({}), false, 'Plain {} must stay unready under Object.prototype width/height pollution');
+        assert.equal(UI.isReadyImage(wxImg), true, 'Prototype-getter wxImg stays ready under Object.prototype pollution');
         for (const kfn of keyListeners) {
           kfn({ key: ' ' });
         }
@@ -2963,6 +2990,8 @@ async function runSectionE() {
       } finally {
         delete Object.prototype[' '];
         delete Object.prototype['1'];
+        delete Object.prototype.width;
+        delete Object.prototype.height;
       }
       dbg.clickHit('tool_fork_btn'); // disarm fork
 

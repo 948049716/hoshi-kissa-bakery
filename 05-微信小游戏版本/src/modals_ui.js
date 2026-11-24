@@ -108,7 +108,6 @@ function renderModalFrame(ctx, metrics, app, maxW, desiredH, dismissOnOutside) {
   return {
     width,
     height,
-    isWide: width >= 820,
     cardX: x,
     cardY: y,
     cardW: w,
@@ -671,8 +670,8 @@ function renderShopModal(ctx, metrics, app, hits) {
   app.modalMaxScroll = 0;
 
   if (activeTab === 'catcakes') {
-    const cols = f.isWide ? 4 : 2;
-    const rows = f.isWide ? 2 : 4;
+    const cols = 2;
+    const rows = 4;
     const gx = 6;
     const gy = 6;
     const cw = Math.floor((f.iw - gx * (cols - 1)) / cols);
@@ -769,8 +768,8 @@ function renderShopModal(ctx, metrics, app, hits) {
   }
 
   if (activeTab === 'devices') {
-    const cols = f.isWide ? 2 : 1;
-    const rows = f.isWide ? 2 : 4;
+    const cols = 1;
+    const rows = 4;
     const gx = 8;
     const gy = 6;
     const cw = Math.floor((f.iw - gx * (cols - 1)) / cols);
@@ -848,8 +847,8 @@ function renderShopModal(ctx, metrics, app, hits) {
   }
 
   if (activeTab === 'patrons') {
-    const cols = f.isWide ? 3 : 1;
-    const rows = f.isWide ? 1 : 3;
+    const cols = 1;
+    const rows = 3;
     const gx = 8;
     const gy = 7;
     const cw = Math.floor((f.iw - gx * (cols - 1)) / cols);
@@ -859,10 +858,8 @@ function renderShopModal(ctx, metrics, app, hits) {
 
     for (let i = 0; i < PATRONS.length; i++) {
       const p = PATRONS[i];
-      const col = f.isWide ? i : 0;
-      const row = f.isWide ? 0 : i;
-      const cx = f.ix + col * (cw + gx);
-      const cy = bodyY + row * (ch + gy);
+      const cx = f.ix;
+      const cy = bodyY + i * (ch + gy);
       const owned = unlocked.includes(p.id);
       const isSelected = owned && selected === p.id;
       const canBuy = !owned && bank >= p.cost;
@@ -872,65 +869,48 @@ function renderShopModal(ctx, metrics, app, hits) {
         radius: 12
       });
 
-      const avatarS = f.isWide ? 62 : Math.min(54, ch - 20);
+      const avatarS = Math.min(54, ch - 20);
       UI.drawUiIcon(
         c,
         sprites,
         p.id,
-        f.isWide ? cx + cw * 0.5 : cx + 34,
-        f.isWide ? cy + 52 : cy + ch * 0.5,
+        cx + 34,
+        cy + ch * 0.5,
         avatarS
       );
 
-      const btnW = f.isWide ? cw - 20 : 92;
+      const btnW = 92;
       const btnH = 30;
-      const btnX = f.isWide ? cx + 10 : cx + cw - 10 - btnW;
-      const btnY = f.isWide ? cy + ch - 40 : Math.round(cy + (ch - btnH) * 0.5);
+      const btnX = cx + cw - 10 - btnW;
+      const btnY = Math.round(cy + (ch - btnH) * 0.5);
 
-      if (f.isWide) {
-        UI.drawFitText(c, p.name, cx + cw * 0.5, cy + 102, cw - 16, 13, 10, 900, '#4A2C2A', 'center', 'middle');
-        UI.drawTagBadge(c, cx + (cw - 110) * 0.5, cy + 118, 110, 19, p.skillName, 'amber', 9.2);
-        UI.drawWrappedText(
-          c,
-          p.passiveDesc,
-          cx + 12,
-          cy + 148,
-          cw - 24,
-          15,
-          UI.fontStr(9.6, 700),
-          '#6E463B',
-          'left',
-          4
-        );
-      } else {
-        const tx = cx + 66;
-        const tw = Math.max(60, btnX - 8 - tx);
-        UI.drawFitText(
-          c,
-          `${p.name} · 【${p.skillName}】`,
-          tx,
-          cy + 24,
-          tw,
-          11.8,
-          9.2,
-          900,
-          '#4A2C2A',
-          'left',
-          'middle'
-        );
-        UI.drawWrappedText(
-          c,
-          p.passiveDesc,
-          tx,
-          cy + 40,
-          tw,
-          14,
-          UI.fontStr(9.4, 700),
-          '#6E463B',
-          'left',
-          3
-        );
-      }
+      const tx = cx + 66;
+      const tw = Math.max(60, btnX - 8 - tx);
+      UI.drawFitText(
+        c,
+        `${p.name} · 【${p.skillName}】`,
+        tx,
+        cy + 24,
+        tw,
+        11.8,
+        9.2,
+        900,
+        '#4A2C2A',
+        'left',
+        'middle'
+      );
+      UI.drawWrappedText(
+        c,
+        p.passiveDesc,
+        tx,
+        cy + 40,
+        tw,
+        14,
+        UI.fontStr(9.4, 700),
+        '#6E463B',
+        'left',
+        3
+      );
 
       const pidCopy = p.id;
       if (!owned) {
@@ -963,8 +943,8 @@ function renderShopModal(ctx, metrics, app, hits) {
   }
 
   // activeTab === 'themes'
-  const cols = f.isWide ? 3 : 1;
-  const rows = f.isWide ? 1 : 3;
+  const cols = 1;
+  const rows = 3;
   const gx = 8;
   const gy = 7;
   const cw = Math.floor((f.iw - gx * (cols - 1)) / cols);
@@ -974,10 +954,8 @@ function renderShopModal(ctx, metrics, app, hits) {
 
   for (let i = 0; i < BOARD_THEME_LIST.length; i++) {
     const th = BOARD_THEME_LIST[i];
-    const col = f.isWide ? i : 0;
-    const row = f.isWide ? 0 : i;
-    const cx = f.ix + col * (cw + gx);
-    const cy = bodyY + row * (ch + gy);
+    const cx = f.ix;
+    const cy = bodyY + i * (ch + gy);
     const owned = unlockedThemes.includes(th.id);
     const isEquipped = owned && equippedId === th.id;
     const canBuy = !owned && bank >= th.cost;
@@ -987,22 +965,16 @@ function renderShopModal(ctx, metrics, app, hits) {
       radius: 12
     });
 
-    const btnW = f.isWide ? cw - 20 : 92;
+    const btnW = 92;
     const btnH = 30;
-    const btnX = f.isWide ? cx + 10 : cx + cw - 10 - btnW;
-    const btnY = f.isWide ? cy + ch - 40 : Math.round(cy + (ch - btnH) * 0.5);
+    const btnX = cx + cw - 10 - btnW;
+    const btnY = Math.round(cy + (ch - btnH) * 0.5);
 
-    if (f.isWide) {
-      UI.drawThemeSwatch(c, cx + 14, cy + 16, cw - 28, 64, th.id);
-      UI.drawFitText(c, th.name, cx + cw * 0.5, cy + 102, cw - 18, 12.8, 10, 900, '#4A2C2A', 'center', 'middle');
-      UI.drawWrappedText(c, th.desc, cx + 12, cy + 124, cw - 24, 15, UI.fontStr(9.6, 700), '#6E463B', 'left', 4);
-    } else {
-      UI.drawThemeSwatch(c, cx + 10, cy + 14, 58, ch - 28, th.id);
-      const tx = cx + 76;
-      const tw = Math.max(60, btnX - 8 - tx);
-      UI.drawFitText(c, th.name, tx, cy + 26, tw, 12.0, 9.5, 900, '#4A2C2A', 'left', 'middle');
-      UI.drawWrappedText(c, th.desc, tx, cy + 44, tw, 14, UI.fontStr(9.4, 700), '#6E463B', 'left', 3);
-    }
+    UI.drawThemeSwatch(c, cx + 10, cy + 14, 58, ch - 28, th.id);
+    const tx = cx + 76;
+    const tw = Math.max(60, btnX - 8 - tx);
+    UI.drawFitText(c, th.name, tx, cy + 26, tw, 12.0, 9.5, 900, '#4A2C2A', 'left', 'middle');
+    UI.drawWrappedText(c, th.desc, tx, cy + 44, tw, 14, UI.fontStr(9.4, 700), '#6E463B', 'left', 3);
 
     const tidCopy = th.id;
     if (!owned) {
@@ -1078,8 +1050,8 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
   app.modalMaxScroll = 0;
 
   if (activeTab === 'catcakes') {
-    const cols = f.isWide ? 4 : 2;
-    const rows = f.isWide ? 2 : 4;
+    const cols = 2;
+    const rows = 4;
     const gx = 6;
     const gy = 6;
     const cw = Math.floor((f.iw - gx * (cols - 1)) / cols);
@@ -1189,9 +1161,9 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
     return;
   }
 
-  // Zero-scroll 24 Recipes Matrix (3x8 on portrait, 4x6 on wide)
-  const cols = f.isWide ? 4 : 3;
-  const rows = f.isWide ? 6 : 8;
+  // Zero-scroll 24 Recipes Matrix (3x8 portrait)
+  const cols = 3;
+  const rows = 8;
   const gx = 5;
   const gy = 4;
   const cw = Math.floor((f.iw - gx * (cols - 1)) / cols);

@@ -1284,11 +1284,14 @@ export const TIER4_TESTS = [
           const stPlay = await ctx.advanceTime(3.2);
           ctx.assertEq(stPlay.screen, 'playing', `Gameplay active at ${vp.tag}`);
           if (vp.width === 1280) {
-            // Verify desktop 3-column geometry (seats on left, patron skill on right)
+            // Verify unified 4-band geometry (customers above board, patron skill below board)
             const seat0 = (stPlay.hits || []).find((h) => h.id === 'seat_0');
             const skillBtn = (stPlay.hits || []).find((h) => h.id === 'patron_skill_btn');
-            if (seat0 && skillBtn) {
-              ctx.assert(seat0.x < 360 && skillBtn.x > 860, 'Desktop 1280x760 uses 3-column wide layout');
+            if (seat0 && skillBtn && stPlay.boardLayout) {
+              ctx.assert(
+                seat0.y < stPlay.boardLayout.y && skillBtn.y > stPlay.boardLayout.y,
+                'Unified layout places seat_0 above board and patron_skill_btn below board'
+              );
             }
           }
           await assertCapsuleAndSafeBottomExplicit(ctx, `T4-07-play-${vp.tag}`, vp.safeBottom);

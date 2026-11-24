@@ -975,77 +975,8 @@ function renderLobbyScreen(ctx, metrics, app, hits, nowSec) {
 
   renderLobbyTopBar(c, geom, app, hits);
 
-  const isWide = width >= 820;
   const bodyTop = headerBottom + 6;
   const availH = Math.max(360, bottomLimit - bodyTop);
-
-  if (isWide) {
-    const totalW = Math.min(1120, width - 40);
-    const startX = Math.round((width - totalW) * 0.5);
-    const leftW = Math.round(totalW * 0.43);
-    const rightX = startX + leftW + 20;
-    const rightW = totalW - leftW - 20;
-
-    // Left Column: Brand Title Plaque + v2 Hero Illustration + Active Patron Stage
-    const plaqueH = 68;
-    drawTitlePlaqueBanner(
-      c,
-      startX,
-      bodyTop,
-      leftW,
-      plaqueH,
-      sprites,
-      `${rankTitle} · 总评星 ${totalStars}/90`,
-      totalStars
-    );
-
-    const heroY = bodyTop + plaqueH + 10;
-    const patronCardH = 128;
-    const heroH = Math.max(180, bottomLimit - patronCardH - 10 - heroY);
-
-    UI.drawWoodBoard(c, startX, heroY, leftW, heroH, 15, true);
-    c.save();
-    try {
-      UI.roundRectPath(c, startX + 7, heroY + 7, leftW - 14, heroH - 14, 10);
-      c.clip();
-      if (sprites.hero) {
-        UI.drawCoverImage(c, sprites.hero, startX + 7, heroY + 7, leftW - 14, heroH - 14, 0.5);
-      } else {
-        UI.drawParchmentSheet(c, startX + 7, heroY + 7, leftW - 14, heroH - 14, 10);
-      }
-    } finally {
-      c.restore();
-    }
-
-    const patronY = heroY + heroH + 10;
-    renderPatronBar(c, { x: startX, y: patronY, w: leftW, h: patronCardH }, app, hits, nowSec);
-
-    // Right Column: Chapter Switcher + Winding 10-Node Map + Primary CTA + 4-Item Dock
-    const chapH = 38;
-    renderChapterBar(c, { x: rightX, y: bodyTop, w: rightW, h: chapH }, app, hits);
-
-    const dockH = 44;
-    const dockY = bottomLimit - dockH;
-    renderLobbyBottomDock(c, { x: rightX, y: dockY, w: rightW, h: dockH }, app, hits);
-
-    const ctaH = 48;
-    const ctaY = dockY - 8 - ctaH;
-    UI.drawPillButton(c, rightX, ctaY, rightW, ctaH, {
-      style: 'cta',
-      icon: 'serve_bell',
-      sprites,
-      iconSize: 22,
-      text: `开始营业 · 第 ${ctaLevelId} 关（目标 ${ctaStar1} 分）`,
-      fontSize: 14,
-      radius: 13
-    });
-    hits.add('lobby_start_cta', rightX, ctaY, rightW, ctaH, () => app.startLevel(ctaLevelId));
-
-    const mapY = bodyTop + chapH + 8;
-    const mapH = Math.max(220, ctaY - 8 - mapY);
-    renderCampaignMap(c, { x: rightX, y: mapY, w: rightW, h: mapH }, app, hits, nowSec, false);
-    return;
-  }
 
   // Portrait Layout (375x667 & 390x844)
   const compact = availH < 640;
@@ -1097,7 +1028,6 @@ function renderLobbyScreen(ctx, metrics, app, hits, nowSec) {
 function renderPlayTopBar(ctx, geom, app, hits, nowSec) {
   const c = getSafeCtx(ctx);
   const { width, topY, headerH, maxRight } = geom;
-  const isWide = width >= 820;
   const sprites = app.sprites || {};
   const orderState = app.orderState || {};
   const lvl = getLevelById(app.currentLevelId || orderState.levelId || '1-1') || getLevelById('1-1');
@@ -1105,7 +1035,7 @@ function renderPlayTopBar(ctx, geom, app, hits, nowSec) {
   const score = Math.max(0, Math.floor(Number(orderState.score) || 0));
   const timeLeft = Math.max(0, Number(orderState.timeLeft) || 0);
 
-  const padX = isWide ? 18 : 8;
+  const padX = 8;
   const btnS = Math.min(30, headerH);
   const btnY = topY + Math.floor((headerH - btnS) * 0.5);
 
@@ -1123,11 +1053,11 @@ function renderPlayTopBar(ctx, geom, app, hits, nowSec) {
   const pillY = topY + Math.floor((headerH - pillH) * 0.5);
 
   const lvlX = padX + btnS + 4;
-  const lvlW = isWide ? 132 : 38;
+  const lvlW = 38;
   UI.drawKissaCard(c, lvlX, pillY, lvlW, pillH, { tone: 'cream', radius: 8 });
   UI.drawFitText(
     c,
-    isWide && lvl ? `${lvl.id} · ${lvl.name}` : lvl ? lvl.id : '1-1',
+    lvl ? lvl.id : '1-1',
     lvlX + lvlW * 0.5,
     pillY + pillH * 0.5 + 0.5,
     lvlW - 8,
@@ -1140,7 +1070,7 @@ function renderPlayTopBar(ctx, geom, app, hits, nowSec) {
   );
 
   const timerX = lvlX + lvlW + 4;
-  const timerW = isWide ? 82 : 58;
+  const timerW = 58;
   const isUrgentClock = timeLeft <= 15 && timeLeft > 0;
   const pulse = isUrgentClock ? 0.5 + 0.5 * Math.sin(nowSec * 9.0) : 0;
   UI.drawKissaCard(c, timerX, pillY, timerW, pillH, {
@@ -1274,7 +1204,7 @@ function drawUtensilButton(ctx, x, y, w, h, kind, app, hits, shortcutHint = '') 
   hits.add(hitId, x, y, w, h, () => app.onTapToolButton(kind));
 }
 
-function drawPatronSkillMedallion(ctx, x, y, w, h, app, hits, nowSec, wideStyle = false) {
+function drawPatronSkillMedallion(ctx, x, y, w, h, app, hits, nowSec) {
   const c = getSafeCtx(ctx);
   const sprites = app.sprites || {};
   const saveData = app.saveData || {};
@@ -1283,65 +1213,6 @@ function drawPatronSkillMedallion(ctx, x, y, w, h, app, hits, nowSec, wideStyle 
   const charge = clamp(Number(app.skillEnergy) || 0, 0, 100);
   const ready = charge >= 100;
   const pulse = ready ? 0.5 + 0.5 * Math.sin(nowSec * 6.5) : 0;
-
-  if (wideStyle) {
-    UI.drawPillButton(c, x, y, w, h, {
-      style: ready ? 'cta' : 'walnut',
-      radius: 13,
-      text: ''
-    });
-    const r = Math.min(20, h * 0.38);
-    const cx = x + 28;
-    const cy = y + h * 0.5;
-    c.save();
-    try {
-      c.strokeStyle = 'rgba(255, 248, 220, 0.32)';
-      c.lineWidth = 3.2;
-      c.beginPath();
-      c.arc(cx, cy, r, 0, Math.PI * 2);
-      c.stroke();
-
-      c.strokeStyle = ready ? '#FFF394' : '#F4BA40';
-      c.lineWidth = 3.4;
-      c.beginPath();
-      c.arc(cx, cy, r, -Math.PI * 0.5, -Math.PI * 0.5 + (charge / 100) * Math.PI * 2);
-      c.stroke();
-    } finally {
-      c.restore();
-    }
-    UI.drawUiIcon(c, sprites, patron.id, cx, cy, r * 1.65);
-
-    const tx = cx + r + 10;
-    const tw = Math.max(60, x + w - 10 - tx);
-    UI.drawFitText(
-      c,
-      `[F] ${patron.skillName}`,
-      tx,
-      y + h * 0.36,
-      tw,
-      12.0,
-      9.5,
-      900,
-      ready ? '#4A2C2A' : '#FFF6E2',
-      'left',
-      'middle'
-    );
-    UI.drawFitText(
-      c,
-      ready ? '充能已满 · 点击释放' : `招牌技充能 ${Math.floor(charge)}%`,
-      tx,
-      y + h * 0.69,
-      tw,
-      10.0,
-      8.2,
-      800,
-      ready ? '#6E3B10' : '#EED4AE',
-      'left',
-      'middle'
-    );
-    hits.add('patron_skill_btn', x, y, w, h, () => app.onTapPatronSkill());
-    return;
-  }
 
   UI.drawKissaCard(c, x, y, w, h, {
     tone: ready ? 'selected' : 'cream',
@@ -1403,213 +1274,6 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
   app.guideTargets = guideTargets;
 
   renderPlayTopBar(c, geom, app, hits, nowSec);
-
-  const isWide = width >= 820;
-
-  if (isWide) {
-    const totalW = Math.min(1120, width - 36);
-    const startX = Math.round((width - totalW) * 0.5);
-    const colTop = headerBottom + 10;
-    const colH = Math.max(420, bottomLimit - colTop);
-
-    const leftW = 264;
-    const rightW = 244;
-    const gapCol = 18;
-    const centerX = startX + leftW + gapCol;
-    const centerW = Math.max(320, totalW - leftW - rightW - gapCol * 2);
-    const rightX = centerX + centerW + gapCol;
-
-    // Left Column: Level Target Summary + Vertical 3-Seat Customers
-    const lvl = getLevelById(app.currentLevelId || orderState.levelId || '1-1') || getLevelById('1-1');
-    const summaryH = 82;
-    UI.drawKissaCard(c, startX, colTop, leftW, summaryH, { tone: 'cream', radius: 12 });
-    const stars = lvl && lvl.stars ? lvl.stars : [750, 1050, 1400];
-    UI.drawFitText(
-      c,
-      `1星 ${stars[0]} · 2星 ${stars[1]} · 3星 ${stars[2]}`,
-      startX + leftW * 0.5,
-      colTop + 24,
-      leftW - 18,
-      11.0,
-      8.8,
-      900,
-      '#4A2C2A',
-      'center',
-      'middle'
-    );
-    UI.drawFitText(
-      c,
-      `已上菜 ${orderState.ordersServed || 0} 单 · VIP ${orderState.vipServed || 0}/${orderState.vipQuotaTarget || 0}`,
-      startX + leftW * 0.5,
-      colTop + 48,
-      leftW - 18,
-      10.2,
-      8.5,
-      700,
-      '#7A5438',
-      'center',
-      'middle'
-    );
-    if (lvl && lvl.desc) {
-      UI.drawFitText(
-        c,
-        lvl.desc,
-        startX + leftW * 0.5,
-        colTop + 67,
-        leftW - 18,
-        9.4,
-        7.8,
-        700,
-        '#8C6853',
-        'center',
-        'middle'
-      );
-    }
-
-    const custRect = {
-      x: startX,
-      y: colTop + summaryH + 8,
-      w: leftW,
-      h: Math.max(200, colH - summaryH - 8)
-    };
-    BoardRenderer.renderCustomersBar(c, custRect, orderState, sprites, hits, nowSec, {
-      vertical: true,
-      animState,
-      guideTargets,
-      onSelectSeat: (idx) => app.selectCustomerSeat(idx)
-    });
-
-    // Center Column: Tray Strip + Shaped Board Stage + Bottom Utensils & Knead Dock
-    const trayRect = { x: centerX, y: colTop, w: centerW, h: 62 };
-    BoardRenderer.renderTrayStrip(c, trayRect, orderState, sprites, hits, nowSec, {
-      theme: app.equippedTheme,
-      animState,
-      guideTargets,
-      boardFullHint: app.boardFullHintTimer > 0,
-      onTapTraySlot: (idx) => app.handleTraySlotTap(idx),
-      onTapTrash: () => app.handleTrashBtnTap()
-    });
-
-    const dockH = 56;
-    const dockY = bottomLimit - dockH;
-    const toolW = 86;
-    const kneadX = centerX + toolW + 10;
-    const kneadW = Math.max(130, centerW - (toolW + 10) * 2);
-    const spoonX = kneadX + kneadW + 10;
-
-    drawUtensilButton(c, centerX, dockY + 2, toolW, dockH - 4, 'fork', app, hits, '1');
-
-    const kneadPressScale = app.kneadPressTimer > 0 ? 0.95 : 1.0;
-    const kPadY = kneadPressScale < 1 ? 3 : 0;
-    UI.drawPillButton(c, kneadX, dockY + kPadY, kneadW, dockH - kPadY * 2, {
-      style: 'cta',
-      icon: 'btn_knead',
-      sprites,
-      iconSize: 22,
-      text: '[Space] 揉面补料',
-      fontSize: 13.5,
-      radius: 13
-    });
-    hits.add('knead_btn', kneadX, dockY, kneadW, dockH, () => app.onTapKneadButton());
-    guideTargets.kneadBtn = { x: kneadX, y: dockY, w: kneadW, h: dockH };
-
-    drawUtensilButton(c, spoonX, dockY + 2, toolW, dockH - 4, 'spoon', app, hits, '2');
-
-    const stageY = colTop + 68;
-    const stageH = Math.max(220, dockY - 8 - stageY);
-    const stageRect = { x: centerX, y: stageY, w: centerW, h: stageH };
-    const layout = BoardRenderer.renderBoardStage(
-      c,
-      stageRect,
-      gridState,
-      orderState,
-      app.equippedTheme,
-      sprites,
-      animState,
-      nowSec,
-      {
-        activeTool: app.activeTool,
-        guideTargets,
-        neededTiers: app.neededTiers
-      }
-    );
-    if (orderState.rushHourActive && !app.activeTool) {
-      UI.drawTagBadge(c, centerX + centerW - 82, stageY + 4, 78, 19, '高峰客流', 'berry', 9.2, 'icon_flame', sprites);
-    }
-
-    // Right Column: Active Patron Stage + Patron Skill CTA + Fever/Shortcuts Card
-    const patronId = normalizePatronId(saveData.selectedPatron);
-    const patron = PATRONS.find((p) => p.id === patronId) || PATRONS[0];
-    const stageCardH = 214;
-    UI.drawKissaCard(c, rightX, colTop, rightW, stageCardH, { tone: 'cream', radius: 13 });
-    if (sprites.patronStage) {
-      UI.drawContainImage(c, sprites.patronStage, rightX + rightW * 0.5, colTop + 92, rightW - 20, 126);
-    }
-    UI.drawUiIcon(c, sprites, patron.id, rightX + 48, colTop + 68, 68);
-    drawSpeechBalloon(c, rightX + 86, colTop + 18, rightW - 96, 76, rightX + 76, colTop + 58);
-    UI.drawWrappedText(
-      c,
-      app.playPatronSpeech || patron.idleLines[0],
-      rightX + 94,
-      colTop + 30,
-      rightW - 112,
-      14,
-      UI.fontStr(9.6, 700),
-      '#4A2C2A',
-      'left',
-      4
-    );
-    UI.drawFitText(
-      c,
-      `${patron.name} · ${patron.shortPassive}`,
-      rightX + rightW * 0.5,
-      colTop + stageCardH - 22,
-      rightW - 20,
-      11.0,
-      9.0,
-      900,
-      '#6E463B',
-      'center',
-      'middle'
-    );
-
-    const skillY = colTop + stageCardH + 10;
-    const skillH = 58;
-    drawPatronSkillMedallion(c, rightX, skillY, rightW, skillH, app, hits, nowSec, true);
-
-    const infoY = skillY + skillH + 10;
-    const infoH = Math.max(110, bottomLimit - infoY);
-    UI.drawKissaCard(c, rightX, infoY, rightW, infoH, { tone: 'soft', radius: 12 });
-    UI.drawThemeSwatch(c, rightX + 12, infoY + 12, rightW - 24, 32, (app.equippedTheme && app.equippedTheme.id) || 'amber');
-    UI.drawFitText(
-      c,
-      (app.equippedTheme && app.equippedTheme.name) || '经典星夜琥珀盘',
-      rightX + rightW * 0.5,
-      infoY + 56,
-      rightW - 24,
-      10.5,
-      8.8,
-      800,
-      '#4A2C2A',
-      'center',
-      'middle'
-    );
-    UI.drawWrappedText(
-      c,
-      '快捷键：WASD/方向键 滑动烤盘 · Space 揉面补料 · 1/2 激活厨具 · F 释放招牌技 · Esc 暂停',
-      rightX + 12,
-      infoY + 74,
-      rightW - 24,
-      15,
-      UI.fontStr(9.4, 700),
-      '#6E463B',
-      'left',
-      5
-    );
-
-    app.currentBoardLayout = layout;
-    return layout;
-  }
 
   // Portrait 4-Band Layout (375x667 & 390x844)
   const availH = bottomLimit - headerBottom;
@@ -1683,7 +1347,7 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
   guideTargets.kneadBtn = { x: kneadX, y: dockY + 2, w: kneadW, h: dockH - 4 };
 
   drawUtensilButton(c, spoonX, dockY + 4, spoonW, dockH - 8, 'spoon', app, hits, '');
-  drawPatronSkillMedallion(c, skillX, dockY + 2, skillW, dockH - 4, app, hits, nowSec, false);
+  drawPatronSkillMedallion(c, skillX, dockY + 2, skillW, dockH - 4, app, hits, nowSec);
 
   const stageY = trayY + trayH + 4;
   const stageH = Math.max(210, dockY - 4 - stageY);
@@ -1737,7 +1401,7 @@ function renderToast(ctx, width, headerBottom, app) {
   if (app.activeModal) {
     baseY = Math.max(headerBottom + 10, botLimit - 44);
   } else if (app.screen === 'playing') {
-    baseY = (width >= 820 ? headerBottom + 12 : headerBottom + 114);
+    baseY = headerBottom + 114;
   }
 
   const primary = cur || minor;

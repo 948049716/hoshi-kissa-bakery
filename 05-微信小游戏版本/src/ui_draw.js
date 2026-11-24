@@ -319,28 +319,59 @@ function safeMeasureWidth(ctx, str) {
   }
 }
 
+function hasSafeImageProp(img, key) {
+  if (!img || (typeof img !== 'object' && typeof img !== 'function')) return false;
+  try {
+    if (OWN_PROP.call(img, key)) return true;
+    let proto = Object.getPrototypeOf(img);
+    let depth = 0;
+    while (
+      proto &&
+      proto !== Object.prototype &&
+      proto !== Array.prototype &&
+      proto !== Function.prototype &&
+      depth < 16
+    ) {
+      if (OWN_PROP.call(proto, key)) return true;
+      proto = Object.getPrototypeOf(proto);
+      depth++;
+    }
+    if (key in img && !OWN_PROP.call(Object.prototype, key)) {
+      return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+function readImageProp(img, key) {
+  if (!hasSafeImageProp(img, key)) return undefined;
+  try {
+    return img[key];
+  } catch (_) {
+    return undefined;
+  }
+}
+
 function getReadyImageDims(img) {
   if (!img || typeof img !== 'object') return null;
   try {
-    const isDomImg = typeof HTMLImageElement !== 'undefined' && img instanceof HTMLImageElement;
-    const isDomCanvas = typeof HTMLCanvasElement !== 'undefined' && img instanceof HTMLCanvasElement;
-    const isBitmap = typeof ImageBitmap !== 'undefined' && img instanceof ImageBitmap;
-    const canReadDims = isDomImg || isDomCanvas || isBitmap;
-    const rawW = canReadDims || hasOwnProp(img, 'width') ? img.width : 0;
-    const rawH = canReadDims || hasOwnProp(img, 'height') ? img.height : 0;
-    const w = toSafeNum(rawW, 0);
-    const h = toSafeNum(rawH, 0);
+    const rawComplete = readImageProp(img, 'complete');
+    if (rawComplete === false) return null;
+
+    const rawNw = readImageProp(img, 'naturalWidth');
+    const rawNh = readImageProp(img, 'naturalHeight');
+    if (rawNw !== undefined && rawNw !== null && !(toSafeNum(rawNw, 0) > 0)) return null;
+    if (rawNh !== undefined && rawNh !== null && !(toSafeNum(rawNh, 0) > 0)) return null;
+
+    const nw = toSafeNum(rawNw, 0);
+    const nh = toSafeNum(rawNh, 0);
+    const w = toSafeNum(readImageProp(img, 'width'), 0) || nw;
+    const h = toSafeNum(readImageProp(img, 'height'), 0) || nh;
     if (!(w > 0 && h > 0)) return null;
-    if (isDomImg) {
-      if (img.complete === false) return null;
-      const nw = toSafeNum(img.naturalWidth, 0);
-      const nh = toSafeNum(img.naturalHeight, 0);
-      return nw > 0 && nh > 0 ? { w, h } : null;
-    }
-    if (hasOwnProp(img, 'complete') && img.complete === false) return null;
-    if (hasOwnProp(img, 'naturalWidth')) {
-      const rawNw = img.naturalWidth;
-      if (rawNw !== undefined && !(toSafeNum(rawNw, 0) > 0)) return null;
+
+    const isDomImg = typeof HTMLImageElement !== 'undefined' && img instanceof HTMLImageElement;
+    if (isDomImg && !(nw > 0 && nh > 0)) {
+      return null;
     }
     return { w, h };
   } catch (_) {
@@ -2937,6 +2968,8 @@ module.exports = {
   drawHeartIcon,
   drawCoverImage,
   drawContainImage,
+  getReadyImageDims,
+  isReadyImage,
   drawUiIcon,
   drawWoodBoard,
   drawParchmentSheet,

@@ -2,7 +2,9 @@
 
 ## 1. Overview & Opaque-Box Testing Philosophy
 
-The 《一起做猫饼》(Hoshi Kissa Bakery v2.0) End-to-End (E2E) test suite validates the WeChat Mini Game client (`05-微信小游戏版本/`) and CloudBase function (`05-微信小游戏版本/cloudfunctions/kissa_sync/index.js`) **strictly as an opaque box** inside real headless Chromium via raw Chrome DevTools Protocol (CDP) WebSockets (`Page`, `Runtime`, `Input`, `Emulation`, `Network`) with **zero external npm test dependencies**.
+> **Version Alignment Note**: External product versioning has been standardized to pre-launch SemVer (`v0.8.0` active code baseline → **`v0.9.0` economy & utensil overhaul** → `v1.0.0` public launch). References to `v2` in script names (`test_v2_core.mjs`), asset filenames, and `schemaVersion: 2` denote the Generation-2 shaped-grid architecture. When implementing `v0.9.0` code changes ([docs/v0.9.0-版本调整计划书.md](docs/v0.9.0-版本调整计划书.md)), update numeric assertions (`5,650 ⭐` shop cap, `15 ⭐` initial dust, `8.0s` trash cooldown, `applyForkAction` 5 modes, `unlockLevel` shop gating, and client↔cloud parity) accordingly.
+
+The 《一起做猫饼》(Hoshi Kissa Bakery `v0.8.0` baseline → `v0.9.0`) End-to-End (E2E) test suite validates the WeChat Mini Game client (`05-微信小游戏版本/`) and CloudBase function (`05-微信小游戏版本/cloudfunctions/kissa_sync/index.js`) **strictly as an opaque box** inside real headless Chromium via raw Chrome DevTools Protocol (CDP) WebSockets (`Page`, `Runtime`, `Input`, `Emulation`, `Network`) with **zero external npm test dependencies**.
 
 Every test case interacts exclusively through:
 1. **Real CDP Hardware/Browser Inputs**: Touch/pointer gestures (`mousePressed` → `mouseMoved` → `mouseReleased`, double-tap `<= 320ms`), keyboard shortcuts (`Input.dispatchKeyEvent`), live viewport overrides (`375×667`, `390×844`, `1280×760`), and offscreen `<canvas>` / binary image header inspection.
@@ -32,7 +34,7 @@ All E2E modules live flat under `scripts/*.mjs` so `for f in scripts/*.mjs; do n
 | `scripts/e2e_tier1.mjs` | **Tier 1 — Feature Happy-Path Suite**: `96` isolated E2E tests (`6` per feature across `F01..F16`; gate `>= 80` & `>= 5/feature`). |
 | `scripts/e2e_tier2.mjs` | **Tier 2 — Boundary, Negative & Robustness Suite**: `96` edge-case, anti-cheat, clamping, and error-recovery E2E tests (`6` per feature across `F01..F16`; gate `>= 80` & `>= 5/feature`). |
 | `scripts/e2e_tier3.mjs` | **Tier 3 — Cross-Feature Pairwise Suite**: `18` `Fxx × Fyy` runtime interaction tests covering all 16 features (`gate >= 16` & `>= 1/feature`). |
-| `scripts/e2e_tier4.mjs` | **Tier 4 — Real-World Player Journey Suite**: `10` end-to-end player journeys including 1-to-1 `docs/v2.0/06` §4 L3 scenarios `T4-01..T4-08` + veteran boss/cloud & offline→online sync (`gate >= 8`). |
+| `scripts/e2e_tier4.mjs` | **Tier 4 — Real-World Player Journey Suite**: `10` end-to-end player journeys including 1-to-1 `docs/06-测试与端到端验收规格书.md` §4 L3 scenarios `T4-01..T4-08` + veteran boss/cloud & offline→online sync (`gate >= 8`). |
 | `scripts/e2e_tier5_adversarial.mjs` | *(Optional, M5 Phase 2)* White-box adversarial regression cases automatically included when `--tier all` or `--tier 5` is invoked. |
 
 ---
@@ -110,12 +112,12 @@ On developer/agent Linux VMs, Chromium's `--disable-dev-shm-usage` normally spil
 - **Tier 1 (`scripts/e2e_tier1.mjs`)**: `16 features × 6 cases = 96` isolated happy-path E2E tests (`T1-F01-01..06` through `T1-F16-01..06`).
 - **Tier 2 (`scripts/e2e_tier2.mjs`)**: `16 features × 6 cases = 96` boundary, negative & anti-regression E2E tests (`T2-F01-01..06` through `T2-F16-01..06`).
 - **Tier 3 (`scripts/e2e_tier3.mjs`)**: `18` cross-feature pairwise (`Fxx × Fyy`) E2E tests (`T3-01..T3-18`).
-- **Tier 4 (`scripts/e2e_tier4.mjs`)**: `10` end-to-end player journeys (`T4-01..T4-10`, where `T4-01..T4-08` map 1-to-1 to `docs/v2.0/06` §4 `L3-1..L3-8`).
+- **Tier 4 (`scripts/e2e_tier4.mjs`)**: `10` end-to-end player journeys (`T4-01..T4-10`, where `T4-01..T4-08` map 1-to-1 to `docs/06-测试与端到端验收规格书.md` §4 `L3-1..L3-8`).
 - **Grand Total**: `96 + 96 + 18 + 10 = 220` E2E test cases.
 
 | Feature ID | Feature Name | Spec Sources | Tier 1 Cases (`6/feat`) | Tier 2 Cases (`6/feat`) | Tier 3 Pairwise (`Fxx×Fyy`) | Tier 4 Scenarios |
 | :---: | :--- | :--- | :--- | :--- | :--- | :--- |
-| `F01` | v2.0 Storybook Art Assets & Extraction Pipeline | `ORIGINAL_REQUEST`, `04` §1–5, `extract_assets.py` | `T1-F01-01..06` | `T2-F01-01..06` | `T3-18` | `T4-07, T4-08` |
+| `F01` | Storybook Art Assets & Extraction Pipeline (`v0.8.0`) | `ORIGINAL_REQUEST`, `04` §1–5, `extract_assets.py` | `T1-F01-01..06` | `T2-F01-01..06` | `T3-18` | `T4-07, T4-08` |
 | `F02` | 7-Tier Cat-Cake Catalog & 30-Level Dataset | `01` §1/§4/§6, `02` §1–4, `05` §2.2/§3.3, `06` §3 | `T1-F02-01..06` | `T2-F02-01..06` | `T3-11` | `T4-01, T4-06, T4-09` |
 | `F03` | Shaped-Grid 2048 Slide & Non-Chaining Merge | `01` §2.1–2.2, `05` §3.1, `06` UT-G01..G07 | `T1-F03-01..06` | `T2-F03-01..06` | `T3-01, T3-08` | `T4-02, T4-09` |
 | `F04` | Flavor Inheritance, Special Cell Dyeing & Orthogonal Ice | `01` §1.2/§2.1, `05` §3.1, `06` UT-G08..G10 | `T1-F04-01..06` | `T2-F04-01..06` | `T3-01, T3-02, T3-07` | `T4-09` |

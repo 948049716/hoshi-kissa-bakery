@@ -777,24 +777,62 @@ const LOBBY_LAYOUT_NORMALIZED = {
   baseHeight: 1334,
   plaque: {
     assetId: 'lobby_plaque_blank',
-    wRatio: 0.62,
+    wRatio: 0.57,
     aspectHOverW: 0.6766,
-    yPxTop: 8,
-    titleYInPlaque: 0.60,
-    subtitleYInPlaque: 0.81
+    yPxTop: 6,
+    titleYInPlaque: 0.61,
+    subtitleYInPlaque: 0.825
   },
   levelNodes10: [
-    { level: 1, nx: 0.81, ny: 0.655 },
+    { level: 1, nx: 0.81, ny: 0.658 },
     { level: 2, nx: 0.60, ny: 0.618 },
-    { level: 3, nx: 0.38, ny: 0.612 },
-    { level: 4, nx: 0.19, ny: 0.558 },
-    { level: 5, nx: 0.33, ny: 0.492 },
-    { level: 6, nx: 0.53, ny: 0.485 },
-    { level: 7, nx: 0.72, ny: 0.478 },
-    { level: 8, nx: 0.84, ny: 0.428 },
-    { level: 9, nx: 0.72, ny: 0.358 },
-    { level: 10, nx: 0.51, ny: 0.352 }
-  ]
+    { level: 3, nx: 0.37, ny: 0.612 },
+    { level: 4, nx: 0.19, ny: 0.550 },
+    { level: 5, nx: 0.33, ny: 0.486 },
+    { level: 6, nx: 0.54, ny: 0.485 },
+    { level: 7, nx: 0.735, ny: 0.476 },
+    { level: 8, nx: 0.855, ny: 0.414 },
+    { level: 9, nx: 0.725, ny: 0.354 },
+    { level: 10, nx: 0.525, ny: 0.354 }
+  ],
+  levelNodesByChapter: {
+    1: [
+      { level: 1, nx: 0.81, ny: 0.658 },
+      { level: 2, nx: 0.60, ny: 0.618 },
+      { level: 3, nx: 0.37, ny: 0.612 },
+      { level: 4, nx: 0.19, ny: 0.550 },
+      { level: 5, nx: 0.33, ny: 0.486 },
+      { level: 6, nx: 0.54, ny: 0.485 },
+      { level: 7, nx: 0.735, ny: 0.476 },
+      { level: 8, nx: 0.855, ny: 0.414 },
+      { level: 9, nx: 0.725, ny: 0.354 },
+      { level: 10, nx: 0.525, ny: 0.354 }
+    ],
+    2: [
+      { level: 1, nx: 0.81, ny: 0.660 },
+      { level: 2, nx: 0.60, ny: 0.618 },
+      { level: 3, nx: 0.37, ny: 0.610 },
+      { level: 4, nx: 0.19, ny: 0.548 },
+      { level: 5, nx: 0.34, ny: 0.485 },
+      { level: 6, nx: 0.54, ny: 0.484 },
+      { level: 7, nx: 0.735, ny: 0.476 },
+      { level: 8, nx: 0.855, ny: 0.414 },
+      { level: 9, nx: 0.725, ny: 0.355 },
+      { level: 10, nx: 0.525, ny: 0.355 }
+    ],
+    3: [
+      { level: 1, nx: 0.83, ny: 0.664 },
+      { level: 2, nx: 0.64, ny: 0.618 },
+      { level: 3, nx: 0.43, ny: 0.612 },
+      { level: 4, nx: 0.22, ny: 0.588 },
+      { level: 5, nx: 0.22, ny: 0.502 },
+      { level: 6, nx: 0.40, ny: 0.486 },
+      { level: 7, nx: 0.58, ny: 0.486 },
+      { level: 8, nx: 0.75, ny: 0.476 },
+      { level: 9, nx: 0.86, ny: 0.414 },
+      { level: 10, nx: 0.755, ny: 0.372 }
+    ]
+  }
 };
 
 /**

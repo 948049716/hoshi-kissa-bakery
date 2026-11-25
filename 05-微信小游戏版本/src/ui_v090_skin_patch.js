@@ -567,8 +567,9 @@ function drawPillButton(ctx, x, y, w, h, opts = {}) {
 
   const PRESETS = {
     primary: { top: '#FFD86B', bot: '#F5A420', bevel: '#C67418', text: '#5A3928', stroke: '', outline: false },
-    cta: { top: '#FFD86B', bot: '#F5A420', bevel: '#C67418', text: '#5A3928', stroke: '', outline: false },
+    cta: { top: '#FFE073', bot: '#F39821', bevel: '#B65D0E', text: '#5A3928', stroke: '', outline: false },
     amber: { top: '#FFD86B', bot: '#F5A420', bevel: '#C67418', text: '#5A3928', stroke: '', outline: false },
+    caramel: { top: '#F9D88C', bot: '#E3A44B', bevel: '#AE6F22', text: '#5A3928', stroke: '', outline: false },
     gold: { top: '#FFE27D', bot: '#F5A623', bevel: '#C87A1E', text: '#5A3928', stroke: '', outline: false },
     active: { top: '#FFE27D', bot: '#F5B538', bevel: '#C87A1E', text: '#5A3928', stroke: '', outline: false },
     orange: { top: '#FFA45E', bot: '#F27C38', bevel: '#B84B14', text: '#FFF8EC', stroke: '#5A3928', outline: true },
@@ -592,6 +593,8 @@ function drawPillButton(ctx, x, y, w, h, opts = {}) {
   const bodyH = Math.max(8, sh - maxBevel);
   const fontSize = Math.max(9.5, _num(o.fontSize, Math.round(sh * 0.40)));
   const textColor = typeof o.textColor === 'string' && o.textColor ? o.textColor : pal.text;
+  const hasRichSub = Boolean(o.subIcon || o.subPrefix || o.subSuffix);
+  const hasAnySub = Boolean(subLabel || hasRichSub);
 
   ctx.save();
   try {
@@ -599,7 +602,7 @@ function drawPillButton(ctx, x, y, w, h, opts = {}) {
     _roundRect(ctx, sx, sy + dy + bevelH, sw, bodyH, radius);
     ctx.fillStyle = pal.bevel;
     ctx.fill();
-    ctx.lineWidth = 2.4;
+    ctx.lineWidth = _num(o.borderWidth, 2.4);
     ctx.strokeStyle = V090_KISSA_THEME.ink;
     ctx.stroke();
 
@@ -610,17 +613,18 @@ function drawPillButton(ctx, x, y, w, h, opts = {}) {
     _roundRect(ctx, sx, sy + dy, sw, bodyH, radius);
     ctx.fillStyle = grad;
     ctx.fill();
-    ctx.lineWidth = 2.4;
+    ctx.lineWidth = _num(o.borderWidth, 2.4);
     ctx.strokeStyle = V090_KISSA_THEME.ink;
     ctx.stroke();
 
     // 顶部果冻柔光高光条
     if (sw > 18 && bodyH > 14 && !disabled) {
-      const hlX = sx + Math.min(8, sw * 0.14);
-      const hlW = Math.max(4, sw - Math.min(16, sw * 0.28));
-      const hlH = Math.max(3, Math.min(7, bodyH * 0.24));
-      _roundRect(ctx, hlX, sy + dy + 2.5, hlW, hlH, hlH * 0.5);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.36)';
+      const insetX = Math.min(Math.max(8, radius * 0.55), sw * 0.18);
+      const hlX = sx + insetX;
+      const hlW = Math.max(4, sw - insetX * 2);
+      const hlH = Math.max(3, Math.min(7, bodyH * 0.22));
+      _roundRect(ctx, hlX, sy + dy + 2.6, hlW, hlH, hlH * 0.5);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.34)';
       ctx.fill();
     }
 
@@ -633,7 +637,7 @@ function drawPillButton(ctx, x, y, w, h, opts = {}) {
 
     let drewIcon = false;
     if (iconKey && sprites && drawIconFn) {
-      if (!caption && !subLabel) {
+      if (!caption && !hasAnySub) {
         drewIcon = drawIconFn(ctx, sprites, iconKey, cx, cy, iconSz, disabled ? 0.55 : 1);
       } else {
         // Icon + Text horizontally centered as a group
@@ -644,11 +648,11 @@ function drawPillButton(ctx, x, y, w, h, opts = {}) {
         const groupW = iconSz + gap + clampedTextW;
         const startX = sx + Math.max(6, (sw - groupW) * 0.5);
         const iconCx = startX + iconSz * 0.5;
-        drewIcon = drawIconFn(ctx, sprites, iconKey, iconCx, subLabel ? cy - bodyH * 0.13 : cy, iconSz, disabled ? 0.55 : 1);
+        drewIcon = drawIconFn(ctx, sprites, iconKey, iconCx, hasAnySub ? cy - bodyH * 0.14 : cy, iconSz, disabled ? 0.55 : 1);
         if (drewIcon) {
           const textX = startX + iconSz + gap;
           const availTextW = Math.max(14, sx + sw - 6 - textX);
-          drawOutlinedText(ctx, caption, textX, subLabel ? cy - bodyH * 0.13 : cy + 0.5, {
+          drawOutlinedText(ctx, caption, textX, hasAnySub ? cy - bodyH * 0.14 : cy + 0.5, {
             size: fontSize,
             weight: 800,
             fill: textColor,
@@ -674,18 +678,94 @@ function drawPillButton(ctx, x, y, w, h, opts = {}) {
         maxWidth: sw - 8
       });
     } else if (caption && !drewIcon) {
-      drawOutlinedText(ctx, caption, cx, subLabel ? cy - bodyH * 0.15 : cy + 0.5, {
-        size: fontSize,
-        weight: 800,
-        fill: textColor,
-        stroke: pal.outline ? pal.stroke : '',
-        strokeWidth: pal.outline ? 2.6 : 0,
-        shadowOffsetY: 0,
-        maxWidth: sw - 12
-      });
+      if (o.trailingCaret && !hasAnySub) {
+        const caretW = 7;
+        const caretGap = 4;
+        ctx.font = fontStr(fontSize, 800);
+        const rawTw = typeof ctx.measureText === 'function' ? _num(ctx.measureText(caption).width, caption.length * fontSize * 0.85) : caption.length * fontSize * 0.85;
+        const maxTw = Math.max(16, sw - 12 - caretGap - caretW);
+        const tw = Math.min(rawTw, maxTw);
+        const groupW = tw + caretGap + caretW;
+        const startX = sx + Math.max(6, (sw - groupW) * 0.5);
+        drawOutlinedText(ctx, caption, startX, cy + 0.5, {
+          size: fontSize,
+          weight: 800,
+          fill: textColor,
+          stroke: pal.outline ? pal.stroke : '',
+          strokeWidth: pal.outline ? 2.2 : 0,
+          shadowOffsetY: 0,
+          align: 'left',
+          baseline: 'middle',
+          maxWidth: maxTw
+        });
+        const triCx = startX + tw + caretGap + caretW * 0.5;
+        const triCy = cy + 0.8;
+        ctx.fillStyle = textColor;
+        ctx.beginPath();
+        ctx.moveTo(triCx - 3.6, triCy - 2.2);
+        ctx.lineTo(triCx + 3.6, triCy - 2.2);
+        ctx.lineTo(triCx, triCy + 2.8);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        drawOutlinedText(ctx, caption, cx, hasAnySub ? cy - bodyH * 0.16 : cy + 0.5, {
+          size: fontSize,
+          weight: 800,
+          fill: textColor,
+          stroke: pal.outline ? pal.stroke : '',
+          strokeWidth: pal.outline ? 2.6 : 0,
+          shadowOffsetY: 0,
+          maxWidth: sw - 14
+        });
+      }
     }
 
-    if (subLabel) {
+    if (hasRichSub) {
+      const subSize = Math.max(10, Math.round(fontSize * 0.67));
+      const subY = cy + bodyH * 0.25;
+      const pre = String(o.subPrefix || '');
+      const suf = String(o.subSuffix || '');
+      const subIcSz = Math.round(subSize * 1.15);
+      ctx.font = fontStr(subSize, 700);
+      const preW = pre && typeof ctx.measureText === 'function' ? _num(ctx.measureText(pre).width, pre.length * subSize * 0.85) : pre.length * subSize * 0.85;
+      const sufW = suf && typeof ctx.measureText === 'function' ? _num(ctx.measureText(suf).width, suf.length * subSize * 0.58) : suf.length * subSize * 0.58;
+      const hasSubSprite = Boolean(o.subIcon && sprites && drawIconFn);
+      const gapPre = pre && hasSubSprite ? 4 : 0;
+      const gapSuf = suf && hasSubSprite ? 3 : 0;
+      const rowW = preW + gapPre + (hasSubSprite ? subIcSz : 0) + gapSuf + sufW;
+      let cursorX = cx - rowW * 0.5;
+      if (pre) {
+        drawOutlinedText(ctx, pre, cursorX, subY, {
+          size: subSize,
+          weight: 700,
+          fill: textColor,
+          stroke: '',
+          strokeWidth: 0,
+          shadowOffsetY: 0,
+          align: 'left',
+          baseline: 'middle',
+          maxWidth: Math.max(20, sw * 0.5)
+        });
+        cursorX += preW + gapPre;
+      }
+      if (hasSubSprite) {
+        drawIconFn(ctx, sprites, o.subIcon, cursorX + subIcSz * 0.5, subY - 0.5, subIcSz, disabled ? 0.55 : 1);
+        cursorX += subIcSz + gapSuf;
+      }
+      if (suf) {
+        drawOutlinedText(ctx, suf, cursorX, subY, {
+          size: subSize,
+          weight: 800,
+          fill: textColor,
+          stroke: '',
+          strokeWidth: 0,
+          shadowOffsetY: 0,
+          align: 'left',
+          baseline: 'middle',
+          maxWidth: Math.max(20, sw * 0.45)
+        });
+      }
+    } else if (subLabel) {
       drawOutlinedText(ctx, subLabel, cx, cy + bodyH * 0.25, {
         size: Math.max(9.5, Math.round(fontSize * 0.66)),
         weight: 700,
@@ -725,6 +805,7 @@ function drawTagBadge(ctx, x, y, w, h, text, tone = 'amber', fontSize = 9.5, ico
   const TONES = {
     amber: { bg: '#F5B841', fg: '#5A3928', stroke: '' },
     gold: { bg: '#F5B841', fg: '#5A3928', stroke: '' },
+    butter: { bg: '#F8D78A', fg: '#5A3928', stroke: '' },
     vip: { bg: '#F5B841', fg: '#5A3928', stroke: '' },
     urgent: { bg: '#F27C38', fg: '#FFF8EC', stroke: '#5A3928' },
     berry: { bg: '#F27C38', fg: '#FFF8EC', stroke: '#5A3928' },
@@ -776,7 +857,7 @@ function drawTagBadge(ctx, x, y, w, h, text, tone = 'amber', fontSize = 9.5, ico
 }
 
 /**
- * 暖深木货币胶囊（星尘币等）
+ * 暖深木货币胶囊（星尘币 / 总星数等）
  */
 function drawCurrencyChip(ctx, x, y, w, h, sprites, iconKey, valText, opts = {}) {
   if (!_isCtx(ctx)) return;
@@ -800,26 +881,59 @@ function drawCurrencyChip(ctx, x, y, w, h, sprites, iconKey, valText, opts = {})
     ctx.stroke();
 
     const cy = sy + sh * 0.5;
-    const iconSz = Math.min(sh - 3, Math.round(sh * 0.74));
-    const leftPad = _num(o.leftPad, 6);
+    const iconSz = Math.min(sh - 3, Math.round(sh * 0.72));
+    const leftPad = _num(o.leftPad, 7);
+    const rightPad = _num(o.rightPad, 9);
+    const iconGap = _num(o.iconGap, 5);
+    const fontSz = _num(o.fontSize, Math.max(11.5, Math.round(sh * 0.50)));
+    const safeVal = String(valText === null || valText === undefined ? '' : valText);
     const drawIconFn = _boundUi && typeof _boundUi.drawUiIcon === 'function' ? _boundUi.drawUiIcon : null;
-    let drewIcon = false;
-    if (sprites && iconKey && drawIconFn) {
-      drewIcon = drawIconFn(ctx, sprites, iconKey, sx + leftPad + iconSz * 0.5, cy, iconSz);
-    }
+    const canDrawIcon = Boolean(sprites && iconKey && drawIconFn);
 
-    const textStart = drewIcon ? sx + leftPad + iconSz + 4 : sx + 8;
-    const availW = Math.max(16, sx + sw - 7 - textStart);
-    drawOutlinedText(ctx, String(valText === null || valText === undefined ? '' : valText), textStart + availW * 0.5, cy + 0.6, {
-      size: _num(o.fontSize, Math.max(11.5, Math.round(sh * 0.50))),
-      minSize: 8.5,
-      weight: 800,
-      fill: '#FFF8EC',
-      stroke: '#3E2518',
-      strokeWidth: 2.2,
-      shadowOffsetY: 0,
-      maxWidth: availW
-    });
+    if (o.groupCenter && canDrawIcon) {
+      ctx.font = fontStr(fontSz, 800);
+      const rawW = typeof ctx.measureText === 'function' ? _num(ctx.measureText(safeVal).width, safeVal.length * fontSz * 0.72) : safeVal.length * fontSz * 0.72;
+      const innerAvail = Math.max(20, sw - leftPad - rightPad);
+      const textMaxW = Math.max(16, innerAvail - iconSz - iconGap);
+      const usedTextW = Math.min(rawW, textMaxW);
+      const groupW = iconSz + iconGap + usedTextW;
+      const startX = sx + leftPad + Math.max(0, (innerAvail - groupW) * 0.5);
+      const drewIcon = drawIconFn(ctx, sprites, iconKey, startX + iconSz * 0.5, cy, iconSz);
+      const textX = drewIcon ? startX + iconSz + iconGap : sx + sw * 0.5;
+      drawOutlinedText(ctx, safeVal, textX, cy + 0.6, {
+        size: fontSz,
+        minSize: 8.5,
+        weight: 800,
+        fill: '#FFF8EC',
+        stroke: '#3E2518',
+        strokeWidth: 2.2,
+        shadowOffsetY: 0,
+        align: drewIcon ? 'left' : 'center',
+        baseline: 'middle',
+        maxWidth: drewIcon ? textMaxW : innerAvail
+      });
+    } else {
+      let drewIcon = false;
+      if (canDrawIcon) {
+        drewIcon = drawIconFn(ctx, sprites, iconKey, sx + leftPad + iconSz * 0.5, cy, iconSz);
+      }
+      const textStart = drewIcon ? sx + leftPad + iconSz + iconGap : sx + 8;
+      const availW = Math.max(16, sx + sw - rightPad - textStart);
+      const textAlign = o.align === 'left' ? 'left' : 'center';
+      const tx = textAlign === 'left' ? textStart : textStart + availW * 0.5;
+      drawOutlinedText(ctx, safeVal, tx, cy + 0.6, {
+        size: fontSz,
+        minSize: 8.5,
+        weight: 800,
+        fill: '#FFF8EC',
+        stroke: '#3E2518',
+        strokeWidth: 2.2,
+        shadowOffsetY: 0,
+        align: textAlign,
+        baseline: 'middle',
+        maxWidth: availW
+      });
+    }
   } catch (_) {} finally {
     ctx.restore();
   }

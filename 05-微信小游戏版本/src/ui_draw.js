@@ -566,19 +566,32 @@ function roundRectPath(ctx, x, y, w, h, r) {
   const sy = toSafeNum(y, 0);
   const sw = Math.max(0, toSafeNum(w, 0));
   const sh = Math.max(0, toSafeNum(h, 0));
-  const sr = toSafeNum(r, 0);
-  const rad = Math.max(0, Math.min(sr, Math.min(sw, sh) * 0.5));
+  const maxR = Math.min(sw, sh) * 0.5;
+  let tl, tr, br, bl;
+  if (Array.isArray(r)) {
+    tl = Math.max(0, Math.min(toSafeNum(r[0], 0), maxR));
+    tr = Math.max(0, Math.min(toSafeNum(r[1], tl), maxR));
+    br = Math.max(0, Math.min(toSafeNum(r[2], tl), maxR));
+    bl = Math.max(0, Math.min(toSafeNum(r[3], tr), maxR));
+  } else {
+    const rad = Math.max(0, Math.min(toSafeNum(r, 0), maxR));
+    tl = tr = br = bl = rad;
+  }
   try {
     ctx.beginPath();
-    ctx.moveTo(sx + rad, sy);
-    ctx.lineTo(sx + sw - rad, sy);
-    ctx.arcTo(sx + sw, sy, sx + sw, sy + rad, rad);
-    ctx.lineTo(sx + sw, sy + sh - rad);
-    ctx.arcTo(sx + sw, sy + sh, sx + sw - rad, sy + sh, rad);
-    ctx.lineTo(sx + rad, sy + sh);
-    ctx.arcTo(sx, sy + sh, sx, sy + sh - rad, rad);
-    ctx.lineTo(sx, sy + rad);
-    ctx.arcTo(sx, sy, sx + rad, sy, rad);
+    ctx.moveTo(sx + tl, sy);
+    ctx.lineTo(sx + sw - tr, sy);
+    if (tr > 0) ctx.arcTo(sx + sw, sy, sx + sw, sy + tr, tr);
+    else ctx.lineTo(sx + sw, sy);
+    ctx.lineTo(sx + sw, sy + sh - br);
+    if (br > 0) ctx.arcTo(sx + sw, sy + sh, sx + sw - br, sy + sh, br);
+    else ctx.lineTo(sx + sw, sy + sh);
+    ctx.lineTo(sx + bl, sy + sh);
+    if (bl > 0) ctx.arcTo(sx, sy + sh, sx, sy + sh - bl, bl);
+    else ctx.lineTo(sx, sy + sh);
+    ctx.lineTo(sx, sy + tl);
+    if (tl > 0) ctx.arcTo(sx, sy, sx + tl, sy, tl);
+    else ctx.lineTo(sx, sy);
     ctx.closePath();
   } catch (_) {}
 }

@@ -222,66 +222,78 @@ function drawLockIcon(ctx, cx, cy, size = 14, opts = {}) {
   const c = getSafeCtx(ctx);
   const s = Math.max(8, Number(size) || 14);
   const sp = opts && opts.sprites ? opts.sprites : null;
-  if (sp) {
+  if (sp && !(opts && opts.forceVector)) {
     const lockImg = getSprite(sp, 'icon_lock');
     if (lockImg) {
       UI.drawContainImage(c, lockImg, cx, cy, s * 1.15, s * 1.15);
       return;
     }
   }
-  const bodyW = s * 0.78;
-  const bodyH = s * 0.58;
+  const bodyW = s * 0.74;
+  const bodyH = s * 0.54;
   const bx = cx - bodyW * 0.5;
-  const by = cy - bodyH * 0.28;
-  const shackleR = bodyW * 0.30;
+  const by = cy - bodyH * 0.14;
+  const shackleR = bodyW * 0.28;
+  const strokeInk = (opts && opts.borderColor) || '#3B4049';
 
   c.save();
   try {
-    c.strokeStyle = (opts && opts.shackleColor) || '#5A3928';
-    c.lineWidth = Math.max(1.5, s * 0.13);
+    c.strokeStyle = (opts && opts.shackleColor) || strokeInk;
+    c.lineWidth = Math.max(1.8, s * 0.14);
     c.lineCap = 'round';
     c.beginPath();
-    c.arc(cx, by + 1, shackleR, Math.PI, 0, false);
+    c.arc(cx, by + 0.5, shackleR, Math.PI, 0, false);
     c.stroke();
 
-    c.fillStyle = (opts && opts.bodyColor) || '#B8B0A6';
-    c.strokeStyle = (opts && opts.borderColor) || '#5A3928';
-    c.lineWidth = Math.max(1.2, s * 0.10);
-    UI.roundRectPath(c, bx, by, bodyW, bodyH, Math.max(2, s * 0.16));
+    c.fillStyle = (opts && opts.bodyColor) || '#7D8490';
+    c.strokeStyle = strokeInk;
+    c.lineWidth = Math.max(1.5, s * 0.11);
+    UI.roundRectPath(c, bx, by, bodyW, bodyH, Math.max(2.2, s * 0.16));
     c.fill();
     c.stroke();
 
-    c.fillStyle = '#5A3928';
+    // Engraved keyhole
+    const khR = Math.max(1.4, s * 0.10);
+    c.fillStyle = strokeInk;
     c.beginPath();
-    c.arc(cx, by + bodyH * 0.45, Math.max(1.2, s * 0.09), 0, Math.PI * 2);
+    c.arc(cx, by + bodyH * 0.40, khR, 0, Math.PI * 2);
+    c.fill();
+    c.beginPath();
+    c.moveTo(cx - khR * 0.58, by + bodyH * 0.42);
+    c.lineTo(cx + khR * 0.58, by + bodyH * 0.42);
+    c.lineTo(cx + khR * 0.78, by + bodyH * 0.78);
+    c.lineTo(cx - khR * 0.78, by + bodyH * 0.78);
+    c.closePath();
     c.fill();
   } finally {
     c.restore();
   }
 }
 
-function drawChevronIcon(ctx, cx, cy, size = 12, dir = 'left', color = '#FFF8EC') {
+function drawChevronIcon(ctx, cx, cy, size = 12, dir = 'left', color = '#FFF8EC', alpha = 1) {
   const c = getSafeCtx(ctx);
-  const half = Math.max(4, (Number(size) || 12) * 0.40);
+  const sz = Math.max(10, Number(size) || 12);
+  const half = sz * 0.42;
   const sign = dir === 'left' ? -1 : 1;
   c.save();
   try {
+    c.globalAlpha = clamp(Number(alpha), 0.1, 1);
     c.lineCap = 'round';
     c.lineJoin = 'round';
     c.strokeStyle = '#5A3928';
-    c.lineWidth = Math.max(4.4, (Number(size) || 12) * 0.34);
+    c.lineWidth = Math.max(5.6, sz * 0.36);
     c.beginPath();
-    c.moveTo(cx - sign * half * 0.45, cy - half);
-    c.lineTo(cx + sign * half * 0.55, cy);
-    c.lineTo(cx - sign * half * 0.45, cy + half);
+    c.moveTo(cx - sign * half * 0.46, cy - half);
+    c.lineTo(cx + sign * half * 0.54, cy);
+    c.lineTo(cx - sign * half * 0.46, cy + half);
     c.stroke();
 
     c.strokeStyle = color || '#FFF8EC';
-    c.lineWidth = Math.max(2.2, (Number(size) || 12) * 0.17);
+    c.lineWidth = Math.max(3.0, sz * 0.19);
     c.beginPath();
-    c.moveTo(cx - sign * half * 0.45, cy - half);
-    c.lineTo(cx + sign * half * 0.55, cy);
-    c.lineTo(cx - sign * half * 0.45, cy + half);
+    c.moveTo(cx - sign * half * 0.46, cy - half);
+    c.lineTo(cx + sign * half * 0.54, cy);
+    c.lineTo(cx - sign * half * 0.46, cy + half);
     c.stroke();
   } finally {
     c.restore();
@@ -333,7 +345,7 @@ function drawCircularWoodButton(ctx, cx, cy, radius, opts = {}) {
 
     if (opts.label) {
       UI.drawOutlinedText(c, opts.label, cx, cy + dy + 0.5, {
-        size: Math.round(r * 0.96),
+        size: Math.round(r * 0.98),
         weight: 900,
         fill: muted ? '#DFD3C5' : '#FFF8EC',
         stroke: '#5A3928',
@@ -360,37 +372,36 @@ function drawCircularWoodButton(ctx, cx, cy, radius, opts = {}) {
 
 function drawSpeechBalloon(ctx, x, y, w, h, tailX, tailY) {
   const c = getSafeCtx(ctx);
-  const r = 10;
-  const baseTop = clamp(tailY - 5, y + 8, Math.max(y + 8, y + h - 16));
+  const r = Math.min(11, h * 0.35, w * 0.25);
+  const baseTop = clamp(tailY - 5.5, y + r + 2, Math.max(y + r + 2, y + h - r - 13));
+  const baseBot = Math.min(y + h - r - 1, baseTop + 11);
 
   c.save();
   try {
     const g = c.createLinearGradient(x, y, x, y + h);
-    g.addColorStop(0, '#FFFDF7');
-    g.addColorStop(1, '#F7ECD8');
+    g.addColorStop(0, '#FFFDF8');
+    g.addColorStop(1, '#F8EDD9');
     c.fillStyle = g;
-    UI.roundRectPath(c, x, y, w, h, r);
-    c.fill();
-    c.lineWidth = 2.0;
     c.strokeStyle = '#5A3928';
-    c.stroke();
-
-    // Pointer triangle towards patron portrait
-    c.beginPath();
-    c.moveTo(x + 1.5, baseTop);
-    c.lineTo(tailX, tailY);
-    c.lineTo(x + 1.5, baseTop + 10);
-    c.closePath();
-    c.fillStyle = '#FCF5E8';
-    c.fill();
-
-    c.beginPath();
-    c.moveTo(x + 1, baseTop);
-    c.lineTo(tailX, tailY);
-    c.lineTo(x + 1, baseTop + 10);
-    c.strokeStyle = '#5A3928';
-    c.lineWidth = 2.0;
+    c.lineWidth = 1.9;
     c.lineJoin = 'round';
+
+    // Single seamless closed speech balloon path (rounded rect + left tail, zero inner seam)
+    c.beginPath();
+    c.moveTo(x + r, y);
+    c.lineTo(x + w - r, y);
+    c.quadraticCurveTo(x + w, y, x + w, y + r);
+    c.lineTo(x + w, y + h - r);
+    c.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    c.lineTo(x + r, y + h);
+    c.quadraticCurveTo(x, y + h, x, y + h - r);
+    c.lineTo(x, baseBot);
+    c.lineTo(tailX, tailY);
+    c.lineTo(x, baseTop);
+    c.lineTo(x, y + r);
+    c.quadraticCurveTo(x, y, x + r, y);
+    c.closePath();
+    c.fill();
     c.stroke();
   } finally {
     c.restore();
@@ -633,32 +644,35 @@ function renderLobbyChrome(ctx, geom, stageInfo, app, hits) {
   const saveData = app.saveData || {};
   const sprites = app.sprites || {};
 
-  // 1. Top-left Player Avatar + Stardust Currency Pill (strictly left of WeChat capsule)
-  const leftMargin = isWide ? stageX + 12 : 10;
-  const chipH = Math.min(30, headerH);
+  // 1. Top-left Player Avatar + Snug Stardust Currency Pill (clears plaque rope & WeChat capsule)
+  const leftMargin = isWide ? stageX + 12 : 12;
+  const chipH = Math.min(28, Math.max(24, headerH - 2));
   const chipY = topY + Math.floor((headerH - chipH) * 0.5);
-  const avatarS = chipH + 4;
+  const avatarS = chipH + 8;
   const avatarCx = leftMargin + avatarS * 0.5;
   const avatarCy = chipY + chipH * 0.5;
 
-  const dustX = leftMargin + Math.round(avatarS * 0.58);
-  const maxDustW = Math.max(70, Math.min(112, maxRight - dustX - 6));
+  const dustText = String(saveData.bankStardust || 0);
+  const dustX = leftMargin + Math.round(avatarS * 0.48);
+  const dustLeftPad = Math.round(avatarS * 0.56);
+  const dustIconSz = Math.min(chipH - 3, Math.round(chipH * 0.72));
+  const dustFontSz = 13;
+  c.font = UI.fontStr(dustFontSz, 800);
+  const dustNumW = Math.ceil(c.measureText(dustText).width);
+  const maxDustW = Math.max(66, Math.min(110, maxRight - dustX - 6));
+  const dustW = clamp(dustLeftPad + dustIconSz + 5 + dustNumW + 13, 74, maxDustW);
+
   UI.drawCurrencyChip(
     c,
     dustX,
     chipY,
-    maxDustW,
+    dustW,
     chipH,
     sprites,
     'icon_star_coin',
-    String(saveData.bankStardust || 0),
-    { fontSize: 12.5, leftPad: Math.round(avatarS * 0.48) }
+    dustText,
+    { fontSize: dustFontSz, leftPad: dustLeftPad, rightPad: 10, iconGap: 5, align: 'left' }
   );
-
-  // Subtle cloud sync badge on right edge of stardust pill if room
-  if (app.cloudStatus === 'synced' && maxDustW >= 96) {
-    UI.drawUiIcon(c, sprites, 'icon_cloud_sync', dustX + maxDustW - 10, chipY - 1, 15);
-  }
 
   // Default manager avatar icon overlapping left end of stardust pill (Design 02a)
   const drewAv = UI.drawUiIcon(c, sprites, 'icon_avatar_default', avatarCx, avatarCy, avatarS);
@@ -678,12 +692,12 @@ function renderLobbyChrome(ctx, geom, stageInfo, app, hits) {
   }
 
   // 2. Right-side vertically stacked circular wood buttons: 乐 / 音 / ? (strictly below WeChat capsule!)
-  const btnS = width <= 380 ? 32 : 34;
+  const btnS = width <= 380 ? 33 : 35;
   const btnR = btnS * 0.5;
-  const btnGap = 6;
-  const rightEdge = isWide ? Math.min(width - 14, stageX + stageW + 46) : width - 8;
+  const btnGap = 7;
+  const rightEdge = isWide ? Math.min(width - 14, stageX + stageW + 46) : width - 10;
   const btnX = Math.round(rightEdge - btnS);
-  const startY = Math.max(headerBottom + 6, topY + headerH + 6);
+  const startY = Math.max(headerBottom + 8, topY + headerH + 8);
 
   const bgmOn = app.audio ? Boolean(app.audio.bgmEnabled && app.audio.bgmTrack !== 'off') : true;
   const sfxOn = app.audio ? Boolean(app.audio.sfxEnabled) : true;
@@ -715,11 +729,11 @@ function renderLobbyChrome(ctx, geom, stageInfo, app, hits) {
 }
 
 /**
- * Top hanging fairy-light wooden plaque (`lobby_plaque_blank.webp`) + `<` `>` chapter switchers + `总星 X/90` pill
+ * Top hanging fairy-light wooden plaque (`lobby_plaque_blank`) + `<` `>` chapter switchers + `总星 X/90` pill
  */
 function renderLobbyPlaqueHeader(ctx, geom, stageInfo, chromeInfo, app, hits) {
   const c = getSafeCtx(ctx);
-  const { safeTop, headerBottom } = geom;
+  const { topY, headerBottom } = geom;
   const { stageX, stageW } = stageInfo;
   const saveData = app.saveData || {};
   const sprites = app.sprites || {};
@@ -734,7 +748,8 @@ function renderLobbyPlaqueHeader(ctx, geom, stageInfo, chromeInfo, app, hits) {
   const plaqueW = Math.round(stageW * wRatio);
   const plaqueH = Math.round(plaqueW * plaqueSpec.aspectHOverW);
   const plaqueX = Math.round(stageX + (stageW - plaqueW) * 0.5);
-  const plaqueY = safeTop > 30 ? Math.max(18, Math.round(safeTop * 0.55)) : 4;
+  // Align top hanging nail cleanly with the top chrome row (stays below iPhone notch/Dynamic Island)
+  const plaqueY = Math.max(4, topY - 4);
 
   const plaqueImg = getSprite(sprites, 'lobby_plaque_blank');
   if (plaqueImg) {
@@ -743,46 +758,48 @@ function renderLobbyPlaqueHeader(ctx, geom, stageInfo, chromeInfo, app, hits) {
     UI.drawWoodBoard(c, plaqueX, plaqueY + Math.round(plaqueH * 0.25), plaqueW, Math.round(plaqueH * 0.72), 13, true);
   }
 
-  // Outlined Title at 60% & Subtitle at 81% of plaque height (per JSON spec)
+  // Outlined Title & Chapter Subtitle inside wooden plaque (Design 02a/02b/02c)
   const plaqueCx = plaqueX + plaqueW * 0.5;
   UI.drawOutlinedText(c, GAME_TITLE, plaqueCx, plaqueY + plaqueH * plaqueSpec.titleYInPlaque, {
-    size: clamp(Math.round(plaqueW * 0.145), 22, 34),
+    size: clamp(Math.round(plaqueW * 0.155), 24, 34),
     weight: 900,
-    fill: '#FFE58F',
+    fill: '#FFE788',
     stroke: '#5A3928',
-    strokeWidth: 4.5,
+    strokeWidth: 4.8,
     shadowOffsetY: 2.0,
-    maxWidth: plaqueW * 0.84
+    maxWidth: plaqueW * 0.85
   });
 
   const subText = chapStatus.unlocked
     ? `第${chap.chapter}章 · ${chap.name}`
     : `第${chap.chapter}章 · ${chap.name} (未解锁)`;
   UI.drawOutlinedText(c, subText, plaqueCx, plaqueY + plaqueH * plaqueSpec.subtitleYInPlaque, {
-    size: clamp(Math.round(plaqueW * 0.068), 11.5, 16),
+    size: clamp(Math.round(plaqueW * 0.068), 11.5, 15.5),
     weight: 800,
-    fill: chapStatus.unlocked ? '#FFF8EC' : '#F6C2B0',
+    fill: chapStatus.unlocked ? '#FFF8EC' : '#FFD1B8',
     stroke: '#5A3928',
     strokeWidth: 2.6,
     shadowOffsetY: 1.0,
     maxWidth: plaqueW * 0.86
   });
 
-  // Left '<' and Right '>' Chapter Switch Chevrons (strictly below capsule & disjoint from right utility buttons!)
+  // Left '<' and Right '>' Chapter Switch Chevrons (vertically centered on wooden board, strictly below capsule!)
   const chevW = 26;
   const chevH = 34;
-  const chevY = Math.max(headerBottom + 4, Math.round(plaqueY + plaqueH * 0.54));
-  const prevX = Math.max(stageX + 8, plaqueX - chevW - 4);
+  const chevY = Math.max(headerBottom + 4, Math.round(plaqueY + plaqueH * 0.65 - chevH * 0.5));
   const maxNextX = chromeInfo.utilLeftX - chevW - 4;
-  const nextX = Math.min(maxNextX, plaqueX + plaqueW + 4);
+  const idealSideGap = Math.max(4, Math.min(10, Math.floor((chromeInfo.utilLeftX - (plaqueX + plaqueW) - chevW) * 0.45)));
+  const nextX = Math.min(maxNextX, plaqueX + plaqueW + idealSideGap);
+  const prevX = Math.max(stageX + 8, plaqueX - idealSideGap - chevW);
 
   drawChevronIcon(
     c,
     prevX + chevW * 0.5,
     chevY + chevH * 0.5,
-    18,
+    19,
     'left',
-    chapNum > 1 ? '#FFF8EC' : 'rgba(255, 248, 236, 0.36)'
+    chapNum > 1 ? '#FFF6E3' : '#DCCAB4',
+    chapNum > 1 ? 1 : 0.60
   );
   hits.add('chapter_prev', prevX, chevY, chevW, chevH, () => app.switchChapter(-1));
 
@@ -790,17 +807,22 @@ function renderLobbyPlaqueHeader(ctx, geom, stageInfo, chromeInfo, app, hits) {
     c,
     nextX + chevW * 0.5,
     chevY + chevH * 0.5,
-    18,
+    19,
     'right',
-    chapNum < maxChapter ? '#FFF8EC' : 'rgba(255, 248, 236, 0.36)'
+    chapNum < maxChapter ? '#FFF6E3' : '#DCCAB4',
+    chapNum < maxChapter ? 1 : 0.60
   );
   hits.add('chapter_next', nextX, chevY, chevW, chevH, () => app.switchChapter(1));
 
-  // Total Stars Wood Pill directly under plaque (`总星 24/90`)
-  const starPillW = Math.min(138, Math.round(plaqueW * 0.62));
+  // Total Stars Wood Pill directly under plaque (`总星 24/90`) with snug centered grouping
+  const starText = `总星 ${totalStars}/${MAX_CAMPAIGN_STARS}`;
+  const starFontSz = 12;
+  c.font = UI.fontStr(starFontSz, 800);
+  const starTextW = Math.ceil(c.measureText(starText).width);
   const starPillH = 26;
+  const starPillW = clamp(starTextW + 46, 108, Math.min(134, Math.round(plaqueW * 0.62)));
   const starPillX = Math.round(plaqueCx - starPillW * 0.5);
-  const starPillY = plaqueY + plaqueH + 3;
+  const starPillY = plaqueY + plaqueH + 4;
   UI.drawCurrencyChip(
     c,
     starPillX,
@@ -809,15 +831,24 @@ function renderLobbyPlaqueHeader(ctx, geom, stageInfo, chromeInfo, app, hits) {
     starPillH,
     sprites,
     'icon_star_coin',
-    `总星 ${totalStars}/${MAX_CAMPAIGN_STARS}`,
-    { fontSize: 11.5 }
+    starText,
+    { fontSize: starFontSz, groupCenter: true, iconGap: 5, leftPad: 10, rightPad: 10 }
   );
 
   return { headerBottomY: starPillY + starPillH };
 }
 
+function drawPerspectiveOvalPath(ctx, cx, cy, rx, ry) {
+  ctx.beginPath();
+  if (typeof ctx.ellipse === 'function') {
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+  } else {
+    ctx.arc(cx, cy, Math.round((rx + ry) * 0.5), 0, Math.PI * 2);
+  }
+}
+
 /**
- * 10 Circular Level Nodes placed on LOBBY_LAYOUT_NORMALIZED.levelNodes10 along the hand-painted road
+ * 10 3D Perspective Level Nodes placed on chapter-specific road coordinates along the hand-painted path
  */
 function renderLobbyLevelNodes(ctx, stageInfo, bounds, app, hits, nowSec) {
   const c = getSafeCtx(ctx);
@@ -828,13 +859,17 @@ function renderLobbyLevelNodes(ctx, stageInfo, bounds, app, hits, nowSec) {
   const chapNum = clamp(Math.round(Number(app.selectedChapter) || 1), 1, Math.max(1, CHAPTERS.length));
   const frontierId = saveData.highestUnlockedLevel || '1-1';
   const nodeR = clamp(Math.round(stageW * 0.052), 18, 22);
+  const rx = Math.round(nodeR * 1.12);
+  const ry = Math.round(nodeR * 0.94);
+  const lipH = 3.5;
 
   // Subtle horizontal slide-in on chapter switch (visual-only offset; HitRegistry uses resting bounds!)
   const fadeT = app && app.uiAnim ? easeOutCubic(app.uiAnim.chapterFadeTimer) : 1;
   const slideDir = app && app.uiAnim ? app.uiAnim.chapterSlideDir || 0 : 0;
   const visualSlideX = fadeT < 0.999 ? slideDir * (1 - fadeT) * 28 : 0;
 
-  const nodesSpec = LOBBY_LAYOUT_NORMALIZED.levelNodes10;
+  const byChap = LOBBY_LAYOUT_NORMALIZED.levelNodesByChapter;
+  const nodesSpec = (byChap && byChap[chapNum]) || LOBBY_LAYOUT_NORMALIZED.levelNodes10;
   for (let i = 0; i < nodesSpec.length; i++) {
     const spec = nodesSpec[i];
     const levelId = `${chapNum}-${spec.level}`;
@@ -844,11 +879,11 @@ function renderLobbyLevelNodes(ctx, stageInfo, bounds, app, hits, nowSec) {
     const isFrontier = unlockInfo.unlocked && levelId === frontierId;
     const isBoss = spec.level === 10;
 
-    // Project normalized road coordinates onto rendered cover background, clamped cleanly inside safe corridor
+    // Project chapter-specific normalized road coordinates onto cover background, clamped inside safe corridor
     const rawCx = drawX + spec.nx * drawW;
     const rawCy = drawY + spec.ny * drawH;
-    const cx = Math.round(clamp(rawCx, stageX + nodeR + 6, stageX + stageW - nodeR - 6));
-    const cy = Math.round(clamp(rawCy, minY + nodeR + 2, maxY - nodeR - 14));
+    const cx = Math.round(clamp(rawCx, stageX + rx + 4, stageX + stageW - rx - 4));
+    const cy = Math.round(clamp(rawCy, minY + ry + 2, maxY - ry - 14));
 
     const hitId = `level_node_${levelId}`;
     const pressed = isHitPressed(app, hitId);
@@ -859,73 +894,108 @@ function renderLobbyLevelNodes(ctx, stageInfo, bounds, app, hits, nowSec) {
     try {
       if (fadeT < 0.999) c.globalAlpha = 0.25 + 0.75 * fadeT;
 
+      // Soft perspective cast shadow on the road
+      drawPerspectiveOvalPath(c, vCx, vCy + lipH + 2.4, rx * 1.03, ry * 0.92);
+      c.fillStyle = 'rgba(26, 18, 18, 0.28)';
+      c.fill();
+
       // Golden breathing halo around current frontier level node
       if (isFrontier) {
-        const pulse = 0.65 + 0.35 * Math.sin(nowSec * 4.5);
-        const aura = c.createRadialGradient(vCx, vCy, nodeR * 0.6, vCx, vCy, nodeR * 1.65);
-        aura.addColorStop(0, `rgba(255, 224, 118, ${(0.65 * pulse).toFixed(3)})`);
-        aura.addColorStop(1, 'rgba(255, 212, 102, 0)');
+        const pulse = 0.68 + 0.32 * Math.sin(nowSec * 4.5);
+        const aura = c.createRadialGradient(vCx, vCy, nodeR * 0.55, vCx, vCy, nodeR * 1.72);
+        aura.addColorStop(0, `rgba(255, 226, 118, ${(0.72 * pulse).toFixed(3)})`);
+        aura.addColorStop(0.6, `rgba(255, 206, 86, ${(0.34 * pulse).toFixed(3)})`);
+        aura.addColorStop(1, 'rgba(255, 206, 86, 0)');
         c.fillStyle = aura;
         c.beginPath();
-        c.arc(vCx, vCy, nodeR * 1.65, 0, Math.PI * 2);
+        c.arc(vCx, vCy, nodeR * 1.72, 0, Math.PI * 2);
         c.fill();
       }
 
-      // 3D circular medallion lip
-      c.beginPath();
-      c.arc(vCx, vCy + 3, nodeR, 0, Math.PI * 2);
-      c.fillStyle = !unlockInfo.unlocked ? '#5C5B5A' : isFrontier ? '#B86A14' : '#B89572';
+      // 3D perspective pedestal lip (cool dark slate for locked, warm caramel/tan for unlocked)
+      const strokeColor = !unlockInfo.unlocked
+        ? '#3A3F48'
+        : isBoss
+          ? '#B86A16'
+          : '#5A3928';
+      drawPerspectiveOvalPath(c, vCx, vCy + lipH, rx, ry);
+      c.fillStyle = !unlockInfo.unlocked ? '#4D535E' : isFrontier ? '#BD6E14' : '#C49B72';
       c.fill();
-      c.lineWidth = 2.2;
-      c.strokeStyle = '#5A3928';
+      c.lineWidth = 2.1;
+      c.strokeStyle = strokeColor;
       c.stroke();
 
-      // Main circular node body
-      const grad = c.createLinearGradient(vCx, vCy - nodeR, vCx, vCy + nodeR);
+      // Main 3D perspective disc top surface
+      const grad = c.createLinearGradient(vCx, vCy - ry, vCx, vCy + ry);
       if (!unlockInfo.unlocked) {
-        grad.addColorStop(0, '#9B9896');
-        grad.addColorStop(1, '#797675');
+        grad.addColorStop(0, '#8F96A1');
+        grad.addColorStop(1, '#6C737E');
       } else if (isFrontier) {
-        grad.addColorStop(0, '#FFE885');
-        grad.addColorStop(1, '#F5A623');
+        grad.addColorStop(0, '#FFEB88');
+        grad.addColorStop(1, '#F3A020');
       } else {
-        grad.addColorStop(0, '#FFFDF7');
-        grad.addColorStop(1, '#F3E3C8');
+        grad.addColorStop(0, '#FFFDF8');
+        grad.addColorStop(1, '#F4E2C4');
       }
-      c.beginPath();
-      c.arc(vCx, vCy, nodeR, 0, Math.PI * 2);
+      drawPerspectiveOvalPath(c, vCx, vCy, rx, ry);
       c.fillStyle = grad;
       c.fill();
-      c.lineWidth = isFrontier ? 2.8 : 2.3;
-      c.strokeStyle = isBoss && unlockInfo.unlocked ? '#C87A1E' : '#5A3928';
+      c.lineWidth = isFrontier ? 2.5 : 2.2;
+      c.strokeStyle = strokeColor;
       c.stroke();
 
+      // Bright cream inner ring on frontier disc (Design 02a/02b/02c signature highlight)
+      if (isFrontier) {
+        drawPerspectiveOvalPath(c, vCx, vCy, Math.max(4, rx - 3.2), Math.max(4, ry - 2.8));
+        c.strokeStyle = 'rgba(255, 252, 232, 0.72)';
+        c.lineWidth = 1.8;
+        c.stroke();
+      } else {
+        // Subtle top sheen arc
+        c.beginPath();
+        if (typeof c.ellipse === 'function') {
+          c.ellipse(vCx, vCy, Math.max(4, rx - 2.8), Math.max(4, ry - 2.4), 0, -Math.PI * 0.82, -Math.PI * 0.18);
+        } else {
+          c.arc(vCx, vCy, Math.max(4, nodeR - 2.6), -Math.PI * 0.82, -Math.PI * 0.18);
+        }
+        c.strokeStyle = !unlockInfo.unlocked ? 'rgba(255, 255, 255, 0.22)' : 'rgba(255, 255, 255, 0.65)';
+        c.lineWidth = 1.4;
+        c.stroke();
+      }
+
       if (!unlockInfo.unlocked) {
-        drawLockIcon(c, vCx, vCy, Math.round(nodeR * 0.92), { sprites });
+        // Engraved cool slate padlock matching 02a/02b/02c locked stone medallions
+        drawLockIcon(c, vCx, vCy + 0.5, Math.round(nodeR * 0.82), {
+          forceVector: true,
+          bodyColor: '#7A818D',
+          shackleColor: '#3A3F48',
+          borderColor: '#3A3F48'
+        });
       } else {
         // Level label e.g. '1-6'
         UI.drawOutlinedText(c, levelId, vCx, vCy + 0.5, {
-          size: Math.max(11, Math.round(nodeR * 0.62)),
+          size: Math.max(11.5, Math.round(nodeR * 0.64)),
           weight: 900,
           fill: '#5A3928',
           stroke: '',
           strokeWidth: 0,
           shadowOffsetY: 0,
-          maxWidth: nodeR * 1.7
+          maxWidth: rx * 1.68
         });
 
-        // 3 mini stars tucked right beneath the circular node (matching 02a/02b/02c)
-        const starY = vCy + nodeR + 7;
-        const starStep = Math.min(13, Math.round(nodeR * 0.64));
+        // 3 mini stars tucked tightly beneath the disc in a subtle smile arc (matching 02a/02b/02c)
+        const starBaseY = vCy + ry + 6.5;
+        const starStep = Math.min(12.2, Math.round(rx * 0.56));
         for (let s = 1; s <= 3; s++) {
-          UI.drawStarIcon(c, vCx + (s - 2) * starStep, starY, 5.2, s <= stars, { sprites });
+          const arcDip = s === 2 ? 1.8 : 0;
+          UI.drawStarIcon(c, vCx + (s - 2) * starStep, starBaseY + arcDip, 5.2, s <= stars, { sprites });
         }
 
         // Bouncing cat-paw marker floating above current frontier node!
         if (isFrontier) {
-          const pawBounce = Math.abs(Math.sin(nowSec * 3.8)) * 5.5;
-          const pawS = Math.round(nodeR * 1.45);
-          UI.drawUiIcon(c, sprites, 'icon_paw_marker', vCx + 4, vCy - nodeR - pawS * 0.48 - pawBounce, pawS);
+          const pawBounce = Math.abs(Math.sin(nowSec * 3.8)) * 5.2;
+          const pawS = Math.round(nodeR * 1.54);
+          UI.drawUiIcon(c, sprites, 'icon_paw_marker', vCx + 4, vCy - ry - pawS * 0.45 - pawBounce, pawS);
         }
       }
     } finally {
@@ -941,6 +1011,10 @@ function renderLobbyLevelNodes(ctx, stageInfo, bounds, app, hits, nowSec) {
 
 /**
  * Cozy Patron Dialogue Bar matching Design 02a/02b/02c
+ * - Sleek cream rounded card (no clunky outer wood slab)
+ * - Larger pop-out patron portrait breaking above the card top border (no flat circle behind it)
+ * - Seamless speech balloon with vertically centered wrapped dialogue
+ * - Soft caramel '切换搭档' button with crisp vector downward triangle
  */
 function renderPatronBar(ctx, rect, app, hits, nowSec) {
   const c = getSafeCtx(ctx);
@@ -949,98 +1023,131 @@ function renderPatronBar(ctx, rect, app, hits, nowSec) {
   const sprites = app.sprites || {};
   const patronId = normalizePatronId(saveData.selectedPatron);
   const patron = PATRONS.find((p) => p.id === patronId) || PATRONS[0];
+  const cardR = 14;
 
-  // Outer warm wood rim + cream parchment inner panel (exact 02a style)
-  UI.drawWoodBoard(c, x, y, w, h, 14, false);
-  UI.drawParchmentSheet(c, x + 3.5, y + 3.5, w - 7, h - 7, 11, '#FFFDF7', '#F7EAD2', '#5A3928', 1.6);
-
-  const avatarS = Math.min(h + 10, 66);
-  const avatarCx = x + 10 + avatarS * 0.5;
-  const bounce = app.patronPokeTimer > 0 ? Math.sin(app.patronPokeTimer * 26) * 3.8 : Math.sin(nowSec * 2.4) * 1.4;
-  const avatarCy = y + h * 0.42 + bounce;
-
-  // Soft cream medallion behind patron portrait
+  // Sleek cream parchment card with warm dark-brown outline & soft bottom shadow lip (Design 02a/02b/02c)
   c.save();
   try {
-    c.beginPath();
-    c.arc(avatarCx, y + h * 0.48, avatarS * 0.44, 0, Math.PI * 2);
-    c.fillStyle = '#F5E4C6';
+    UI.roundRectPath(c, x, y + 3, w, h, cardR);
+    c.fillStyle = 'rgba(42, 24, 16, 0.34)';
     c.fill();
+
+    const cardGrad = c.createLinearGradient(x, y, x, y + h);
+    cardGrad.addColorStop(0, '#FFFDF7');
+    cardGrad.addColorStop(0.65, '#FCF3E2');
+    cardGrad.addColorStop(1, '#F4E4C8');
+    UI.roundRectPath(c, x, y, w, h, cardR);
+    c.fillStyle = cardGrad;
+    c.fill();
+    c.lineWidth = 2.6;
+    c.strokeStyle = '#5A3928';
+    c.stroke();
+
+    // Subtle crisp top inner sheen
+    UI.roundRectPath(c, x + 2.5, y + 2.2, w - 5, Math.max(8, h * 0.25), Math.max(4, cardR - 2));
+    c.strokeStyle = 'rgba(255, 255, 255, 0.65)';
+    c.lineWidth = 1.2;
+    c.stroke();
   } finally {
     c.restore();
   }
+
+  // Larger patron portrait popping cleanly above the top card border (NO flat beige circle behind it)
+  const avatarS = Math.min(h + 16, 76);
+  const avatarCx = x + 6 + avatarS * 0.52;
+  const bounce = app.patronPokeTimer > 0 ? Math.sin(app.patronPokeTimer * 26) * 3.8 : Math.sin(nowSec * 2.4) * 1.2;
+  const avatarCy = y + h * 0.34 + bounce;
   UI.drawUiIcon(c, sprites, patron.id, avatarCx, avatarCy, avatarS);
 
-  // Cream-gold name pill under patron portrait (matching 02a '小蜜柑')
-  const namePillW = Math.min(72, avatarS + 8);
-  const namePillH = 18;
+  // Warm butter-gold name pill overlapping bottom border under patron portrait (`小蜜柑`)
+  const namePillW = Math.min(72, Math.max(60, avatarS - 4));
+  const namePillH = 19;
   const namePillX = Math.round(avatarCx - namePillW * 0.5);
-  const namePillY = Math.round(y + h - namePillH * 0.62);
-  UI.drawTagBadge(c, namePillX, namePillY, namePillW, namePillH, patron.name, 'amber', 9.8);
+  const namePillY = Math.round(y + h - namePillH * 0.72);
+  UI.drawTagBadge(c, namePillX, namePillY, namePillW, namePillH, patron.name, 'butter', 10.5);
 
-  // Right-side honey-gold '切换搭档 ▾' pill button
-  const btnW = Math.min(88, Math.max(74, Math.round(w * 0.24)));
-  const btnH = Math.min(34, h - 14);
+  // Right-side warm caramel '切换搭档' button with crisp vector caret
+  const btnW = Math.min(92, Math.max(78, Math.round(w * 0.25)));
+  const btnH = Math.min(34, h - 18);
   const btnX = x + w - 9 - btnW;
   const btnY = Math.round(y + (h - btnH) * 0.5);
 
   UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
-    style: 'amber',
+    style: 'caramel',
     text: '切换搭档',
-    fontSize: 11.0,
+    trailingCaret: true,
+    fontSize: 11.2,
+    borderWidth: 2.0,
     radius: 10,
     pressed: isHitPressed(app, 'lobby_patron_switch')
   });
   hits.add('lobby_patron_switch', btnX, btnY, btnW, btnH, () => app.cycleOrOpenPatrons());
 
-  // Speech balloon in center
-  const balloonX = x + 14 + avatarS;
+  // Seamless speech balloon in center with vertically centered wrapped text
+  const balloonX = x + 12 + avatarS;
   const balloonW = Math.max(70, btnX - 8 - balloonX);
   const balloonY = y + 8;
   const balloonH = h - 16;
   drawSpeechBalloon(c, balloonX, balloonY, balloonW, balloonH, balloonX - 7, balloonY + balloonH * 0.54);
 
   const speechLine = app.currentPatronLine || patron.greet;
-  UI.drawWrappedText(
-    c,
-    speechLine,
-    balloonX + 8,
-    balloonY + (balloonH > 42 ? 12 : 8),
-    balloonW - 14,
-    14,
-    UI.fontStr(10.5, 800),
-    '#5A3928',
-    'left',
-    2
-  );
+  const speechFontSz = balloonH >= 48 ? 11.8 : 11.0;
+  const speechFont = UI.fontStr(speechFontSz, 800);
+  const maxTextW = Math.max(36, balloonW - 18);
+  const rawLines = typeof UI.wrapText === 'function' ? UI.wrapText(c, speechLine, maxTextW, speechFont) : [speechLine];
+  const lines = Array.isArray(rawLines) && rawLines.length > 0 ? rawLines.slice(0, 2) : [speechLine];
+  const lineH = Math.round(speechFontSz * 1.32);
+  const totalTextH = lines.length * lineH;
+  const firstLineCy = balloonY + (balloonH - totalTextH) * 0.5 + lineH * 0.5 + 0.5;
+
+  c.save();
+  try {
+    c.font = speechFont;
+    c.fillStyle = '#5A3928';
+    c.textAlign = 'left';
+    c.textBaseline = 'middle';
+    for (let li = 0; li < lines.length; li++) {
+      c.fillText(lines[li], balloonX + 9, firstLineCy + li * lineH, maxTextW);
+    }
+  } finally {
+    c.restore();
+  }
 
   // Non-HitRegistry poke area for tactile mascot interaction
   app.lobbyPatronPokeRect = { x, y, w: Math.max(40, btnX - 4 - x), h };
 }
 
 /**
- * Full-width dark walnut bottom dock bar with 4 illustrated WebP icons (`02a/02b/02c`)
+ * Full-width dark walnut bottom dock bar with 4 elevated illustrated PNG icons (`02a/02b/02c`)
  */
 function renderLobbyBottomDock(ctx, rect, app, hits) {
   const c = getSafeCtx(ctx);
   const { x, y, w, h, fullW, fullBottom } = rect;
   const sprites = app.sprites || {};
 
-  // Dark walnut full-width dock background bar
+  // Dark walnut full-width dock background bar with rounded top corners & subtle wood bevel highlight
   c.save();
   try {
     const barW = fullW || w;
     const barX = fullW ? 0 : x;
-    const barH = Math.max(h + 6, (fullBottom || y + h) - y);
+    const barH = Math.max(h + 8, (fullBottom || y + h) - y);
     const grad = c.createLinearGradient(barX, y, barX, y + barH);
-    grad.addColorStop(0, '#724B32');
-    grad.addColorStop(0.16, '#5D3C27');
-    grad.addColorStop(1, '#442A1B');
+    grad.addColorStop(0, '#7B5034');
+    grad.addColorStop(0.14, '#603C26');
+    grad.addColorStop(1, '#422617');
     c.fillStyle = grad;
-    UI.roundRectPath(c, barX, y, barW, barH, [14, 14, 0, 0]);
+    UI.roundRectPath(c, barX, y, barW, barH, [18, 18, 0, 0]);
     c.fill();
     c.lineWidth = 2.4;
-    c.strokeStyle = '#3B2215';
+    c.strokeStyle = '#341C0F';
+    c.stroke();
+
+    // Subtle warm wood inner bevel along top edge
+    c.beginPath();
+    c.moveTo(barX + 18, y + 2.4);
+    c.lineTo(barX + barW - 18, y + 2.4);
+    c.strokeStyle = 'rgba(255, 224, 184, 0.22)';
+    c.lineWidth = 1.4;
     c.stroke();
   } finally {
     c.restore();
@@ -1079,7 +1186,9 @@ function renderLobbyBottomDock(ctx, rect, app, hits) {
     }
   ];
 
-  const iconS = Math.min(34, Math.max(26, Math.round(h * 0.58)));
+  // Larger icons slightly elevated so their tops gently pop above the walnut rim (exact 02a/02b/02c look)
+  const iconS = Math.min(44, Math.max(36, Math.round(h * 0.72)));
+  const iconCyBase = y + Math.round(h * 0.27);
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
     const bx = x + i * (colW + gap);
@@ -1087,18 +1196,18 @@ function renderLobbyBottomDock(ctx, rect, app, hits) {
     const pressed = isHitPressed(app, it.id);
     const dy = pressed ? 2 : 0;
 
-    UI.drawUiIcon(c, sprites, it.icon, cx, y + h * 0.37 + dy, iconS);
+    UI.drawUiIcon(c, sprites, it.icon, cx, iconCyBase + dy, iconS);
     UI.drawOutlinedText(c, it.label, cx, y + h * 0.80 + dy, {
-      size: 11.5,
+      size: h >= 58 ? 12.5 : 11.5,
       weight: 800,
       fill: '#FFF8EC',
-      stroke: '#3D2214',
-      strokeWidth: 2.4,
-      shadowOffsetY: 0.6,
+      stroke: '#351C0F',
+      strokeWidth: 2.5,
+      shadowOffsetY: 0.7,
       maxWidth: colW - 6
     });
     if (it.redDot) {
-      drawRedDot(c, cx + iconS * 0.42, y + h * 0.16 + dy, 4.8);
+      drawRedDot(c, cx + iconS * 0.35, iconCyBase - iconS * 0.33 + dy, 4.5);
     }
     hits.add(it.id, bx, y, colW, h, it.onClick);
   }
@@ -1115,11 +1224,12 @@ function renderLobbyScreen(ctx, metrics, app, hits, nowSec) {
   const ctaLevelId = saveData.highestUnlockedLevel || '1-1';
   const ctaLevel = getLevelById(ctaLevelId) || getLevelById('1-1');
   const ctaStar1 = ctaLevel && ctaLevel.stars ? ctaLevel.stars[0] : 850;
+  const ctaStar1Str = Number(ctaStar1 || 0).toLocaleString('en-US');
 
   app.currentBoardLayout = null;
   app.guideTargets = null;
 
-  // 1. Full-bleed chapter hand-painted background (`bg_lobby_ch1/2/3.webp`) + crossfade
+  // 1. Full-bleed chapter hand-painted background (`bg_lobby_ch1/2/3`) + crossfade
   const stageInfo = renderLobbyChapterBg(c, width, height, chapNum, app, sprites);
   const { stageX, stageW } = stageInfo;
 
@@ -1128,14 +1238,15 @@ function renderLobbyScreen(ctx, metrics, app, hits, nowSec) {
 
   // 3. Top hanging fairy-light plaque + '<' '>' chapter buttons + '总星 X/90' wood pill
   const plaqueInfo = renderLobbyPlaqueHeader(c, geom, stageInfo, chromeInfo, app, hits);
+  app.lobbyHeaderBottomY = plaqueInfo.headerBottomY;
 
-  // 4. Bottom Chrome Stack: Dark Wood Dock + Honey-Gold CTA + Patron Dialogue Bar
+  // 4. Bottom Chrome Stack: Dark Wood Dock + Full-Pill Honey-Gold CTA + Patron Dialogue Bar
   const compact = height < 720;
   const padX = 12;
   const innerX = stageX + padX;
   const innerW = stageW - padX * 2;
 
-  const dockH = compact ? 52 : 58;
+  const dockH = compact ? 54 : 60;
   const dockY = bottomLimit - dockH;
   renderLobbyBottomDock(
     c,
@@ -1144,30 +1255,33 @@ function renderLobbyScreen(ctx, metrics, app, hits, nowSec) {
     hits
   );
 
-  const ctaH = compact ? 44 : 50;
-  const ctaW = Math.min(innerW - 14, Math.round(stageW * 0.72));
+  const ctaH = compact ? 48 : 54;
+  const ctaW = Math.min(innerW - 20, Math.round(stageW * 0.66));
   const ctaX = Math.round(stageX + (stageW - ctaW) * 0.5);
-  const ctaY = dockY - (compact ? 8 : 10) - ctaH;
+  const ctaY = dockY - (compact ? 12 : 14) - ctaH;
 
   UI.drawPillButton(c, ctaX, ctaY, ctaW, ctaH, {
     style: 'cta',
     label: `开始营业 · 第 ${ctaLevelId} 关`,
-    subLabel: `1星目标 ${ctaStar1}`,
-    fontSize: compact ? 15.5 : 17,
-    radius: Math.round(ctaH * 0.48),
+    subPrefix: '1星目标',
+    subIcon: 'icon_star_coin',
+    subSuffix: ctaStar1Str,
+    sprites,
+    fontSize: compact ? 16 : 17.5,
+    radius: Math.round(ctaH * 0.5),
     pressed: isHitPressed(app, 'lobby_start_cta')
   });
   hits.add('lobby_start_cta', ctaX, ctaY, ctaW, ctaH, () => app.startLevel(ctaLevelId));
 
-  const patronH = compact ? 58 : 66;
-  const patronY = ctaY - (compact ? 8 : 10) - patronH;
+  const patronH = compact ? 60 : 68;
+  const patronY = ctaY - (compact ? 10 : 12) - patronH;
   renderPatronBar(c, { x: innerX, y: patronY, w: innerW, h: patronH }, app, hits, nowSec);
 
   // 5. 10 Winding-Road Level Nodes strictly within safe corridor between plaque & patron bar
   renderLobbyLevelNodes(
     c,
     stageInfo,
-    { minY: plaqueInfo.headerBottomY + 6, maxY: patronY - 6 },
+    { minY: plaqueInfo.headerBottomY + 6, maxY: patronY - 8 },
     app,
     hits,
     nowSec
@@ -1699,6 +1813,8 @@ function renderToast(ctx, width, headerBottom, app) {
     baseY = Math.max(headerBottom + 10, botLimit - 44);
   } else if (app.screen === 'playing') {
     baseY = headerBottom + 122;
+  } else if (app.screen === 'lobby' && Number.isFinite(app.lobbyHeaderBottomY)) {
+    baseY = Math.max(headerBottom + 8, app.lobbyHeaderBottomY + 6);
   }
 
   const primary = cur || minor;

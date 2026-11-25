@@ -44,6 +44,7 @@ const RunModifiers = require('./run_modifiers');
 const BalanceConfig = require('./balance_config');
 const {
   getSafeCtx,
+  drawTopLeftStardustChip,
   drawRedDot,
   drawLockIcon,
   drawCircularWoodButton
@@ -159,6 +160,11 @@ function beginModalFrame(ctx, metrics, app, opts = {}) {
     c.restore();
   }
 
+  // Optional bright top-left player avatar + live stardust pill above modal scrim (Designs 04/06/07/09!)
+  if (opts.showTopCurrency && typeof drawTopLeftStardustChip === 'function') {
+    drawTopLeftStardustChip(c, m, app);
+  }
+
   const maxW = Number(opts.maxW) || 440;
   const desiredH = Number(opts.desiredH) || 520;
   const extraTopHeadroom = Number(opts.extraTopHeadroom) || 14;
@@ -201,7 +207,7 @@ function beginModalFrame(ctx, metrics, app, opts = {}) {
   const topInset = Number(opts.sheetTopInset);
   const sheetTop = Number.isFinite(topInset)
     ? y + topInset
-    : y + (hasAwning ? awningH - 6 : subtitle ? 44 : 16);
+    : y + (hasAwning ? awningH - 6 : subtitle ? 46 : 16);
   const sheetBotPad = Number.isFinite(opts.sheetBottomPad) ? opts.sheetBottomPad : 11;
   const sheetX = x + padX;
   const sheetW = w - padX * 2;
@@ -235,14 +241,14 @@ function beginModalFrame(ctx, metrics, app, opts = {}) {
 
   // Floating centered arched wooden title plaque (Designs 04, 06, 07, 08, 09, 10, 11)
   if (hasPlaque && title) {
-    const plaqueW = Math.min(w - 66, Math.max(158, Math.round(w * 0.56)));
-    const plaqueH = 40;
+    const plaqueW = Math.min(w - 58, Math.max(170, Math.round(w * 0.60)));
+    const plaqueH = 44;
     const plaqueX = Math.round(x + (w - plaqueW) * 0.5);
-    const plaqueY = Math.max(topBound + 1, y - 16);
+    const plaqueY = Math.max(topBound + 1, y - 18);
 
     if (subtitle) {
-      const subW = Math.min(w - 48, plaqueW + 10);
-      const subH = 22;
+      const subW = Math.min(w - 44, plaqueW + 12);
+      const subH = 25;
       const subX = Math.round(x + (w - subW) * 0.5);
       const subY = plaqueY + plaqueH - 6;
       UI.drawKissaCard(c, subX, subY, subW, subH, {
@@ -254,12 +260,12 @@ function beginModalFrame(ctx, metrics, app, opts = {}) {
         lineWidth: 2.2
       });
       UI.drawOutlinedText(c, subtitle, subX + subW * 0.5, subY + subH * 0.5 + 1.5, {
-        size: 11.2,
-        minSize: 8.8,
+        size: 13.0,
+        minSize: 9.6,
         weight: 800,
         fill: '#FFF3DC',
         stroke: '#3D2214',
-        strokeWidth: 2.2,
+        strokeWidth: 2.4,
         shadowOffsetY: 0,
         maxWidth: subW - 14
       });
@@ -269,7 +275,7 @@ function beginModalFrame(ctx, metrics, app, opts = {}) {
     c.save();
     try {
       const pr = 12;
-      const arch = 6.5;
+      const arch = 7.0;
       c.shadowColor = 'rgba(26, 14, 8, 0.34)';
       c.shadowBlur = 8;
       c.shadowOffsetY = 3;
@@ -331,14 +337,14 @@ function beginModalFrame(ctx, metrics, app, opts = {}) {
       c.restore();
     }
 
-    UI.drawOutlinedText(c, title, plaqueX + plaqueW * 0.5, plaqueY + plaqueH * 0.48, {
-      size: 20,
-      minSize: 14,
+    UI.drawOutlinedText(c, title, plaqueX + plaqueW * 0.5, plaqueY + plaqueH * 0.49, {
+      size: 23.5,
+      minSize: 16,
       weight: 900,
       fill: '#FFE77A',
       stroke: '#4A230D',
-      strokeWidth: 4.0,
-      shadowOffsetY: 1.4,
+      strokeWidth: 4.4,
+      shadowOffsetY: 1.5,
       maxWidth: plaqueW - 22
     });
   }
@@ -346,7 +352,7 @@ function beginModalFrame(ctx, metrics, app, opts = {}) {
   // Safe inner content area
   const ix = sheetX + 10;
   const iw = sheetW - 20;
-  const iy = sheetTop + (hasPlaque && !hasAwning && !subtitle ? 22 : subtitle ? 18 : 10);
+  const iy = sheetTop + (hasPlaque && !hasAwning && !subtitle ? 22 : subtitle ? 20 : 10);
   const ih = Math.max(100, sheetTop + sheetH - 10 - iy);
 
   return {
@@ -378,7 +384,7 @@ function endModalFrame(ctx) {
 
 function drawCloseButton(ctx, f, hits, app, onCloseOverride = null) {
   const c = getSafeCtx(ctx);
-  const sz = 34;
+  const sz = 35;
   const r = sz * 0.5;
   const bx = Math.min(f.width - sz - 4, Math.round(f.cardX + f.cardW - sz * 0.72));
   const by = Math.max(f.topBound + 2, Math.round(f.cardY - 10));
@@ -396,9 +402,9 @@ function drawCloseButton(ctx, f, hits, app, onCloseOverride = null) {
 
 function drawSectionRibbonTag(ctx, x, y, text) {
   const c = getSafeCtx(ctx);
-  const w = Math.max(66, text.length * 14 + 18);
-  const h = 21;
-  UI.drawTagBadge(c, x, y, w, h, text, 'wood', 10.6);
+  const w = Math.max(76, text.length * 16 + 20);
+  const h = 23;
+  UI.drawTagBadge(c, x, y, w, h, text, 'wood', 12.6);
   return { w, h };
 }
 
@@ -446,18 +452,18 @@ function drawFolderTabs(ctx, x, y, w, h, tabs, activeId, hits, app, onSelect, op
       c.stroke();
 
       UI.drawOutlinedText(c, t.label, tx + tabW * 0.5, ty + th * 0.52, {
-        size: Number(opts.fontSize) || (count >= 4 ? 11.4 : 12.6),
-        minSize: 8.6,
-        weight: 800,
-        fill: active ? '#5A3928' : '#FFF4E0',
+        size: Number(opts.fontSize) || (count >= 4 ? 12.6 : 14.0),
+        minSize: 9.2,
+        weight: 900,
+        fill: active ? '#4E2A16' : '#FFF6E4',
         stroke: active ? '' : '#4A2B1A',
-        strokeWidth: active ? 0 : 2.2,
+        strokeWidth: active ? 0 : 2.4,
         shadowOffsetY: 0,
-        maxWidth: tabW - 8
+        maxWidth: tabW - 12
       });
 
       if (t.redDot) {
-        drawRedDot(c, tx + tabW - 7, ty + 7, 4.3);
+        drawRedDot(c, tx + tabW - 4, ty + 3.5, 3.6);
       }
     } finally {
       c.restore();
@@ -470,6 +476,40 @@ function drawFolderTabs(ctx, x, y, w, h, tabs, activeId, hits, app, onSelect, op
 
 /* ======================== 04. 关卡备战弹窗 (LevelPreviewModal) ======================== */
 
+function drawMiniPlusCornerBadge(ctx, cx, cy, r, tone = 'green') {
+  const c = getSafeCtx(ctx);
+  c.save();
+  try {
+    const g = c.createLinearGradient(cx, cy - r, cx, cy + r);
+    if (tone === 'gold') {
+      g.addColorStop(0, '#FFE678');
+      g.addColorStop(1, '#F0A422');
+    } else {
+      g.addColorStop(0, '#B8E05E');
+      g.addColorStop(1, '#7DB832');
+    }
+    UI.roundRectPath(c, cx - r, cy - r, r * 2, r * 2, Math.max(4, r * 0.45));
+    c.fillStyle = g;
+    c.fill();
+    c.lineWidth = 1.8;
+    c.strokeStyle = '#4A2B1A';
+    c.stroke();
+
+    c.strokeStyle = '#FFFDF5';
+    c.lineWidth = 2.2;
+    c.lineCap = 'round';
+    const arm = r * 0.46;
+    c.beginPath();
+    c.moveTo(cx - arm, cy);
+    c.lineTo(cx + arm, cy);
+    c.moveTo(cx, cy - arm);
+    c.lineTo(cx, cy + arm);
+    c.stroke();
+  } finally {
+    c.restore();
+  }
+}
+
 function renderLevelPreviewModal(ctx, metrics, app, hits, nowSec) {
   const c = getSafeCtx(ctx);
   const sprites = app.sprites || {};
@@ -480,156 +520,169 @@ function renderLevelPreviewModal(ctx, metrics, app, hits, nowSec) {
   const chapName = getChapterName(lvl.chapter);
 
   const f = beginModalFrame(c, metrics, app, {
-    maxW: 430,
-    desiredH: 540,
+    maxW: 432,
+    desiredH: 556,
     dismissOnOutside: true,
+    showTopCurrency: true,
     title: '关卡备战',
     subtitle: `第 ${lvl.id} 关 · ${chapName}`,
-    sheetTopInset: 38,
+    sheetTopInset: 42,
     sheetBottomPad: 12
   });
 
   try {
     drawCloseButton(c, f, hits, app);
 
-    const compact = f.ih < 410;
-    const ctaH = compact ? 42 : 48;
+    const compact = f.ih < 415;
+    const ctaH = compact ? 44 : 50;
     const ctaY = f.iy + f.ih - ctaH;
     const gap = compact ? 7 : 10;
 
-    // --- Section 1: 1/2/3 Star Target Box + Top-Right Time Pill (Design 04) ---
-    const starBoxY = f.iy + 8;
-    const starBoxH = compact ? 76 : 90;
+    // --- Section 1: Double-Nested 1/2/3 Star Target Box + Top-Right Time Pill (Design 04) ---
+    const starBoxY = f.iy + 6;
+    const starBoxH = compact ? 84 : 98;
     UI.drawKissaCard(c, f.ix, starBoxY, f.iw, starBoxH, {
-      tone: 'recess',
-      borderColor: '#C5A982',
-      radius: 12,
+      tone: 'cream',
+      topCol: '#FDF5E5',
+      botCol: '#F6E8CC',
+      borderColor: '#D4BA94',
+      radius: 13,
       lineWidth: 1.8
     });
+    // Recessed inner warm honey-parchment well (Design 04 signature double-frame look!)
+    const inPad = 6;
+    UI.drawKissaCard(c, f.ix + inPad, starBoxY + inPad, f.iw - inPad * 2, starBoxH - inPad * 2, {
+      tone: 'recess',
+      topCol: '#EDD7B1',
+      botCol: '#E3C696',
+      borderColor: '#C4A579',
+      radius: 9,
+      lineWidth: 1.4
+    });
 
-    const colW = (f.iw - 14) / 3;
+    const colW = (f.iw - 16) / 3;
     const starLabels = ['1星', '2星', '3星'];
     for (let s = 0; s < 3; s++) {
-      const colX = f.ix + 7 + s * colW;
-      const cx = colX + colW * 0.5;
+      const colX = f.ix + 8 + s * colW;
+      const cx = colX + colW * 0.5 - (s === 2 ? 4 : 0);
       if (s > 0) {
         c.save();
         try {
-          c.strokeStyle = 'rgba(138, 86, 52, 0.24)';
+          c.strokeStyle = 'rgba(138, 86, 52, 0.28)';
           c.lineWidth = 1.2;
           c.beginPath();
           c.moveTo(colX, starBoxY + 14);
-          c.lineTo(colX, starBoxY + starBoxH - 18);
+          c.lineTo(colX, starBoxY + starBoxH - 14);
           c.stroke();
         } finally {
           c.restore();
         }
       }
 
-      UI.drawOutlinedText(c, starLabels[s], cx, starBoxY + 15, {
-        size: 12.2,
-        minSize: 9.5,
-        weight: 800,
-        fill: '#FFE27D',
+      UI.drawOutlinedText(c, starLabels[s], cx, starBoxY + (compact ? 20 : 23), {
+        size: compact ? 13.5 : 15.0,
+        minSize: 10.5,
+        weight: 900,
+        fill: '#FFE582',
         stroke: '#5A3928',
-        strokeWidth: 2.8,
-        shadowOffsetY: 0
+        strokeWidth: 3.0,
+        shadowOffsetY: 0.6
       });
 
-      const starSz = compact ? 13 : 15;
-      const starGap = starSz * 0.92;
+      const starSz = compact ? 16 : 19;
+      const starGap = starSz * 0.96;
       const startStarX = cx - (s * starGap) * 0.5;
       for (let k = 0; k <= s; k++) {
-        UI.drawStarIcon(c, startStarX + k * starGap, starBoxY + (compact ? 35 : 39), starSz * 0.48, true, sprites);
+        UI.drawStarIcon(c, startStarX + k * starGap, starBoxY + (compact ? 43 : 48), starSz * 0.45, true, { sprites });
       }
 
+      // Accurately centered `[⭐ 800]` group using measured text width (Design 04!)
       const scoreText = formatNum(lvl.stars[s]);
-      UI.drawStarIcon(c, cx - 22, starBoxY + (compact ? 56 : 63), 5.6, true, sprites);
+      const scoreFontSz = compact ? 13.6 : 15.2;
+      c.font = UI.fontStr(scoreFontSz, 900);
+      const scoreW = Math.min(colW - 24, Math.ceil(c.measureText(scoreText).width));
+      const miniR = compact ? 6.4 : 7.0;
+      const miniD = miniR * 2.1;
+      const miniGap = 4;
+      const groupW = miniD + miniGap + scoreW;
+      const groupLeft = cx - groupW * 0.5;
+      const scoreCy = starBoxY + (compact ? 65 : 74);
+      UI.drawStarIcon(c, groupLeft + miniD * 0.5, scoreCy, miniR, true, { sprites });
       UI.drawFitText(
         c,
         scoreText,
-        cx - 12,
-        starBoxY + (compact ? 56.5 : 63.5),
+        groupLeft + miniD + miniGap,
+        scoreCy + 0.5,
         colW - 22,
-        compact ? 12.2 : 13.4,
-        9.2,
+        scoreFontSz,
+        10.0,
         900,
-        '#5A3928',
+        '#4E2B18',
         'left',
         'middle'
       );
     }
 
-    // Best score subtle footer inside bottom of star card
-    const bestScore = (saveData.levelBestScores && saveData.levelBestScores[lvl.id]) || 0;
-    const prevStars = (saveData.levelStars && saveData.levelStars[lvl.id]) || 0;
-    if (!compact) {
-      UI.drawFitText(
-        c,
-        bestScore > 0 ? `历史最佳：${formatNum(bestScore)} 分（${prevStars}星）` : `关卡名称：${lvl.name}`,
-        f.ix + f.iw * 0.5,
-        starBoxY + starBoxH - 9,
-        f.iw - 20,
-        9.4,
-        7.8,
-        700,
-        '#8A5A32',
-        'center',
-        'middle'
-      );
-    }
-
-    // Top-right overlapping wood time badge ("限时 01:30")
+    // Top-right overlapping wood time badge ("限时 01:30", Design 04 — clears 3星 label cleanly!)
     const timeBadgeW = 54;
-    const timeBadgeH = 32;
-    const timeBadgeX = f.ix + f.iw - timeBadgeW + 6;
-    const timeBadgeY = starBoxY - 17;
+    const timeBadgeH = 35;
+    const timeBadgeX = f.ix + f.iw - timeBadgeW + 9;
+    const timeBadgeY = starBoxY - 19;
     UI.drawKissaCard(c, timeBadgeX, timeBadgeY, timeBadgeW, timeBadgeH, {
       tone: 'wood',
-      topCol: '#9B653E',
-      botCol: '#73482B',
-      borderColor: '#5A3928',
-      radius: 9,
+      topCol: '#A06942',
+      botCol: '#74482B',
+      borderColor: '#4A2B1A',
+      radius: 10,
       lineWidth: 2.2
     });
-    UI.drawOutlinedText(c, '限时', timeBadgeX + timeBadgeW * 0.5, timeBadgeY + 10, {
-      size: 9.4,
-      weight: 800,
-      fill: '#FFE27D',
+    c.save();
+    try {
+      UI.roundRectPath(c, timeBadgeX + 2.4, timeBadgeY + 2.4, timeBadgeW - 4.8, timeBadgeH - 4.8, 7.6);
+      c.strokeStyle = 'rgba(255, 232, 192, 0.36)';
+      c.lineWidth = 1.2;
+      c.stroke();
+    } finally {
+      c.restore();
+    }
+    UI.drawOutlinedText(c, '限时', timeBadgeX + timeBadgeW * 0.5, timeBadgeY + 11, {
+      size: 11.0,
+      weight: 900,
+      fill: '#FFE584',
       stroke: '#4A2B1A',
-      strokeWidth: 2.0,
+      strokeWidth: 2.2,
       shadowOffsetY: 0
     });
-    UI.drawOutlinedText(c, formatClockMMSS(lvl.durationSec), timeBadgeX + timeBadgeW * 0.5, timeBadgeY + 23, {
-      size: 11.0,
-      minSize: 8.8,
+    UI.drawOutlinedText(c, formatClockMMSS(lvl.durationSec), timeBadgeX + timeBadgeW * 0.5, timeBadgeY + 24.5, {
+      size: 12.6,
+      minSize: 9.8,
       weight: 900,
       fill: '#FFF8EC',
       stroke: '#4A2B1A',
-      strokeWidth: 2.2,
+      strokeWidth: 2.4,
       shadowOffsetY: 0,
       maxWidth: timeBadgeW - 6
     });
 
-    // --- Section 2: 本关特色 (Feature Tiles + Mini Board Preview) ---
+    // --- Section 2: 本关特色 (Double-Recessed Feature Tiles matching Design 04!) ---
     const featY = starBoxY + starBoxH + gap + 6;
-    const featH = compact ? 92 : 112;
+    const featH = compact ? 96 : 118;
     UI.drawKissaCard(c, f.ix, featY, f.iw, featH, {
       tone: 'recess',
-      topCol: '#FBF1DD',
-      botCol: '#F3E3C4',
+      topCol: '#FBF2DE',
+      botCol: '#F4E5C8',
       borderColor: '#D6BE99',
       radius: 12,
       lineWidth: 1.6
     });
-    drawSectionRibbonTag(c, f.ix + 8, featY - 10, '本关特色');
+    drawSectionRibbonTag(c, f.ix + 8, featY - 11, '本关特色');
     if (lvl && lvl.goal && lvl.goal.type && lvl.goal.type !== 'score') {
       const preGoal = LevelGoals.createGoalState(lvl.goal, {
         initialIce: (Array.isArray(lvl.matrix) ? lvl.matrix.join('') : '').split('I').length - 1
       });
       const gb = LevelGoals.formatGoalBadge(preGoal);
       if (gb) {
-        UI.drawTagBadge(c, f.ix + f.iw - 96, featY - 9, 90, 20, gb.text, 'green', 9.2);
+        UI.drawTagBadge(c, f.ix + f.iw - 96, featY - 10, 90, 21, gb.text, 'green', 10.0);
       }
     }
 
@@ -642,11 +695,10 @@ function renderLevelPreviewModal(ctx, metrics, app, hits, nowSec) {
     if (matJoined.includes('M')) featureItems.push({ icon: 'flavor_matcha', label: '抹茶格' });
     if (matJoined.includes('B')) featureItems.push({ icon: 'flavor_berry', label: '草莓格' });
     if (matJoined.includes('G')) featureItems.push({ icon: 'flavor_gold', label: '镀金格' });
-    if ((lvl.vipQuota || 0) > 0) featureItems.push({ icon: 'cust_vip_cat', label: `VIP×${lvl.vipQuota}` });
+    if ((lvl.vipQuota || 0) > 0) featureItems.push({ icon: 'cust_vip_cat', label: 'VIP客流' });
     if ((lvl.urgentRate || 0) > 0 && featureItems.length < 3) {
       featureItems.push({ icon: 'icon_urgent_flame', label: '急单热潮' });
     }
-    // Always fill up to 3 rich cards (including board miniature when fewer special features exist)
     const showMiniBoard = featureItems.length < 3;
     const displayCards = featureItems.slice(0, showMiniBoard ? 2 : 3);
     if (showMiniBoard) {
@@ -666,26 +718,27 @@ function renderLevelPreviewModal(ctx, metrics, app, hits, nowSec) {
     }
 
     const tileCount = displayCards.length;
-    const tileGap = 10;
-    const tileSize = Math.min(compact ? 52 : 64, Math.floor((f.iw - 28 - tileGap * (tileCount - 1)) / tileCount));
+    const tileGap = 14;
+    const tileSize = Math.min(compact ? 56 : 70, Math.floor((f.iw - 28 - tileGap * (tileCount - 1)) / tileCount));
     const totalRowW = tileCount * tileSize + (tileCount - 1) * tileGap;
     const rowStartX = Math.round(f.ix + (f.iw - totalRowW) * 0.5);
-    const tileTopY = featY + (compact ? 16 : 20);
+    const tileTopY = featY + (compact ? 17 : 20);
 
     for (let i = 0; i < tileCount; i++) {
       const it = displayCards[i];
       const tx = rowStartX + i * (tileSize + tileGap);
       UI.drawKissaCard(c, tx, tileTopY, tileSize, tileSize, {
         tone: 'cream',
+        doubleRecess: true,
         borderColor: '#5A3928',
-        radius: 12,
-        lineWidth: 2.2
+        radius: 13,
+        lineWidth: 2.3
       });
 
       if (it.kind === 'mini_board') {
         BoardRenderer.renderBoardStage(
           c,
-          { x: tx + 4, y: tileTopY + 4, w: tileSize - 8, h: tileSize - 8 },
+          { x: tx + 5, y: tileTopY + 5, w: tileSize - 10, h: tileSize - 10 },
           lvl,
           null,
           app.equippedTheme,
@@ -702,37 +755,37 @@ function renderLevelPreviewModal(ctx, metrics, app, hits, nowSec) {
         c,
         it.label,
         tx + tileSize * 0.5,
-        tileTopY + tileSize + (compact ? 12 : 14),
-        tileSize + 14,
-        compact ? 10.2 : 11.4,
-        8.2,
-        800,
-        '#5A3928',
+        tileTopY + tileSize + (compact ? 13 : 15),
+        tileSize + 18,
+        compact ? 11.8 : 13.2,
+        9.0,
+        900,
+        '#4E2B18',
         'center',
         'middle'
       );
     }
 
-    // --- Section 3: 出战配置 (Selectable 3 Patrons + Starting Tools Preview) ---
+    // --- Section 3: 出战配置 (Selectable 3 Patrons + Double-Framed Starting Tools with '+' Badges, Design 04) ---
     const cfgY = featY + featH + gap + 6;
-    const cfgH = Math.max(96, ctaY - gap - cfgY);
+    const cfgH = Math.max(100, ctaY - gap - cfgY);
     UI.drawKissaCard(c, f.ix, cfgY, f.iw, cfgH, {
       tone: 'recess',
-      topCol: '#FBF1DD',
-      botCol: '#F3E3C4',
+      topCol: '#FBF2DE',
+      botCol: '#F4E5C8',
       borderColor: '#D6BE99',
       radius: 12,
       lineWidth: 1.6
     });
-    drawSectionRibbonTag(c, f.ix + 8, cfgY - 10, '出战配置');
+    drawSectionRibbonTag(c, f.ix + 8, cfgY - 11, '出战配置');
 
     const selectedPatronId = normalizePatronId(saveData.selectedPatron);
     const unlockedPatrons = Array.isArray(saveData.unlockedPatrons) ? saveData.unlockedPatrons : ['mikan'];
 
-    const toolsRowH = compact ? 24 : 28;
-    const patCardY = cfgY + 14;
-    const patCardH = Math.max(52, cfgH - 14 - toolsRowH - 10);
-    const patGap = 6;
+    const toolsRowH = compact ? 30 : 34;
+    const patCardY = cfgY + 16;
+    const patCardH = Math.max(54, cfgH - 16 - toolsRowH - 11);
+    const patGap = 7;
     const patW = Math.floor((f.iw - 16 - patGap * 2) / 3);
 
     for (let i = 0; i < PATRONS.length; i++) {
@@ -744,39 +797,40 @@ function renderLevelPreviewModal(ctx, metrics, app, hits, nowSec) {
       UI.drawKissaCard(c, px, patCardY, patW, patCardH, {
         tone: active ? 'selected' : owned ? 'cream' : 'soft',
         selected: active,
+        goldenGlow: active,
         locked: !owned,
-        radius: 10
+        radius: 11
       });
 
       const avSz = Math.min(54, Math.max(36, Math.round(patCardH * 0.56)));
-      UI.drawUiIcon(c, sprites, p.id, px + patW * 0.5, patCardY + (patCardH - 28) * 0.5 + 3, avSz, owned ? 1 : 0.45);
+      UI.drawUiIcon(c, sprites, p.id, px + patW * 0.5, patCardY + (patCardH - 30) * 0.5 + 3, avSz, owned ? 1 : 0.45);
       if (!owned) {
-        drawLockIcon(c, px + patW - 12, patCardY + 12, 11, { sprites });
+        drawLockIcon(c, px + patW - 13, patCardY + 13, 15, { sprites });
       }
 
       UI.drawFitText(
         c,
         p.name,
         px + patW * 0.5,
-        patCardY + patCardH - (compact ? 19 : 21),
+        patCardY + patCardH - (compact ? 21 : 23),
         patW - 8,
-        10.8,
-        8.2,
+        12.2,
+        9.0,
         900,
-        owned ? '#5A3928' : '#7D6E62',
+        owned ? '#4E2B18' : '#2E231B',
         'center',
         'middle'
       );
       UI.drawFitText(
         c,
-        !owned ? `${p.cost}星解锁` : active ? p.skillName : '点击出战',
+        !owned ? `${p.cost}星解锁` : active ? `(${p.skillName})` : '点击出战',
         px + patW * 0.5,
-        patCardY + patCardH - 8,
-        patW - 8,
-        8.8,
-        7.2,
-        700,
-        active ? '#B85A08' : '#754C36',
+        patCardY + patCardH - 9,
+        patW - 6,
+        9.8,
+        7.8,
+        800,
+        active ? '#A84E06' : owned ? '#754C36' : '#3B2F26',
         'center',
         'middle'
       );
@@ -787,7 +841,7 @@ function renderLevelPreviewModal(ctx, metrics, app, hits, nowSec) {
       );
     }
 
-    // Starting tools strip inside 出战配置 (移位叉×N + 升阶勺×M)
+    // Starting tools strip inside 出战配置 (移位叉×N + 升阶勺×M with Design 04 double-frame & '+' badges!)
     const devToolsLv = clamp(
       Math.floor(Number(saveData.deviceUpgrades && saveData.deviceUpgrades.dev_tools) || 0),
       0,
@@ -797,61 +851,50 @@ function renderLevelPreviewModal(ctx, metrics, app, hits, nowSec) {
       fork: 1,
       spoon: 0
     };
-    const tStripY = patCardY + patCardH + 5;
+    const tStripY = patCardY + patCardH + 6;
     const tHalfW = Math.floor((f.iw - 22) / 2);
 
-    // Fork pill
-    UI.drawKissaCard(c, f.ix + 8, tStripY, tHalfW, toolsRowH, {
-      tone: 'cream',
-      borderColor: '#9E7958',
-      radius: 8,
-      lineWidth: 1.5
-    });
-    UI.drawUiIcon(c, sprites, 'tool_fork', f.ix + 21, tStripY + toolsRowH * 0.5, toolsRowH - 6);
-    UI.drawFitText(
-      c,
-      `移位叉 ×${startTools.fork}`,
-      f.ix + 34,
-      tStripY + toolsRowH * 0.5 + 0.5,
-      tHalfW - 30,
-      10.4,
-      8.2,
-      800,
-      '#5A3928',
-      'left',
-      'middle'
-    );
+    const toolSpecs = [
+      { x: f.ix + 8, icon: 'tool_fork', label: `移位叉 ×${startTools.fork}`, badgeTone: 'green' },
+      { x: f.ix + 8 + tHalfW + 6, icon: 'tool_spoon', label: `升阶勺 ×${startTools.spoon}`, badgeTone: 'gold' }
+    ];
+    for (let ti = 0; ti < toolSpecs.length; ti++) {
+      const ts = toolSpecs[ti];
+      UI.drawKissaCard(c, ts.x, tStripY, tHalfW, toolsRowH, {
+        tone: 'cream',
+        doubleRecess: true,
+        borderColor: '#5A3928',
+        radius: 10,
+        lineWidth: 2.0
+      });
+      const icS = toolsRowH - 6;
+      const icCx = ts.x + 22;
+      const icCy = tStripY + toolsRowH * 0.5;
+      UI.drawUiIcon(c, sprites, ts.icon, icCx, icCy, icS);
+      drawMiniPlusCornerBadge(c, icCx + icS * 0.35, icCy + icS * 0.24, 5.4, ts.badgeTone);
+      UI.drawFitText(
+        c,
+        ts.label,
+        ts.x + 42,
+        tStripY + toolsRowH * 0.5 + 0.5,
+        tHalfW - 46,
+        12.4,
+        9.4,
+        900,
+        '#4E2B18',
+        'left',
+        'middle'
+      );
+    }
 
-    // Spoon pill
-    const spX = f.ix + 8 + tHalfW + 6;
-    UI.drawKissaCard(c, spX, tStripY, tHalfW, toolsRowH, {
-      tone: 'cream',
-      borderColor: '#9E7958',
-      radius: 8,
-      lineWidth: 1.5
-    });
-    UI.drawUiIcon(c, sprites, 'tool_spoon', spX + 13, tStripY + toolsRowH * 0.5, toolsRowH - 6);
-    UI.drawFitText(
-      c,
-      `升阶勺 ×${startTools.spoon}`,
-      spX + 26,
-      tStripY + toolsRowH * 0.5 + 0.5,
-      tHalfW - 30,
-      10.4,
-      8.2,
-      800,
-      '#5A3928',
-      'left',
-      'middle'
-    );
-
-    // --- Footer Primary 3D CTA Button ("开始营业") ---
-    const ctaW = Math.min(246, f.iw - 12);
+    // --- Footer Primary 3D CTA Button ("开始营业", Design 04) ---
+    const ctaW = Math.min(254, f.iw - 10);
     const ctaX = Math.round(f.ix + (f.iw - ctaW) * 0.5);
     UI.drawPillButton(c, ctaX, ctaY, ctaW, ctaH, {
       variant: 'primary',
+      glossDot: true,
       label: '开始营业',
-      fontSize: 18,
+      fontSize: 21.5,
       radius: ctaH * 0.5,
       pressed: isPressed(app, 'preview_start_btn')
     });
@@ -908,23 +951,23 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
   const chapName = getChapterName(lvl.chapter);
 
   const f = beginModalFrame(c, metrics, app, {
-    maxW: 420,
-    desiredH: 520,
-    extraTopHeadroom: 32,
+    maxW: 426,
+    desiredH: 536,
+    extraTopHeadroom: 36,
     dismissOnOutside: false,
     plaque: false,
     withRivets: false,
-    sheetTopInset: 36,
-    sheetBottomPad: 86
+    sheetTopInset: 38,
+    sheetBottomPad: 92
   });
 
   try {
-    // 1. Arching 3 Large Stars above top border with staggered pop animation (Design 05)
+    // 1. Arching 3 Large Glossy Illustrated Stars above top border with golden glow & sparkles (Design 05)
     const revealT = Number.isFinite(res.elapsedRevealSec) ? res.elapsedRevealSec : 1.0;
     const starConfigs = [
-      { idx: 1, dx: -60, dy: -7, r: 26, rot: -0.18 },
-      { idx: 2, dx: 0, dy: -20, r: 32, rot: 0 },
-      { idx: 3, dx: 60, dy: -7, r: 26, rot: 0.18 }
+      { idx: 1, dx: -64, dy: -15, r: 28, rot: -0.18 },
+      { idx: 2, dx: 0, dy: -29, r: 36, rot: 0 },
+      { idx: 3, dx: 64, dy: -15, r: 28, rot: 0.18 }
     ];
     for (let i = 0; i < starConfigs.length; i++) {
       const sc = starConfigs[i];
@@ -935,31 +978,43 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
       const sy = f.cardY + sc.dy;
       c.save();
       try {
+        if (earned && localT > 0.2) {
+          const glowR = sc.r * 1.65 * pop;
+          const aura = c.createRadialGradient(sx, sy, sc.r * 0.25, sx, sy, glowR);
+          aura.addColorStop(0, 'rgba(255, 232, 128, 0.72)');
+          aura.addColorStop(0.55, 'rgba(255, 198, 72, 0.28)');
+          aura.addColorStop(1, 'rgba(255, 198, 72, 0)');
+          c.fillStyle = aura;
+          c.beginPath();
+          c.arc(sx, sy, glowR, 0, Math.PI * 2);
+          c.fill();
+        }
         c.translate(sx, sy);
         c.rotate(sc.rot);
-        UI.drawStarIcon(c, 0, 0, sc.r * pop, earned && localT > 0.05, sprites);
+        UI.drawStarIcon(c, 0, 0, sc.r * pop, earned && localT > 0.05, { sprites });
       } finally {
         c.restore();
       }
       if (earned && localT > 0.5) {
-        drawSparkleStar(c, sx + sc.r * 0.72, sy - sc.r * 0.55, 5.5, 0.9);
+        drawSparkleStar(c, sx + sc.r * 0.85, sy - sc.r * 0.58, 7.2, 0.95);
+        if (sc.idx === 1) drawSparkleStar(c, sx + sc.r * 0.95, sy - sc.r * 0.92, 5.2, 0.88);
       }
     }
 
     // Decorative wooden corner paw-print stamps (Design 05)
-    UI.drawUiIcon(c, sprites, 'icon_paw_marker', f.cardX + 20, f.cardY + 18, 16, 0.38);
-    UI.drawUiIcon(c, sprites, 'icon_paw_marker', f.cardX + f.cardW - 20, f.cardY + 18, 16, 0.38);
+    UI.drawUiIcon(c, sprites, 'icon_paw_marker', f.cardX + 20, f.cardY + 18, 17, 0.42);
+    UI.drawUiIcon(c, sprites, 'icon_paw_marker', f.cardX + f.cardW - 20, f.cardY + 18, 17, 0.42);
 
     // 2. Festive Ribbon Banner across top ("营业大成功！" / "顺利过关！" / "继续加油！")
-    const ribW = Math.min(f.cardW + 18, f.width - 14);
-    const ribH = 62;
+    const ribW = Math.min(f.cardW + 22, f.width - 12);
+    const ribH = 68;
     const ribX = Math.round(f.cardX + (f.cardW - ribW) * 0.5);
-    const ribY = f.cardY + 1;
+    const ribY = f.cardY + 2;
     const ribImg = getSprite(sprites, 'result_ribbon');
     if (ribImg) {
       UI.drawContainImage(c, ribImg, ribX + ribW * 0.5, ribY + ribH * 0.5, ribW, ribH);
     } else {
-      UI.drawKissaCard(c, ribX + 16, ribY + 8, ribW - 32, 42, {
+      UI.drawKissaCard(c, ribX + 16, ribY + 8, ribW - 32, 46, {
         tone: 'wood',
         topCol: '#E66844',
         botCol: '#C5462B',
@@ -976,14 +1031,14 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
         : res.cleared
         ? '顺利过关！'
         : '继续加油！';
-    UI.drawOutlinedText(c, ribbonTitle, f.cardX + f.cardW * 0.5, ribY + ribH * 0.45, {
-      size: 23,
-      minSize: 16,
+    UI.drawOutlinedText(c, ribbonTitle, f.cardX + f.cardW * 0.5, ribY + ribH * 0.41, {
+      size: 26,
+      minSize: 18,
       weight: 900,
       fill: '#FFF4C8',
-      stroke: '#5A3928',
-      strokeWidth: 4.5,
-      shadowOffsetY: 1.8,
+      stroke: '#4A230D',
+      strokeWidth: 4.8,
+      shadowOffsetY: 2.0,
       maxWidth: ribW - 76
     });
 
@@ -1006,51 +1061,51 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
       f.ix + f.iw * 0.5,
       subY,
       f.iw - 12,
-      14.5,
-      10.2,
+      16.2,
+      11.5,
       900,
-      '#5A3928',
+      '#4E2B18',
       'center',
       'middle'
     );
 
     // 4. Score Hero Box + Cheering Patron Portrait (Design 05)
-    const heroY = subY + 16;
-    const heroH = Math.min(92, Math.max(74, Math.floor(f.sheetH * 0.28)));
+    const heroY = subY + 17;
+    const heroH = Math.min(96, Math.max(78, Math.floor(f.sheetH * 0.28)));
     UI.drawKissaCard(c, f.ix, heroY, f.iw, heroH, {
       tone: 'recess',
       topCol: '#F7E7C8',
-      botCol: '#EED6AE',
+      botCol: '#ECD3A6',
       borderColor: '#C5A982',
       radius: 12,
       lineWidth: 1.8
     });
 
-    // Top-left overlapping badge ("新纪录" / "营业达标" / "目标未达标" / "未达1星线")
+    // Top-left overlapping badge ("· 新纪录 ·" / "营业达标" / "目标未达标" / "未达1星线")
     if (res.isNewBest && (res.score || 0) > 0 && !res.goalUnmet) {
-      UI.drawTagBadge(c, f.ix + 8, heroY - 9, 64, 21, '新纪录', 'urgent', 10.5);
+      UI.drawTagBadge(c, f.ix + 8, heroY - 10, 76, 23, '· 新纪录 ·', 'urgent', 12.0);
     } else if (res.cleared) {
-      UI.drawTagBadge(c, f.ix + 8, heroY - 9, 68, 21, '营业达标', 'green', 10.0);
+      UI.drawTagBadge(c, f.ix + 8, heroY - 10, 76, 23, '营业达标', 'green', 11.4);
     } else if (res.goalUnmet) {
-      UI.drawTagBadge(c, f.ix + 8, heroY - 9, 80, 21, '目标未达标', 'urgent', 9.8);
+      UI.drawTagBadge(c, f.ix + 8, heroY - 10, 84, 23, '目标未达标', 'urgent', 10.8);
     } else {
-      UI.drawTagBadge(c, f.ix + 8, heroY - 9, 76, 21, '未达1星线', 'wood', 9.8);
+      UI.drawTagBadge(c, f.ix + 8, heroY - 10, 84, 23, '未达1星线', 'wood', 11.0);
     }
 
     // Animated counting score
     const countT = easeOutCubic(clamp(revealT / 0.72, 0, 1));
     const shownScore = Math.round((res.score || 0) * countT);
-    const patronSz = Math.min(heroH + 6, 86);
-    const scoreAreaW = Math.max(100, f.iw - patronSz - 16);
-    UI.drawOutlinedText(c, formatNum(shownScore), f.ix + 14 + scoreAreaW * 0.45, heroY + heroH * 0.56, {
-      size: 36,
-      minSize: 22,
+    const patronSz = Math.min(heroH + 8, 92);
+    const scoreAreaW = Math.max(104, f.iw - patronSz - 12);
+    UI.drawOutlinedText(c, formatNum(shownScore), f.ix + 12 + scoreAreaW * 0.46, heroY + heroH * 0.57, {
+      size: 42,
+      minSize: 24,
       weight: 900,
-      fill: '#C48120',
-      stroke: '#5A3928',
+      fill: '#B6721A',
+      stroke: '#4A2610',
       strokeWidth: 2.2,
-      shadowOffsetY: 1.0,
-      maxWidth: scoreAreaW - 8
+      shadowOffsetY: 1.2,
+      maxWidth: scoreAreaW - 6
     });
 
     const activePatronId = normalizePatronId(saveData.selectedPatron);
@@ -1058,19 +1113,30 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
       c,
       sprites,
       activePatronId,
-      f.ix + f.iw - patronSz * 0.52 - 4,
-      heroY + heroH * 0.52,
+      f.ix + f.iw - patronSz * 0.50 - 4,
+      heroY + heroH * 0.50,
       patronSz
     );
 
-    // 5. Inner Detailed Stats Sheet (Double warm-brown frame, 3 rows + M2 diagnostics)
+    // 5. Inner Detailed Stats Sheet (Design 05 double warm-brown wooden frame around ivory card, 3 rows + M2 diagnostics)
     const statsY = heroY + heroH + 10;
-    const statsH = Math.max(106, f.sheetY + f.sheetH - 12 - statsY);
+    const statsH = Math.max(112, f.sheetY + f.sheetH - 10 - statsY);
     UI.drawKissaCard(c, f.ix, statsY, f.iw, statsH, {
+      tone: 'wood',
+      topCol: '#9B6844',
+      botCol: '#7B4D2F',
+      borderColor: '#4E2C1A',
+      radius: 14,
+      lineWidth: 2.4
+    });
+    const stIn = 5;
+    UI.drawKissaCard(c, f.ix + stIn, statsY + stIn, f.iw - stIn * 2, statsH - stIn * 2, {
       tone: 'cream',
-      borderColor: '#5A3928',
-      radius: 13,
-      lineWidth: 2.6
+      topCol: '#FFFDF7',
+      botCol: '#FAF0DC',
+      borderColor: '#4E2C1A',
+      radius: 10,
+      lineWidth: 1.8
     });
 
     const maxCombo = Math.max(0, Math.floor(Number(res.maxCombo) || 0));
@@ -1102,8 +1168,9 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
     const diag = res.diagnostics && typeof res.diagnostics === 'object' ? res.diagnostics : null;
     const hasDiagBlock = Boolean(diag && statsH >= 146);
     const hasSubNote = statsH >= 122;
-    const footerH = hasDiagBlock ? 42 : hasSubNote ? 22 : 8;
-    const rowBlockH = statsH - footerH;
+    const innerTop = statsY + stIn + 3;
+    const footerH = hasDiagBlock ? 40 : hasSubNote ? 22 : 6;
+    const rowBlockH = statsH - stIn * 2 - footerH;
     const rowH = rowBlockH / 3;
     const statRows = [
       {
@@ -1122,7 +1189,7 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
 
     for (let i = 0; i < statRows.length; i++) {
       const row = statRows[i];
-      const ry = statsY + 4 + i * rowH;
+      const ry = innerTop + i * rowH;
       const rCy = ry + rowH * 0.5;
       if (i > 0) {
         c.save();
@@ -1130,67 +1197,72 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
           c.strokeStyle = 'rgba(138, 86, 52, 0.25)';
           c.lineWidth = 1.2;
           c.beginPath();
-          c.moveTo(f.ix + 12, ry);
-          c.lineTo(f.ix + f.iw - 12, ry);
+          c.moveTo(f.ix + 16, ry);
+          c.lineTo(f.ix + f.iw - 16, ry);
           c.stroke();
         } finally {
           c.restore();
         }
       }
 
-      UI.drawFitText(c, row.label, f.ix + 14, rCy, f.iw * 0.48, 13.0, 10.0, 800, '#5A3928', 'left', 'middle');
+      UI.drawFitText(c, row.label, f.ix + 18, rCy, f.iw * 0.48, 15.2, 11.2, 900, '#4E2B18', 'left', 'middle');
 
       if (row.type === 'combo' && row.extra) {
+        const extraFontSz = 15.2;
+        c.font = UI.fontStr(extraFontSz, 900);
+        const extraW = Math.min(72, Math.ceil(c.measureText(row.extra).width));
         UI.drawFitText(
           c,
           row.extra,
-          f.ix + f.iw - 14,
+          f.ix + f.iw - 18,
           rCy,
-          64,
-          13.0,
-          10.0,
+          72,
+          extraFontSz,
+          11.2,
           900,
-          '#5A3928',
+          '#4E2B18',
           'right',
           'middle'
         );
-        UI.drawOutlinedText(c, row.val, f.ix + f.iw - 66, rCy, {
-          size: 13.5,
-          minSize: 10,
+        UI.drawOutlinedText(c, row.val, f.ix + f.iw - 18 - extraW - 2, rCy, {
+          size: 16.0,
+          minSize: 11.5,
           weight: 900,
-          fill: '#FFB838',
-          stroke: '#5A3928',
-          strokeWidth: 2.6,
-          shadowOffsetY: 0,
+          fill: '#FFC43C',
+          stroke: '#4E2610',
+          strokeWidth: 3.0,
+          shadowOffsetY: 0.6,
           align: 'right'
         });
       } else if (row.type === 'dust') {
+        const valFontSz = 16.2;
+        c.font = UI.fontStr(valFontSz, 900);
+        const measuredW = Math.min(84, Math.ceil(c.measureText(row.val).width));
         UI.drawFitText(
           c,
           row.val,
-          f.ix + f.iw - 14,
+          f.ix + f.iw - 18,
           rCy,
-          76,
-          14.0,
-          10.5,
+          84,
+          valFontSz,
+          11.5,
           900,
-          '#5A3928',
+          '#4E2B18',
           'right',
           'middle'
         );
-        const valApproxW = Math.min(62, row.val.length * 9.2 + 8);
-        UI.drawStarIcon(c, f.ix + f.iw - 14 - valApproxW - 8, rCy, 7.2, true, sprites);
+        UI.drawStarIcon(c, f.ix + f.iw - 18 - measuredW - 12, rCy, 8.8, true, { sprites });
       } else {
         UI.drawFitText(
           c,
           row.val,
-          f.ix + f.iw - 14,
+          f.ix + f.iw - 18,
           rCy,
-          110,
-          14.0,
-          10.5,
+          116,
+          16.2,
+          11.5,
           900,
-          '#5A3928',
+          '#4E2B18',
           'right',
           'middle'
         );
@@ -1230,10 +1302,10 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
         c,
         diag && diag.tip ? diag.tip : parts.join(' · '),
         f.ix + f.iw * 0.5,
-        statsY + statsH - 11,
-        f.iw - 20,
-        9.4,
-        7.6,
+        statsY + statsH - stIn - 10,
+        f.iw - 24,
+        10.2,
+        8.2,
         700,
         '#8A5A32',
         'center',
@@ -1245,7 +1317,7 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
     const nextId = getNextLevelId(res.levelId);
     const nextUnlocked = Boolean(res.cleared && nextId && isLevelUnlocked(nextId, saveData.levelStars).unlocked);
     const barTop = f.sheetY + f.sheetH + 8;
-    const primaryH = 38;
+    const primaryH = 42;
     const btnGap = 10;
     const halfW = Math.floor((f.sheetW - btnGap) / 2);
 
@@ -1254,14 +1326,14 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
       variant: 'wood',
       icon: 'icon_shop',
       sprites,
-      iconSize: 17,
+      iconSize: 19,
       label: '星夜小铺',
-      fontSize: 13.2,
+      fontSize: 15.2,
       radius: primaryH * 0.5,
       pressed: isPressed(app, 'result_shop_btn')
     });
     if (typeof app.hasAffordableShopItem === 'function' && app.hasAffordableShopItem()) {
-      drawRedDot(c, f.sheetX + halfW - 10, barTop + 8, 4.6);
+      drawRedDot(c, f.sheetX + halfW - 10, barTop + 8, 4.8);
     }
     hits.add('result_shop_btn', f.sheetX, barTop, halfW, primaryH, () => app.openShopFromResult());
 
@@ -1273,14 +1345,14 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
       textOutline: true,
       glossDot: isCampaignRes && nextUnlocked,
       label: isCampaignRes && res.cleared && nextId ? `下一关 ${nextId}` : '返回大厅',
-      fontSize: 13.6,
+      fontSize: 15.0,
       radius: primaryH * 0.5,
       pressed: isPressed(app, 'result_next_btn')
     });
     hits.add('result_next_btn', nextX, barTop, halfW, primaryH, () => app.onResultNext());
 
     // Bottom compact row: 重玩/再试 + 激励视频复活/双倍星尘 (v0.13 M4)
-    const retryH = 26;
+    const retryH = 28;
     const retryY = barTop + primaryH + 6;
     const retryLabel =
       resMode === 'daily'
@@ -1303,10 +1375,10 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
         textOutline: true,
         icon: 'icon_restart',
         sprites,
-        iconSize: 12,
+        iconSize: 13,
         label: retryLabel,
-        fontSize: 10.8,
-        radius: 13,
+        fontSize: 12.2,
+        radius: 14,
         pressed: isPressed(app, 'result_retry_btn')
       });
       hits.add('result_retry_btn', f.sheetX, retryY, leftW, retryH, () => app.startLevel(res.levelId));
@@ -1320,10 +1392,10 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
         textOutline: true,
         icon: canRevive ? 'icon_clock' : 'icon_star_coin',
         sprites,
-        iconSize: 13,
+        iconSize: 14,
         label: adLabel,
-        fontSize: 10.8,
-        radius: 13,
+        fontSize: 12.2,
+        radius: 14,
         pressed: isPressed(app, adHitId)
       });
       hits.add(adHitId, f.sheetX + leftW + rowGap, retryY, rightW, retryH, () => {
@@ -1331,17 +1403,17 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
         else if (canDouble && typeof app.onDoubleDustWithAd === 'function') app.onDoubleDustWithAd();
       });
     } else {
-      const retryW = Math.min(138, f.sheetW - 24);
+      const retryW = Math.min(148, f.sheetW - 24);
       const retryX = Math.round(f.cardX + (f.cardW - retryW) * 0.5);
       UI.drawPillButton(c, retryX, retryY, retryW, retryH, {
         variant: res.cleared ? 'dark' : 'primary',
         textOutline: true,
         icon: 'icon_restart',
         sprites,
-        iconSize: 13,
+        iconSize: 14,
         label: retryLabel,
-        fontSize: 11.4,
-        radius: 13,
+        fontSize: 13.0,
+        radius: 14,
         pressed: isPressed(app, 'result_retry_btn')
       });
       hits.add('result_retry_btn', retryX, retryY, retryW, retryH, () => app.startLevel(res.levelId));
@@ -1387,21 +1459,22 @@ function renderShopModal(ctx, metrics, app, hits) {
   const activeTab = app.activeShopTab || 'catcakes';
 
   const f = beginModalFrame(c, metrics, app, {
-    maxW: 452,
-    desiredH: 576,
+    maxW: 454,
+    desiredH: 586,
     dismissOnOutside: true,
+    showTopCurrency: true,
     awning: true,
     title: activeTab === 'themes' ? '烤盘主题' : activeTab === 'research' ? '星夜茶研所' : '星夜小铺',
-    sheetTopInset: 66,
+    sheetTopInset: 78,
     sheetBottomPad: 12
   });
 
   try {
     drawCloseButton(c, f, hits, app);
 
-    // 5 Folder Tabs seamlessly docked to top edge of cream parchment (Design 06 + M3 茶研所)
-    const tabY = f.sheetY - 27;
-    const tabH = 29;
+    // 5 Folder Tabs seamlessly docked to top edge of cream parchment with clean clearance under awning (Design 06 + M3 茶研所)
+    const tabY = f.sheetY - 31;
+    const tabH = 33;
     const tabs = [
       { id: 'catcakes', hitId: 'shop_tab_catcakes', label: '猫饼', redDot: app.hasAffordableShopTab && app.hasAffordableShopTab('catcakes') },
       { id: 'devices', hitId: 'shop_tab_devices', label: '设备', redDot: app.hasAffordableShopTab && app.hasAffordableShopTab('devices') },
@@ -1420,42 +1493,13 @@ function renderShopModal(ctx, metrics, app, hits) {
       hits,
       app,
       (tabId) => app.setShopTab(tabId),
-      { gap: 3, fontSize: 10.6 }
+      { gap: 3, fontSize: 11.4 }
     );
 
-    // Compact balance strip at top of parchment so player sees stardust live while buying
-    const balBarY = f.sheetY + 8;
-    const balBarH = 24;
-    const chipW = 92;
-    UI.drawFitText(
-      c,
-      activeTab === 'catcakes'
-        ? '永久提升各阶猫饼上菜基础分'
-        : activeTab === 'devices'
-        ? '后厨设备升级全关卡永久生效'
-        : activeTab === 'patrons'
-        ? '解锁看板店员获得专属技能'
-        : activeTab === 'research'
-        ? '解锁无限加成、顾客手记与台面徽章'
-        : '随心切换局内烘焙烤盘外观',
-      f.ix,
-      balBarY + balBarH * 0.5,
-      f.iw - chipW - 8,
-      10.4,
-      8.2,
-      700,
-      '#8A5A32',
-      'left',
-      'middle'
-    );
-    UI.drawCurrencyChip(c, f.ix + f.iw - chipW, balBarY, chipW, balBarH, sprites, 'icon_star_coin', formatNum(bank), {
-      fontSize: 11.4
-    });
-
-    const footerH = 20;
-    const footerY = f.sheetY + f.sheetH - footerH - 4;
-    const bodyY = balBarY + balBarH + 6;
-    const bodyH = Math.max(180, footerY - 6 - bodyY);
+    const footerH = 22;
+    const footerY = f.sheetY + f.sheetH - footerH - 5;
+    const bodyY = f.sheetY + 10;
+    const bodyH = Math.max(190, footerY - 6 - bodyY);
     app.modalScrollRect = null;
     app.modalMaxScroll = 0;
 
@@ -1463,9 +1507,9 @@ function renderShopModal(ctx, metrics, app, hits) {
     const anim = f.anim;
 
     if (activeTab === 'catcakes') {
-      const cardGap = 8;
-      // Fit 4 full cards comfortably on 390x844 so C1..C4 are always visible at scroll=0
-      const cardH = clamp(Math.floor((bodyH - cardGap * 3) / 4.25), 72, 86);
+      const cardGap = 9;
+      // Fit 4 lush full cards cleanly edge-to-edge on 390x844 (Design 06 exact 4-card composition!)
+      const cardH = clamp(Math.floor((bodyH - cardGap * 3) / 4), 78, 108);
       const { scrollY, maxScroll, contentH } = setupListScroll(
         app,
         f.ix,
@@ -1476,7 +1520,7 @@ function renderShopModal(ctx, metrics, app, hits) {
         cardH,
         cardGap
       );
-      const listW = f.iw - (maxScroll > 0 ? 10 : 0);
+      const listW = f.iw - (maxScroll > 0 ? 11 : 0);
 
       c.save();
       try {
@@ -1503,32 +1547,35 @@ function renderShopModal(ctx, metrics, app, hits) {
           UI.drawKissaCard(c, f.ix, cy, listW, cardH, {
             tone: isMax ? 'equipped' : 'cream',
             locked: !isUnlocked,
-            radius: 13
+            radius: 13,
+            lineWidth: 2.5
           });
 
           // Left thumbnail slot
-          const slotS = Math.min(58, cardH - 16);
+          const slotS = Math.min(64, cardH - 14);
           const slotX = f.ix + 8;
           const slotY = Math.round(cy + (cardH - slotS) * 0.5);
           UI.drawKissaCard(c, slotX, slotY, slotS, slotS, {
             tone: 'recess',
             locked: !isUnlocked,
-            borderColor: isUnlocked ? '#D5BD98' : '#9B9084',
+            topCol: isUnlocked ? '#FAF0DC' : '#968D80',
+            botCol: isUnlocked ? '#EFE0C4' : '#80776A',
+            borderColor: isUnlocked ? '#D5BD98' : '#6A6156',
             radius: 10,
             lineWidth: 1.5
           });
-          UI.drawCatcakeSprite(c, sprites, cake.tier, slotX + slotS * 0.5, slotY + slotS * 0.5, slotS * 0.78, {
+          UI.drawCatcakeSprite(c, sprites, cake.tier, slotX + slotS * 0.5, slotY + slotS * 0.5, slotS * 0.82, {
             happy: isUnlocked && isMax,
             silhouette: false,
-            alpha: isUnlocked ? 1 : 0.62
+            alpha: isUnlocked ? 1 : 0.72
           });
           if (!isUnlocked) {
-            drawLockIcon(c, slotX + slotS - 9, slotY + slotS - 9, 13, { sprites });
+            drawLockIcon(c, slotX + slotS - 11, slotY + slotS - 11, 19, { sprites });
           }
 
           // Right action button (Design 06)
-          const btnW = Math.min(82, Math.max(70, Math.round(listW * 0.25)));
-          const btnH = 34;
+          const btnW = Math.min(92, Math.max(76, Math.round(listW * 0.27)));
+          const btnH = 39;
           const btnX = f.ix + listW - 8 - btnW;
           const btnY = Math.round(cy + (cardH - btnH) * 0.5);
           const hitId = `shop_buy_catcake_${cake.tier}`;
@@ -1536,12 +1583,13 @@ function renderShopModal(ctx, metrics, app, hits) {
           UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
             variant: !isUnlocked ? 'disabled' : isMax ? 'equipped' : canBuy ? 'primary' : 'wood',
             disabled: !isUnlocked || (!isMax && !canBuy),
+            glossDot: isUnlocked && !isMax && canBuy,
             icon: !isUnlocked ? 'icon_lock' : isMax ? '' : 'icon_star_coin',
             sprites,
-            iconSize: 15,
+            iconSize: !isUnlocked ? 17 : 20,
             label: !isUnlocked ? '未解锁' : isMax ? '已满级' : String(cost),
-            fontSize: !isUnlocked || isMax ? 11.4 : 13.6,
-            radius: 12,
+            fontSize: !isUnlocked || isMax ? 13.0 : 16.0,
+            radius: 13,
             pressed: isPressed(app, hitId)
           });
 
@@ -1550,55 +1598,55 @@ function renderShopModal(ctx, metrics, app, hits) {
             app.buyCatcakeUpgrade(tierCopy)
           );
 
-          // Middle info column: Name + Lv badge + 4-segment bar + boost text
+          // Middle info column: Name + Lv badge + 4-segment bar + boost text (Design 06)
           const tx = slotX + slotS + 9;
-          const tw = Math.max(72, btnX - 8 - tx);
+          const tw = Math.max(74, btnX - 8 - tx);
 
           UI.drawFitText(
             c,
             cake.name,
             tx,
-            cy + Math.round(cardH * 0.25),
+            cy + Math.round(cardH * 0.24),
             tw,
-            13.2,
-            10.0,
+            15.8,
+            11.4,
             900,
-            isUnlocked ? '#5A3928' : '#6A5E53',
+            isUnlocked ? '#4E2B18' : '#3C322A',
             'left',
             'middle'
           );
 
           const lvY = cy + Math.round(cardH * 0.53);
-          const lvPillW = 46;
+          const lvPillW = 50;
           UI.drawTagBadge(
             c,
             tx,
-            lvY - 8.5,
+            lvY - 9.5,
             lvPillW,
-            17,
+            19,
             isUnlocked ? `Lv.${lv}/4` : '未解锁',
-            isUnlocked ? 'wood' : 'soft',
-            8.8
+            isUnlocked ? 'wood' : 'cocoa',
+            10.6
           );
           const barX = tx + lvPillW + 6;
-          const barW = Math.max(46, Math.min(82, tw - lvPillW - 6));
-          UI.drawSegmentedBar(c, barX, lvY - 6.5, barW, 13, isUnlocked ? lv : 0, 4);
+          const barW = Math.max(48, Math.min(86, tw - lvPillW - 6));
+          UI.drawSegmentedBar(c, barX, lvY - 7.5, barW, 15, isUnlocked ? lv : 0, 4);
 
           const subCopy = !isUnlocked
-            ? `到达第 ${cake.unlockLevel} 关解锁研发`
+            ? `通关第 ${cake.unlockLevel} 关解锁研发`
             : isMax
             ? `已满级 · 菜价 ${curP} 分 (+60%)`
-            : `得分 +${lv * 15}% → +${(lv + 1) * 15}%（${curP}分）`;
+            : `得分 +${lv * 15}% → +${(lv + 1) * 15}%`;
           UI.drawFitText(
             c,
             subCopy,
             tx,
-            cy + Math.round(cardH * 0.81),
+            cy + Math.round(cardH * 0.82),
             tw,
-            9.8,
-            7.8,
-            700,
-            isUnlocked ? '#754C36' : '#7A6F63',
+            12.0,
+            9.2,
+            800,
+            isUnlocked ? '#5A3928' : '#43382F',
             'left',
             'middle'
           );
@@ -1612,7 +1660,7 @@ function renderShopModal(ctx, metrics, app, hits) {
           c,
           f.ix + f.iw - 6,
           bodyY + 2,
-          5,
+          5.5,
           bodyH - 4,
           scrollY / maxScroll,
           bodyH / Math.max(bodyH, contentH)
@@ -1625,10 +1673,10 @@ function renderShopModal(ctx, metrics, app, hits) {
         f.ix + f.iw * 0.5,
         footerY + footerH * 0.5,
         f.iw - 8,
-        10.2,
-        8.2,
-        700,
-        '#754C36',
+        12.2,
+        9.4,
+        800,
+        '#5A3928',
         'center',
         'middle'
       );
@@ -1636,8 +1684,8 @@ function renderShopModal(ctx, metrics, app, hits) {
     }
 
     if (activeTab === 'devices') {
-      const cardGap = 8;
-      const cardH = clamp(Math.floor((bodyH - cardGap * (SHOP_DEVICES.length - 1)) / SHOP_DEVICES.length), 74, 92);
+      const cardGap = 9;
+      const cardH = clamp(Math.floor((bodyH - cardGap * (SHOP_DEVICES.length - 1)) / SHOP_DEVICES.length), 78, 96);
       const { scrollY, maxScroll, contentH } = setupListScroll(
         app,
         f.ix,
@@ -1648,7 +1696,7 @@ function renderShopModal(ctx, metrics, app, hits) {
         cardH,
         cardGap
       );
-      const listW = f.iw - (maxScroll > 0 ? 10 : 0);
+      const listW = f.iw - (maxScroll > 0 ? 11 : 0);
 
       c.save();
       try {
@@ -1669,10 +1717,11 @@ function renderShopModal(ctx, metrics, app, hits) {
 
           UI.drawKissaCard(c, f.ix, cy, listW, cardH, {
             tone: isMax ? 'equipped' : 'cream',
-            radius: 13
+            radius: 13,
+            lineWidth: 2.5
           });
 
-          const slotS = Math.min(58, cardH - 16);
+          const slotS = Math.min(64, cardH - 14);
           const slotX = f.ix + 8;
           const slotY = Math.round(cy + (cardH - slotS) * 0.5);
           UI.drawKissaCard(c, slotX, slotY, slotS, slotS, {
@@ -1681,10 +1730,10 @@ function renderShopModal(ctx, metrics, app, hits) {
             radius: 10,
             lineWidth: 1.5
           });
-          UI.drawUiIcon(c, sprites, dev.icon, slotX + slotS * 0.5, slotY + slotS * 0.5, slotS * 0.78);
+          UI.drawUiIcon(c, sprites, dev.icon, slotX + slotS * 0.5, slotY + slotS * 0.5, slotS * 0.80);
 
-          const btnW = Math.min(82, Math.max(70, Math.round(listW * 0.25)));
-          const btnH = 34;
+          const btnW = Math.min(92, Math.max(76, Math.round(listW * 0.27)));
+          const btnH = 39;
           const btnX = f.ix + listW - 8 - btnW;
           const btnY = Math.round(cy + (cardH - btnH) * 0.5);
           const hitId = `shop_buy_${dev.id}`;
@@ -1692,12 +1741,13 @@ function renderShopModal(ctx, metrics, app, hits) {
           UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
             variant: isMax ? 'equipped' : canBuy ? 'primary' : 'wood',
             disabled: !isMax && !canBuy,
+            glossDot: !isMax && canBuy,
             icon: isMax ? '' : 'icon_star_coin',
             sprites,
-            iconSize: 15,
+            iconSize: 20,
             label: isMax ? '已满级' : String(cost),
-            fontSize: isMax ? 11.4 : 13.6,
-            radius: 12,
+            fontSize: isMax ? 13.0 : 16.0,
+            radius: 13,
             pressed: isPressed(app, hitId)
           });
 
@@ -1707,27 +1757,27 @@ function renderShopModal(ctx, metrics, app, hits) {
           );
 
           const tx = slotX + slotS + 9;
-          const tw = Math.max(72, btnX - 8 - tx);
+          const tw = Math.max(74, btnX - 8 - tx);
 
-          UI.drawFitText(c, dev.name, tx, cy + Math.round(cardH * 0.24), tw, 13.0, 9.8, 900, '#5A3928', 'left', 'middle');
+          UI.drawFitText(c, dev.name, tx, cy + Math.round(cardH * 0.24), tw, 15.6, 11.2, 900, '#4E2B18', 'left', 'middle');
 
-          const lvY = cy + Math.round(cardH * 0.50);
-          const lvPillW = 46;
-          UI.drawTagBadge(c, tx, lvY - 8, lvPillW, 16, `Lv.${lv}/${dev.maxLv}`, 'wood', 8.6);
+          const lvY = cy + Math.round(cardH * 0.52);
+          const lvPillW = 50;
+          UI.drawTagBadge(c, tx, lvY - 9.5, lvPillW, 19, `Lv.${lv}/${dev.maxLv}`, 'wood', 10.6);
           const barX = tx + lvPillW + 6;
-          const barW = Math.max(46, Math.min(80, tw - lvPillW - 6));
-          UI.drawSegmentedBar(c, barX, lvY - 6, barW, 12, lv, dev.maxLv);
+          const barW = Math.max(48, Math.min(86, tw - lvPillW - 6));
+          UI.drawSegmentedBar(c, barX, lvY - 7.5, barW, 15, lv, dev.maxLv);
 
           UI.drawFitText(
             c,
             dev.getDesc(lv),
             tx,
-            cy + Math.round(cardH * 0.80),
+            cy + Math.round(cardH * 0.82),
             tw,
-            9.6,
-            7.6,
-            700,
-            '#754C36',
+            11.8,
+            9.0,
+            800,
+            '#5A3928',
             'left',
             'middle'
           );
@@ -1737,7 +1787,7 @@ function renderShopModal(ctx, metrics, app, hits) {
       }
 
       if (maxScroll > 0) {
-        UI.drawScrollBar(c, f.ix + f.iw - 6, bodyY + 2, 5, bodyH - 4, scrollY / maxScroll, bodyH / Math.max(bodyH, contentH));
+        UI.drawScrollBar(c, f.ix + f.iw - 6, bodyY + 2, 5.5, bodyH - 4, scrollY / maxScroll, bodyH / Math.max(bodyH, contentH));
       }
       UI.drawFitText(
         c,
@@ -1745,10 +1795,10 @@ function renderShopModal(ctx, metrics, app, hits) {
         f.ix + f.iw * 0.5,
         footerY + footerH * 0.5,
         f.iw - 8,
-        10.0,
-        8.0,
-        700,
-        '#754C36',
+        12.2,
+        9.4,
+        800,
+        '#5A3928',
         'center',
         'middle'
       );
@@ -1756,8 +1806,8 @@ function renderShopModal(ctx, metrics, app, hits) {
     }
 
     if (activeTab === 'patrons') {
-      const cardGap = 10;
-      const cardH = clamp(Math.floor((bodyH - cardGap * (PATRONS.length - 1)) / PATRONS.length), 88, 110);
+      const cardGap = 11;
+      const cardH = clamp(Math.floor((bodyH - cardGap * (PATRONS.length - 1)) / PATRONS.length), 96, 122);
       const { scrollY, maxScroll, contentH } = setupListScroll(
         app,
         f.ix,
@@ -1768,7 +1818,7 @@ function renderShopModal(ctx, metrics, app, hits) {
         cardH,
         cardGap
       );
-      const listW = f.iw - (maxScroll > 0 ? 10 : 0);
+      const listW = f.iw - (maxScroll > 0 ? 11 : 0);
       const unlocked = Array.isArray(saveData.unlockedPatrons) ? saveData.unlockedPatrons : ['mikan'];
       const selected = normalizePatronId(saveData.selectedPatron);
 
@@ -1790,10 +1840,12 @@ function renderShopModal(ctx, metrics, app, hits) {
           UI.drawKissaCard(c, f.ix, cy, listW, cardH, {
             tone: isSelected ? 'selected' : 'cream',
             selected: isSelected,
-            radius: 13
+            goldenGlow: isSelected,
+            radius: 13,
+            lineWidth: 2.5
           });
 
-          const avS = Math.min(64, cardH - 16);
+          const avS = Math.min(72, cardH - 16);
           const avX = f.ix + 8;
           const avY = Math.round(cy + (cardH - avS) * 0.5);
           UI.drawKissaCard(c, avX, avY, avS, avS, {
@@ -1802,26 +1854,26 @@ function renderShopModal(ctx, metrics, app, hits) {
             radius: 12,
             lineWidth: 1.6
           });
-          UI.drawUiIcon(c, sprites, p.id, avX + avS * 0.5, avY + avS * 0.5, avS * 0.86);
+          UI.drawUiIcon(c, sprites, p.id, avX + avS * 0.5, avY + avS * 0.5, avS * 0.88);
 
-          const btnW = Math.min(86, Math.max(74, Math.round(listW * 0.25)));
-          const btnH = 34;
+          const btnW = Math.min(92, Math.max(78, Math.round(listW * 0.27)));
+          const btnH = 39;
           const btnX = f.ix + listW - 8 - btnW;
           const btnY = Math.round(cy + (cardH - btnH) * 0.5);
 
-          const tx = avX + avS + 9;
-          const tw = Math.max(72, btnX - 8 - tx);
+          const tx = avX + avS + 10;
+          const tw = Math.max(74, btnX - 8 - tx);
 
-          UI.drawFitText(c, `${p.name} · ${p.skillName}`, tx, cy + 22, tw, 12.6, 9.6, 900, '#5A3928', 'left', 'middle');
+          UI.drawFitText(c, `${p.name} · ${p.skillName}`, tx, cy + 25, tw, 15.0, 11.0, 900, '#4E2B18', 'left', 'middle');
           UI.drawWrappedText(
             c,
             p.passiveDesc,
             tx,
-            cy + 36,
+            cy + 44,
             tw,
-            14,
-            UI.fontStr(9.6, 700),
-            '#754C36',
+            16,
+            UI.fontStr(11.4, 700),
+            '#6B432B',
             'left',
             3
           );
@@ -1832,12 +1884,13 @@ function renderShopModal(ctx, metrics, app, hits) {
             UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
               variant: canBuy ? 'primary' : 'wood',
               disabled: !canBuy,
+              glossDot: canBuy,
               icon: 'icon_star_coin',
               sprites,
-              iconSize: 15,
+              iconSize: 20,
               label: String(p.cost),
-              fontSize: 13.4,
-              radius: 12,
+              fontSize: 16.0,
+              radius: 13,
               pressed: isPressed(app, hitId)
             });
             addScrollClippedHit(hits, hitId, btnX, btnY, btnW, btnH, scrollY, bodyY, bodyH, () =>
@@ -1848,8 +1901,8 @@ function renderShopModal(ctx, metrics, app, hits) {
             UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
               variant: isSelected ? 'equipped' : 'wood',
               label: isSelected ? '出战中' : '切换出战',
-              fontSize: 11.4,
-              radius: 12,
+              fontSize: 13.6,
+              radius: 13,
               pressed: isPressed(app, hitId)
             });
             addScrollClippedHit(hits, hitId, btnX, btnY, btnW, btnH, scrollY, bodyY, bodyH, () =>
@@ -1862,7 +1915,7 @@ function renderShopModal(ctx, metrics, app, hits) {
       }
 
       if (maxScroll > 0) {
-        UI.drawScrollBar(c, f.ix + f.iw - 6, bodyY + 2, 5, bodyH - 4, scrollY / maxScroll, bodyH / Math.max(bodyH, contentH));
+        UI.drawScrollBar(c, f.ix + f.iw - 6, bodyY + 2, 5.5, bodyH - 4, scrollY / maxScroll, bodyH / Math.max(bodyH, contentH));
       }
       UI.drawFitText(
         c,
@@ -1870,10 +1923,10 @@ function renderShopModal(ctx, metrics, app, hits) {
         f.ix + f.iw * 0.5,
         footerY + footerH * 0.5,
         f.iw - 8,
-        10.0,
-        8.0,
-        700,
-        '#754C36',
+        12.2,
+        9.4,
+        800,
+        '#5A3928',
         'center',
         'middle'
       );
@@ -1928,7 +1981,7 @@ function renderShopModal(ctx, metrics, app, hits) {
               : '徽章';
           const catTone =
             item.category === 'perk' ? 'amber' : item.category === 'secret' ? 'matcha' : 'berry';
-          UI.drawTagBadge(c, f.ix + 8, cy + 10, 42, 20, catTag, catTone, 9.6);
+          UI.drawTagBadge(c, f.ix + 8, cy + 10, 42, 20, catTag, catTone, 10.6);
 
           const btnW = 76;
           const btnH = 34;
@@ -1939,8 +1992,8 @@ function renderShopModal(ctx, metrics, app, hits) {
           const descX = f.ix + 10;
           const descW = Math.max(120, btnX - 10 - descX);
 
-          UI.drawFitText(c, item.name, textX, cy + 20, textW, 13.0, 10.0, 900, '#5A3928', 'left', 'middle');
-          UI.drawFitText(c, item.desc, descX, cy + 48, descW, 10.0, 7.6, 700, '#754C36', 'left', 'middle');
+          UI.drawFitText(c, item.name, textX, cy + 20, textW, 14.2, 10.6, 900, '#4E2B18', 'left', 'middle');
+          UI.drawFitText(c, item.desc, descX, cy + 48, descW, 11.4, 8.8, 700, '#6A422B', 'left', 'middle');
 
           const itemIdCopy = item.id;
           const hitId = `shop_buy_research_${itemIdCopy}`;
@@ -1948,7 +2001,7 @@ function renderShopModal(ctx, metrics, app, hits) {
             UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
               variant: 'equipped',
               label: '已解锁',
-              fontSize: 11.2,
+              fontSize: 11.8,
               radius: 12,
               disabled: true
             });
@@ -1960,7 +2013,7 @@ function renderShopModal(ctx, metrics, app, hits) {
               sprites,
               iconSize: 14,
               label: String(item.cost),
-              fontSize: 13.2,
+              fontSize: 13.6,
               radius: 12,
               pressed: isPressed(app, hitId)
             });
@@ -1983,19 +2036,21 @@ function renderShopModal(ctx, metrics, app, hits) {
         f.ix + f.iw * 0.5,
         footerY + footerH * 0.5,
         f.iw - 8,
-        10.0,
-        8.0,
+        11.4,
+        8.8,
         700,
-        '#754C36',
+        '#6A422B',
         'center',
         'middle'
       );
       return;
     }
 
-    // --- Tab 4: 棋盘主题 (Design 09 BoardThemeModal) ---
-    const cardGap = 10;
-    const cardH = clamp(Math.floor((bodyH - cardGap * (BOARD_THEME_LIST.length - 1)) / BOARD_THEME_LIST.length), 88, 108);
+    // --- Tab 4: 棋盘主题 (Design 09 BoardThemeModal with Golden Glow, Sparkles & Olive '使用中') ---
+    const cardGap = 12;
+    const cardH = clamp(Math.floor((bodyH - cardGap * (BOARD_THEME_LIST.length - 1)) / BOARD_THEME_LIST.length), 96, 118);
+    const totalThemesH = BOARD_THEME_LIST.length * cardH + (BOARD_THEME_LIST.length - 1) * cardGap;
+    const themeTopPad = Math.max(0, Math.min(20, Math.floor((bodyH - totalThemesH) * 0.35)));
     const { scrollY, maxScroll, contentH } = setupListScroll(
       app,
       f.ix,
@@ -2006,21 +2061,21 @@ function renderShopModal(ctx, metrics, app, hits) {
       cardH,
       cardGap
     );
-    const listW = f.iw - (maxScroll > 0 ? 10 : 0);
+    const listW = f.iw - (maxScroll > 0 ? 11 : 0);
     const unlockedThemes = Array.isArray(saveData.unlockedThemes) ? saveData.unlockedThemes : ['amber'];
     const equippedId = saveData.equippedTheme || 'amber';
 
     c.save();
     try {
       c.beginPath();
-      c.rect(f.ix - 2, bodyY, f.iw + 4, bodyH);
+      c.rect(f.ix - 6, bodyY - 4, f.iw + 12, bodyH + 8);
       c.clip();
       c.globalAlpha *= anim.tabAlpha;
       c.translate(0, -scrollY + anim.tabOffsetY);
 
       for (let i = 0; i < BOARD_THEME_LIST.length; i++) {
         const th = BOARD_THEME_LIST[i];
-        const cy = bodyY + i * (cardH + cardGap);
+        const cy = bodyY + themeTopPad + i * (cardH + cardGap);
         const owned = unlockedThemes.includes(th.id);
         const isEquipped = owned && equippedId === th.id;
         const canBuy = !owned && bank >= th.cost;
@@ -2028,23 +2083,25 @@ function renderShopModal(ctx, metrics, app, hits) {
         UI.drawKissaCard(c, f.ix, cy, listW, cardH, {
           tone: isEquipped ? 'selected' : 'cream',
           selected: isEquipped,
-          radius: 13
+          goldenGlow: isEquipped,
+          radius: 14,
+          lineWidth: isEquipped ? 2.8 : 2.5
         });
 
-        const swS = Math.min(68, cardH - 18);
+        const swS = Math.min(76, cardH - 16);
         const swX = f.ix + 10;
         const swY = Math.round(cy + (cardH - swS) * 0.5);
         UI.drawThemeSwatch(c, swX, swY, swS, swS, th.id, sprites);
 
-        const btnW = Math.min(84, Math.max(72, Math.round(listW * 0.25)));
-        const btnH = 34;
+        const btnW = Math.min(94, Math.max(78, Math.round(listW * 0.28)));
+        const btnH = 40;
         const btnX = f.ix + listW - 10 - btnW;
         const btnY = Math.round(cy + (cardH - btnH) * 0.5);
 
         const tx = swX + swS + 10;
-        const tw = Math.max(72, btnX - 8 - tx);
-        UI.drawFitText(c, th.name, tx, cy + Math.round(cardH * 0.34), tw, 13.8, 10.4, 900, '#5A3928', 'left', 'middle');
-        UI.drawFitText(c, th.desc, tx, cy + Math.round(cardH * 0.68), tw, 10.2, 8.2, 700, '#754C36', 'left', 'middle');
+        const tw = Math.max(74, btnX - 8 - tx);
+        UI.drawFitText(c, th.name, tx, cy + Math.round(cardH * 0.34), tw, 16.5, 12.0, 900, '#4E2B18', 'left', 'middle');
+        UI.drawFitText(c, th.desc, tx, cy + Math.round(cardH * 0.69), tw, 12.0, 9.2, 800, '#5A3928', 'left', 'middle');
 
         const tidCopy = th.id;
         if (!owned) {
@@ -2052,12 +2109,13 @@ function renderShopModal(ctx, metrics, app, hits) {
           UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
             variant: canBuy ? 'primary' : 'wood',
             disabled: !canBuy,
+            glossDot: canBuy,
             icon: 'icon_star_coin',
             sprites,
-            iconSize: 15,
+            iconSize: 20,
             label: String(th.cost),
-            fontSize: 13.6,
-            radius: 12,
+            fontSize: 16.0,
+            radius: 13,
             pressed: isPressed(app, hitId)
           });
           addScrollClippedHit(hits, hitId, btnX, btnY, btnW, btnH, scrollY, bodyY, bodyH, () =>
@@ -2068,8 +2126,8 @@ function renderShopModal(ctx, metrics, app, hits) {
           UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
             variant: isEquipped ? 'equipped' : 'wood',
             label: isEquipped ? '使用中' : '切换主题',
-            fontSize: 11.4,
-            radius: 12,
+            fontSize: 14.5,
+            radius: 13,
             pressed: isPressed(app, hitId)
           });
           addScrollClippedHit(hits, hitId, btnX, btnY, btnW, btnH, scrollY, bodyY, bodyH, () =>
@@ -2082,7 +2140,7 @@ function renderShopModal(ctx, metrics, app, hits) {
     }
 
     if (maxScroll > 0) {
-      UI.drawScrollBar(c, f.ix + f.iw - 6, bodyY + 2, 5, bodyH - 4, scrollY / maxScroll, bodyH / Math.max(bodyH, contentH));
+      UI.drawScrollBar(c, f.ix + f.iw - 6, bodyY + 2, 5.5, bodyH - 4, scrollY / maxScroll, bodyH / Math.max(bodyH, contentH));
     }
     UI.drawFitText(
       c,
@@ -2090,10 +2148,10 @@ function renderShopModal(ctx, metrics, app, hits) {
       f.ix + f.iw * 0.5,
       footerY + footerH * 0.5,
       f.iw - 8,
-      10.2,
-      8.2,
-      700,
-      '#754C36',
+      12.2,
+      9.4,
+      800,
+      '#5A3928',
       'center',
       'middle'
     );
@@ -2111,11 +2169,12 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
   const activeTab = app.activeCompendiumTab || 'catcakes';
 
   const f = beginModalFrame(c, metrics, app, {
-    maxW: 452,
-    desiredH: 572,
+    maxW: 454,
+    desiredH: 582,
     dismissOnOutside: true,
+    showTopCurrency: true,
     title: '星夜图鉴',
-    sheetTopInset: 66,
+    sheetTopInset: 70,
     sheetBottomPad: 12
   });
 
@@ -2133,9 +2192,9 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
     }
 
     // 3 Folder Tabs + Right-side "已收集 X/Y" counter pill (Design 07 + M3 顾客图鉴)
-    const tabY = f.sheetY - 27;
-    const tabH = 29;
-    const countW = 60;
+    const tabY = f.sheetY - 30;
+    const tabH = 32;
+    const countW = 64;
     const tabsW = f.sheetW - 18 - countW;
     drawFolderTabs(
       c,
@@ -2164,12 +2223,12 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
       radius: 9,
       lineWidth: 2.0
     });
-    UI.drawOutlinedText(c, '已收集', cntX + countW * 0.5, tabY + 8, {
-      size: 8.6,
-      weight: 700,
+    UI.drawOutlinedText(c, '已收集', cntX + countW * 0.5, tabY + 9, {
+      size: 10.2,
+      weight: 800,
       fill: '#FFE5AA',
       stroke: '#3D2214',
-      strokeWidth: 1.6,
+      strokeWidth: 1.8,
       shadowOffsetY: 0
     });
     const counterText =
@@ -2182,13 +2241,13 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
       c,
       counterText,
       cntX + countW * 0.5,
-      tabY + 20,
+      tabY + 22,
       {
-        size: 10.6,
+        size: 12.6,
         weight: 900,
         fill: '#FFF8EC',
         stroke: '#3D2214',
-        strokeWidth: 1.8,
+        strokeWidth: 2.0,
         shadowOffsetY: 0
       }
     );
@@ -2201,7 +2260,7 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
 
     if (activeTab === 'catcakes') {
       // Exact Design 07 layout: 3-column grid (C1–C7 + Honor slot) + bottom detail strip!
-      const detailH = 58;
+      const detailH = 64;
       const gridWrapH = Math.max(150, bodyH - detailH - 8);
       UI.drawKissaCard(c, f.ix, bodyY, f.iw, gridWrapH, {
         tone: 'recess',
@@ -2236,46 +2295,40 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
           UI.drawKissaCard(c, cx, cy, cw, ch, {
             tone: isSel ? 'selected' : 'cream',
             selected: isSel,
+            goldenGlow: isSel && unlocked,
             locked: !unlocked,
-            radius: 11
+            radius: 12,
+            lineWidth: isSel ? 2.6 : 2.2
           });
 
-          // Top-left C1..C7 badge
-          UI.drawTagBadge(c, cx + 4, cy + 4, 26, 15, cake.id, isSel ? 'amber' : 'wood', 8.5);
+          // Top-left C1..C7 badge (consistent warm dark-wood tag matching Design 07)
+          UI.drawTagBadge(c, cx + 4, cy + 4, 30, 18, cake.id, 'wood', 10.6);
 
-          const spS = Math.min(cw - 16, ch - 30);
-          const spCy = cy + 16 + (ch - 32) * 0.5;
+          const spS = Math.min(cw - 14, ch - 32);
+          const spCy = cy + 17 + (ch - 34) * 0.5;
           if (unlocked) {
             const lv = clamp(Math.floor(Number(saveData.catcakeLevels && saveData.catcakeLevels[cake.tier]) || 0), 0, 4);
             UI.drawCatcakeSprite(c, sprites, cake.tier, cx + cw * 0.5, spCy, spS, {
               happy: lv >= 2
             });
           } else {
-            // Silhouette + "?" + top-right lock icon (Design 07 C7)
+            // Exact Design 07 C7: plump rounded-ear cat silhouette + single warm-beige '?' + top-right silver padlock
             UI.drawCatcakeSprite(c, sprites, cake.tier, cx + cw * 0.5, spCy, spS, {
               silhouette: true
             });
-            UI.drawOutlinedText(c, '?', cx + cw * 0.5, spCy + 1, {
-              size: Math.max(15, Math.round(spS * 0.45)),
-              weight: 900,
-              fill: '#EFE4D0',
-              stroke: '#4A3A2E',
-              strokeWidth: 2.2,
-              shadowOffsetY: 0
-            });
-            drawLockIcon(c, cx + cw - 12, cy + 12, 13, { sprites });
+            drawLockIcon(c, cx + cw - 15, cy + 15, 21, { sprites });
           }
 
           UI.drawFitText(
             c,
             unlocked ? cake.name : '未解锁',
             cx + cw * 0.5,
-            cy + ch - 10,
+            cy + ch - 11,
             cw - 8,
-            10.2,
-            7.8,
+            12.4,
+            9.0,
             900,
-            unlocked ? '#5A3928' : '#6A5E53',
+            unlocked ? '#4E2B18' : '#3C2B1E',
             'center',
             'middle'
           );
@@ -2297,21 +2350,21 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
         UI.drawKissaCard(c, achX, achY, achW, ch, {
           tone: 'amber',
           borderColor: '#C59A5A',
-          radius: 11,
-          lineWidth: 1.8
+          radius: 12,
+          lineWidth: 2.0
         });
-        UI.drawUiIcon(c, sprites, 'medal_gold', achX + 26, achY + ch * 0.5, Math.min(34, ch - 18));
-        UI.drawFitText(c, getChefRank(saveData), achX + 48, achY + ch * 0.36, achW - 56, 12.2, 9.2, 900, '#5A3928', 'left', 'middle');
+        UI.drawUiIcon(c, sprites, 'medal_gold', achX + 28, achY + ch * 0.5, Math.min(38, ch - 18));
+        UI.drawFitText(c, getChefRank(saveData), achX + 52, achY + ch * 0.36, achW - 60, 14.2, 10.2, 900, '#4E2B18', 'left', 'middle');
         UI.drawFitText(
           c,
           `荣誉勋章 ${achDone}/${ACHIEVEMENTS.length} · 总星 ${computeTotalStars(saveData.levelStars)}/90`,
-          achX + 48,
+          achX + 52,
           achY + ch * 0.68,
-          achW - 56,
-          9.6,
-          7.6,
-          700,
-          '#754C36',
+          achW - 60,
+          11.2,
+          8.6,
+          800,
+          '#6A422B',
           'left',
           'middle'
         );
@@ -2332,19 +2385,19 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
         radius: 11,
         lineWidth: 1.8
       });
-      UI.drawTagBadge(c, f.ix + 10, detY + 8, 30, 18, selCake.id, 'wood', 9.8);
+      UI.drawTagBadge(c, f.ix + 10, detY + 8, 34, 21, selCake.id, 'wood', 11.2);
       UI.drawFitText(
         c,
         selUnlocked
           ? `${selCake.name} · 基础分 ${selPrice}${selLv > 0 ? ' (Lv.' + selLv + ')' : ''}`
           : `${selCake.name} · 未解锁`,
-        f.ix + 46,
-        detY + 17,
-        f.iw - 56,
-        12.4,
-        9.4,
+        f.ix + 50,
+        detY + 19,
+        f.iw - 60,
+        14.8,
+        10.8,
         900,
-        '#5A3928',
+        '#4E2B18',
         'left',
         'middle'
       );
@@ -2354,12 +2407,12 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
           ? selCake.desc
           : `推进至第 ${selCake.unlockLevel} 关即可解锁烘焙该阶猫饼。`,
         f.ix + 12,
-        detY + 41,
+        detY + 46,
         f.iw - 24,
-        10.0,
-        8.0,
-        700,
-        '#754C36',
+        11.8,
+        9.0,
+        800,
+        '#6A422B',
         'left',
         'middle'
       );
@@ -2496,9 +2549,9 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
     const rows = Math.max(1, Math.ceil(RECIPE_LIST.length / cols));
     const gx = 6;
     const gy = 6;
-    const rowH = 64;
+    const rowH = 68;
     const { scrollY, maxScroll, contentH } = setupListScroll(app, f.ix, f.iw, bodyY, bodyH, rows, rowH, gy);
-    const gridW = f.iw - (maxScroll > 0 ? 10 : 0);
+    const gridW = f.iw - (maxScroll > 0 ? 11 : 0);
     const cw = Math.floor((gridW - gx * (cols - 1)) / cols);
 
     c.save();
@@ -2521,36 +2574,36 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
         UI.drawKissaCard(c, cx, cy, cw, rowH, {
           tone: 'cream',
           locked: !unlocked,
-          radius: 9,
-          lineWidth: 1.8
+          radius: 10,
+          lineWidth: 1.9
         });
 
         UI.drawFitText(
           c,
           r.name,
           cx + cw * 0.5,
-          cy + 11,
+          cy + 12,
           cw - 8,
-          9.4,
-          7.4,
+          11.0,
+          8.4,
           900,
-          unlocked ? '#5A3928' : '#70655B',
+          unlocked ? '#4E2B18' : '#3C2F26',
           'center',
           'middle'
         );
 
         const slotCnt = r.slots.length;
-        const iconS = Math.min(20, Math.max(15, Math.floor((cw - 14) / Math.max(2, slotCnt))));
+        const iconS = Math.min(22, Math.max(16, Math.floor((cw - 14) / Math.max(2, slotCnt))));
         const stepX = iconS + 3;
         const startX = cx + cw * 0.5 - ((slotCnt - 1) * stepX) * 0.5;
-        const iconY = cy + 33;
+        const iconY = cy + 35;
 
         for (let s = 0; s < slotCnt; s++) {
           const sl = r.slots[s];
           UI.drawCatcakeSprite(c, sprites, sl.tier, startX + s * stepX, iconY, iconS, {
             flavor: sl.flavor !== 'any' ? sl.flavor : 'plain',
             showFlavorBadge: sl.flavor !== 'any',
-            alpha: unlocked ? 1 : 0.6
+            alpha: unlocked ? 1 : 0.65
           });
         }
 
@@ -2558,12 +2611,12 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
           c,
           `×${r.comboMult.toFixed(2)} · ${r.baseScoreLv0}分`,
           cx + cw * 0.5,
-          cy + rowH - 10,
+          cy + rowH - 11,
           cw - 6,
-          8.6,
-          7.0,
+          10.0,
+          8.0,
           800,
-          '#8A5220',
+          unlocked ? '#8A5220' : '#4A3E35',
           'center',
           'middle'
         );
@@ -2573,7 +2626,7 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
     }
 
     if (maxScroll > 0) {
-      UI.drawScrollBar(c, f.ix + f.iw - 6, bodyY + 2, 5, bodyH - 4, scrollY / maxScroll, bodyH / Math.max(bodyH, contentH));
+      UI.drawScrollBar(c, f.ix + f.iw - 6, bodyY + 2, 5.5, bodyH - 4, scrollY / maxScroll, bodyH / Math.max(bodyH, contentH));
     }
   } finally {
     endModalFrame(c);
@@ -2599,11 +2652,12 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
       : 'stars';
 
   const f = beginModalFrame(c, metrics, app, {
-    maxW: 452,
-    desiredH: 576,
+    maxW: 454,
+    desiredH: 584,
     dismissOnOutside: true,
+    showTopCurrency: true,
     title: '猫饼排行榜',
-    sheetTopInset: 66,
+    sheetTopInset: 70,
     sheetBottomPad: 12
   });
 
@@ -2611,8 +2665,8 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
     drawCloseButton(c, f, hits, app);
 
     // 5 Folder Tabs: 总星榜 | 营业榜 | 特调榜 | 无限榜 | 好友榜
-    const tabY = f.sheetY - 27;
-    const tabH = 29;
+    const tabY = f.sheetY - 30;
+    const tabH = 32;
     drawFolderTabs(
       c,
       f.sheetX + 6,
@@ -2630,12 +2684,12 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
       hits,
       app,
       (tabId) => app.setLeaderboardBoardType(tabId),
-      { gap: 3, fontSize: 10.4 }
+      { gap: 3, fontSize: 11.2 }
     );
 
     // Compact Chef Identity & WeChat Auth Strip (preserves leaderboard_avatar_btn & leaderboard_auth_btn!)
     const profY = f.sheetY + 8;
-    const profH = 42;
+    const profH = 44;
     UI.drawKissaCard(c, f.ix, profY, f.iw, profH, {
       tone: 'recess',
       borderColor: '#C9AE86',
@@ -2644,27 +2698,27 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
     });
 
     const avPreset = normalizePatronId(profile.avatarPreset || saveData.selectedPatron);
-    const avS = 32;
+    const avS = 34;
     const avX = f.ix + 6;
     const avY = profY + 5;
     UI.drawPillButton(c, avX, avY, avS, avS, {
       variant: 'card',
       icon: avPreset,
       sprites,
-      iconSize: 24,
-      radius: 16,
+      iconSize: 26,
+      radius: 17,
       pressed: isPressed(app, 'leaderboard_avatar_btn')
     });
     hits.add('leaderboard_avatar_btn', avX, avY, avS, avS, () => app.cycleProfileAvatar());
 
-    const authW = 88;
-    const authH = 26;
+    const authW = 94;
+    const authH = 28;
     const authX = f.ix + f.iw - 6 - authW;
     const authY = Math.round(profY + (profH - authH) * 0.5);
     UI.drawPillButton(c, authX, authY, authW, authH, {
       variant: profile.authorized ? 'equipped' : 'wood',
       label: profile.authorized ? '已同步名片' : '授权头像昵称',
-      fontSize: 9.8,
+      fontSize: 11.2,
       radius: 10,
       pressed: isPressed(app, 'leaderboard_auth_btn')
     });
@@ -2680,31 +2734,31 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
         : app.cloudStatus === 'syncing'
         ? '云端同步中'
         : '本地挑战榜';
-    UI.drawFitText(c, dispName, infoX, profY + 15, infoW, 11.8, 9.2, 900, '#5A3928', 'left', 'middle');
+    UI.drawFitText(c, dispName, infoX, profY + 15, infoW, 13.4, 10.0, 900, '#4E2B18', 'left', 'middle');
     UI.drawUiIcon(
       c,
       sprites,
       app.cloudStatus === 'synced' ? 'icon_cloud_sync' : 'icon_star_coin',
-      infoX + 6,
-      profY + 31,
-      12
+      infoX + 7,
+      profY + 32,
+      14
     );
     UI.drawFitText(
       c,
       `${getChefRank(saveData)} · ${syncLabel}`,
-      infoX + 15,
-      profY + 31,
-      infoW - 15,
-      9.2,
-      7.6,
-      700,
-      '#754C36',
+      infoX + 17,
+      profY + 32,
+      infoW - 17,
+      10.6,
+      8.4,
+      800,
+      '#6A422B',
       'left',
       'middle'
     );
 
     // Pinned Golden Self Row Footer (Exact Design 08 golden bottom bar!)
-    const footerH = 48;
+    const footerH = 52;
     const footerY = f.sheetY + f.sheetH - footerH - 8;
     const listY = profY + profH + 7;
     const listH = Math.max(120, footerY - 7 - listY);
@@ -2725,7 +2779,6 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
           radius: 13,
           lineWidth: 2.0
         });
-
         const sharedCanvas =
           typeof app.renderFriendsOpenData === 'function'
             ? app.renderFriendsOpenData(Math.floor(f.iw - 12), Math.floor(listH - 12), metrics.dpr || 2)
@@ -2735,19 +2788,19 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
         } else {
           const midX = f.ix + f.iw * 0.5;
           const midY = listY + listH * 0.44;
-          UI.drawUiIcon(c, sprites, 'patron_mikan', midX - 24, midY - 30, 54);
-          UI.drawUiIcon(c, sprites, 'icon_cloud_sync', midX + 26, midY - 26, 34);
-          UI.drawTagBadge(c, midX - 58, midY + 4, 116, 22, '已接入开放域', 'matcha', 10.2);
+          UI.drawUiIcon(c, sprites, 'patron_mikan', midX - 24, midY - 32, 60);
+          UI.drawUiIcon(c, sprites, 'icon_cloud_sync', midX + 26, midY - 28, 38);
+          UI.drawTagBadge(c, midX - 58, midY + 4, 116, 24, '已接入开放域', 'matcha', 11.4);
           UI.drawFitText(
             c,
             '微信好友排行已开启',
             midX,
-            midY + 38,
+            midY + 40,
             f.iw - 28,
-            15.0,
-            11.5,
+            17.0,
+            12.2,
             900,
-            '#5A3928',
+            '#4E2B18',
             'center',
             'middle'
           );
@@ -2755,25 +2808,25 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
             c,
             '微信端内自动同步好友总星与营业排行，点击下方按钮邀请好友加入星夜猫饼店。',
             midX,
-            midY + 56,
+            midY + 58,
             f.iw - 40,
-            16,
-            UI.fontStr(10.4, 700),
-            '#754C36',
+            18,
+            UI.fontStr(11.6, 700),
+            '#6A422B',
             'center',
             3
           );
 
-          const shareW = Math.min(180, f.iw - 44);
-          const shareH = 34;
+          const shareW = Math.min(188, f.iw - 40);
+          const shareH = 36;
           const shareX = Math.round(midX - shareW * 0.5);
-          const shareY = Math.min(listY + listH - shareH - 12, midY + 98);
+          const shareY = Math.min(listY + listH - shareH - 12, midY + 102);
           UI.drawPillButton(c, shareX, shareY, shareW, shareH, {
             variant: 'primary',
             textOutline: true,
             label: '邀请好友一起玩',
-            fontSize: 12.2,
-            radius: 17,
+            fontSize: 13.4,
+            radius: 18,
             pressed: isPressed(app, 'friends_share_btn')
           });
           hits.add('friends_share_btn', shareX, shareY, shareW, shareH, () => {
@@ -2786,10 +2839,10 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
     } else {
       // Full Design 08 Leaderboard Rows with Gold / Silver / Bronze Medals & Row Fills!
       const rows = Array.isArray(lb.list) ? lb.list : [];
-      const rowH = 50;
+      const rowH = 52;
       const rowGap = 6;
       const { scrollY, maxScroll, contentH } = setupListScroll(app, f.ix, f.iw, listY, listH, rows.length, rowH, rowGap);
-      const listW = f.iw - (maxScroll > 0 ? 10 : 0);
+      const listW = f.iw - (maxScroll > 0 ? 11 : 0);
 
       // Decorative fallback avatars for diverse leaderboard entries
       const avatarRing = ['patron_mikan', 'cust_lop_bunny', 'cust_shiba', 'cust_fox', 'cust_ragdoll', 'patron_luna', 'patron_mugi'];
@@ -2809,10 +2862,10 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
             f.ix + f.iw * 0.5,
             listY + listH * 0.5,
             f.iw - 20,
-            12.0,
-            9.5,
+            13.2,
+            10.0,
             700,
-            '#754C36',
+            '#6A422B',
             'center',
             'middle'
           );
@@ -2837,25 +2890,25 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
           UI.drawKissaCard(c, f.ix, ry, listW, rowH, {
             tone: rowTone,
             radius: 12,
-            lineWidth: 2.1
+            lineWidth: 2.2
           });
 
-          // Rank Medal (1/2/3 WebP) or Bold Rank Number
-          const rankCx = f.ix + 22;
+          // Rank Medal (1/2/3 PNG) or Bold Rank Number
+          const rankCx = f.ix + 23;
           if (rank === 1 || rank === 2 || rank === 3) {
             const medalKey = rank === 1 ? 'medal_gold' : rank === 2 ? 'medal_silver' : 'medal_bronze';
-            UI.drawUiIcon(c, sprites, medalKey, rankCx, ry + rowH * 0.5, 32);
+            UI.drawUiIcon(c, sprites, medalKey, rankCx, ry + rowH * 0.5, 35);
           } else {
-            UI.drawFitText(c, String(rank), rankCx, ry + rowH * 0.5 + 0.5, 30, 15.5, 11.0, 900, '#5A3928', 'center', 'middle');
+            UI.drawFitText(c, String(rank), rankCx, ry + rowH * 0.5 + 0.5, 32, 17.0, 12.0, 900, '#4E2B18', 'center', 'middle');
           }
 
           // Portrait Avatar in soft circular frame
-          const avCx = f.ix + 58;
+          const avCx = f.ix + 60;
           const avCy = ry + rowH * 0.5;
           c.save();
           try {
             c.beginPath();
-            c.arc(avCx, avCy, 17, 0, Math.PI * 2);
+            c.arc(avCx, avCy, 18, 0, Math.PI * 2);
             c.fillStyle = '#FFF8EC';
             c.fill();
             c.lineWidth = 1.8;
@@ -2867,7 +2920,7 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
           const avatarKey = r.avatarPreset
             ? normalizePatronId(r.avatarPreset)
             : avatarRing[i % avatarRing.length];
-          UI.drawUiIcon(c, sprites, avatarKey, avCx, avCy, 28);
+          UI.drawUiIcon(c, sprites, avatarKey, avCx, avCy, 31);
 
           const rStars = Math.max(0, Math.floor(Number(r.totalStars) || 0));
           const rScore = Math.max(0, Math.floor(Number(r.totalCumulativeScore) || 0));
@@ -2875,8 +2928,8 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
           const rShift = Math.max(0, Math.floor(Number(r.endlessBestShift) || 0));
           const rEndless = Math.max(0, Math.floor(Number(r.endlessBestScore) || 0));
 
-          const valColW = 84;
-          const nameX = f.ix + 82;
+          const valColW = 90;
+          const nameX = f.ix + 85;
           const nameW = Math.max(60, f.ix + listW - valColW - 10 - nameX);
           const tagSuffix = r.isMe ? '（我）' : '';
 
@@ -2884,12 +2937,12 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
             c,
             `${r.nickName || '星夜店长'}${tagSuffix}`,
             nameX,
-            ry + rowH * 0.34,
+            ry + rowH * 0.33,
             nameW,
-            12.8,
-            9.6,
+            14.8,
+            10.6,
             900,
-            '#5A3928',
+            '#4E2B18',
             'left',
             'middle'
           );
@@ -2900,10 +2953,10 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
               nameX,
               ry + rowH * 0.71,
               nameW,
-              10.2,
-              8.2,
+              11.8,
+              9.0,
               800,
-              '#754C36',
+              '#6A422B',
               'left',
               'middle'
             );
@@ -2914,25 +2967,25 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
               nameX,
               ry + rowH * 0.71,
               nameW,
-              10.6,
-              8.4,
+              12.2,
+              9.2,
               800,
               '#8A5220',
               'left',
               'middle'
             );
           } else {
-            UI.drawStarIcon(c, nameX + 6, ry + rowH * 0.70, 5.8, true, sprites);
+            UI.drawStarIcon(c, nameX + 7, ry + rowH * 0.70, 7.0, true, { sprites });
             UI.drawFitText(
               c,
               `${rStars}/90`,
-              nameX + 16,
+              nameX + 19,
               ry + rowH * 0.71,
-              nameW - 18,
-              10.8,
-              8.6,
+              nameW - 20,
+              12.6,
+              9.4,
               800,
-              '#754C36',
+              '#6A422B',
               'left',
               'middle'
             );
@@ -2951,10 +3004,10 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
             f.ix + listW - 10,
             ry + rowH * 0.5 + 0.5,
             valColW,
-            15.0,
-            10.5,
+            16.6,
+            11.5,
             900,
-            '#5A3928',
+            '#4E2B18',
             'right',
             'middle'
           );
@@ -2964,7 +3017,7 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
       }
 
       if (maxScroll > 0) {
-        UI.drawScrollBar(c, f.ix + f.iw - 6, listY + 2, 5, listH - 4, scrollY / maxScroll, listH / Math.max(listH, contentH));
+        UI.drawScrollBar(c, f.ix + f.iw - 6, listY + 2, 5.5, listH - 4, scrollY / maxScroll, listH / Math.max(listH, contentH));
       }
     }
 
@@ -2978,18 +3031,18 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
     UI.drawKissaCard(c, f.ix, footerY, f.iw, footerH, {
       tone: 'myRankRow',
       radius: 12,
-      lineWidth: 2.3
+      lineWidth: 2.4
     });
 
     const myRankText = lb.myRank ? String(lb.myRank) : '--';
-    UI.drawFitText(c, myRankText, f.ix + 22, footerY + footerH * 0.5, 32, 15.5, 11.0, 900, '#5A3928', 'center', 'middle');
+    UI.drawFitText(c, myRankText, f.ix + 23, footerY + footerH * 0.5, 34, 17.0, 12.0, 900, '#4E2B18', 'center', 'middle');
 
-    const myAvCx = f.ix + 58;
+    const myAvCx = f.ix + 60;
     const myAvCy = footerY + footerH * 0.5;
     c.save();
     try {
       c.beginPath();
-      c.arc(myAvCx, myAvCy, 16.5, 0, Math.PI * 2);
+      c.arc(myAvCx, myAvCy, 18, 0, Math.PI * 2);
       c.fillStyle = '#FFF8EC';
       c.fill();
       c.lineWidth = 1.8;
@@ -2998,18 +3051,18 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
     } finally {
       c.restore();
     }
-    UI.drawUiIcon(c, sprites, avPreset, myAvCx, myAvCy, 27);
+    UI.drawUiIcon(c, sprites, avPreset, myAvCx, myAvCy, 30);
 
-    const myNameX = f.ix + 82;
-    const myNameW = Math.max(60, f.iw - 172);
-    UI.drawFitText(c, `我 (${dispName})`, myNameX, footerY + footerH * 0.34, myNameW, 12.6, 9.4, 900, '#5A3928', 'left', 'middle');
+    const myNameX = f.ix + 85;
+    const myNameW = Math.max(60, f.iw - 178);
+    UI.drawFitText(c, `我 (${dispName})`, myNameX, footerY + footerH * 0.33, myNameW, 14.6, 10.4, 900, '#4E2B18', 'left', 'middle');
     if (boardType === 'daily') {
-      UI.drawFitText(c, '今天特调最高分', myNameX, footerY + footerH * 0.71, myNameW, 10.2, 8.2, 800, '#5A3928', 'left', 'middle');
+      UI.drawFitText(c, '今天特调最高分', myNameX, footerY + footerH * 0.71, myNameW, 11.8, 9.0, 800, '#5A3928', 'left', 'middle');
     } else if (boardType === 'endless') {
-      UI.drawFitText(c, `最高过 ${myShift} 班`, myNameX, footerY + footerH * 0.71, myNameW, 10.6, 8.4, 800, '#5A3928', 'left', 'middle');
+      UI.drawFitText(c, `最高过 ${myShift} 班`, myNameX, footerY + footerH * 0.71, myNameW, 12.2, 9.2, 800, '#5A3928', 'left', 'middle');
     } else {
-      UI.drawStarIcon(c, myNameX + 6, footerY + footerH * 0.70, 5.8, true, sprites);
-      UI.drawFitText(c, `${myStars}/90`, myNameX + 16, footerY + footerH * 0.71, myNameW - 18, 10.8, 8.6, 800, '#5A3928', 'left', 'middle');
+      UI.drawStarIcon(c, myNameX + 7, footerY + footerH * 0.70, 7.0, true, { sprites });
+      UI.drawFitText(c, `${myStars}/90`, myNameX + 19, footerY + footerH * 0.71, myNameW - 20, 12.6, 9.4, 900, '#4E2B18', 'left', 'middle');
     }
 
     const myFooterVal =
@@ -3023,11 +3076,11 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
       myFooterVal,
       f.ix + f.iw - 10,
       footerY + footerH * 0.5 + 0.5,
-      82,
-      15.2,
-      10.8,
+      86,
+      16.6,
+      11.5,
       900,
-      '#5A3928',
+      '#4E2B18',
       'right',
       'middle'
     );
@@ -3054,19 +3107,19 @@ function renderPauseModal(ctx, metrics, app, hits) {
     : `第 ${lvl.id} 关 · ${chapName}`;
 
   const f = beginModalFrame(c, metrics, app, {
-    maxW: 392,
-    desiredH: 468,
+    maxW: 398,
+    desiredH: 486,
     dismissOnOutside: false,
     title: '营业暂停',
     subtitle: pauseSubtitle,
-    sheetTopInset: 38,
+    sheetTopInset: 42,
     sheetBottomPad: 12
   });
 
   try {
     drawCloseButton(c, f, hits, app);
 
-    const compact = f.ih < 365;
+    const compact = f.ih < 370;
     // Live shift progress micro-strip
     const statusY = f.iy + 6;
     const statusH = 22;
@@ -3076,24 +3129,32 @@ function renderPauseModal(ctx, metrics, app, hits) {
       f.ix + f.iw * 0.5,
       statusY + statusH * 0.5,
       f.iw - 8,
-      10.4,
-      8.4,
+      11.8,
+      9.0,
       800,
-      '#754C36',
+      '#6A422B',
       'center',
       'middle'
     );
 
-    // Inner Cream Audio Switch Card (Exact Design 10!)
+    // Inner Double-Framed Cream Audio Switch Card (Exact Design 10!)
     const cardY = statusY + statusH + 6;
-    const cardH = compact ? 92 : 108;
+    const cardH = compact ? 98 : 116;
     UI.drawKissaCard(c, f.ix, cardY, f.iw, cardH, {
-      tone: 'recess',
-      topCol: '#FBF1DD',
-      botCol: '#F2E2C4',
+      tone: 'cream',
+      topCol: '#FDF5E5',
+      botCol: '#F5E7CC',
       borderColor: '#C5A982',
       radius: 14,
       lineWidth: 1.8
+    });
+    UI.drawKissaCard(c, f.ix + 6, cardY + 6, f.iw - 12, cardH - 12, {
+      tone: 'recess',
+      topCol: '#F7EBD3',
+      botCol: '#EFE0C2',
+      borderColor: '#D6BC96',
+      radius: 10,
+      lineWidth: 1.3
     });
 
     const trackInfo =
@@ -3105,11 +3166,11 @@ function renderPauseModal(ctx, metrics, app, hits) {
     const bgmPos = app.uiAnim && Number.isFinite(app.uiAnim.bgmSwitchPos) ? app.uiAnim.bgmSwitchPos : bgmOn ? 1 : 0;
     const sfxPos = app.uiAnim && Number.isFinite(app.uiAnim.sfxSwitchPos) ? app.uiAnim.sfxSwitchPos : sfxOn ? 1 : 0;
 
-    const swW = 72;
-    const swH = 30;
-    const swX = f.ix + f.iw - 14 - swW;
-    const row1Cy = cardY + cardH * 0.27;
-    const row2Cy = cardY + cardH * 0.73;
+    const swW = 78;
+    const swH = 32;
+    const swX = f.ix + f.iw - 16 - swW;
+    const row1Cy = cardY + cardH * 0.28;
+    const row2Cy = cardY + cardH * 0.72;
 
     // Horizontal hairline divider between BGM & SFX rows
     c.save();
@@ -3117,25 +3178,25 @@ function renderPauseModal(ctx, metrics, app, hits) {
       c.strokeStyle = 'rgba(138, 86, 52, 0.24)';
       c.lineWidth = 1.2;
       c.beginPath();
-      c.moveTo(f.ix + 14, cardY + cardH * 0.5);
-      c.lineTo(f.ix + f.iw - 14, cardY + cardH * 0.5);
+      c.moveTo(f.ix + 16, cardY + cardH * 0.5);
+      c.lineTo(f.ix + f.iw - 16, cardY + cardH * 0.5);
       c.stroke();
     } finally {
       c.restore();
     }
 
     // Row 1: 背景音乐
-    UI.drawUiIcon(c, sprites, 'icon_music', f.ix + 28, row1Cy, 24);
+    UI.drawUiIcon(c, sprites, 'icon_music', f.ix + 30, row1Cy, 28);
     UI.drawFitText(
       c,
       bgmOn ? `背景音乐 (${trackInfo.label || '开'})` : '背景音乐 (静音)',
-      f.ix + 48,
+      f.ix + 52,
       row1Cy + 0.5,
-      swX - (f.ix + 54),
-      13.6,
-      10.0,
+      swX - (f.ix + 58),
+      15.6,
+      11.0,
       900,
-      '#5A3928',
+      '#4E2B18',
       'left',
       'middle'
     );
@@ -3143,17 +3204,17 @@ function renderPauseModal(ctx, metrics, app, hits) {
     hits.add('pause_bgm_btn', swX - 4, Math.round(row1Cy - swH * 0.5) - 2, swW + 8, swH + 4, () => app.cycleBgm());
 
     // Row 2: 游戏音效
-    UI.drawUiIcon(c, sprites, 'icon_sfx', f.ix + 28, row2Cy, 24);
+    UI.drawUiIcon(c, sprites, 'icon_sfx', f.ix + 30, row2Cy, 28);
     UI.drawFitText(
       c,
       '游戏音效',
-      f.ix + 48,
+      f.ix + 52,
       row2Cy + 0.5,
-      swX - (f.ix + 54),
-      13.6,
-      10.2,
+      swX - (f.ix + 58),
+      15.8,
+      11.2,
       900,
-      '#5A3928',
+      '#4E2B18',
       'left',
       'middle'
     );
@@ -3161,20 +3222,21 @@ function renderPauseModal(ctx, metrics, app, hits) {
     hits.add('pause_sfx_btn', swX - 4, Math.round(row2Cy - swH * 0.5) - 2, swW + 8, swH + 4, () => app.toggleSfx());
 
     // 3 Large Stacked 3D Buttons (Exact Design 10 Hierarchy!)
-    const secH = compact ? 30 : 32;
+    const secH = compact ? 32 : 34;
     const secY = f.iy + f.ih - secH;
     const stackTop = cardY + cardH + (compact ? 10 : 14);
-    const stackAvail = Math.max(120, secY - 10 - stackTop);
+    const stackAvail = Math.max(126, secY - 10 - stackTop);
     const btnGap = compact ? 8 : 10;
-    const btnH = clamp(Math.floor((stackAvail - btnGap * 2) / 3), 36, 46);
-    const btnW = Math.min(234, f.iw - 14);
+    const btnH = clamp(Math.floor((stackAvail - btnGap * 2) / 3), 38, 48);
+    const btnW = Math.min(248, f.iw - 10);
     const btnX = Math.round(f.ix + (f.iw - btnW) * 0.5);
 
     const b1Y = stackTop;
     UI.drawPillButton(c, btnX, b1Y, btnW, btnH, {
       variant: 'primary',
+      glossDot: true,
       label: '继续营业',
-      fontSize: 16.5,
+      fontSize: 19.5,
       radius: btnH * 0.5,
       pressed: isPressed(app, 'pause_resume_btn')
     });
@@ -3185,7 +3247,7 @@ function renderPauseModal(ctx, metrics, app, hits) {
       variant: 'wood',
       woodGrain: true,
       label: '重新开始',
-      fontSize: 16.0,
+      fontSize: 19.0,
       radius: btnH * 0.5,
       pressed: isPressed(app, 'pause_restart_btn')
     });
@@ -3195,7 +3257,7 @@ function renderPauseModal(ctx, metrics, app, hits) {
     UI.drawPillButton(c, btnX, b3Y, btnW, btnH, {
       variant: 'dark',
       label: '返回大厅',
-      fontSize: 16.0,
+      fontSize: 19.0,
       radius: btnH * 0.5,
       pressed: isPressed(app, 'pause_lobby_btn')
     });
@@ -3210,10 +3272,10 @@ function renderPauseModal(ctx, metrics, app, hits) {
       variant: 'card',
       icon: 'icon_help',
       sprites,
-      iconSize: 13,
+      iconSize: 15,
       label: '玩法说明',
-      fontSize: 10.2,
-      radius: 11,
+      fontSize: 12.6,
+      radius: 12,
       pressed: isPressed(app, 'pause_help_btn')
     });
     hits.add('pause_help_btn', secRowX, secY, secW, secH, () => app.openModal('help'));
@@ -3222,10 +3284,10 @@ function renderPauseModal(ctx, metrics, app, hits) {
       variant: 'card',
       icon: 'icon_book',
       sprites,
-      iconSize: 13,
+      iconSize: 15,
       label: '星夜图鉴',
-      fontSize: 10.2,
-      radius: 11,
+      fontSize: 12.6,
+      radius: 12,
       pressed: isPressed(app, 'pause_compendium_btn')
     });
     hits.add('pause_compendium_btn', secRowX + secW + secGap, secY, secW, secH, () => app.openCompendium('recipes'));
@@ -3265,13 +3327,25 @@ function drawHelpIllustration(ctx, sprites, stepIdx, x, y, size) {
     UI.drawCatcakeSprite(c, sprites, 2, x + size * 0.74, cy, Math.round(size * 0.40));
     c.save();
     try {
-      c.strokeStyle = '#754C36';
-      c.lineWidth = 1.6;
+      c.strokeStyle = '#6A3F26';
+      c.lineWidth = 1.9;
+      c.lineCap = 'round';
+      c.lineJoin = 'round';
+      const ax1 = x + size * 0.45;
+      const ax2 = x + size * 0.56;
+      // Top-left merge arrow
       c.beginPath();
-      c.moveTo(x + size * 0.45, y + size * 0.35);
-      c.lineTo(x + size * 0.54, cy - 3);
-      c.moveTo(x + size * 0.45, y + size * 0.67);
-      c.lineTo(x + size * 0.54, cy + 3);
+      c.moveTo(ax1, y + size * 0.34);
+      c.lineTo(ax2, cy - 3);
+      c.moveTo(ax2 - 4, cy - 6);
+      c.lineTo(ax2, cy - 3);
+      c.lineTo(ax2 - 4, cy - 0.5);
+      // Bottom-left merge arrow
+      c.moveTo(ax1, y + size * 0.68);
+      c.lineTo(ax2, cy + 3);
+      c.moveTo(ax2 - 4, cy + 0.5);
+      c.lineTo(ax2, cy + 3);
+      c.lineTo(ax2 - 4, cy + 6);
       c.stroke();
     } finally {
       c.restore();
@@ -3281,20 +3355,20 @@ function drawHelpIllustration(ctx, sprites, stepIdx, x, y, size) {
 
   if (stepIdx === 1) {
     // 2. Dough knead icon (Design 11 card 2)
-    UI.drawUiIcon(c, sprites, 'knead_dough', cx, cy, size * 0.78);
+    UI.drawUiIcon(c, sprites, 'knead_dough', cx, cy, size * 0.80);
     return;
   }
 
   if (stepIdx === 2) {
     // 3. Glowing servable catcake on serving plate (Design 11 card 3)
-    UI.drawUiIcon(c, sprites, 'serving_plate', cx, cy + size * 0.14, size * 0.76);
-    UI.drawCatcakeSprite(c, sprites, 1, cx, cy - size * 0.04, size * 0.52, { servable: true, happy: true });
+    UI.drawUiIcon(c, sprites, 'serving_plate', cx, cy + size * 0.14, size * 0.78);
+    UI.drawCatcakeSprite(c, sprites, 1, cx, cy - size * 0.04, size * 0.54, { servable: true, happy: true });
     return;
   }
 
-  // 4. Fever & Combo badge using our generated icon_fever_badge.webp (Design 11 card 4)
-  UI.drawUiIcon(c, sprites, 'icon_fever_badge', cx, cy - size * 0.08, size * 0.62);
-  UI.drawTagBadge(c, x + 5, y + size - 19, size - 10, 15, '星光热潮', 'purple', 8.0);
+  // 4. Fever & Combo badge using our generated icon_fever_badge.png (Design 11 card 4)
+  UI.drawUiIcon(c, sprites, 'icon_fever_badge', cx, cy - size * 0.08, size * 0.64);
+  UI.drawTagBadge(c, x + 4, y + size - 20, size - 8, 16, '星光热潮', 'purple', 8.8);
 }
 
 function renderHelpModal(ctx, metrics, app, hits) {
@@ -3302,12 +3376,12 @@ function renderHelpModal(ctx, metrics, app, hits) {
   const sprites = app.sprites || {};
 
   const f = beginModalFrame(c, metrics, app, {
-    maxW: 438,
-    desiredH: 546,
+    maxW: 442,
+    desiredH: 560,
     dismissOnOutside: true,
     title: '玩法说明',
-    sheetTopInset: 34,
-    sheetBottomPad: 32
+    sheetTopInset: 36,
+    sheetBottomPad: 34
   });
 
   try {
@@ -3316,15 +3390,15 @@ function renderHelpModal(ctx, metrics, app, hits) {
     const cards = [
       {
         title: '1. 滑动搓猫饼',
-        body: '上下左右滑动烤盘，合并相同猫饼升阶；停在抹茶/草莓/镀金格可染上专属风味！'
+        body: '上下左右滑动烤盘，合并相同猫饼升阶；停在抹茶/草莓/镀金格可染上风味！'
       },
       {
         title: '2. 揉面补料与厨具',
-        body: '点击揉面补料随时往烤盘补充新猫饼；移位叉可跨障挪移破冰，升阶勺直升一阶。'
+        body: '点揉面补料随时补充新猫饼；移位叉可跨障破冰，升阶勺直升一阶。'
       },
       {
         title: '3. 装盘点客上菜',
-        body: '单击发光猫饼装盘，凑齐后点发光顾客上菜！双击托盘可丢入8秒冷却厨余篮（0扣分）。'
+        body: '单击发光猫饼装盘，凑齐点发光顾客上菜；双击托盘丢入厨余篮(0扣分)。'
       },
       {
         title: '4. 连击与星光热潮',
@@ -3333,7 +3407,7 @@ function renderHelpModal(ctx, metrics, app, hits) {
     ];
 
     const bodyY = f.sheetY + 18;
-    const bodyH = Math.max(220, f.sheetY + f.sheetH - 10 - bodyY);
+    const bodyH = Math.max(220, f.sheetY + f.sheetH - 12 - bodyY);
     const gap = 8;
     const ch = Math.floor((bodyH - gap * (cards.length - 1)) / cards.length);
 
@@ -3344,34 +3418,34 @@ function renderHelpModal(ctx, metrics, app, hits) {
         tone: 'cream',
         borderColor: '#5A3928',
         radius: 13,
-        lineWidth: 2.2
+        lineWidth: 2.3
       });
 
-      const illuS = Math.min(62, ch - 14);
+      const illuS = Math.min(68, ch - 12);
       const illuX = f.ix + 8;
       const illuY = Math.round(cy + (ch - illuS) * 0.5);
       drawHelpIllustration(c, sprites, i, illuX, illuY, illuS);
 
       const tx = illuX + illuS + 10;
       const tw = Math.max(80, f.ix + f.iw - 10 - tx);
-      UI.drawFitText(c, it.title, tx, cy + Math.round(ch * 0.28), tw, 13.8, 10.2, 900, '#5A3928', 'left', 'middle');
+      UI.drawFitText(c, it.title, tx, cy + Math.round(ch * 0.26), tw, 15.6, 11.4, 900, '#4E2B18', 'left', 'middle');
       UI.drawWrappedText(
         c,
         it.body,
         tx,
-        cy + Math.round(ch * 0.45),
+        cy + Math.round(ch * 0.44),
         tw,
-        14.2,
-        UI.fontStr(10.0, 700),
-        '#754C36',
+        15.6,
+        UI.fontStr(11.6, 700),
+        '#6A422B',
         'left',
         3
       );
     }
 
     // Bottom Honey-Gold 3D "我知道了" Button overlapping bottom border (Design 11)
-    const okW = Math.min(188, f.iw - 24);
-    const okH = 44;
+    const okW = Math.min(204, f.iw - 18);
+    const okH = 48;
     const okX = Math.round(f.cardX + (f.cardW - okW) * 0.5);
     const okY = Math.min(f.botBound - okH - 2, f.cardY + f.cardH - Math.round(okH * 0.56));
     UI.drawPillButton(c, okX, okY, okW, okH, {
@@ -3379,7 +3453,7 @@ function renderHelpModal(ctx, metrics, app, hits) {
       textOutline: true,
       glossDot: true,
       label: '我知道了',
-      fontSize: 17.0,
+      fontSize: 20.0,
       radius: okH * 0.5,
       pressed: isPressed(app, 'help_ok_btn')
     });
@@ -3401,11 +3475,11 @@ function renderConfirmModal(ctx, metrics, app, hits) {
   };
 
   const f = beginModalFrame(c, metrics, app, {
-    maxW: 380,
-    desiredH: 236,
+    maxW: 384,
+    desiredH: 244,
     dismissOnOutside: false,
     title: cfg.title || '操作确认',
-    sheetTopInset: 30,
+    sheetTopInset: 32,
     sheetBottomPad: 12
   });
 
@@ -3418,14 +3492,14 @@ function renderConfirmModal(ctx, metrics, app, hits) {
       f.ix + f.iw * 0.5,
       f.iy + 16,
       f.iw - 16,
-      19,
-      UI.fontStr(12.2, 800),
-      '#5A3928',
+      20,
+      UI.fontStr(13.8, 800),
+      '#4E2B18',
       'center',
       4
     );
 
-    const btnH = 40;
+    const btnH = 42;
     const btnY = f.iy + f.ih - btnH;
     const gap = 10;
     const bw = Math.floor((f.iw - gap) / 2);
@@ -3433,7 +3507,7 @@ function renderConfirmModal(ctx, metrics, app, hits) {
     UI.drawPillButton(c, f.ix, btnY, bw, btnH, {
       variant: 'wood',
       label: cfg.cancelText || '取消',
-      fontSize: 13.5,
+      fontSize: 15.2,
       radius: btnH * 0.5,
       pressed: isPressed(app, 'confirm_cancel')
     });
@@ -3442,7 +3516,7 @@ function renderConfirmModal(ctx, metrics, app, hits) {
     UI.drawPillButton(c, f.ix + bw + gap, btnY, bw, btnH, {
       variant: 'primary',
       label: cfg.confirmText || '确认',
-      fontSize: 13.5,
+      fontSize: 15.2,
       radius: btnH * 0.5,
       pressed: isPressed(app, 'confirm_accept')
     });

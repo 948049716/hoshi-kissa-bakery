@@ -1394,28 +1394,28 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
         } finally {
           try { ctx.restore(); } catch (_) {}
         }
-        UI.drawUiIcon(ctx, sprites, 'icon_vip_crown', bx + bw * 0.5, by - 3.5, 16);
+        UI.drawUiIcon(ctx, sprites, 'icon_vip_crown', bx + bw * 0.5, by - 4.0, 17);
         UI.drawOutlinedText(ctx, 'VIP', bx + bw * 0.5, by + 10.5, {
-          size: 10.8,
+          size: 11.8,
           weight: 900,
           fill: '#FFFDF5',
           stroke: '#4A2410',
-          strokeWidth: 2.5,
+          strokeWidth: 2.6,
           shadowOffsetY: 0.5,
           maxWidth: bw - 4
         });
-        UI.drawOutlinedText(ctx, '×1.5', bx + bw * 0.5, by + 21.5, {
-          size: 9.2,
+        UI.drawOutlinedText(ctx, '×1.5', bx + bw * 0.5, by + 22.0, {
+          size: 10.0,
           weight: 900,
           fill: '#FFF8E0',
           stroke: '#4A2410',
-          strokeWidth: 2.0,
+          strokeWidth: 2.2,
           shadowOffsetY: 0,
           maxWidth: bw - 4
         });
       } else if (isUrgent) {
-        const bw = Math.min(44, Math.round(cardW * 0.40));
-        const bh = 29;
+        const bw = Math.min(46, Math.round(cardW * 0.42));
+        const bh = 30;
         const bx = cardX;
         const by = portBot - bh + 2;
         ctx.save();
@@ -1437,20 +1437,20 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
           try { ctx.restore(); } catch (_) {}
         }
         UI.drawOutlinedText(ctx, '急单', bx + bw * 0.5, by + 10.5, {
-          size: 10.6,
+          size: 11.8,
           weight: 900,
           fill: '#FFFDF5',
           stroke: '#4E220E',
-          strokeWidth: 2.5,
+          strokeWidth: 2.6,
           shadowOffsetY: 0.5,
           maxWidth: bw - 4
         });
-        UI.drawOutlinedText(ctx, '×1.25', bx + bw * 0.5, by + 21.5, {
-          size: 8.8,
+        UI.drawOutlinedText(ctx, '×1.25', bx + bw * 0.5, by + 22.0, {
+          size: 9.8,
           weight: 900,
           fill: '#FFF2CC',
           stroke: '#4E220E',
-          strokeWidth: 2.0,
+          strokeWidth: 2.2,
           shadowOffsetY: 0,
           maxWidth: bw - 4
         });
@@ -1524,8 +1524,8 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
           try { ctx.restore(); } catch (_) {}
         }
 
-        const pillW = clamp(Math.round(cardW * 0.58), 52, 68);
-        const pillH = 18;
+        const pillW = clamp(Math.round(cardW * 0.62), 56, 72);
+        const pillH = 19;
         const pillX = Math.round(portCx - pillW * 0.5);
         const pillY = Math.round(bubbleY + bubbleH - 4 - readyPulse * 2.0);
         ctx.save();
@@ -1543,12 +1543,12 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
           try { ctx.restore(); } catch (_) {}
         }
         UI.drawOutlinedText(ctx, '点此上菜', portCx, pillY + pillH * 0.5 + 0.5, {
-          size: 9.8,
-          minSize: 8.2,
+          size: 11.0,
+          minSize: 8.6,
           weight: 900,
           fill: '#FFF8EC',
           stroke: '#5A3928',
-          strokeWidth: 2.2,
+          strokeWidth: 2.4,
           shadowOffsetY: 0,
           maxWidth: pillW - 8
         });
@@ -2014,8 +2014,8 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
       if (comboActive) {
         const countStr = `${comboCount}连`;
         const multStr = `×${comboMult.toFixed(2)}`;
-        const bigSz = clamp(Math.round(statusH * 0.60), 13.5, 18.0);
-        const smallSz = clamp(Math.round(statusH * 0.44), 10.5, 13.8);
+        const bigSz = clamp(Math.round(statusH * 0.66), 15.0, 20.0);
+        const smallSz = clamp(Math.round(statusH * 0.48), 11.5, 15.0);
         const gapTxt = 3.5;
 
         ctx.save();
@@ -2035,7 +2035,7 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
         }
 
         const totalTxtW = bigW + gapTxt + smallW;
-        const maxAvail = comboW - 12;
+        const maxAvail = comboW - 10;
         const scaleDown = totalTxtW > maxAvail ? maxAvail / totalTxtW : 1;
         const fBig = bigSz * scaleDown;
         const fSmall = smallSz * scaleDown;
@@ -2046,36 +2046,36 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
 
         UI.drawOutlinedText(ctx, countStr, startTxtX, txtCy, {
           size: fBig,
-          minSize: 9.8,
+          minSize: 10.5,
           weight: 900,
           fill: '#FFE75E',
           stroke: '#4E2006',
-          strokeWidth: 3.5,
+          strokeWidth: 3.6,
           shadowOffsetY: 0.8,
           align: 'left',
           baseline: 'middle'
         });
         UI.drawOutlinedText(ctx, multStr, startTxtX + scaledBigW + gapTxt * scaleDown, txtCy + 0.8, {
           size: fSmall,
-          minSize: 8.5,
+          minSize: 9.2,
           weight: 900,
           fill: '#FFFDF8',
           stroke: '#4E2006',
-          strokeWidth: 2.8,
+          strokeWidth: 3.0,
           shadowOffsetY: 0.7,
           align: 'left',
           baseline: 'middle'
         });
       } else {
         UI.drawOutlinedText(ctx, comboBroken ? '连击中断' : '连击待发', statusX + comboW * 0.5, statusY + statusH * 0.52, {
-          size: clamp(Math.round(statusH * 0.42), 10.5, 13.0),
-          minSize: 8.8,
+          size: clamp(Math.round(statusH * 0.46), 11.5, 14.0),
+          minSize: 9.2,
           weight: 800,
           fill: comboBroken ? '#E5DDD5' : '#F4DFC2',
           stroke: '#361C0E',
-          strokeWidth: 2.2,
+          strokeWidth: 2.4,
           shadowOffsetY: 0.5,
-          maxWidth: comboW - 12
+          maxWidth: comboW - 10
         });
       }
 
@@ -2188,19 +2188,19 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
       }
 
       // Split-aligned crisp bold white outlined text (`星光热潮` on left, `75%` inside right-mid fill, Design 03)
-      const fTxtSz = clamp(Math.round(feverH * 0.52), 11.0, 13.4);
+      const fTxtSz = clamp(Math.round(feverH * 0.58), 12.2, 14.5);
       const fTxtCy = feverY + feverH * 0.52;
       UI.drawOutlinedText(ctx, '星光热潮', feverX + 11, fTxtCy, {
         size: fTxtSz,
-        minSize: 9.0,
+        minSize: 9.6,
         weight: 900,
         fill: '#FFFFFF',
         stroke: '#281024',
-        strokeWidth: 2.8,
+        strokeWidth: 3.0,
         shadowOffsetY: 0.6,
         align: 'left',
         baseline: 'middle',
-        maxWidth: feverW * 0.52
+        maxWidth: feverW * 0.54
       });
 
       if (feverActive) {
@@ -2215,12 +2215,12 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
           feverX + feverW - 11,
           fTxtCy,
           {
-            size: fTxtSz * 0.95,
-            minSize: 8.6,
+            size: fTxtSz * 0.94,
+            minSize: 9.0,
             weight: 900,
             fill: '#FFF3A8',
             stroke: '#361224',
-            strokeWidth: 2.6,
+            strokeWidth: 2.8,
             shadowOffsetY: 0.6,
             align: 'right',
             baseline: 'middle',
@@ -2228,17 +2228,17 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
           }
         );
       } else {
-        UI.drawOutlinedText(ctx, `${Math.round(feverEnergy)}%`, feverX + Math.round(feverW * 0.66), fTxtCy, {
+        UI.drawOutlinedText(ctx, `${Math.round(feverEnergy)}%`, feverX + Math.round(feverW * 0.68), fTxtCy, {
           size: fTxtSz,
-          minSize: 9.0,
+          minSize: 9.6,
           weight: 900,
           fill: '#FFFFFF',
           stroke: '#281024',
-          strokeWidth: 2.8,
+          strokeWidth: 3.0,
           shadowOffsetY: 0.6,
           align: 'center',
           baseline: 'middle',
-          maxWidth: feverW * 0.36
+          maxWidth: feverW * 0.34
         });
       }
     }

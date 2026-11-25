@@ -3074,15 +3074,22 @@ export const TIER3_TESTS = [
       ctx.assert(feverTiles[0].tier >= 2 && feverTiles[0].tier <= 3, `Fever knead must yield C2/C3, got C${feverTiles[0].tier}`);
       ctx.assert(fSt.dough.temp <= tempBeforeFeverKnead + 0.01, 'Fever knead does not heat up dough');
 
-      // Serve during Fever -> extends feverTimer (+1.0s)
-      await ctx.advanceTime(2.5);
+      // Serve during Fever -> extends feverTimer (+1.0s), compensating for virtual time spent crafting the dish
+      await ctx.advanceTime(1.8);
       fSt = await ctx.getState();
       const seatInFever = fSt.seats.findIndex(Boolean);
       ctx.assert(seatInFever >= 0 && fSt.feverActive, 'Seated customer available inside Fever');
       const timerBeforeServe = fSt.feverTimer;
+      const timeLeftBeforeServe = fSt.timeLeft;
       await serveCustomerOrganic(ctx, seatInFever);
-      const timerAfterServe = (await ctx.getState()).feverTimer;
-      ctx.assert(timerAfterServe > timerBeforeServe - 0.5, `Fever V2 serve extends feverTimer (${timerBeforeServe.toFixed(2)} -> ${timerAfterServe.toFixed(2)})`);
+      const afterServeSt = await ctx.getState();
+      const timerAfterServe = afterServeSt.feverTimer;
+      const elapsedDt = Math.max(0, timeLeftBeforeServe - afterServeSt.timeLeft);
+      const netExtend = timerAfterServe - (timerBeforeServe - elapsedDt);
+      ctx.assert(
+        afterServeSt.feverActive && netExtend >= 0.75,
+        `Fever V2 serve extends feverTimer by ~1.0s (before=${timerBeforeServe.toFixed(2)}, after=${timerAfterServe.toFixed(2)}, dt=${elapsedDt.toFixed(2)}, netExtend=${netExtend.toFixed(2)})`
+      );
 
       // Plant a C1 via raw debug knead (if C2 landed, retry) then let Fever expire -> afterglow turns non-frozen C1 into C2!
       await ctx.clearBoardExcept([]);

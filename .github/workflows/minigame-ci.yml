@@ -48,7 +48,7 @@ jobs:
 
       - name: Syntax check Mini Game, Cloud Function & scripts
         run: |
-          for f in 05-微信小游戏版本/game.js 05-微信小游戏版本/src/*.js 05-微信小游戏版本/cloudfunctions/kissa_sync/index.js scripts/*.mjs; do
+          for f in 05-微信小游戏版本/game.js 05-微信小游戏版本/src/*.js 05-微信小游戏版本/openDataContext/*.js 05-微信小游戏版本/cloudfunctions/kissa_sync/index.js scripts/*.mjs; do
             node --check "$f"
           done
 
@@ -84,7 +84,7 @@ jobs:
           retention-days: 7
 
   upload:
-    name: 上传到微信开发者平台
+    name: 部署云函数与上传微信体验版
     needs: verify
     runs-on: ubuntu-latest
     steps:
@@ -96,6 +96,39 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Deploy kissa_sync to CloudBase (dev-d0ggz3zx89d349af3)
+        if: github.event_name != 'workflow_dispatch' || inputs.action == 'upload'
+        env:
+          TCB_SECRET_ID: ${{ secrets.TCB_SECRET_ID }}
+          TCB_SECRET_KEY: ${{ secrets.TCB_SECRET_KEY }}
+          TCB_ENV_ID: dev-d0ggz3zx89d349af3
+        run: |
+          if [ -z "$TCB_SECRET_ID" ] || [ -z "$TCB_SECRET_KEY" ]; then
+            echo "::notice::未配置 TCB_SECRET_ID / TCB_SECRET_KEY，跳过云函数自动部署。"
+            exit 0
+          fi
+          npm --prefix "$RUNNER_TEMP/tcb" install --no-save @cloudbase/cli
+          TCB_BIN="$RUNNER_TEMP/tcb/node_modules/.bin/tcb"
+          "$TCB_BIN" login --apiKeyId "$TCB_SECRET_ID" --apiKey "$TCB_SECRET_KEY"
+
+          FOUND_REGION=""
+          for r in ap-shanghai ap-guangzhou ap-beijing ap-chengdu; do
+            echo "Checking CloudBase region: $r ..."
+            OUT=$("$TCB_BIN" env list -r "$r" 2>&1 || true)
+            if echo "$OUT" | grep -q "$TCB_ENV_ID"; then
+              FOUND_REGION="$r"
+              echo "Found $TCB_ENV_ID in region: $FOUND_REGION"
+              break
+            fi
+          done
+
+          if [ -z "$FOUND_REGION" ]; then
+            echo "::warning::当前 SecretId 账号下未找到环境 $TCB_ENV_ID，跳过云函数自动部署（可在微信开发者工具右键 kissa_sync 上传并部署）。"
+            exit 0
+          fi
+
+          "$TCB_BIN" fn deploy kissa_sync --dir 05-微信小游戏版本/cloudfunctions/kissa_sync -e "$TCB_ENV_ID" -r "$FOUND_REGION" --force
+
       - name: Install miniprogram-ci cleanly in runner temp
         run: |
           mkdir -p "$RUNNER_TEMP/mpci"
@@ -104,7 +137,7 @@ jobs:
       - name: Upload / Preview Mini Game via miniprogram-ci
         env:
           MINIPROGRAM_CI_PATH: ${{ runner.temp }}/mpci/node_modules/miniprogram-ci
-          WECHAT_PRIVATE_KEY: ${{ secrets.WECHAT_PRIVATE_KEY }}
+          WECHAT_PRIVATE_KEY: ${{ secrets.WECHAT_PRIVATE_KEY || secrets.WX_PRIVATE_KEY }}
           WECHAT_APPID: ${{ secrets.WECHAT_APPID }}
           WECHAT_ACTION: ${{ github.event_name == 'workflow_dispatch' && inputs.action || 'upload' }}
           WECHAT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}

@@ -1,4 +1,4 @@
-name: Deploy WeChat MiniGame & CloudBase
+name: Deploy WeChat MiniGame & CloudBase (Manual Hotfix)
 
 on:
   workflow_dispatch:
@@ -10,14 +10,7 @@ on:
       desc:
         description: '版本备注'
         required: false
-        default: '云开发与小游戏自动部署'
-  push:
-    branches:
-      - main
-    paths:
-      - '05-微信小游戏版本/**'
-      - 'scripts/ci_upload_minigame.mjs'
-      - '.github/workflows/deploy-wechat-minigame.yml'
+        default: '云开发与小游戏手动紧急部署'
 
 jobs:
   deploy-cloudfunction:

@@ -568,6 +568,7 @@ function drawPillButton(ctx, x, y, w, h, opts = {}) {
   const PRESETS = {
     primary: { top: '#FFD86B', bot: '#F5A420', bevel: '#C67418', text: '#5A3928', stroke: '', outline: false },
     cta: { top: '#FFE073', bot: '#F39821', bevel: '#B65D0E', text: '#5A3928', stroke: '', outline: false },
+    knead: { top: '#FFE66E', mid: '#FAAD22', bot: '#EB8212', bevel: '#B5530A', text: '#FFFDF8', stroke: '#4A230D', outline: true, strokeW: 3.6, glossDot: true },
     amber: { top: '#FFD86B', bot: '#F5A420', bevel: '#C67418', text: '#5A3928', stroke: '', outline: false },
     caramel: { top: '#F9D88C', bot: '#E3A44B', bevel: '#AE6F22', text: '#5A3928', stroke: '', outline: false },
     gold: { top: '#FFE27D', bot: '#F5A623', bevel: '#C87A1E', text: '#5A3928', stroke: '', outline: false },
@@ -576,7 +577,7 @@ function drawPillButton(ctx, x, y, w, h, opts = {}) {
     green: { top: '#94C954', bot: '#72A639', bevel: '#4B7122', text: '#FFF8EC', stroke: '#3D591D', outline: true },
     equipped: { top: '#8FB347', bot: '#6E9132', bevel: '#4B6620', text: '#FFF8EC', stroke: '#3D521B', outline: true },
     secondary: { top: '#BE8150', bot: '#8A5634', bevel: '#5E361D', text: '#FFF8EC', stroke: '#5A3928', outline: true },
-    wood: { top: '#B87B4B', bot: '#8A5634', bevel: '#5E361D', text: '#FFF8EC', stroke: '#5A3928', outline: true },
+    wood: { top: '#BA7E4B', bot: '#7F4D2B', bevel: '#522E17', text: '#FFF8EC', stroke: '#4A2511', outline: true },
     walnut: { top: '#C48A55', bot: '#986036', bevel: '#663B1E', text: '#FFF8EC', stroke: '#5A3928', outline: true },
     dark: { top: '#7E543C', bot: '#5B3A27', bevel: '#3B2316', text: '#F5E6D3', stroke: '#3B2316', outline: true },
     muted: { top: '#845940', bot: '#69432E', bevel: '#4A2E1E', text: '#F5E6D3', stroke: '#3D2417', outline: true },
@@ -587,7 +588,7 @@ function drawPillButton(ctx, x, y, w, h, opts = {}) {
   };
 
   const pal = PRESETS[styleKey] || PRESETS.primary;
-  const maxBevel = disabled ? 2 : Math.min(5, Math.max(2.5, Math.round(sh * 0.11)));
+  const maxBevel = disabled ? 2 : Math.min(6, Math.max(2.5, Math.round(sh * 0.12)));
   const bevelH = Math.max(1.5, maxBevel * (1 - pressAmt * 0.65));
   const dy = pressAmt * Math.min(2.5, maxBevel * 0.65);
   const bodyH = Math.max(8, sh - maxBevel);
@@ -609,10 +610,32 @@ function drawPillButton(ctx, x, y, w, h, opts = {}) {
     // 主体渐变面
     const grad = _linearGrad(ctx, sx, sy + dy, sx, sy + dy + bodyH, pal.top);
     _addStop(grad, 0, pal.top);
+    if (pal.mid) _addStop(grad, 0.56, pal.mid);
     _addStop(grad, 1, pal.bot);
     _roundRect(ctx, sx, sy + dy, sw, bodyH, radius);
     ctx.fillStyle = grad;
     ctx.fill();
+
+    // 可选暖木细木纹（对应设计图 03 底部移位叉/升阶勺木质按钮）
+    if (o.woodGrain && !disabled && sw > 24 && bodyH > 24) {
+      ctx.save();
+      try {
+        _roundRect(ctx, sx + 2, sy + dy + 2, sw - 4, bodyH - 4, Math.max(4, radius - 2));
+        if (typeof ctx.clip === 'function') ctx.clip();
+        ctx.strokeStyle = 'rgba(66, 34, 16, 0.18)';
+        ctx.lineWidth = 1.1;
+        for (let gy = sy + dy + 12; gy < sy + dy + bodyH - 8; gy += 11) {
+          ctx.beginPath();
+          ctx.moveTo(sx + 3, gy);
+          ctx.quadraticCurveTo(sx + sw * 0.5, gy + 1.5, sx + sw - 3, gy - 0.8);
+          ctx.stroke();
+        }
+      } finally {
+        ctx.restore();
+      }
+    }
+
+    _roundRect(ctx, sx, sy + dy, sw, bodyH, radius);
     ctx.lineWidth = _num(o.borderWidth, 2.4);
     ctx.strokeStyle = V090_KISSA_THEME.ink;
     ctx.stroke();
@@ -622,10 +645,21 @@ function drawPillButton(ctx, x, y, w, h, opts = {}) {
       const insetX = Math.min(Math.max(8, radius * 0.55), sw * 0.18);
       const hlX = sx + insetX;
       const hlW = Math.max(4, sw - insetX * 2);
-      const hlH = Math.max(3, Math.min(7, bodyH * 0.22));
-      _roundRect(ctx, hlX, sy + dy + 2.6, hlW, hlH, hlH * 0.5);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.34)';
+      const hlH = Math.max(3, Math.min(7, bodyH * 0.20));
+      _roundRect(ctx, hlX, sy + dy + 2.8, hlW, hlH, hlH * 0.5);
+      ctx.fillStyle = pal.glossDot ? 'rgba(255, 255, 232, 0.44)' : 'rgba(255, 255, 255, 0.34)';
       ctx.fill();
+
+      if (pal.glossDot && sw > 70) {
+        ctx.fillStyle = 'rgba(255, 254, 240, 0.78)';
+        ctx.beginPath();
+        if (typeof ctx.ellipse === 'function') {
+          ctx.ellipse(sx + Math.max(15, radius * 0.65), sy + dy + Math.max(9, bodyH * 0.25), 5.2, 2.8, -0.45, 0, Math.PI * 2);
+        } else {
+          ctx.arc(sx + Math.max(15, radius * 0.65), sy + dy + Math.max(9, bodyH * 0.25), 3.4, 0, Math.PI * 2);
+        }
+        ctx.fill();
+      }
     }
 
     const cx = sx + sw * 0.5;
@@ -708,13 +742,13 @@ function drawPillButton(ctx, x, y, w, h, opts = {}) {
         ctx.closePath();
         ctx.fill();
       } else {
-        drawOutlinedText(ctx, caption, cx, hasAnySub ? cy - bodyH * 0.16 : cy + 0.5, {
+        drawOutlinedText(ctx, caption, cx, hasAnySub ? cy - bodyH * 0.16 : cy + 0.6, {
           size: fontSize,
-          weight: 800,
+          weight: 900,
           fill: textColor,
           stroke: pal.outline ? pal.stroke : '',
-          strokeWidth: pal.outline ? 2.6 : 0,
-          shadowOffsetY: 0,
+          strokeWidth: pal.outline ? _num(pal.strokeW, 2.6) : 0,
+          shadowOffsetY: pal.glossDot ? 1.4 : 0,
           maxWidth: sw - 14
         });
       }
@@ -1005,30 +1039,61 @@ function drawNoticeBanner(ctx, x, y, w, h, opts = {}) {
 }
 
 /**
- * 优先锁定顾客青蓝光环（对应设计图 03 左侧小狐狸头像光环）
+ * 优先锁定顾客青蓝光环（对应设计图 03 左侧小狐狸头像双环准星光环）
  */
 function drawPriorityTargetBadge(ctx, cx, cy, radius = 8, nowSec = 0, opts = {}) {
   if (!_isCtx(ctx)) return;
   const r = _num(radius, 8);
   if (!(r > 0)) return;
   const t = _num(nowSec, 0);
-  const pulse = 0.78 + 0.22 * Math.sin(t * 5.2);
+  const pulse = 0.80 + 0.20 * Math.sin(t * 5.2);
+  const outerR = r * (1.16 + 0.03 * pulse);
+  const innerR = r * (0.97 + 0.02 * pulse);
+  const tickLen = Math.max(3.5, r * 0.22);
 
   ctx.save();
   try {
-    ctx.strokeStyle = 'rgba(75, 232, 255, 0.36)';
-    ctx.lineWidth = Math.max(2.4, r * 0.22);
+    // Soft luminous outer cyan mist ring
+    ctx.strokeStyle = 'rgba(75, 232, 255, 0.34)';
+    ctx.lineWidth = Math.max(4.5, r * 0.24);
     ctx.beginPath();
-    ctx.arc(cx, cy, r * (1.12 + 0.06 * pulse), 0, Math.PI * 2);
+    ctx.arc(cx, cy, outerR, 0, Math.PI * 2);
     ctx.stroke();
 
-    ctx.strokeStyle = V090_EXT_COLORS.priorityCyan;
-    ctx.lineWidth = Math.max(2.0, r * 0.14);
+    // Crisp outer ring
+    ctx.strokeStyle = 'rgba(130, 244, 255, 0.82)';
+    ctx.lineWidth = 1.8;
     ctx.shadowColor = V090_EXT_COLORS.priorityCyan;
-    ctx.shadowBlur = 8;
+    ctx.shadowBlur = 10;
     ctx.beginPath();
-    ctx.arc(cx, cy, r * (0.98 + 0.04 * pulse), 0, Math.PI * 2);
+    ctx.arc(cx, cy, outerR, 0, Math.PI * 2);
     ctx.stroke();
+
+    // Inner bright cyan reticle ring
+    ctx.strokeStyle = V090_EXT_COLORS.priorityCyan;
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, innerR, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // 4 short inward reticle crosshair ticks (12, 3, 6, 9 o'clock — Design 03)
+    ctx.strokeStyle = '#BDF8FF';
+    ctx.lineWidth = 2.0;
+    ctx.lineCap = 'round';
+    const dirs = [
+      [0, -1],
+      [1, 0],
+      [0, 1],
+      [-1, 0]
+    ];
+    for (let i = 0; i < dirs.length; i++) {
+      const dx = dirs[i][0];
+      const dy = dirs[i][1];
+      ctx.beginPath();
+      ctx.moveTo(cx + dx * (innerR + 1.5), cy + dy * (innerR + 1.5));
+      ctx.lineTo(cx + dx * (innerR - tickLen), cy + dy * (innerR - tickLen));
+      ctx.stroke();
+    }
   } catch (_) {} finally {
     ctx.restore();
   }
@@ -1157,56 +1222,82 @@ function drawCooldownCell(ctx, x, y, w, h, remainingSec, opts = {}) {
   const label = forkReady ? '叉入销毁' : String(o.label || '厨余篮');
   const wobbleRot = _num(o.rot, 0);
 
+  // Design 03 proportions: compact glossy warm-caramel square in upper ~74%, crisp outlined label anchored cleanly across bottom
+  const boxH = Math.max(24, Math.round(sh * 0.72));
+  const boxW = Math.min(sw, Math.max(36, Math.round(boxH * 1.16)));
+  const bx = Math.round(sx + (sw - boxW) * 0.5);
+  const by = Math.round(sy + 1);
+  const rad = Math.min(10, Math.round(boxH * 0.27));
+
   ctx.save();
   try {
-    const grad = _linearGrad(ctx, sx, sy, sx, sy + sh, '#8A5634');
+    // Soft bottom shadow lip under the wood square
+    _roundRect(ctx, bx, by + 2.2, boxW, boxH, rad);
+    ctx.fillStyle = forkReady ? '#225934' : '#3E2212';
+    ctx.fill();
+
+    const grad = _linearGrad(ctx, bx, by, bx, by + boxH, '#A26D44');
     if (forkReady) {
       _addStop(grad, 0, '#6BC97D');
       _addStop(grad, 1, '#3A8F53');
     } else if (isCooling) {
-      _addStop(grad, 0, '#8C6247');
-      _addStop(grad, 1, '#6C4731');
+      _addStop(grad, 0, '#B07B52');
+      _addStop(grad, 0.55, '#8F5D3A');
+      _addStop(grad, 1, '#704528');
     } else {
-      _addStop(grad, 0, '#B0774D');
-      _addStop(grad, 1, '#845232');
+      _addStop(grad, 0, '#BA8151');
+      _addStop(grad, 0.55, '#96613A');
+      _addStop(grad, 1, '#754627');
     }
 
-    _roundRect(ctx, sx, sy, sw, sh, 10);
+    _roundRect(ctx, bx, by, boxW, boxH, rad);
     ctx.fillStyle = grad;
     ctx.fill();
-    ctx.lineWidth = forkReady ? 2.6 : 2.3;
-    ctx.strokeStyle = forkReady ? '#225934' : V090_KISSA_THEME.ink;
+    ctx.lineWidth = forkReady ? 2.4 : 2.1;
+    ctx.strokeStyle = forkReady ? '#225934' : '#402212';
     ctx.stroke();
+
+    // Soft glossy oval highlight at top-left (Design 03 detail)
+    if (!forkReady) {
+      ctx.fillStyle = 'rgba(255, 240, 214, 0.34)';
+      ctx.beginPath();
+      if (typeof ctx.ellipse === 'function') {
+        ctx.ellipse(bx + 7.5, by + 6.0, 4.2, 2.2, -0.35, 0, Math.PI * 2);
+      } else {
+        ctx.arc(bx + 7.5, by + 6.0, 2.5, 0, Math.PI * 2);
+      }
+      ctx.fill();
+    }
 
     if (forkReady && typeof ctx.setLineDash === 'function') {
       ctx.strokeStyle = '#E8FFF0';
-      ctx.lineWidth = 1.6;
+      ctx.lineWidth = 1.5;
       ctx.setLineDash([4, 3]);
-      _roundRect(ctx, sx + 2, sy + 2, sw - 4, sh - 4, 8);
+      _roundRect(ctx, bx + 2, by + 2, boxW - 4, boxH - 4, Math.max(4, rad - 2));
       ctx.stroke();
       ctx.setLineDash([]);
     }
 
     if (isCooling && !forkReady) {
-      drawOutlinedText(ctx, `${Math.ceil(rem)}s`, sx + sw * 0.5, sy + sh * 0.40, {
-        size: Math.max(12, Math.round(sh * 0.37)),
-        minSize: 10,
+      drawOutlinedText(ctx, `${Math.ceil(rem)}s`, bx + boxW * 0.5, by + boxH * 0.52, {
+        size: Math.max(15, Math.round(boxH * 0.54)),
+        minSize: 12,
         weight: 900,
-        fill: '#FFF8EC',
-        stroke: V090_KISSA_THEME.ink,
-        strokeWidth: 3.0,
-        shadowOffsetY: 1,
-        maxWidth: sw - 8
+        fill: '#FFFDF8',
+        stroke: '#3D1E0E',
+        strokeWidth: 3.4,
+        shadowOffsetY: 1.0,
+        maxWidth: boxW - 6
       });
       if (_imgDims(clockImg) && typeof ctx.drawImage === 'function') {
-        const csz = Math.max(12, Math.min(18, Math.round(Math.min(sw, sh) * 0.34)));
-        ctx.drawImage(clockImg, sx + sw - csz - 1, sy - 3, csz, csz);
+        const csz = Math.max(13, Math.min(18, Math.round(boxH * 0.44)));
+        ctx.drawImage(clockImg, bx + boxW - csz * 0.72, by - csz * 0.22, csz, csz);
       }
     } else if (_imgDims(trashImg) && typeof ctx.drawImage === 'function') {
-      const isz = Math.max(16, Math.round(Math.min(sw, sh) * 0.56));
+      const isz = Math.max(18, Math.round(Math.min(boxW, boxH) * 0.74));
       ctx.save();
       try {
-        ctx.translate(sx + sw * 0.5, sy + sh * 0.38);
+        ctx.translate(bx + boxW * 0.5, by + boxH * 0.49);
         if (wobbleRot) ctx.rotate(wobbleRot);
         ctx.drawImage(trashImg, -isz * 0.5, -isz * 0.5, isz, isz);
       } finally {
@@ -1214,15 +1305,15 @@ function drawCooldownCell(ctx, x, y, w, h, remainingSec, opts = {}) {
       }
     }
 
-    drawOutlinedText(ctx, label, sx + sw * 0.5, sy + sh * 0.80, {
-      size: Math.max(9.2, Math.round(sh * 0.21)),
-      minSize: 7.5,
-      weight: 800,
-      fill: '#FFF6E6',
-      stroke: V090_KISSA_THEME.ink,
-      strokeWidth: 2.0,
-      shadowOffsetY: 0,
-      maxWidth: sw - 6
+    drawOutlinedText(ctx, label, sx + sw * 0.5, sy + sh - Math.max(6.5, sh * 0.14), {
+      size: Math.max(10.8, Math.round(sh * 0.24)),
+      minSize: 8.8,
+      weight: 900,
+      fill: '#FFFDF8',
+      stroke: '#381B0D',
+      strokeWidth: 2.8,
+      shadowOffsetY: 0.7,
+      maxWidth: sw + 6
     });
   } catch (_) {} finally {
     ctx.restore();

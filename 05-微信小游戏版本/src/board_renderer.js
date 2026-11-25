@@ -477,6 +477,8 @@ function resolveBoardTheme(themeArg) {
     return {
       id: typeof rawId === 'string' ? rawId : base.id,
       frameStops,
+      frameSideTop: safeColor(getOwn(themeArg, 'frameSideTop', null), base.frameSideTop || '#B56B2B'),
+      frameSideBot: safeColor(getOwn(themeArg, 'frameSideBot', null), base.frameSideBot || '#8D4B1B'),
       frameBorder: safeColor(getOwn(themeArg, 'frameBorder', null), base.frameBorder),
       frameHighlight: safeColor(getOwn(themeArg, 'frameHighlight', null), base.frameHighlight),
       boardBgTop: safeColor(getOwn(themeArg, 'boardBgTop', null), base.boardBgTop),
@@ -484,6 +486,7 @@ function resolveBoardTheme(themeArg) {
       boardInnerBorder: safeColor(getOwn(themeArg, 'boardInnerBorder', null), base.boardInnerBorder),
       cellFill: safeColor(getOwn(themeArg, 'cellFill', null), base.cellFill),
       cellFillAlt: safeColor(getOwn(themeArg, 'cellFillAlt', null), base.cellFillAlt),
+      cellTopShadow: safeColor(getOwn(themeArg, 'cellTopShadow', null), base.cellTopShadow || 'rgba(116, 52, 14, 0.44)'),
       cellBorder: safeColor(getOwn(themeArg, 'cellBorder', null), base.cellBorder),
       cellInnerSheen: safeColor(getOwn(themeArg, 'cellInnerSheen', null), base.cellInnerSheen),
       trayBg: safeColor(getOwn(themeArg, 'trayBg', null), base.trayBg),
@@ -708,16 +711,17 @@ function computeBoardLayout(rect, arg2, arg3 = undefined, arg4 = undefined) {
     rows = clamp(Math.floor(rows) || 4, 1, 12);
     cols = clamp(Math.floor(cols) || 4, 1, 12);
 
-    const maxCell = Math.max(16, toSafeNum(getOwn(safeOpts, 'maxCellSize', 88), 88));
-    const minCell = Math.max(12, toSafeNum(getOwn(safeOpts, 'minCellSize', 46), 46));
-    const padX = rw < 220 ? 6 : 12;
-    const padY = rh < 220 ? 6 : 10;
+    const isThumb = Boolean(getOwn(safeOpts, 'thumbnail', false));
+    const maxCell = Math.max(16, toSafeNum(getOwn(safeOpts, 'maxCellSize', isThumb ? 48 : 80), isThumb ? 48 : 80));
+    const minCell = Math.max(12, toSafeNum(getOwn(safeOpts, 'minCellSize', isThumb ? 12 : 46), isThumb ? 12 : 46));
+    const padX = isThumb || rw < 220 ? 6 : cols <= 4 ? 24 : 14;
+    const padY = isThumb || rh < 220 ? 6 : 16;
 
     const hardMax = Math.max(
       12,
       Math.floor(Math.min((rw - padX * 2) / cols, (rh - padY * 2) / rows))
     );
-    const rawIdeal = Math.floor(Math.min((rw - 24) / cols, (rh - 20) / rows));
+    const rawIdeal = Math.floor(Math.min((rw - padX * 2) / cols, (rh - padY * 2) / rows));
     const cellSize = Math.min(maxCell, Math.min(hardMax, Math.max(minCell, rawIdeal)));
 
     const gridW = cols * cellSize;
@@ -725,9 +729,13 @@ function computeBoardLayout(rect, arg2, arg3 = undefined, arg4 = undefined) {
     const offX = toSafeNum(getOwn(safeOpts, 'offsetX', 0), 0);
     const offY = toSafeNum(getOwn(safeOpts, 'offsetY', 0), 0);
     const gridX = Math.round(rx + (rw - gridW) * 0.5 + offX);
-    const gridY = Math.round(ry + (rh - gridH) * 0.5 + offY);
-    const cellInset = Math.max(1.5, Math.round(cellSize * 0.045));
-    const bezelPad = Math.max(3, Math.min(8, Math.round(cellSize * 0.09)));
+    const gridY = Math.round(ry + (rh - gridH) * 0.5 + offY - (isThumb ? 0 : 2));
+    const cellInset = isThumb
+      ? Math.max(1.2, Math.round(cellSize * 0.055))
+      : Math.max(3, Math.min(5, Math.round(cellSize * 0.06)));
+    const bezelPad = isThumb
+      ? Math.max(3, Math.min(6, Math.round(cellSize * 0.14)))
+      : Math.max(7, Math.min(12, Math.round(cellSize * 0.155)));
 
     return {
       x: rx,
@@ -966,27 +974,69 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
     const startX = vertical ? rx : rx + Math.max(0, Math.floor((rw - (cardW * 3 + gap * 2)) * 0.5));
     const seatRects = [];
 
-    // Warm wooden bakery counter ledge running cleanly beneath the 3 portrait seats (Design 03)
-    const counterH = Math.min(20, Math.max(14, Math.round(cardH * 0.16)));
+    // Full-width warm honey-oak bakery counter ledge running flush beneath the 3 portrait seats (Design 03)
+    const counterH = Math.min(22, Math.max(17, Math.round(cardH * 0.175)));
     const counterY = ry + cardH - counterH;
-    if (!vertical) {
+    const fullBarX = toSafeNum(getOwn(opts, 'fullBarX', rx - 8), rx - 8);
+    const fullBarW = Math.max(rw + 16, toSafeNum(getOwn(opts, 'fullBarW', rw + 16), rw + 16));
+
+    // Helper: draw seamless cream speech bubble + curved downward comic tail (single closed path, zero seam)
+    const drawSeamlessSpeechBubble = (bx, by, bw, bh, tx, isReady = false, readyPulse = 0) => {
+      const r = Math.min(11, bh * 0.32, bw * 0.22);
+      const tBaseL = clamp(tx - 6, bx + r + 2, bx + bw - r - 14);
+      const tBaseR = Math.min(bx + bw - r - 2, tBaseL + 11);
+      const tTipX = tBaseL + 2;
+      const tTipY = by + bh + 7.5;
+
       ctx.save();
       try {
-        const cg = safeLinearGradient(ctx, rx - 8, counterY, rx - 8, ry + cardH, '#D9A773');
-        safeAddColorStop(cg, 0, '#E3B680', '#E3B680');
-        safeAddColorStop(cg, 0.4, '#C9935B', '#C9935B');
-        safeAddColorStop(cg, 1, '#9E6A3A', '#9E6A3A');
-        ctx.fillStyle = cg;
-        UI.roundRectPath(ctx, rx - 4, counterY, rw + 8, counterH, 6);
+        ctx.shadowColor = isReady ? 'rgba(255, 200, 56, 0.85)' : 'rgba(56, 30, 14, 0.20)';
+        ctx.shadowBlur = isReady ? 8 + 4 * readyPulse : 5;
+        ctx.shadowOffsetY = isReady ? 0 : 2;
+
+        const bg = safeLinearGradient(ctx, bx, by, bx, by + bh, isReady ? '#FFF7D6' : '#FFFDF7');
+        if (isReady) {
+          safeAddColorStop(bg, 0, '#FFFDF0', '#FFFDF0');
+          safeAddColorStop(bg, 1, '#FFE79E', '#FFE79E');
+        } else {
+          safeAddColorStop(bg, 0, '#FFFDF7', '#FFFDF7');
+          safeAddColorStop(bg, 1, '#F8EED9', '#F8EED9');
+        }
+        ctx.fillStyle = bg;
+        ctx.strokeStyle = isReady ? '#E8961E' : '#4B2B17';
+        ctx.lineWidth = isReady ? 2.5 : 2.1;
+        ctx.lineJoin = 'round';
+
+        ctx.beginPath();
+        ctx.moveTo(bx + r, by);
+        ctx.lineTo(bx + bw - r, by);
+        ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + r);
+        ctx.lineTo(bx + bw, by + bh - r);
+        ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - r, by + bh);
+        ctx.lineTo(tBaseR, by + bh);
+        ctx.quadraticCurveTo(tBaseR - 3.5, by + bh + 5.5, tTipX, tTipY);
+        ctx.quadraticCurveTo(tBaseL + 0.5, by + bh + 3.2, tBaseL, by + bh);
+        ctx.lineTo(bx + r, by + bh);
+        ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - r);
+        ctx.lineTo(bx, by + r);
+        ctx.quadraticCurveTo(bx, by, bx + r, by);
+        ctx.closePath();
         ctx.fill();
-        ctx.lineWidth = 2.0;
-        ctx.strokeStyle = '#5A3928';
+
+        ctx.shadowColor = 'rgba(0, 0, 0, 0)';
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetY = 0;
         ctx.stroke();
       } finally {
         try { ctx.restore(); } catch (_) {}
       }
-    }
+    };
 
+    // Draw full-width wooden counter ledge BEFORE portraits/badges? No — portraits stand BEHIND the counter!
+    // So draw empty-seat placeholders, speech bubbles & clipped portraits first, THEN draw the oak counter ledge & patience bars cleanly in front!
+
+    // Pre-pass: register hit areas & draw background speech bubbles + behind-counter portraits
+    const seatRenderMeta = [];
     for (let i = 0; i < 3; i++) {
       const cardX = vertical ? startX : startX + i * (cardW + gap);
       const cardY = vertical ? ry + i * (cardH + gap) : ry;
@@ -1025,8 +1075,8 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
                 sprites,
                 typeof rawLeaveId === 'string' && rawLeaveId ? rawLeaveId : 'cust_orange',
                 cardX + cardW * 0.5 + p * 22,
-                cardY + cardH * 0.56,
-                Math.min(54, cardH * 0.54),
+                counterY - Math.min(28, cardH * 0.24),
+                Math.min(60, cardH * 0.56),
                 { circular: false, mood: 'angry', alpha }
               );
               drewLeaving = true;
@@ -1036,27 +1086,38 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
         }
 
         if (!drewLeaving) {
-          UI.drawKissaCard(ctx, cardX + 4, cardY + 8, cardW - 8, Math.max(28, cardH - counterH - 14), {
-            tone: 'soft',
-            radius: 12,
-            borderColor: 'rgba(90, 57, 40, 0.45)',
-            lineWidth: 1.6
-          });
-          UI.drawUiIcon(ctx, sprites || {}, 'icon_clock', cardX + cardW * 0.5, cardY + cardH * 0.34, 16, 0.65);
+          // Cozy subtle translucent waiting plaque in the bubble zone so the sunlit cafe interior shines through
+          const waitX = cardX + 6;
+          const waitY = cardY + 6;
+          const waitW = Math.max(36, cardW - 12);
+          const waitH = clamp(Math.round(cardH * 0.36), 34, 44);
+          ctx.save();
+          try {
+            ctx.fillStyle = 'rgba(255, 248, 234, 0.72)';
+            ctx.strokeStyle = 'rgba(90, 57, 40, 0.42)';
+            ctx.lineWidth = 1.6;
+            UI.roundRectPath(ctx, waitX, waitY, waitW, waitH, 10);
+            ctx.fill();
+            ctx.stroke();
+          } finally {
+            try { ctx.restore(); } catch (_) {}
+          }
+          UI.drawUiIcon(ctx, sprites || {}, 'icon_clock', waitX + 14, waitY + waitH * 0.5, 15, 0.72);
           UI.drawFitText(
             ctx,
             '候客中...',
-            cardX + cardW * 0.5,
-            cardY + cardH * 0.56,
-            Math.max(24, cardW - 14),
-            10.2,
-            8.2,
+            waitX + 25 + (waitW - 30) * 0.5,
+            waitY + waitH * 0.5 + 0.5,
+            Math.max(24, waitW - 30),
+            10.5,
+            8.4,
             700,
-            '#754C36',
+            '#6E4831',
             'center',
             'middle'
           );
         }
+        safePush(seatRenderMeta, null);
         continue;
       }
 
@@ -1094,64 +1155,18 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
         ? 'anxious'
         : 'normal';
 
-      // 1. Cream Speech Bubble on top with downward tail pointing to customer portrait (Design 03)
-      const bubbleX = cardX + 2;
-      const bubbleY = cardY + 2;
-      const bubbleW = Math.max(36, cardW - 4);
-      const bubbleH = clamp(Math.round(cardH * 0.37), 34, 46);
-      const tailX = bubbleX + Math.round(bubbleW * (i === 0 ? 0.34 : i === 2 ? 0.66 : 0.42));
-
-      ctx.save();
-      try {
-        const bg = safeLinearGradient(
-          ctx,
-          bubbleX,
-          bubbleY,
-          bubbleX,
-          bubbleY + bubbleH,
-          isReady ? '#FFF7D6' : '#FFFDF7'
-        );
-        if (isReady) {
-          safeAddColorStop(bg, 0, '#FFFDF0', '#FFFDF0');
-          safeAddColorStop(bg, 1, '#FFE79E', '#FFE79E');
-          ctx.shadowColor = 'rgba(255, 200, 56, 0.85)';
-          ctx.shadowBlur = 8 + 4 * readyPulse;
-        } else {
-          safeAddColorStop(bg, 0, '#FFFDF7', '#FFFDF7');
-          safeAddColorStop(bg, 1, '#F8EDD9', '#F8EDD9');
-        }
-        ctx.fillStyle = bg;
-        UI.roundRectPath(ctx, bubbleX, bubbleY, bubbleW, bubbleH, 10);
-        ctx.fill();
-        ctx.lineWidth = isReady ? 2.5 : 2.0;
-        ctx.strokeStyle = isReady ? '#E8961E' : '#5A3928';
-        ctx.stroke();
-
-        // Downward speech tail
-        ctx.shadowBlur = 0;
-        ctx.beginPath();
-        ctx.moveTo(tailX - 5, bubbleY + bubbleH - 1.5);
-        ctx.lineTo(tailX - 1, bubbleY + bubbleH + 7);
-        ctx.lineTo(tailX + 5, bubbleY + bubbleH - 1.5);
-        ctx.closePath();
-        ctx.fillStyle = isReady ? '#FFE9A6' : '#F9EFE0';
-        ctx.fill();
-        ctx.beginPath();
-        ctx.moveTo(tailX - 5, bubbleY + bubbleH - 1);
-        ctx.lineTo(tailX - 1, bubbleY + bubbleH + 7);
-        ctx.lineTo(tailX + 5, bubbleY + bubbleH - 1);
-        ctx.strokeStyle = isReady ? '#E8961E' : '#5A3928';
-        ctx.lineWidth = 1.9;
-        ctx.lineJoin = 'round';
-        ctx.stroke();
-      } finally {
-        try { ctx.restore(); } catch (_) {}
-      }
+      // 1. Seamless Cream Speech Bubble on top with curved downward comic tail (Design 03 + readyToServe glow)
+      const bubbleX = cardX + 3;
+      const bubbleY = cardY + 6;
+      const bubbleW = Math.max(36, cardW - 6);
+      const bubbleH = clamp(Math.round(cardH * 0.35), 34, 45);
+      const tailX = bubbleX + Math.round(bubbleW * 0.28);
+      drawSeamlessSpeechBubble(bubbleX, bubbleY, bubbleW, bubbleH, tailX, isReady, readyPulse);
 
       // Order required Cat-Cakes inside Speech Bubble (1..3 slots)
       if (slots.length > 0) {
         const chipGap = slots.length >= 3 ? 2 : 5;
-        const maxItemS = Math.min(bubbleH - 6, slots.length >= 3 ? 30 : 34);
+        const maxItemS = Math.min(bubbleH - 6, slots.length >= 3 ? 31 : 34);
         const itemS = clamp(
           Math.floor((bubbleW - 10 - (slots.length - 1) * chipGap) / slots.length),
           18,
@@ -1180,25 +1195,25 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
           });
 
           if (matched) {
-            UI.drawCheckmarkBadge(ctx, icx + itemS * 0.30, itemCy + itemS * 0.28, Math.max(5.0, itemS * 0.20), {
+            UI.drawCheckmarkBadge(ctx, icx + itemS * 0.31, itemCy + itemS * 0.28, Math.max(5.5, itemS * 0.21), {
               sprites
             });
           }
         }
       }
 
-      // 2. Standalone Customer WebP Portrait standing behind the wooden counter
-      const portTop = bubbleY + bubbleH + 2;
+      // 2. Standalone Customer Portrait standing cleanly behind the wooden counter ledge (Design 03)
+      const portTop = bubbleY + bubbleH + 1;
       const portBot = counterY + 2;
-      const portH = Math.max(36, portBot - portTop);
-      const portS = Math.min(cardW * 0.78, portH * 1.10);
+      const portH = Math.max(38, portBot - portTop);
+      const portS = Math.min(cardW * 0.86, portH * 1.18);
       const bob = isReady
         ? -Math.abs(Math.sin(nowSec * 5.8 + i * 0.9)) * 3.0
-        : Math.sin(nowSec * 2.6 + i * 1.4) * 1.2;
+        : Math.sin(nowSec * 2.6 + i * 1.4) * 1.0;
       const portCx = cardX + cardW * 0.5;
-      const portCy = portBot - portS * 0.44 + bob;
+      const portCy = portBot - portS * 0.42 + bob;
 
-      // Golden ready-to-serve aura behind portrait (takes lead over cyan target halo when ready)
+      // Golden ready-to-serve aura behind portrait (Plan A)
       if (isReady) {
         ctx.save();
         try {
@@ -1213,115 +1228,251 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
         } finally {
           try { ctx.restore(); } catch (_) {}
         }
-      } else if (isPreferred && typeof UI.drawPriorityTargetBadge === 'function') {
-        // Cyan priority target halo behind preferred customer portrait (Design 03 left fox)
-        UI.drawPriorityTargetBadge(ctx, portCx, portCy, portS * 0.52, nowSec);
       }
 
-      UI.drawCustomerPortrait(ctx, sprites, custId, portCx, portCy, portS, {
-        circular: false,
-        mood,
-        isVip,
-        isUrgent
-      });
+      // Clip softly at counterY so customer torso tucks cleanly behind the wooden bar counter
+      ctx.save();
+      try {
+        if (!vertical && typeof ctx.clip === 'function') {
+          ctx.beginPath();
+          ctx.rect(cardX - 10, cardY - 6, cardW + 20, counterY - (cardY - 6) + 1);
+          ctx.clip();
+        }
+        UI.drawCustomerPortrait(ctx, sprites, custId, portCx, portCy, portS, {
+          circular: false,
+          mood,
+          isVip,
+          isUrgent
+        });
+      } finally {
+        try { ctx.restore(); } catch (_) {}
+      }
 
-      // 3. Semantic Badges: Urgent ('急单 ×1.25') or VIP ('VIP ×1.5' + crown) matching Design 03
+      safePush(seatRenderMeta, {
+        i,
+        cardX,
+        cardY,
+        bubbleY,
+        bubbleH,
+        isVip,
+        isUrgent,
+        isPreferred,
+        isReady,
+        readyPulse,
+        ratio,
+        portCx,
+        portCy,
+        portS,
+        portBot: counterY
+      });
+    }
+
+    // 3. Full-width Warm Honey-Oak Bakery Counter Ledge sitting cleanly IN FRONT of customer torsos (Design 03)
+    if (!vertical) {
+      ctx.save();
+      try {
+        const cg = safeLinearGradient(ctx, fullBarX, counterY, fullBarX, ry + cardH, '#D9A26B');
+        safeAddColorStop(cg, 0, '#E8B87E', '#E8B87E');
+        safeAddColorStop(cg, 0.45, '#D2965C', '#D2965C');
+        safeAddColorStop(cg, 1, '#BE7F44', '#BE7F44');
+        ctx.fillStyle = cg;
+        if (typeof ctx.fillRect === 'function') {
+          ctx.fillRect(fullBarX, counterY, fullBarW, counterH);
+        } else {
+          UI.roundRectPath(ctx, fullBarX, counterY, fullBarW, counterH, 0);
+          ctx.fill();
+        }
+
+        // Subtle horizontal oak woodgrain streaks
+        ctx.strokeStyle = 'rgba(122, 68, 28, 0.18)';
+        ctx.lineWidth = 1.1;
+        for (let gy = counterY + 5; gy < counterY + counterH - 3; gy += 6) {
+          ctx.beginPath();
+          ctx.moveTo(fullBarX, gy);
+          ctx.lineTo(fullBarX + fullBarW, gy);
+          ctx.stroke();
+        }
+
+        // Top sunlit rim sheen + crisp dark-brown top border
+        ctx.strokeStyle = 'rgba(255, 240, 212, 0.45)';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(fullBarX, counterY + 1.5);
+        ctx.lineTo(fullBarX + fullBarW, counterY + 1.5);
+        ctx.stroke();
+
+        ctx.strokeStyle = '#52301C';
+        ctx.lineWidth = 2.0;
+        ctx.beginPath();
+        ctx.moveTo(fullBarX, counterY);
+        ctx.lineTo(fullBarX + fullBarW, counterY);
+        ctx.stroke();
+      } finally {
+        try { ctx.restore(); } catch (_) {}
+      }
+    }
+
+    // 4. Foreground overlays: Semantic Badges (急单/VIP), 3-Band Patience Bars, Ready-to-Serve / Cyan Priority Lock
+    for (let idx = 0; idx < seatRenderMeta.length; idx++) {
+      const m = seatRenderMeta[idx];
+      if (!m) continue;
+      const {
+        cardX,
+        cardY,
+        bubbleY,
+        bubbleH,
+        isVip,
+        isUrgent,
+        isPreferred,
+        isReady,
+        readyPulse,
+        ratio,
+        portCx,
+        portCy,
+        portS,
+        portBot
+      } = m;
+
+      // Glowing Cyan Reticle Ring & 4-Corner Priority Lock Frame (drawn beneath 急单/VIP badges, unless readyToServe takes lead)
+      if (!isReady && isPreferred && typeof UI.drawPriorityTargetBadge === 'function') {
+        UI.drawPriorityTargetBadge(ctx, portCx, portCy + 2, portS * 0.48, nowSec);
+      }
+      if (!isReady && isPreferred && typeof UI.drawPriorityLockFrame === 'function') {
+        UI.drawPriorityLockFrame(ctx, cardX - 1, cardY, cardW + 2, cardH - 1, nowSec);
+      }
+
+      // Semantic Badges: Urgent ('急单 ×1.25') or VIP ('VIP ×1.5' + crown) cleanly OVER reticle, matching Design 03
       if (isVip) {
         const bw = Math.min(44, Math.round(cardW * 0.40));
-        const bh = 28;
-        const bx = cardX + cardW - bw - 1;
-        const by = portBot - bh - 2;
-        UI.drawKissaCard(ctx, bx, by, bw, bh, {
-          fill: '#F5B841',
-          borderColor: '#5A3928',
-          radius: 8,
-          lineWidth: 1.9
-        });
-        UI.drawUiIcon(ctx, sprites, 'icon_vip_crown', bx + bw * 0.5, by - 4, 15);
-        UI.drawOutlinedText(ctx, 'VIP', bx + bw * 0.5, by + 9.5, {
-          size: 9.8,
+        const bh = 29;
+        const bx = cardX + cardW - bw;
+        const by = portBot - bh + 2;
+        ctx.save();
+        try {
+          const vg = safeLinearGradient(ctx, bx, by, bx, by + bh, '#F5B841');
+          safeAddColorStop(vg, 0, '#FFE478', '#FFE478');
+          safeAddColorStop(vg, 1, '#EE9F22', '#EE9F22');
+          UI.roundRectPath(ctx, bx, by, bw, bh, 8);
+          ctx.fillStyle = vg;
+          ctx.fill();
+          ctx.lineWidth = 2.0;
+          ctx.strokeStyle = '#4E2A16';
+          ctx.stroke();
+          UI.roundRectPath(ctx, bx + 1.8, by + 1.8, bw - 3.6, bh - 3.6, 6.2);
+          ctx.lineWidth = 1.0;
+          ctx.strokeStyle = 'rgba(255, 250, 224, 0.65)';
+          ctx.stroke();
+        } finally {
+          try { ctx.restore(); } catch (_) {}
+        }
+        UI.drawUiIcon(ctx, sprites, 'icon_vip_crown', bx + bw * 0.5, by - 3.5, 16);
+        UI.drawOutlinedText(ctx, 'VIP', bx + bw * 0.5, by + 10.5, {
+          size: 10.8,
           weight: 900,
-          fill: '#FFF8EC',
-          stroke: '#5A3928',
-          strokeWidth: 2.2,
-          shadowOffsetY: 0,
+          fill: '#FFFDF5',
+          stroke: '#4A2410',
+          strokeWidth: 2.5,
+          shadowOffsetY: 0.5,
           maxWidth: bw - 4
         });
-        UI.drawOutlinedText(ctx, '×1.5', bx + bw * 0.5, by + 20.5, {
-          size: 8.8,
+        UI.drawOutlinedText(ctx, '×1.5', bx + bw * 0.5, by + 21.5, {
+          size: 9.2,
           weight: 900,
-          fill: '#5A3928',
-          stroke: '',
-          strokeWidth: 0,
+          fill: '#FFF8E0',
+          stroke: '#4A2410',
+          strokeWidth: 2.0,
           shadowOffsetY: 0,
           maxWidth: bw - 4
         });
       } else if (isUrgent) {
         const bw = Math.min(44, Math.round(cardW * 0.40));
-        const bh = 28;
-        const bx = cardX + 1;
-        const by = portBot - bh - 2;
-        UI.drawKissaCard(ctx, bx, by, bw, bh, {
-          fill: '#F27C38',
-          borderColor: '#5A3928',
-          radius: 8,
-          lineWidth: 1.9
-        });
-        UI.drawOutlinedText(ctx, '急单', bx + bw * 0.5, by + 9.5, {
-          size: 9.8,
+        const bh = 29;
+        const bx = cardX;
+        const by = portBot - bh + 2;
+        ctx.save();
+        try {
+          const ug = safeLinearGradient(ctx, bx, by, bx, by + bh, '#F27C38');
+          safeAddColorStop(ug, 0, '#FF9A44', '#FF9A44');
+          safeAddColorStop(ug, 1, '#E6531A', '#E6531A');
+          UI.roundRectPath(ctx, bx, by, bw, bh, 8);
+          ctx.fillStyle = ug;
+          ctx.fill();
+          ctx.lineWidth = 2.0;
+          ctx.strokeStyle = '#4E2612';
+          ctx.stroke();
+          UI.roundRectPath(ctx, bx + 1.8, by + 1.8, bw - 3.6, bh - 3.6, 6.2);
+          ctx.lineWidth = 1.0;
+          ctx.strokeStyle = 'rgba(255, 232, 186, 0.55)';
+          ctx.stroke();
+        } finally {
+          try { ctx.restore(); } catch (_) {}
+        }
+        UI.drawOutlinedText(ctx, '急单', bx + bw * 0.5, by + 10.5, {
+          size: 10.6,
           weight: 900,
-          fill: '#FFF8EC',
-          stroke: '#5A3928',
-          strokeWidth: 2.2,
-          shadowOffsetY: 0,
+          fill: '#FFFDF5',
+          stroke: '#4E220E',
+          strokeWidth: 2.5,
+          shadowOffsetY: 0.5,
           maxWidth: bw - 4
         });
-        UI.drawOutlinedText(ctx, '×1.25', bx + bw * 0.5, by + 20.5, {
-          size: 8.6,
+        UI.drawOutlinedText(ctx, '×1.25', bx + bw * 0.5, by + 21.5, {
+          size: 8.8,
           weight: 900,
-          fill: '#FFE9B8',
-          stroke: '#5A3928',
-          strokeWidth: 1.8,
+          fill: '#FFF2CC',
+          stroke: '#4E220E',
+          strokeWidth: 2.0,
           shadowOffsetY: 0,
           maxWidth: bw - 4
         });
       }
 
-      // 4. Bottom 3-Band Patience Progress Bar tucked into wooden counter ledge (Design 03)
-      const barW = Math.max(26, cardW - 18);
-      const barH = 8.5;
+      // 3-Band Patience Progress Bar nested cleanly inside oak counter ledge (Design 03)
+      const barW = Math.max(30, cardW - 22);
+      const barH = 9.5;
       const barX = Math.round(cardX + (cardW - barW) * 0.5);
       const barY = Math.round(counterY + (counterH - barH) * 0.5);
 
       ctx.save();
       try {
-        ctx.fillStyle = '#6D432B';
+        // Outer cream rim casing
+        ctx.fillStyle = freezeActive ? '#8CEEFF' : '#F8E6C4';
+        UI.roundRectPath(ctx, barX - 1.5, barY - 1.5, barW + 3, barH + 3, (barH + 3) * 0.5);
+        ctx.fill();
+
+        // Dark walnut recessed track
+        ctx.fillStyle = '#5A3620';
         UI.roundRectPath(ctx, barX, barY, barW, barH, barH * 0.5);
         ctx.fill();
 
         if (ratio > 0) {
-          const fillW = Math.max(5, (barW - 2) * ratio);
-          const pg = safeLinearGradient(ctx, barX, barY, barX + barW, barY, '#74C353');
+          const fillW = Math.max(6, (barW - 2) * ratio);
+          const pg = safeLinearGradient(ctx, barX, barY, barX, barY + barH, '#74C353');
           if (freezeActive) {
-            safeAddColorStop(pg, 0, '#7CE8FF', '#7CE8FF');
-            safeAddColorStop(pg, 1, '#2FA8DF', '#2FA8DF');
+            safeAddColorStop(pg, 0, '#9AF0FF', '#9AF0FF');
+            safeAddColorStop(pg, 1, '#2EA4DC', '#2EA4DC');
           } else if (ratio >= PATIENCE_TIP_BANDS.greenThreshold) {
-            safeAddColorStop(pg, 0, '#8AD862', '#8AD862');
-            safeAddColorStop(pg, 1, '#58AE3B', '#58AE3B');
+            safeAddColorStop(pg, 0, '#96E56B', '#96E56B');
+            safeAddColorStop(pg, 1, '#52B435', '#52B435');
           } else if (ratio >= PATIENCE_TIP_BANDS.yellowThreshold) {
-            safeAddColorStop(pg, 0, '#FFD452', '#FFD452');
-            safeAddColorStop(pg, 1, '#E89B1E', '#E89B1E');
+            safeAddColorStop(pg, 0, '#FFE468', '#FFE468');
+            safeAddColorStop(pg, 1, '#EB9B1A', '#EB9B1A');
           } else {
-            safeAddColorStop(pg, 0, '#F46E64', '#F46E64');
-            safeAddColorStop(pg, 1, '#D13B32', '#D13B32');
+            safeAddColorStop(pg, 0, '#FF766B', '#FF766B');
+            safeAddColorStop(pg, 1, '#D63830', '#D63830');
             ctx.globalAlpha *= 0.80 + 0.20 * Math.sin(nowSec * 12);
           }
           ctx.fillStyle = pg;
           UI.roundRectPath(ctx, barX + 1, barY + 1, fillW, barH - 2, (barH - 2) * 0.5);
           ctx.fill();
+
+          // Subtle top glossy gleam inside patience bar
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.36)';
+          UI.roundRectPath(ctx, barX + 2.5, barY + 1.6, Math.max(3, fillW - 3), (barH - 2) * 0.38, 2);
+          ctx.fill();
         }
 
-        ctx.strokeStyle = freezeActive ? '#4BE8FF' : '#FFF4DC';
+        ctx.strokeStyle = '#4B2B17';
         ctx.lineWidth = 1.4;
         UI.roundRectPath(ctx, barX, barY, barW, barH, barH * 0.5);
         ctx.stroke();
@@ -1329,7 +1480,7 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
         try { ctx.restore(); } catch (_) {}
       }
 
-      // 5. Ready-to-Serve Golden Pulse Frame & Bouncing '点此上菜' Pill (Plan A), or Cyan Priority Lock
+      // 5. Ready-to-Serve Golden Pulse Frame & Bouncing '点此上菜' Pill (Plan A)
       if (isReady) {
         ctx.save();
         try {
@@ -1372,8 +1523,6 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
           shadowOffsetY: 0,
           maxWidth: pillW - 8
         });
-      } else if (isPreferred && typeof UI.drawPriorityLockFrame === 'function') {
-        UI.drawPriorityLockFrame(ctx, cardX + 1, cardY + 1, cardW - 2, cardH - 2, nowSec);
       }
     }
 
@@ -1436,44 +1585,79 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
 
     const rawShowStatus = getOwn(opts, 'showStatusRow', undefined);
     const showStatusRow = rawShowStatus !== undefined ? Boolean(rawShowStatus) : rh >= 52;
-    const statusH = showStatusRow ? Math.min(22, Math.max(16, Math.floor(rh * 0.30))) : 0;
-    const rowGap = showStatusRow ? 4 : 0;
-    const trayRowH = Math.max(30, rh - statusH - rowGap);
+    const optStatusH = toSafeNum(getOwn(opts, 'statusH', 0), 0);
+    const optRowGap = toSafeNum(getOwn(opts, 'rowGap', 0), 0);
+    const statusH = showStatusRow
+      ? optStatusH > 0
+        ? optStatusH
+        : clamp(Math.round(rh * 0.34), 24, 33)
+      : 0;
+    const rowGap = showStatusRow ? (optRowGap > 0 ? optRowGap : rh >= 84 ? 8 : 5) : 0;
+    const trayRowH = Math.max(34, rh - statusH - rowGap);
 
-    const trashW = Math.min(64, Math.max(50, Math.round(rw * 0.165)));
-    const trashX = rx + rw - trashW;
-    const trashY = ry + 1;
-    const trashH = Math.max(28, trayRowH - 2);
+    const trashW = Math.min(64, Math.max(52, Math.round(rw * 0.165)));
+    const trashX = rx + rw - trashW - 2;
+    const trashY = ry + 3;
+    const trashH = Math.max(32, trayRowH - 5);
 
-    const platterX = rx;
-    const platterW = Math.max(110, trashX - rx - 6);
+    const platterX = rx + 6;
+    const platterW = Math.max(120, trashX - platterX - 8);
 
-    // 1. Dark Espresso Wooden Serving Counter Rail behind plates & trash (Design 03)
+    // 1. Full-Width Dark Espresso Wooden Serving Counter Rail flush beneath oak counter (Design 03)
+    const fullBarX = toSafeNum(getOwn(opts, 'fullBarX', rx - 8), rx - 8);
+    const fullBarW = Math.max(rw + 16, toSafeNum(getOwn(opts, 'fullBarW', rw + 16), rw + 16));
+    const railRad = [0, 0, 14, 14];
     ctx.save();
     try {
-      const railG = safeLinearGradient(ctx, rx - 4, ry, rx - 4, ry + trayRowH, '#5C3C28');
-      safeAddColorStop(railG, 0, '#6B4730', '#6B4730');
-      safeAddColorStop(railG, 1, '#472D1E', '#472D1E');
+      // Soft downward drop shadow cast onto dark walnut tabletop
+      ctx.shadowColor = 'rgba(18, 9, 4, 0.44)';
+      ctx.shadowBlur = 10;
+      ctx.shadowOffsetY = 4;
+
+      const railG = safeLinearGradient(ctx, fullBarX, ry, fullBarX, ry + trayRowH, '#4D3C34');
+      safeAddColorStop(railG, 0, '#5A463C', '#5A463C');
+      safeAddColorStop(railG, 0.55, '#4A3830', '#4A3830');
+      safeAddColorStop(railG, 1, '#3D2D26', '#3D2D26');
       ctx.fillStyle = railG;
-      UI.roundRectPath(ctx, rx - 3, ry, rw + 6, trayRowH, 11);
+      UI.roundRectPath(ctx, fullBarX, ry, fullBarW, trayRowH, railRad);
       ctx.fill();
-      ctx.lineWidth = 2.0;
-      ctx.strokeStyle = '#382115';
+
+      ctx.shadowColor = 'rgba(0, 0, 0, 0)';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+
+      // Subtle inner top wood sheen along upper rail lip
+      ctx.strokeStyle = 'rgba(255, 224, 196, 0.14)';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(fullBarX + 2, ry + 2.2);
+      ctx.lineTo(fullBarX + fullBarW - 2, ry + 2.2);
+      ctx.stroke();
+
+      // Subtle inner bevel line above bottom border
+      ctx.strokeStyle = 'rgba(255, 214, 178, 0.12)';
+      ctx.lineWidth = 1.2;
+      UI.roundRectPath(ctx, fullBarX + 2, ry + 1, fullBarW - 4, trayRowH - 3, [0, 0, 12, 12]);
+      ctx.stroke();
+
+      ctx.lineWidth = 2.1;
+      ctx.strokeStyle = '#2B1B13';
+      UI.roundRectPath(ctx, fullBarX, ry, fullBarW, trayRowH, railRad);
       ctx.stroke();
     } finally {
       try { ctx.restore(); } catch (_) {}
     }
 
-    // 3~4 Round Wooden Serving Plates (`serving_plate.webp`)
+    // 3~4 Large Prominent Round Wooden Serving Plates (`serving_plate.png`, Design 03)
     const plateImg =
       (sprites && sprites.byId && sprites.byId.serving_plate) ||
       (sprites && sprites.servingPlate) ||
       null;
-    const slotGap = trayCap >= 4 ? 5 : 10;
-    const maxSlotW = Math.floor((platterW - 10 - (trayCap - 1) * slotGap) / trayCap);
-    const slotS = clamp(Math.min(maxSlotW, Math.round(trayRowH * 1.15)), 26, Math.max(28, trayRowH + 8));
-    const slotHitH = Math.min(trayRowH - 2, slotS);
-    const totalSlotsW = trayCap * slotS + (trayCap - 1) * slotGap;
+    const slotGap = trayCap >= 4 ? 6 : 12;
+    const maxSlotW = Math.floor((platterW - (trayCap - 1) * slotGap) / trayCap);
+    const slotW = clamp(Math.min(maxSlotW, Math.round(trayRowH * 1.62)), 38, Math.max(46, Math.round(trayRowH * 1.68)));
+    const slotHitH = Math.max(30, trayRowH - 4);
+    const totalSlotsW = trayCap * slotW + (trayCap - 1) * slotGap;
     const startSlotX = Math.round(platterX + (platterW - totalSlotsW) * 0.5);
     const slotY = Math.round(ry + (trayRowH - slotHitH) * 0.5);
 
@@ -1481,11 +1665,11 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
     let filledSlots = 0;
 
     for (let i = 0; i < trayCap; i++) {
-      const sx = startSlotX + i * (slotS + slotGap);
+      const sx = startSlotX + i * (slotW + slotGap);
       const rawTrayItem = getOwn(trayArr, i, null);
       const tile = isPlainObj(rawTrayItem) ? rawTrayItem : null;
       if (tile) filledSlots++;
-      safePush(slotRects, { x: sx, y: slotY, w: slotS, h: slotHitH, slotIdx: i });
+      safePush(slotRects, { x: sx, y: slotY, w: slotW, h: slotHitH, slotIdx: i });
 
       const slotIdxCopy = i;
       safeAddHit(
@@ -1493,36 +1677,35 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
         `tray_slot_${slotIdxCopy}`,
         sx,
         slotY,
-        slotS,
+        slotW,
         slotHitH,
         () => onTapTraySlot(slotIdxCopy),
         { slotIdx: slotIdxCopy, occupied: Boolean(tile) }
       );
 
       const matched = tile ? isTrayIndexMatchedInSeats(orderState, i) : false;
-      const plateCx = sx + slotS * 0.5;
-      const plateCy = ry + trayRowH * 0.56;
+      const plateCx = sx + slotW * 0.5;
+      const plateCy = ry + trayRowH * 0.55;
 
-      if (matched) {
-        ctx.save();
-        try {
-          ctx.fillStyle = 'rgba(255, 224, 108, 0.28)';
-          UI.fillEllipse(ctx, plateCx, plateCy, slotS * 0.52, trayRowH * 0.42);
-          ctx.fill();
-        } finally {
-          try { ctx.restore(); } catch (_) {}
-        }
+      // Grounding cast shadow beneath each wooden plate (clean espresso shadow matching Design 03)
+      ctx.save();
+      try {
+        ctx.fillStyle = 'rgba(18, 9, 4, 0.36)';
+        UI.fillEllipse(ctx, plateCx, plateCy + 3, slotW * 0.45, trayRowH * 0.34);
+        ctx.fill();
+      } finally {
+        try { ctx.restore(); } catch (_) {}
       }
 
       if (plateImg && UI.isReadyImage(plateImg)) {
-        UI.drawContainImage(ctx, plateImg, plateCx, plateCy, slotS * 1.02, trayRowH * 0.94);
+        UI.drawContainImage(ctx, plateImg, plateCx, plateCy, slotW * 1.04, trayRowH * 1.18);
       } else {
         ctx.save();
         try {
           ctx.fillStyle = matched ? '#D69952' : '#A86E3E';
           ctx.strokeStyle = '#5A3928';
           ctx.lineWidth = 2.0;
-          UI.fillEllipse(ctx, plateCx, plateCy, slotS * 0.46, trayRowH * 0.34);
+          UI.fillEllipse(ctx, plateCx, plateCy, slotW * 0.45, trayRowH * 0.35);
           ctx.fill();
           ctx.stroke();
         } finally {
@@ -1538,13 +1721,15 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
         }
         const tileTier = toSafeTier(getOwn(tile, 'tier', 1), 1);
         const rawTileFlv = getOwn(tile, 'flavor', 'plain');
+        const cakeSz = Math.max(24, Math.min(slotW * 0.64, trayRowH * 0.90));
+        // Seated snugly inside the wooden plate with cute cat ears gently peeking slightly above the dark rail rim (Design 03)
         UI.drawCatcakeSprite(
           ctx,
           sprites,
           tileTier,
           plateCx,
-          ry + trayRowH * 0.42 + bounceDy,
-          Math.max(18, Math.min(slotS * 0.72, trayRowH * 0.86)),
+          ry + trayRowH * 0.33 + bounceDy,
+          cakeSz,
           {
             happy: matched,
             flavor: typeof rawTileFlv === 'string' ? rawTileFlv : 'plain',
@@ -1617,12 +1802,18 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
       }
     }
 
-    // 3. Bottom Serve Combo + Purple-Gold Starlight Fever Bar (Design 03)
-    if (showStatusRow && statusH >= 12) {
+    // 3. Bottom Serve Combo Flame-Crest Pill + Luminous Violet-Pink Starlight Fever Bar (Strictly Design 03)
+    if (showStatusRow && statusH >= 16) {
       const statusY = ry + trayRowH + rowGap;
-      const comboW = Math.round(rw * 0.36);
-      const feverX = rx + comboW + 6;
-      const feverW = Math.max(80, rw - comboW - 6);
+      const optStatusW = toSafeNum(getOwn(opts, 'statusW', 0), 0);
+      const statusW = optStatusW > 0
+        ? Math.min(rw, optStatusW)
+        : Math.min(rw - 8, Math.max(280, Math.round(rw * 0.88)));
+      const statusX = Math.round(rx + (rw - statusW) * 0.5);
+      const statusGap = statusW >= 310 ? 10 : 8;
+      const comboW = clamp(Math.round(statusW * 0.34), 94, 124);
+      const feverX = statusX + comboW + statusGap;
+      const feverW = Math.max(120, statusW - comboW - statusGap);
 
       const comboCount = Math.max(0, Math.floor(toSafeNum(getOwn(orderState, 'comboCount', 0), 0)));
       const comboTimer = Math.max(0, toSafeNum(getOwn(orderState, 'comboTimer', 0), 0));
@@ -1633,60 +1824,197 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
       const multIdx = clamp(comboCount - 1, 0, multLen - 1);
       const comboMult = SERVE_COMBO_MULTS[multIdx] || 1.0;
 
-      // Orange-gold Combo Pill (with cute cat-ear glow peak when active)
+      // Helper: trace seamless Combo Pill with plump 3-peak golden flame/crown crest rising organically from top-left (Design 03)
+      const traceFlameComboPath = (cx0, cy0, cw0, ch0, peakLift) => {
+        const r = ch0 * 0.5;
+        const p1x = cx0 + r * 0.48;
+        const p1y = cy0 - peakLift * 0.52;
+        const v1x = cx0 + cw0 * 0.16;
+        const v1y = cy0 - peakLift * 0.18;
+        const p2x = cx0 + cw0 * 0.25;
+        const p2y = cy0 - peakLift;
+        const v2x = cx0 + cw0 * 0.34;
+        const v2y = cy0 - peakLift * 0.24;
+        const p3x = cx0 + cw0 * 0.41;
+        const p3y = cy0 - peakLift * 0.44;
+        const joinX = cx0 + cw0 * 0.50;
+
+        ctx.beginPath();
+        ctx.moveTo(cx0 + r * 0.14, cy0 + r * 0.54);
+        ctx.quadraticCurveTo(cx0 + r * 0.12, cy0 - peakLift * 0.16, p1x, p1y);
+        ctx.quadraticCurveTo(p1x + 4.5, p1y + 1.2, v1x, v1y);
+        ctx.quadraticCurveTo(p2x - 5.2, p2y + 2.5, p2x, p2y);
+        ctx.quadraticCurveTo(p2x + 5.2, p2y + 2.5, v2x, v2y);
+        ctx.quadraticCurveTo(p3x - 2.4, p3y + 0.6, p3x, p3y);
+        ctx.quadraticCurveTo(p3x + 5.5, cy0 - peakLift * 0.08, joinX, cy0);
+        ctx.lineTo(cx0 + cw0 - r, cy0);
+        ctx.arc(cx0 + cw0 - r, cy0 + r, r, -Math.PI * 0.5, Math.PI * 0.5, false);
+        ctx.lineTo(cx0 + r, cy0 + ch0);
+        ctx.arc(cx0 + r, cy0 + r, r, Math.PI * 0.5, Math.PI * 1.18, false);
+        ctx.closePath();
+      };
+
+      // A. Left Combo Pill (Active: seamless glowing flame-crest orange-gold capsule; Idle/Broken: chunky warm-wood bevel pill)
       ctx.save();
       try {
+        const pillR = statusH * 0.5;
         if (comboActive) {
-          ctx.shadowColor = 'rgba(245, 184, 65, 0.55)';
-          ctx.shadowBlur = 8;
-        }
-        const cg = safeLinearGradient(ctx, rx, statusY, rx, statusY + statusH, '#F27C38');
-        if (comboBroken) {
-          safeAddColorStop(cg, 0, '#8A847D', '#8A847D');
-          safeAddColorStop(cg, 1, '#66605A', '#66605A');
-        } else if (comboActive) {
-          safeAddColorStop(cg, 0, '#FFD466', '#FFD466');
-          safeAddColorStop(cg, 1, '#F27C38', '#F27C38');
-        } else {
-          safeAddColorStop(cg, 0, '#8A5A3A', '#8A5A3A');
-          safeAddColorStop(cg, 1, '#633E26', '#633E26');
-        }
-        ctx.fillStyle = cg;
-        UI.roundRectPath(ctx, rx, statusY, comboW, statusH, statusH * 0.5);
-        ctx.fill();
-        ctx.shadowColor = 'rgba(0, 0, 0, 0)';
-        ctx.shadowBlur = 0;
-        ctx.strokeStyle = comboActive ? '#FFE885' : '#3D2417';
-        ctx.lineWidth = 1.8;
-        ctx.stroke();
+          const peakLift = clamp(Math.round(statusH * 0.31), 8, 11);
+          ctx.shadowColor = 'rgba(255, 190, 56, 0.80)';
+          ctx.shadowBlur = 13;
 
-        if (comboActive) {
-          const cRatio = clamp(comboTimer / comboWindow, 0, 1);
-          ctx.fillStyle = 'rgba(255, 250, 210, 0.45)';
-          UI.roundRectPath(ctx, rx + 5, statusY + statusH - 3.6, Math.max(4, (comboW - 10) * cRatio), 2.2, 1.1);
+          const cg = safeLinearGradient(ctx, statusX, statusY - peakLift, statusX, statusY + statusH, '#F89B14');
+          safeAddColorStop(cg, 0, '#FFF8A2', '#FFF8A2');
+          safeAddColorStop(cg, 0.28, '#FFDC58', '#FFDC58');
+          safeAddColorStop(cg, 0.62, '#FA9614', '#FA9614');
+          safeAddColorStop(cg, 1, '#E65E0C', '#E65E0C');
+          traceFlameComboPath(statusX, statusY, comboW, statusH, peakLift);
+          ctx.fillStyle = cg;
           ctx.fill();
+
+          ctx.shadowColor = 'rgba(0, 0, 0, 0)';
+          ctx.shadowBlur = 0;
+
+          // Seamless inset flame-crest cream-gold inner rim (follows crest curve — zero cutting line across flame base!)
+          traceFlameComboPath(statusX + 2.0, statusY + 2.0, comboW - 4.0, statusH - 4.0, Math.max(4, peakLift - 2.2));
+          ctx.strokeStyle = 'rgba(255, 248, 192, 0.72)';
+          ctx.lineWidth = 1.6;
+          ctx.lineJoin = 'round';
+          ctx.stroke();
+
+          // Soft bright inner core glow right inside the rising main flame peak
+          ctx.fillStyle = 'rgba(255, 252, 214, 0.44)';
+          UI.fillEllipse(ctx, statusX + comboW * 0.25, statusY - peakLift * 0.22, comboW * 0.11, peakLift * 0.44);
+          ctx.fill();
+
+          // Glossy top-right specular sheen on the orange-gold capsule
+          ctx.fillStyle = 'rgba(255, 255, 232, 0.34)';
+          UI.roundRectPath(
+            ctx,
+            statusX + comboW * 0.48,
+            statusY + 3.0,
+            Math.max(12, comboW * 0.38),
+            Math.max(3.4, statusH * 0.20),
+            3
+          );
+          ctx.fill();
+
+          // Subtle active combo timer indicator tucked neatly along lower inside curve
+          const cRatio = clamp(comboTimer / comboWindow, 0, 1);
+          ctx.fillStyle = 'rgba(255, 248, 200, 0.45)';
+          UI.roundRectPath(
+            ctx,
+            statusX + pillR * 0.60,
+            statusY + statusH - 4.0,
+            Math.max(6, (comboW - pillR * 1.2) * cRatio),
+            2.0,
+            1.0
+          );
+          ctx.fill();
+
+          // Crisp warm-mahogany outline wrapping the entire flame crest & capsule
+          traceFlameComboPath(statusX, statusY, comboW, statusH, peakLift);
+          ctx.strokeStyle = '#6A2E0E';
+          ctx.lineWidth = 2.0;
+          ctx.lineJoin = 'round';
+          ctx.stroke();
+        } else {
+          // Chunky dark warm-wood pill when idle/broken (matches Fever bar weight cleanly)
+          const cg = safeLinearGradient(ctx, statusX, statusY, statusX, statusY + statusH, '#6F4830');
+          if (comboBroken) {
+            safeAddColorStop(cg, 0, '#8A8178', '#8A8178');
+            safeAddColorStop(cg, 1, '#5D554E', '#5D554E');
+          } else {
+            safeAddColorStop(cg, 0, '#7E5438', '#7E5438');
+            safeAddColorStop(cg, 1, '#53331F', '#53331F');
+          }
+          UI.roundRectPath(ctx, statusX, statusY, comboW, statusH, pillR);
+          ctx.fillStyle = cg;
+          ctx.fill();
+          ctx.strokeStyle = '#361C0E';
+          ctx.lineWidth = 2.1;
+          ctx.stroke();
+
+          // Inner warm bevel rim
+          UI.roundRectPath(ctx, statusX + 2.0, statusY + 2.0, comboW - 4.0, statusH - 4.0, Math.max(4, pillR - 2));
+          ctx.strokeStyle = comboBroken ? 'rgba(235, 224, 212, 0.25)' : 'rgba(255, 218, 174, 0.28)';
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
         }
       } finally {
         try { ctx.restore(); } catch (_) {}
       }
 
-      const comboText = comboActive
-        ? `${comboCount}连 ×${comboMult.toFixed(2)}`
-        : comboBroken
-        ? '连击中断'
-        : '连击待发';
-      UI.drawOutlinedText(ctx, comboText, rx + comboW * 0.5, statusY + statusH * 0.5 + 0.4, {
-        size: comboActive ? 11.4 : 9.8,
-        minSize: 8.2,
-        weight: 900,
-        fill: comboActive ? '#FFF9E0' : '#EEDCC4',
-        stroke: '#5A3928',
-        strokeWidth: comboActive ? 2.4 : 1.8,
-        shadowOffsetY: 0,
-        maxWidth: comboW - 10
-      });
+      // Two-color bold outlined Combo Typography (`3连` butter-gold + `×1.22` pure white, Design 03)
+      if (comboActive) {
+        const countStr = `${comboCount}连`;
+        const multStr = `×${comboMult.toFixed(2)}`;
+        const bigSz = clamp(Math.round(statusH * 0.60), 13.5, 18.0);
+        const smallSz = clamp(Math.round(statusH * 0.44), 10.5, 13.8);
+        const gapTxt = 3.5;
 
-      // Purple-to-Gold Starlight Fever Bar (`#B56CF5 -> #F5B841`, Design 03)
+        ctx.save();
+        let bigW = countStr.length * bigSz * 0.85;
+        let smallW = multStr.length * smallSz * 0.62;
+        try {
+          if (typeof ctx.measureText === 'function') {
+            ctx.font = UI.fontStr(bigSz, 900);
+            const m1 = ctx.measureText(countStr);
+            if (m1 && Number.isFinite(m1.width) && m1.width > 0) bigW = m1.width;
+            ctx.font = UI.fontStr(smallSz, 900);
+            const m2 = ctx.measureText(multStr);
+            if (m2 && Number.isFinite(m2.width) && m2.width > 0) smallW = m2.width;
+          }
+        } finally {
+          try { ctx.restore(); } catch (_) {}
+        }
+
+        const totalTxtW = bigW + gapTxt + smallW;
+        const maxAvail = comboW - 12;
+        const scaleDown = totalTxtW > maxAvail ? maxAvail / totalTxtW : 1;
+        const fBig = bigSz * scaleDown;
+        const fSmall = smallSz * scaleDown;
+        const scaledBigW = bigW * scaleDown;
+        const scaledTotalW = totalTxtW * scaleDown;
+        const startTxtX = statusX + (comboW - scaledTotalW) * 0.5;
+        const txtCy = statusY + statusH * 0.52;
+
+        UI.drawOutlinedText(ctx, countStr, startTxtX, txtCy, {
+          size: fBig,
+          minSize: 9.8,
+          weight: 900,
+          fill: '#FFE75E',
+          stroke: '#4E2006',
+          strokeWidth: 3.5,
+          shadowOffsetY: 0.8,
+          align: 'left',
+          baseline: 'middle'
+        });
+        UI.drawOutlinedText(ctx, multStr, startTxtX + scaledBigW + gapTxt * scaleDown, txtCy + 0.8, {
+          size: fSmall,
+          minSize: 8.5,
+          weight: 900,
+          fill: '#FFFDF8',
+          stroke: '#4E2006',
+          strokeWidth: 2.8,
+          shadowOffsetY: 0.7,
+          align: 'left',
+          baseline: 'middle'
+        });
+      } else {
+        UI.drawOutlinedText(ctx, comboBroken ? '连击中断' : '连击待发', statusX + comboW * 0.5, statusY + statusH * 0.52, {
+          size: clamp(Math.round(statusH * 0.42), 10.5, 13.0),
+          minSize: 8.8,
+          weight: 800,
+          fill: comboBroken ? '#E5DDD5' : '#F4DFC2',
+          stroke: '#361C0E',
+          strokeWidth: 2.2,
+          shadowOffsetY: 0.5,
+          maxWidth: comboW - 12
+        });
+      }
+
+      // B. Right Starlight Fever Energy Bar (Sleeker height vertically centered beside Flame Combo Pill, Design 03!)
       const feverTimer = Math.max(0, toSafeNum(getOwn(orderState, 'feverTimer', 0), 0));
       const feverActive = Boolean(getOwn(orderState, 'feverActive', false) || feverTimer > 0);
       const feverEnergy = clamp(toSafeNum(getOwn(orderState, 'feverEnergy', 0), 0), 0, 100);
@@ -1694,56 +2022,155 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
         ? clamp(feverTimer / (FEVER_CONFIG.durationSec || 10), 0, 1)
         : clamp(feverEnergy / 100, 0, 1);
 
+      const feverH = clamp(statusH - 6, 20, 27);
+      const feverY = statusY + Math.round((statusH - feverH) * 0.5) + 1;
+      const fRad = feverH * 0.5;
+      const frameInset = 2.6;
+      const trackX = feverX + frameInset;
+      const trackY = feverY + frameInset;
+      const trackW = Math.max(12, feverW - frameInset * 2);
+      const trackH = Math.max(8, feverH - frameInset * 2);
+      const trackR = trackH * 0.5;
+
       ctx.save();
       try {
-        ctx.fillStyle = '#4A2E24';
-        UI.roundRectPath(ctx, feverX, statusY, feverW, statusH, statusH * 0.5);
+        if (feverActive) {
+          ctx.shadowColor = 'rgba(218, 118, 245, 0.68)';
+          ctx.shadowBlur = 12;
+        }
+        // Outer metallic warm-bronze rim casing
+        const casingG = safeLinearGradient(ctx, feverX, feverY, feverX, feverY + feverH, '#7B5342');
+        safeAddColorStop(casingG, 0, feverActive ? '#F5C468' : '#966A54', '#966A54');
+        safeAddColorStop(casingG, 0.5, feverActive ? '#C878D8' : '#6D493C', '#6D493C');
+        safeAddColorStop(casingG, 1, feverActive ? '#8C48B8' : '#4E3128', '#4E3128');
+        UI.roundRectPath(ctx, feverX, feverY, feverW, feverH, fRad);
+        ctx.fillStyle = casingG;
         ctx.fill();
 
+        ctx.shadowColor = 'rgba(0, 0, 0, 0)';
+        ctx.shadowBlur = 0;
+
+        ctx.strokeStyle = feverActive ? '#4F1E5C' : '#351B10';
+        ctx.lineWidth = 2.0;
+        ctx.stroke();
+
+        // Deep recessed dark-plum interior track
+        const troughG = safeLinearGradient(ctx, trackX, trackY, trackX, trackY + trackH, '#322230');
+        safeAddColorStop(troughG, 0, '#241824', '#241824');
+        safeAddColorStop(troughG, 0.45, '#352435', '#352435');
+        safeAddColorStop(troughG, 1, '#3F2D3E', '#3F2D3E');
+        UI.roundRectPath(ctx, trackX, trackY, trackW, trackH, trackR);
+        ctx.fillStyle = troughG;
+        ctx.fill();
+
+        // Luminous pastel-amethyst-violet to orchid-pink glossy 3D energy fill clipped neatly inside trough (Design 03)
         if (fRatio > 0) {
-          const fg = safeLinearGradient(ctx, feverX, statusY, feverX + feverW, statusY, '#B56CF5');
-          if (feverActive) {
-            safeAddColorStop(fg, 0, '#C57BFF', '#C57BFF');
-            safeAddColorStop(fg, 0.55, '#F58BBF', '#F58BBF');
-            safeAddColorStop(fg, 1, '#FFE278', '#FFE278');
-          } else {
-            safeAddColorStop(fg, 0, '#9B6CF0', '#9B6CF0');
-            safeAddColorStop(fg, 0.58, '#D27EE2', '#D27EE2');
-            safeAddColorStop(fg, 1, '#F5B841', '#F5B841');
+          ctx.save();
+          try {
+            UI.roundRectPath(ctx, trackX, trackY, trackW, trackH, trackR);
+            if (typeof ctx.clip === 'function') ctx.clip();
+
+            const fillW = Math.max(trackH * 0.85, trackW * fRatio);
+            const fg = safeLinearGradient(ctx, trackX, trackY, trackX + fillW, trackY, '#9A54E4');
+            if (feverActive) {
+              safeAddColorStop(fg, 0, '#9E54F0', '#9E54F0');
+              safeAddColorStop(fg, 0.52, '#E478CE', '#E478CE');
+              safeAddColorStop(fg, 1, '#FFE47C', '#FFE47C');
+            } else {
+              safeAddColorStop(fg, 0, '#7B44E6', '#7B44E6');
+              safeAddColorStop(fg, 0.45, '#A862E8', '#A862E8');
+              safeAddColorStop(fg, 0.82, '#D880D2', '#D880D2');
+              safeAddColorStop(fg, 1, '#F4A4D4', '#F4A4D4');
+            }
+            ctx.fillStyle = fg;
+            UI.roundRectPath(ctx, trackX, trackY, fillW, trackH, trackR);
+            ctx.fill();
+
+            // Bright upper 3D jelly glossy lavender-white highlight strip
+            const glossH = Math.max(4, trackH * 0.44);
+            const glossG = safeLinearGradient(ctx, trackX, trackY, trackX, trackY + glossH, 'rgba(255, 244, 255, 0.56)');
+            safeAddColorStop(glossG, 0, 'rgba(255, 246, 255, 0.58)', 'rgba(255, 246, 255, 0.58)');
+            safeAddColorStop(glossG, 1, 'rgba(255, 232, 255, 0.08)', 'rgba(255, 232, 255, 0.08)');
+            ctx.fillStyle = glossG;
+            UI.roundRectPath(ctx, trackX + 2, trackY + 1, Math.max(4, fillW - 4), glossH, glossH * 0.5);
+            ctx.fill();
+
+            // Lower deep-violet 3D contour shade
+            const shadeH = Math.max(3, trackH * 0.25);
+            ctx.fillStyle = 'rgba(60, 18, 114, 0.30)';
+            UI.roundRectPath(ctx, trackX, trackY + trackH - shadeH, fillW, shadeH, shadeH * 0.5);
+            ctx.fill();
+
+            // Luminous leading-edge sheen when partially filled
+            if (fRatio > 0.06 && fRatio < 0.99) {
+              ctx.fillStyle = 'rgba(255, 238, 250, 0.48)';
+              ctx.beginPath();
+              ctx.arc(trackX + fillW - trackR * 0.72, trackY + trackR, trackR * 0.52, -Math.PI * 0.45, Math.PI * 0.45);
+              ctx.fill();
+            }
+          } finally {
+            try { ctx.restore(); } catch (_) {}
           }
-          ctx.fillStyle = fg;
-          UI.roundRectPath(
-            ctx,
-            feverX + 1.8,
-            statusY + 1.8,
-            Math.max(8, (feverW - 3.6) * fRatio),
-            statusH - 3.6,
-            (statusH - 3.6) * 0.5
-          );
-          ctx.fill();
         }
 
-        ctx.strokeStyle = feverActive ? '#FFE885' : '#5A3928';
-        ctx.lineWidth = 2.0;
-        UI.roundRectPath(ctx, feverX, statusY, feverW, statusH, statusH * 0.5);
+        // Crisp inner trough outline separating bezel from recessed track
+        UI.roundRectPath(ctx, trackX, trackY, trackW, trackH, trackR);
+        ctx.strokeStyle = '#25131E';
+        ctx.lineWidth = 1.4;
         ctx.stroke();
       } finally {
         try { ctx.restore(); } catch (_) {}
       }
 
-      const feverLabel = feverActive
-        ? `星光热潮 ×${(FEVER_CONFIG.scoreMult || 1.25).toFixed(2)}  ${Math.ceil(feverTimer)}s`
-        : `星光热潮   ${Math.round(feverEnergy)}%`;
-      UI.drawOutlinedText(ctx, feverLabel, feverX + feverW * 0.5, statusY + statusH * 0.5 + 0.5, {
-        size: 10.6,
-        minSize: 8.2,
+      // Split-aligned crisp bold white outlined text (`星光热潮` on left, `75%` inside right-mid fill, Design 03)
+      const fTxtSz = clamp(Math.round(feverH * 0.52), 11.0, 13.4);
+      const fTxtCy = feverY + feverH * 0.52;
+      UI.drawOutlinedText(ctx, '星光热潮', feverX + 11, fTxtCy, {
+        size: fTxtSz,
+        minSize: 9.0,
         weight: 900,
-        fill: '#FFF8EC',
-        stroke: '#5A3928',
-        strokeWidth: 2.2,
-        shadowOffsetY: 0,
-        maxWidth: feverW - 14
+        fill: '#FFFFFF',
+        stroke: '#281024',
+        strokeWidth: 2.8,
+        shadowOffsetY: 0.6,
+        align: 'left',
+        baseline: 'middle',
+        maxWidth: feverW * 0.52
       });
+
+      if (feverActive) {
+        UI.drawOutlinedText(
+          ctx,
+          `×${(FEVER_CONFIG.scoreMult || 1.25).toFixed(2)} ${Math.ceil(feverTimer)}s`,
+          feverX + feverW - 11,
+          fTxtCy,
+          {
+            size: fTxtSz * 0.95,
+            minSize: 8.6,
+            weight: 900,
+            fill: '#FFF3A8',
+            stroke: '#361224',
+            strokeWidth: 2.6,
+            shadowOffsetY: 0.6,
+            align: 'right',
+            baseline: 'middle',
+            maxWidth: feverW * 0.46
+          }
+        );
+      } else {
+        UI.drawOutlinedText(ctx, `${Math.round(feverEnergy)}%`, feverX + Math.round(feverW * 0.66), fTxtCy, {
+          size: fTxtSz,
+          minSize: 9.0,
+          weight: 900,
+          fill: '#FFFFFF',
+          stroke: '#281024',
+          strokeWidth: 2.8,
+          shadowOffsetY: 0.6,
+          align: 'center',
+          baseline: 'middle',
+          maxWidth: feverW * 0.36
+        });
+      }
     }
 
     if (guideTargets) {
@@ -2026,6 +2453,166 @@ function normalizeBoardStageArgs(arg5, arg6, arg7, arg8, arg9) {
 }
 
 /**
+ * Build exact rectilinear CW outer & CCW inner-hole boundary loops from non-void board cells.
+ * Produces straight crisp tray walls and clean rounded corners with zero scalloping or inner diamond gaps.
+ */
+function buildOrthogonalBoardLoops(cellsMatrix, rows, cols, gridX, gridY, cellSize) {
+  const isSolid = (r, c) =>
+    r >= 0 && r < rows && c >= 0 && c < cols && cellsMatrix[r] && cellsMatrix[r][c] && cellsMatrix[r][c].type !== 'void';
+
+  const outMap = Object.create(null);
+  const allEdges = [];
+  const addEdge = (x0, y0, x1, y1, dx, dy) => {
+    const key = `${x0},${y0}`;
+    const edge = { x0, y0, x1, y1, dx, dy, used: false };
+    if (!outMap[key]) outMap[key] = [];
+    safePush(outMap[key], edge);
+    safePush(allEdges, edge);
+  };
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (!isSolid(r, c)) continue;
+      if (!isSolid(r - 1, c)) addEdge(c, r, c + 1, r, 1, 0);
+      if (!isSolid(r, c + 1)) addEdge(c + 1, r, c + 1, r + 1, 0, 1);
+      if (!isSolid(r + 1, c)) addEdge(c + 1, r + 1, c, r + 1, -1, 0);
+      if (!isSolid(r, c - 1)) addEdge(c, r + 1, c, r, 0, -1);
+    }
+  }
+
+  const loops = [];
+  const maxSteps = rows * cols * 4 + 16;
+  for (let ei = 0; ei < allEdges.length; ei++) {
+    const start = allEdges[ei];
+    if (start.used) continue;
+    const rawPts = [];
+    let cur = start;
+    let steps = 0;
+    while (cur && !cur.used && steps < maxSteps) {
+      cur.used = true;
+      safePush(rawPts, { x: cur.x0, y: cur.y0 });
+      steps++;
+      const nextKey = `${cur.x1},${cur.y1}`;
+      const cands = outMap[nextKey];
+      if (!cands || cands.length === 0) break;
+      let nextEdge = null;
+      if (cands.length === 1) {
+        if (!cands[0].used) nextEdge = cands[0];
+      } else {
+        // Right-turn preference at rare diagonal pinch keeps solid connected without crossing
+        const rdx = -cur.dy;
+        const rdy = cur.dx;
+        for (let ci = 0; ci < cands.length; ci++) {
+          if (!cands[ci].used && cands[ci].dx === rdx && cands[ci].dy === rdy) {
+            nextEdge = cands[ci];
+            break;
+          }
+        }
+        if (!nextEdge) {
+          for (let ci = 0; ci < cands.length; ci++) {
+            if (!cands[ci].used) {
+              nextEdge = cands[ci];
+              break;
+            }
+          }
+        }
+      }
+      if (!nextEdge || (nextEdge.x0 === start.x0 && nextEdge.y0 === start.y0 && steps > 1 && nextEdge === start)) {
+        break;
+      }
+      cur = nextEdge;
+    }
+
+    // Simplify collinear consecutive vertices
+    const nRaw = rawPts.length;
+    if (nRaw < 4) continue;
+    const corners = [];
+    for (let i = 0; i < nRaw; i++) {
+      const prev = rawPts[(i - 1 + nRaw) % nRaw];
+      const curr = rawPts[i];
+      const next = rawPts[(i + 1) % nRaw];
+      const d1x = Math.sign(curr.x - prev.x);
+      const d1y = Math.sign(curr.y - prev.y);
+      const d2x = Math.sign(next.x - curr.x);
+      const d2y = Math.sign(next.y - curr.y);
+      if (d1x !== d2x || d1y !== d2y) {
+        safePush(corners, {
+          x: gridX + curr.x * cellSize,
+          y: gridY + curr.y * cellSize
+        });
+      }
+    }
+    if (corners.length >= 4) {
+      safePush(loops, corners);
+    }
+  }
+  return loops;
+}
+
+/**
+ * Trace compound Canvas 2D path for offset rectilinear loops with smooth convex/concave corner fillets.
+ */
+function traceOffsetRoundedLoops(ctx, loops, pad, convexRad, concaveRad, offsetY = 0) {
+  ctx.beginPath();
+  for (let li = 0; li < loops.length; li++) {
+    const verts = loops[li];
+    const n = verts.length;
+    if (n < 4) continue;
+
+    const pts = [];
+    for (let i = 0; i < n; i++) {
+      const prev = verts[(i - 1 + n) % n];
+      const curr = verts[i];
+      const next = verts[(i + 1) % n];
+      const dpx = Math.sign(curr.x - prev.x);
+      const dpy = Math.sign(curr.y - prev.y);
+      const dnx = Math.sign(next.x - curr.x);
+      const dny = Math.sign(next.y - curr.y);
+      // Interior is on the right in screen coords -> outward normal is (dy, -dx)
+      const npx = dpy;
+      const npy = -dpx;
+      const nnx = dny;
+      const nny = -dnx;
+      const cross = dpx * dny - dpy * dnx;
+      safePush(pts, {
+        x: curr.x + (npx + nnx) * pad,
+        y: curr.y + (npy + nny) * pad + offsetY,
+        isConvex: cross > 0
+      });
+    }
+
+    const entries = [];
+    const exits = [];
+    for (let i = 0; i < n; i++) {
+      const prev = pts[(i - 1 + n) % n];
+      const curr = pts[i];
+      const next = pts[(i + 1) % n];
+      const vpx = curr.x - prev.x;
+      const vpy = curr.y - prev.y;
+      const vnx = next.x - curr.x;
+      const vny = next.y - curr.y;
+      const lenP = Math.hypot(vpx, vpy);
+      const lenN = Math.hypot(vnx, vny);
+      const targetR = curr.isConvex ? convexRad : concaveRad;
+      const r = Math.max(0, Math.min(targetR, lenP * 0.44, lenN * 0.44));
+      const upx = lenP > 1e-4 ? vpx / lenP : 0;
+      const upy = lenP > 1e-4 ? vpy / lenP : 0;
+      const unx = lenN > 1e-4 ? vnx / lenN : 0;
+      const uny = lenN > 1e-4 ? vny / lenN : 0;
+      safePush(entries, { x: curr.x - upx * r, y: curr.y - upy * r });
+      safePush(exits, { x: curr.x + unx * r, y: curr.y + uny * r });
+    }
+
+    ctx.moveTo(exits[n - 1].x, exits[n - 1].y);
+    for (let i = 0; i < n; i++) {
+      ctx.lineTo(entries[i].x, entries[i].y);
+      ctx.quadraticCurveTo(pts[i].x, pts[i].y, exits[i].x, exits[i].y);
+    }
+    ctx.closePath();
+  }
+}
+
+/**
  * Render the shaped 2048 Cat-Cake baking board stage, special flavor/gold/obstacle/ice cells,
  * servable rings, active utensil aiming frames, and all micro-animations.
  */
@@ -2152,104 +2739,146 @@ function renderBoardStage(
       }
     }
 
-    // Pass 1A: Shaped outer wooden/sakura/moonlight frame union over NON-VOID cells only
-    const outerRad = Math.round(cellSize * 0.22) + bezelPad;
+    // Pass 1: Unified Rectilinear 3D Baking Tray (Ground Shadow -> 3D Bottom Wall -> Raised Outer Rim -> Recessed Inner Deck)
+    const boardLoops = buildOrthogonalBoardLoops(cellsMatrix, rows, cols, layout.gridX, layout.gridY, cellSize);
+    const outerPad = bezelPad;
+    const innerPad = Math.max(1.2, Math.round(outerPad * 0.20));
+    const lipH = isThumb ? Math.max(2, Math.round(outerPad * 0.55)) : Math.max(6.0, Math.min(9.0, Math.round(outerPad * 0.74)));
+    const outerConvexR = isThumb ? Math.max(5, Math.round(cellSize * 0.26)) : clamp(Math.round(cellSize * 0.22), 12, 17);
+    const outerConcaveR = Math.max(3, Math.round(outerConvexR * 0.38));
+    const innerConvexR = Math.max(4, outerConvexR - Math.max(4, Math.round((outerPad - innerPad) * 0.88)));
+    const innerConcaveR = Math.max(2, Math.round(innerConvexR * 0.36));
+
     const frameStops =
       safeIsArray(themeObj.frameStops) && safeArrayLen(themeObj.frameStops, 16) >= 3
         ? themeObj.frameStops
-        : ['#d59c3b', '#ad7424', '#8c5a18'];
+        : ['#F2C36E', '#E2AD55', '#D29743'];
+    const outlineCol = safeColor(themeObj.frameBorder, '#4A2614');
+    const outlineW = isThumb ? 1.6 : 2.5;
 
     ctx.save();
     try {
+      // 1A. Soft Ground Drop Shadow on dark walnut tabletop
+      ctx.save();
+      try {
+        ctx.shadowColor = 'rgba(18, 8, 3, 0.48)';
+        ctx.shadowBlur = isThumb ? 4 : 14;
+        ctx.shadowOffsetY = isThumb ? 2 : 6;
+        ctx.fillStyle = 'rgba(28, 13, 5, 0.38)';
+        traceOffsetRoundedLoops(ctx, boardLoops, outerPad, outerConvexR, outerConcaveR, lipH + 1);
+        ctx.fill();
+      } finally {
+        try { ctx.restore(); } catch (_) {}
+      }
+
+      // 1B. 3D Bottom Thickness Wall (solid underside of wooden baking tray, Design 03!)
+      const sideGrad = safeLinearGradient(
+        ctx,
+        layout.gridX,
+        layout.gridY + layout.gridH - outerPad,
+        layout.gridX,
+        layout.gridY + layout.gridH + outerPad + lipH,
+        '#B56B2B'
+      );
+      safeAddColorStop(sideGrad, 0, themeObj.frameSideTop || '#B56B2B', '#B56B2B');
+      safeAddColorStop(sideGrad, 1, themeObj.frameSideBot || '#8D4B1B', '#8D4B1B');
+      traceOffsetRoundedLoops(ctx, boardLoops, outerPad, outerConvexR, outerConcaveR, lipH);
+      ctx.fillStyle = sideGrad;
+      ctx.fill();
+      ctx.strokeStyle = outlineCol;
+      ctx.lineWidth = outlineW;
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+
+      // 1C. Raised Outer Baking-Tray Rim (warm bright bevel frame)
       const frameGrad = safeLinearGradient(
         ctx,
         layout.gridX,
-        layout.gridY - bezelPad,
+        layout.gridY - outerPad,
         layout.gridX,
-        layout.gridY + layout.gridH + bezelPad,
-        '#d59c3b'
+        layout.gridY + layout.gridH + outerPad,
+        '#F2C36E'
       );
-      safeAddColorStop(frameGrad, 0, getOwn(frameStops, 0, '#d59c3b'), '#d59c3b');
-      safeAddColorStop(frameGrad, 0.52, getOwn(frameStops, 1, '#ad7424'), '#ad7424');
-      safeAddColorStop(frameGrad, 1, getOwn(frameStops, 2, '#8c5a18'), '#8c5a18');
-
-      // Outer drop lip + frame stroke per non-void cell
-      ctx.fillStyle = 'rgba(26, 12, 5, 0.30)';
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          if (cellsMatrix[r][c].type === 'void') continue;
-          const sx = layout.gridX + c * cellSize;
-          const sy = layout.gridY + r * cellSize;
-          UI.roundRectPath(
-            ctx,
-            sx - bezelPad,
-            sy - bezelPad + 3,
-            cellSize + bezelPad * 2,
-            cellSize + bezelPad * 2,
-            outerRad
-          );
-          ctx.fill();
-        }
-      }
-
+      safeAddColorStop(frameGrad, 0, getOwn(frameStops, 0, '#F2C36E'), '#F2C36E');
+      safeAddColorStop(frameGrad, 0.52, getOwn(frameStops, 1, '#E2AD55'), '#E2AD55');
+      safeAddColorStop(frameGrad, 1, getOwn(frameStops, 2, '#D29743'), '#D29743');
+      traceOffsetRoundedLoops(ctx, boardLoops, outerPad, outerConvexR, outerConcaveR, 0);
       ctx.fillStyle = frameGrad;
-      ctx.strokeStyle = safeColor(themeObj.frameBorder, '#4A2C2A');
-      ctx.lineWidth = 2.4;
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          if (cellsMatrix[r][c].type === 'void') continue;
-          const sx = layout.gridX + c * cellSize;
-          const sy = layout.gridY + r * cellSize;
-          UI.roundRectPath(
-            ctx,
-            sx - bezelPad,
-            sy - bezelPad,
-            cellSize + bezelPad * 2,
-            cellSize + bezelPad * 2,
-            outerRad
-          );
-          ctx.fill();
-          ctx.stroke();
-        }
-      }
-      // Second fill pass without stroke merges interior frame seams cleanly
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          if (cellsMatrix[r][c].type === 'void') continue;
-          const sx = layout.gridX + c * cellSize;
-          const sy = layout.gridY + r * cellSize;
-          UI.roundRectPath(
-            ctx,
-            sx - bezelPad + 1.2,
-            sy - bezelPad + 1.2,
-            cellSize + bezelPad * 2 - 2.4,
-            cellSize + bezelPad * 2 - 2.4,
-            Math.max(4, outerRad - 1.2)
-          );
-          ctx.fill();
-        }
+      ctx.fill();
+      ctx.strokeStyle = outlineCol;
+      ctx.lineWidth = outlineW;
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+
+      // Soft bright top-rim specular bevel highlight inset inside outer rim
+      if (!isThumb && outerPad >= 6) {
+        traceOffsetRoundedLoops(
+          ctx,
+          boardLoops,
+          Math.max(innerPad + 1, outerPad - 2.2),
+          Math.max(5, outerConvexR - 2),
+          Math.max(2, outerConcaveR - 1),
+          0
+        );
+        ctx.strokeStyle = safeColor(themeObj.frameHighlight, 'rgba(255, 248, 218, 0.64)');
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
       }
 
-      // Pass 1B: Recessed carved board bed over NON-VOID cells only
-      const bedGrad = safeLinearGradient(
+      // 1D. Recessed Inner Tray Deck (smooth lighter wooden divider surface)
+      // Draw recessed inner shadow step along top lip first
+      if (!isThumb) {
+        traceOffsetRoundedLoops(ctx, boardLoops, innerPad + 0.8, innerConvexR + 0.8, innerConcaveR, -0.5);
+        ctx.fillStyle = safeColor(themeObj.boardInnerBorder, '#9A5922');
+        ctx.fill();
+      }
+
+      const deckGrad = safeLinearGradient(
         ctx,
         layout.gridX,
         layout.gridY,
         layout.gridX,
         layout.gridY + layout.gridH,
-        '#243B4A'
+        '#DEA14A'
       );
-      safeAddColorStop(bedGrad, 0, themeObj.boardBgTop, '#243B4A');
-      safeAddColorStop(bedGrad, 1, themeObj.boardBgBot, '#182834');
-      ctx.fillStyle = bedGrad;
-      const bedRad = Math.round(cellSize * 0.20) + 2;
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          if (cellsMatrix[r][c].type === 'void') continue;
-          const sx = layout.gridX + c * cellSize;
-          const sy = layout.gridY + r * cellSize;
-          UI.roundRectPath(ctx, sx - 2, sy - 2, cellSize + 4, cellSize + 4, bedRad);
-          ctx.fill();
+      safeAddColorStop(deckGrad, 0, themeObj.boardBgTop, '#DEA14A');
+      safeAddColorStop(deckGrad, 1, themeObj.boardBgBot, '#CC8E3B');
+      traceOffsetRoundedLoops(ctx, boardLoops, innerPad, innerConvexR, innerConcaveR, 0.8);
+      ctx.fillStyle = deckGrad;
+      ctx.fill();
+
+      // Subtle inner bevel step crease separating raised outer rim from inner divider deck
+      traceOffsetRoundedLoops(ctx, boardLoops, innerPad + 0.4, innerConvexR + 0.4, innerConcaveR, 0.4);
+      ctx.strokeStyle = safeColor(themeObj.boardInnerBorder, '#9A5922');
+      ctx.lineWidth = isThumb ? 1.0 : 1.7;
+      ctx.stroke();
+
+      // Theme Rim Accents matching Design 09 (delicate sakura petals / moonlight stars along tray corners)
+      if (!isThumb && boardLoops.length > 0 && (themeObj.id === 'sakura' || themeObj.id === 'moonlight')) {
+        const outerVerts = boardLoops[0];
+        ctx.save();
+        try {
+          if (themeObj.id === 'sakura') {
+            for (let vi = 0; vi < outerVerts.length && vi < 6; vi += 2) {
+              const v = outerVerts[vi];
+              const dx = v.x < layout.gridX + layout.gridW * 0.5 ? -outerPad * 0.35 : outerPad * 0.35;
+              const dy = v.y < layout.gridY + layout.gridH * 0.5 ? -outerPad * 0.35 : outerPad * 0.35;
+              ctx.fillStyle = '#FFD2E2';
+              ctx.strokeStyle = '#6E3C4C';
+              ctx.lineWidth = 1.2;
+              UI.drawSakuraPetal(ctx, v.x + dx, v.y + dy, 5.2, vi * 0.9 + 0.4);
+            }
+          } else {
+            for (let vi = 0; vi < outerVerts.length && vi < 8; vi++) {
+              const v = outerVerts[vi];
+              const dx = v.x < layout.gridX + layout.gridW * 0.5 ? outerPad * 0.1 : -outerPad * 0.1;
+              const dy = v.y < layout.gridY + layout.gridH * 0.5 ? outerPad * 0.1 : -outerPad * 0.1;
+              ctx.fillStyle = vi % 2 === 0 ? '#FFE68A' : 'rgba(224, 240, 255, 0.78)';
+              UI.drawStar(ctx, v.x + dx, v.y + dy, vi % 2 === 0 ? 4.0 : 2.6, vi * 0.5);
+            }
+          }
+        } finally {
+          try { ctx.restore(); } catch (_) {}
         }
       }
     } finally {
@@ -2283,8 +2912,9 @@ function renderBoardStage(
     const guideFrozenOrthoSet = Object.create(null);
     const guideFrozenOrtho = [];
 
-    // Pass 2: Individual Playable Cushions, Obstacle Blocks, Special Cell Overlays, Rings & Tool Aiming
-    const cushionRad = Math.max(5, Math.round(cw * 0.18));
+    // Pass 2: Carved Sunken Cell Wells, Obstacle Blocks, Special Cell Overlays, Rings & Tool Aiming (Design 03)
+    const cushionRad = Math.max(5, Math.round(cw * 0.165));
+    const cellTopShadow = safeColor(themeObj.cellTopShadow, 'rgba(116, 52, 14, 0.44)');
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         const cell = cellsMatrix[r][c];
@@ -2300,28 +2930,53 @@ function renderBoardStage(
           guideCells[`${r},${c}`] = cellRect;
         }
 
-        if (cell.type === 'block') {
-          UI.drawBoardTileOverlay(ctx, sprites, 'tile_block', cx0, cy0, cw, { alpha: 1.0 });
-          continue;
-        }
-
-        // Playable cell cushion ('normal' | 'gold' | 'matcha' | 'berry')
+        // Carved sunken well base (drawn for BOTH playable wells & underneath stone obstacles!)
         ctx.save();
         try {
-          ctx.fillStyle =
+          const wellBase =
             (r + c) % 2 === 0
-              ? themeObj.cellFill || 'rgba(255, 244, 218, 0.88)'
-              : themeObj.cellFillAlt || 'rgba(250, 236, 202, 0.88)';
+              ? safeColor(themeObj.cellFill, '#B7732C')
+              : safeColor(themeObj.cellFillAlt, '#B4702A');
+          const wg = safeLinearGradient(ctx, cx0, cy0, cx0, cy0 + cw, wellBase);
+          safeAddColorStop(wg, 0, safeColor(themeObj.cellBorder, '#8E501E'), '#8E501E');
+          safeAddColorStop(wg, 0.14, wellBase, wellBase);
+          safeAddColorStop(wg, 1, wellBase, wellBase);
           UI.roundRectPath(ctx, cx0, cy0, cw, cw, cushionRad);
+          ctx.fillStyle = wg;
           ctx.fill();
 
-          ctx.strokeStyle = themeObj.cellInnerSheen || 'rgba(255, 252, 240, 0.65)';
-          ctx.lineWidth = 1.1;
-          UI.roundRectPath(ctx, cx0 + 1.2, cy0 + 1.2, cw - 2.4, cw - 2.4, Math.max(3, cushionRad - 1));
-          ctx.stroke();
+          // Clipped inner top recessed wall shadow (gives unmistakable carved-into-wood hollow depth!)
+          if (!isThumb && typeof ctx.clip === 'function') {
+            ctx.save();
+            try {
+              UI.roundRectPath(ctx, cx0, cy0, cw, cw, cushionRad);
+              ctx.clip();
+              const shH = Math.max(4, Math.round(cw * 0.14));
+              const shG = safeLinearGradient(ctx, cx0, cy0, cx0, cy0 + shH, cellTopShadow);
+              safeAddColorStop(shG, 0, cellTopShadow, cellTopShadow);
+              safeAddColorStop(shG, 1, 'rgba(0, 0, 0, 0)', 'rgba(0, 0, 0, 0)');
+              ctx.fillStyle = shG;
+              if (typeof ctx.fillRect === 'function') {
+                ctx.fillRect(cx0, cy0, cw, shH);
+              }
+            } finally {
+              try { ctx.restore(); } catch (_) {}
+            }
+          }
 
-          ctx.strokeStyle = themeObj.cellBorder || '#C69552';
-          ctx.lineWidth = 1.4;
+          // Subtle warm catch-light curve along the bottom outer lip of the recessed hollow
+          if (!isThumb) {
+            ctx.strokeStyle = safeColor(themeObj.cellInnerSheen, 'rgba(255, 226, 158, 0.38)');
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.moveTo(cx0 + cushionRad * 0.75, cy0 + cw + 0.6);
+            ctx.lineTo(cx0 + cw - cushionRad * 0.75, cy0 + cw + 0.6);
+            ctx.stroke();
+          }
+
+          // Soft recessed groove outline
+          ctx.strokeStyle = safeColor(themeObj.cellBorder, '#8E501E');
+          ctx.lineWidth = isThumb ? 0.9 : 1.15;
           UI.roundRectPath(ctx, cx0, cy0, cw, cw, cushionRad);
           ctx.stroke();
         } finally {
@@ -2330,10 +2985,15 @@ function renderBoardStage(
           } catch (_) {}
         }
 
+        if (cell.type === 'block') {
+          UI.drawBoardTileOverlay(ctx, sprites, 'tile_block', cx0 - 1, cy0 - 1, cw + 2, { alpha: 1.0 });
+          continue;
+        }
+
         if (cell.type === 'matcha') {
           ctx.save();
           try {
-            ctx.fillStyle = 'rgba(125, 168, 92, 0.13)';
+            ctx.fillStyle = 'rgba(110, 174, 72, 0.24)';
             UI.roundRectPath(ctx, cx0, cy0, cw, cw, cushionRad);
             ctx.fill();
           } finally {
@@ -2348,13 +3008,13 @@ function renderBoardStage(
             cx0 + cw * 0.06,
             cy0 + cw * 0.06,
             cw * 0.88,
-            { alpha: 0.90 }
+            { alpha: 0.92 }
           );
           if (guideTargets) safePush(guideCellTypes.matcha, cellRect);
         } else if (cell.type === 'berry') {
           ctx.save();
           try {
-            ctx.fillStyle = 'rgba(232, 106, 140, 0.13)';
+            ctx.fillStyle = 'rgba(235, 92, 132, 0.24)';
             UI.roundRectPath(ctx, cx0, cy0, cw, cw, cushionRad);
             ctx.fill();
           } finally {
@@ -2369,7 +3029,7 @@ function renderBoardStage(
             cx0 + cw * 0.06,
             cy0 + cw * 0.06,
             cw * 0.88,
-            { alpha: 0.90 }
+            { alpha: 0.92 }
           );
           if (guideTargets) safePush(guideCellTypes.berry, cellRect);
         } else if (cell.type === 'gold') {
@@ -2408,27 +3068,22 @@ function renderBoardStage(
             if (guideTargets) safePush(guideServable, cellRect);
             ctx.save();
             try {
-              ctx.fillStyle = `rgba(255, 214, 78, ${(0.15 + 0.13 * pulse).toFixed(3)})`;
-              UI.roundRectPath(ctx, cx0 + 1, cy0 + 1, cw - 2, cw - 2, cushionRad);
-              ctx.fill();
-
               if (matchesPref) {
-                ctx.strokeStyle = '#FFB014';
-                ctx.lineWidth = 2.8;
-                UI.roundRectPath(ctx, cx0 + 0.5, cy0 + 0.5, cw - 1, cw - 1, cushionRad);
+                ctx.fillStyle = `rgba(255, 224, 120, ${(0.06 + 0.05 * pulse).toFixed(3)})`;
+                UI.roundRectPath(ctx, cx0 + 1, cy0 + 1, cw - 2, cw - 2, cushionRad);
+                ctx.fill();
+
+                ctx.strokeStyle = `rgba(255, 214, 96, ${(0.68 + 0.22 * pulse).toFixed(3)})`;
+                ctx.lineWidth = 2.0;
+                UI.roundRectPath(ctx, cx0 + 0.8, cy0 + 0.8, cw - 1.6, cw - 1.6, Math.max(4, cushionRad - 0.5));
                 ctx.stroke();
 
-                ctx.strokeStyle = `rgba(255, 240, 140, ${(0.78 + 0.22 * pulse).toFixed(3)})`;
-                ctx.lineWidth = 1.8;
-                UI.roundRectPath(ctx, cx0 - 2, cy0 - 2, cw + 4, cw + 4, cushionRad + 2);
-                ctx.stroke();
-
-                ctx.fillStyle = '#FFF4A8';
-                UI.drawStar(ctx, cx0 + 5, cy0 + 5, Math.max(2.6, cellSize * 0.06), nowSec * 2.5);
+                ctx.fillStyle = 'rgba(255, 246, 178, 0.88)';
+                UI.drawStar(ctx, cx0 + 6, cy0 + 6, Math.max(2.3, cellSize * 0.048), nowSec * 2.2);
               } else {
-                ctx.strokeStyle = `rgba(242, 168, 24, ${(0.72 + 0.26 * pulse).toFixed(3)})`;
-                ctx.lineWidth = 2.4;
-                UI.roundRectPath(ctx, cx0 + 0.5, cy0 + 0.5, cw - 1, cw - 1, cushionRad);
+                ctx.strokeStyle = `rgba(255, 222, 126, ${(0.38 + 0.16 * pulse).toFixed(3)})`;
+                ctx.lineWidth = 1.4;
+                UI.roundRectPath(ctx, cx0 + 0.8, cy0 + 0.8, cw - 1.6, cw - 1.6, Math.max(4, cushionRad - 0.5));
                 ctx.stroke();
               }
             } finally {
@@ -2705,6 +3360,24 @@ function renderBoardStage(
           }
         }
 
+        // Subtle grounding shadow anchoring each Cat-Cake inside its recessed wooden hollow (Design 03)
+        if (!isThumb) {
+          ctx.save();
+          try {
+            ctx.fillStyle = 'rgba(66, 28, 6, 0.22)';
+            UI.fillEllipse(
+              ctx,
+              drawCx,
+              drawCy + cellSize * 0.26 * scale,
+              cellSize * 0.30 * scale,
+              cellSize * 0.11 * scale
+            );
+            ctx.fill();
+          } finally {
+            try { ctx.restore(); } catch (_) {}
+          }
+        }
+
         UI.drawCatcakeSprite(ctx, sprites, tileTier, drawCx, drawCy, spriteSize, {
           happy: isHappy,
           flavor: tileFlavor,
@@ -2724,8 +3397,56 @@ function renderBoardStage(
           );
         }
 
-        // Mandatory M1 rule: draw tile_ice over frozenHp > 0 Cat-Cakes at globalAlpha = 0.58
+        // Frosted rounded-square crystal casing + mandatory M1 tile_ice overlay at globalAlpha = 0.58 (Design 03)
         if (tileFrozenHp > 0) {
+          const iceX = slotX + cellInset;
+          const iceY = slotY + cellInset;
+          const iceW = Math.max(8, cellSize - cellInset * 2);
+          const iceR = Math.max(5, Math.round(iceW * 0.165));
+          ctx.save();
+          try {
+            const ig = safeLinearGradient(ctx, iceX, iceY, iceX + iceW, iceY + iceW, 'rgba(218, 245, 255, 0.50)');
+            safeAddColorStop(ig, 0, 'rgba(246, 253, 255, 0.64)', 'rgba(246, 253, 255, 0.64)');
+            safeAddColorStop(ig, 0.52, 'rgba(186, 228, 248, 0.46)', 'rgba(186, 228, 248, 0.46)');
+            safeAddColorStop(ig, 1, 'rgba(148, 204, 236, 0.56)', 'rgba(148, 204, 236, 0.56)');
+            UI.roundRectPath(ctx, iceX, iceY, iceW, iceW, iceR);
+            ctx.fillStyle = ig;
+            ctx.fill();
+
+            // Crisp diagonal frost specular sheen inside ice block
+            if (!isThumb && typeof ctx.clip === 'function') {
+              ctx.save();
+              try {
+                UI.roundRectPath(ctx, iceX + 1.5, iceY + 1.5, iceW - 3, iceW - 3, Math.max(3, iceR - 1.5));
+                ctx.clip();
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.34)';
+                ctx.beginPath();
+                ctx.moveTo(iceX + iceW * 0.08, iceY + iceW * 0.54);
+                ctx.lineTo(iceX + iceW * 0.56, iceY + iceW * 0.06);
+                ctx.lineTo(iceX + iceW * 0.74, iceY + iceW * 0.06);
+                ctx.lineTo(iceX + iceW * 0.08, iceY + iceW * 0.72);
+                ctx.closePath();
+                ctx.fill();
+              } finally {
+                try { ctx.restore(); } catch (_) {}
+              }
+            }
+
+            // Inner frost rim highlight
+            UI.roundRectPath(ctx, iceX + 2, iceY + 2, iceW - 4, iceW - 4, Math.max(3, iceR - 2));
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.78)';
+            ctx.lineWidth = 1.6;
+            ctx.stroke();
+
+            // Outer icy steel-blue rounded-square outline
+            UI.roundRectPath(ctx, iceX, iceY, iceW, iceW, iceR);
+            ctx.strokeStyle = '#5B89AC';
+            ctx.lineWidth = 1.8;
+            ctx.stroke();
+          } finally {
+            try { ctx.restore(); } catch (_) {}
+          }
+
           const iceInset = cellInset * 0.6;
           UI.drawBoardTileOverlay(
             ctx,

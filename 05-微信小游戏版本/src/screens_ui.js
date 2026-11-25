@@ -1390,9 +1390,245 @@ function renderTitleScreen(ctx, metrics, app, hits) {
 
 /* ======================== Play Screen HUD (`03_局内营业主界面`) ======================== */
 
-function renderPlayTopBar(ctx, geom, app, hits, nowSec) {
+/**
+ * Draw pixel-aligned PlayScreen interior bands:
+ * - Warm sunlit blurred cafe wall behind customers (`playBarBottom .. trayY`)
+ * - Rich dark-walnut wooden tabletop below tray (`trayY .. height`)
+ * - Starry night sky + rounded-bottom dark-navy top HUD shelf (`0 .. playBarBottom`)
+ */
+function renderPlayInteriorBands(ctx, geom, playBarBottom, trayY, theme, nowSec) {
   const c = getSafeCtx(ctx);
-  const { topY, headerH, maxRight } = geom;
+  const { width, height, topY, headerH } = geom;
+  const th = theme && typeof theme === 'object' ? theme : BOARD_THEMES.amber;
+  const isSakura = th.id === 'sakura';
+  const isMoon = th.id === 'moonlight';
+
+  c.save();
+  try {
+    // 1. Warm blurred sunlit bakery cafe interior wall behind customers (Design 03)
+    const wallTop = Math.max(0, playBarBottom - 10);
+    const wallBot = Math.max(wallTop + 20, trayY + 2);
+    const wallG = c.createLinearGradient(0, wallTop, 0, wallBot);
+    if (isSakura) {
+      wallG.addColorStop(0, '#B88496');
+      wallG.addColorStop(0.55, '#DFB3BC');
+      wallG.addColorStop(1, '#CCA0AB');
+    } else if (isMoon) {
+      wallG.addColorStop(0, '#364774');
+      wallG.addColorStop(0.55, '#546897');
+      wallG.addColorStop(1, '#445886');
+    } else {
+      wallG.addColorStop(0, '#D4A879');
+      wallG.addColorStop(0.45, '#ECD4AD');
+      wallG.addColorStop(1, '#D6AA78');
+    }
+    c.fillStyle = wallG;
+    c.fillRect(0, wallTop, width, wallBot - wallTop);
+
+    // Soft-focus cafe window / wall frame panels behind customers for warm cozy depth
+    const panelY = wallTop + 14;
+    const panelH = Math.max(24, wallBot - panelY - 24);
+    const panelCol = isSakura
+      ? 'rgba(255, 240, 246, 0.34)'
+      : isMoon
+      ? 'rgba(186, 214, 255, 0.16)'
+      : 'rgba(255, 249, 232, 0.42)';
+    const trimCol = isSakura
+      ? 'rgba(128, 72, 92, 0.22)'
+      : isMoon
+      ? 'rgba(28, 42, 78, 0.34)'
+      : 'rgba(138, 86, 46, 0.22)';
+    const panelGap = 14;
+    const panelW = Math.max(56, Math.round((width - 40 - panelGap * 2) / 3));
+    const panelStartX = Math.round((width - (panelW * 3 + panelGap * 2)) * 0.5);
+    for (let i = 0; i < 3; i++) {
+      const px = panelStartX + i * (panelW + panelGap);
+      UI.roundRectPath(c, px, panelY, panelW, panelH, 8);
+      c.fillStyle = panelCol;
+      c.fill();
+      c.lineWidth = 4;
+      c.strokeStyle = trimCol;
+      c.stroke();
+    }
+
+    // Soft warm counter ambient vignette along lower wall
+    const wallShade = c.createLinearGradient(0, wallBot - 36, 0, wallBot);
+    wallShade.addColorStop(0, 'rgba(90, 52, 26, 0)');
+    wallShade.addColorStop(1, isMoon ? 'rgba(18, 28, 56, 0.28)' : 'rgba(116, 66, 30, 0.24)');
+    c.fillStyle = wallShade;
+    c.fillRect(0, wallBot - 36, width, 36);
+
+    // 2. Deep espresso-walnut bakery tabletop below serving tray (`trayY .. height`)
+    const tableG = c.createLinearGradient(0, trayY, 0, height);
+    if (isSakura) {
+      tableG.addColorStop(0, '#5E3645');
+      tableG.addColorStop(1, '#40212D');
+    } else if (isMoon) {
+      tableG.addColorStop(0, '#223154');
+      tableG.addColorStop(1, '#151F38');
+    } else {
+      tableG.addColorStop(0, '#4E3220');
+      tableG.addColorStop(0.55, '#472D1C');
+      tableG.addColorStop(1, '#3A2315');
+    }
+    c.fillStyle = tableG;
+    c.fillRect(0, trayY, width, Math.max(0, height - trayY));
+
+    // Subtle horizontal tabletop wood plank grooves
+    c.strokeStyle = isMoon ? 'rgba(10, 16, 34, 0.34)' : 'rgba(26, 12, 5, 0.26)';
+    c.lineWidth = 1.5;
+    for (let py = trayY + 56; py < height; py += 62) {
+      c.beginPath();
+      c.moveTo(0, py);
+      c.lineTo(width, py);
+      c.stroke();
+    }
+
+    // 3. Starry Night Sky + Rounded-Bottom Dark-Navy Header Shelf (`0 .. playBarBottom`)
+    c.shadowColor = 'rgba(12, 16, 32, 0.42)';
+    c.shadowBlur = 10;
+    c.shadowOffsetY = 4;
+
+    const skyG = c.createLinearGradient(0, 0, 0, playBarBottom);
+    if (isSakura) {
+      skyG.addColorStop(0, '#362144');
+      skyG.addColorStop(0.6, '#4C305B');
+      skyG.addColorStop(1, '#583864');
+    } else if (isMoon) {
+      skyG.addColorStop(0, '#121A3D');
+      skyG.addColorStop(0.6, '#1D2C5C');
+      skyG.addColorStop(1, '#26386F');
+    } else {
+      skyG.addColorStop(0, '#172242');
+      skyG.addColorStop(0.52, '#202D54');
+      skyG.addColorStop(1, '#273660');
+    }
+    c.fillStyle = skyG;
+    UI.roundRectPath(c, -2, -2, width + 4, playBarBottom + 2, [0, 0, 16, 16]);
+    c.fill();
+
+    c.shadowColor = 'rgba(0, 0, 0, 0)';
+    c.shadowBlur = 0;
+    c.shadowOffsetY = 0;
+
+    // Subtle starry nebula sheen + tiny twinkling night stars in upper sky row
+    const starColor = isSakura ? '#FFD8EB' : '#FFE8A0';
+    for (let i = 0; i < 18; i++) {
+      const sx = ((i * 89.3 + 17) % 100) * 0.01 * width;
+      const sy = ((i * 37.7 + 7) % 100) * 0.01 * Math.max(24, topY + headerH);
+      const twinkle = 0.35 + 0.45 * (0.5 + 0.5 * Math.sin(nowSec * 2.2 + i * 1.7));
+      c.fillStyle = starColor;
+      c.globalAlpha = twinkle;
+      if (i % 5 === 0) {
+        UI.drawStar(c, sx, sy, 3.0, i * 0.6);
+      } else {
+        c.beginPath();
+        c.arc(sx, sy, i % 3 === 0 ? 1.5 : 1.0, 0, Math.PI * 2);
+        c.fill();
+      }
+    }
+    c.globalAlpha = 1;
+
+    // Subtle hairline separator between title row & Play HUD controls row + rounded bottom shelf outline
+    c.strokeStyle = 'rgba(130, 160, 220, 0.16)';
+    c.lineWidth = 1.0;
+    c.beginPath();
+    c.moveTo(10, topY + headerH + 2);
+    c.lineTo(width - 10, topY + headerH + 2);
+    c.stroke();
+
+    c.strokeStyle = '#131B33';
+    c.lineWidth = 2.0;
+    UI.roundRectPath(c, -2, -2, width + 4, playBarBottom + 2, [0, 0, 16, 16]);
+    c.stroke();
+
+    // Centered game title in starry nav bar row (strictly clears WeChat top-right capsule, Design 03)
+    const titleCx = Math.round(width * 0.5);
+    const titleCy = Math.round(topY + headerH * 0.5 + 0.5);
+    const maxTitleRight = geom.maxRight - 6;
+    if (titleCx + 42 < maxTitleRight) {
+      UI.drawOutlinedText(c, GAME_TITLE, titleCx, titleCy, {
+        size: 16.5,
+        weight: 800,
+        fill: '#FFFDF8',
+        stroke: '#162040',
+        strokeWidth: 2.6,
+        shadowOffsetY: 0.6
+      });
+    }
+  } finally {
+    c.restore();
+  }
+}
+
+/**
+ * Chunky warm-wood rounded-square Pause button with crisp outlined `||` bars (Design 03 top-left)
+ */
+function drawPlayPauseButton(ctx, x, y, size, pressed) {
+  const c = getSafeCtx(ctx);
+  const s = Math.max(26, Number(size) || 34);
+  const rad = Math.min(11, Math.round(s * 0.30));
+  const dy = pressed ? 1.5 : 0;
+  const bevel = pressed ? 1.5 : 3.0;
+  const bodyH = s - 3.0;
+
+  c.save();
+  try {
+    // 3D wood underside lip
+    UI.roundRectPath(c, x, y + dy + bevel, s, bodyH, rad);
+    c.fillStyle = '#4E2B17';
+    c.fill();
+    c.lineWidth = 2.1;
+    c.strokeStyle = '#331A0C';
+    c.stroke();
+
+    // Warm caramel wood top face
+    const g = c.createLinearGradient(x, y + dy, x, y + dy + bodyH);
+    g.addColorStop(0, '#BF8350');
+    g.addColorStop(0.55, '#915A34');
+    g.addColorStop(1, '#714225');
+    UI.roundRectPath(c, x, y + dy, s, bodyH, rad);
+    c.fillStyle = g;
+    c.fill();
+    c.lineWidth = 2.1;
+    c.strokeStyle = '#3A1F0F';
+    c.stroke();
+
+    // Inner warm top bevel highlight
+    UI.roundRectPath(c, x + 2.2, y + dy + 2.0, s - 4.4, Math.max(6, bodyH * 0.34), Math.max(4, rad - 2));
+    c.strokeStyle = 'rgba(255, 236, 206, 0.36)';
+    c.lineWidth = 1.3;
+    c.stroke();
+
+    // Two thick cream-white rounded vertical pause bars with crisp dark-brown outlines
+    const barW = Math.max(4.4, Math.round(s * 0.145));
+    const barH = Math.max(12, Math.round(bodyH * 0.48));
+    const barGap = Math.max(3.6, Math.round(s * 0.11));
+    const bx1 = x + s * 0.5 - barGap * 0.5 - barW;
+    const bx2 = x + s * 0.5 + barGap * 0.5;
+    const by = y + dy + (bodyH - barH) * 0.5;
+    const barR = barW * 0.48;
+
+    for (const bx of [bx1, bx2]) {
+      UI.roundRectPath(c, bx, by, barW, barH, barR);
+      c.fillStyle = '#FFFDF5';
+      c.fill();
+      c.lineWidth = 1.8;
+      c.strokeStyle = '#4A2512';
+      c.stroke();
+    }
+  } finally {
+    c.restore();
+  }
+}
+
+/**
+ * Full-width Play Top HUD Row sitting cleanly BELOW the WeChat capsule (strictly matching Design 03):
+ * `[Pause]  [关卡 1-5]  [🕒 01:28]  [    680   ★─★─☆ ]`
+ */
+function renderPlayTopBar(ctx, barRect, app, hits, nowSec) {
+  const c = getSafeCtx(ctx);
+  const { x: bx, y: by, w: bw, h: bh } = barRect;
   const sprites = app.sprites || {};
   const orderState = app.orderState || {};
   const lvl = getLevelById(app.currentLevelId || orderState.levelId || '1-1') || getLevelById('1-1');
@@ -1400,104 +1636,137 @@ function renderPlayTopBar(ctx, geom, app, hits, nowSec) {
   const score = Math.max(0, Math.floor(Number(orderState.score) || 0));
   const timeLeft = Math.max(0, Number(orderState.timeLeft) || 0);
 
-  const padX = 8;
-  const btnS = Math.min(30, headerH);
-  const btnY = topY + Math.floor((headerH - btnS) * 0.5);
+  const btnS = Math.min(29, Math.max(27, bh - 2));
+  const btnY = Math.round(by + (bh - btnS) * 0.5);
+  const gap = bw >= 360 ? 7 : 5;
 
-  // Circular wood Pause button (Design 03 top-left)
-  drawCircularWoodButton(c, padX + btnS * 0.5, btnY + btnS * 0.5, btnS * 0.5, {
-    icon: 'icon_pause',
-    sprites,
-    pressed: isHitPressed(app, 'pause_btn')
+  // 1. Warm-wood rounded-square Pause button (Design 03 top-left)
+  drawPlayPauseButton(c, bx, btnY, btnS, isHitPressed(app, 'pause_btn'));
+  hits.add('pause_btn', bx, btnY, btnS, btnS, () => app.togglePause());
+
+  const pillH = Math.min(28, Math.max(24, bh - 5));
+  const pillY = Math.round(by + (bh - pillH) * 0.5);
+
+  // Helper: dark espresso-wood HUD pill with warm inner bevel rim (Design 03)
+  const drawHudWoodPill = (px, py, pw, ph, borderOverride = '') => {
+    c.save();
+    try {
+      const r = ph * 0.5;
+      const g = c.createLinearGradient(px, py, px, py + ph);
+      g.addColorStop(0, '#72492F');
+      g.addColorStop(0.55, '#593621');
+      g.addColorStop(1, '#472918');
+      UI.roundRectPath(c, px, py, pw, ph, r);
+      c.fillStyle = g;
+      c.fill();
+      c.lineWidth = 2.0;
+      c.strokeStyle = borderOverride || '#2D180C';
+      c.stroke();
+
+      UI.roundRectPath(c, px + 2, py + 2, pw - 4, ph - 4, Math.max(4, r - 2));
+      c.lineWidth = 1.2;
+      c.strokeStyle = 'rgba(222, 168, 120, 0.34)';
+      c.stroke();
+    } finally {
+      c.restore();
+    }
+  };
+
+  // 2. Dark wood '关卡 X-Y' pill (always shows full `关卡 X-Y`, Design 03)
+  const lvlX = bx + btnS + gap;
+  const lvlW = clamp(Math.round(bw * 0.22), 70, 88);
+  drawHudWoodPill(lvlX, pillY, lvlW, pillH);
+  UI.drawOutlinedText(c, `关卡 ${lvl ? lvl.id : '1-1'}`, lvlX + lvlW * 0.5, pillY + pillH * 0.5 + 0.5, {
+    size: 12.6,
+    minSize: 9.8,
+    weight: 900,
+    fill: '#FFF6E2',
+    stroke: '#361C0E',
+    strokeWidth: 2.4,
+    shadowOffsetY: 0.5,
+    maxWidth: lvlW - 10
   });
-  hits.add('pause_btn', padX, btnY, btnS, btnS, () => app.togglePause());
 
-  const pillH = Math.min(28, headerH);
-  const pillY = topY + Math.floor((headerH - pillH) * 0.5);
-
-  // Dark wood '关卡 X-Y' pill
-  const lvlX = padX + btnS + 4;
-  const lvlW = maxRight >= 310 ? 58 : 44;
-  UI.drawKissaCard(c, lvlX, pillY, lvlW, pillH, { tone: 'wood', radius: pillH * 0.5, lineWidth: 2.0 });
-  UI.drawOutlinedText(c, maxRight >= 310 ? `关卡 ${lvl ? lvl.id : '1-1'}` : lvl ? lvl.id : '1-1', lvlX + lvlW * 0.5, pillY + pillH * 0.5 + 0.5, {
-    size: 10.8,
-    minSize: 8.5,
-    weight: 800,
-    fill: '#FFF8EC',
-    stroke: '#3E2518',
-    strokeWidth: 2.0,
-    shadowOffsetY: 0,
-    maxWidth: lvlW - 8
-  });
-
-  // Dark wood Countdown Clock pill (`icon_clock.webp + MM:SS`)
-  const timerX = lvlX + lvlW + 4;
-  const timerW = 62;
+  // 3. Dark wood Countdown Clock pill (`icon_clock + MM:SS`, Design 03)
+  const timerX = lvlX + lvlW + gap;
+  const timerW = clamp(Math.round(bw * 0.23), 74, 92);
   const isUrgentClock = timeLeft <= 15 && timeLeft > 0;
   const pulse = isUrgentClock ? 0.5 + 0.5 * Math.sin(nowSec * 9.0) : 0;
-  UI.drawKissaCard(c, timerX, pillY, timerW, pillH, {
-    tone: 'wood',
-    borderColor: isUrgentClock ? '#E85C5C' : '#3E2518',
-    radius: pillH * 0.5,
-    lineWidth: 2.0
-  });
-  UI.drawUiIcon(
-    c,
-    sprites,
-    'icon_clock',
-    timerX + 12,
-    pillY + pillH * 0.5,
-    14 + pulse * 1.4
-  );
-  UI.drawOutlinedText(c, formatClockMMSS(timeLeft), timerX + 21, pillY + pillH * 0.5 + 0.5, {
-    size: 11.2,
-    minSize: 8.5,
-    weight: 800,
-    fill: isUrgentClock ? '#FFB4A2' : '#FFF8EC',
-    stroke: '#3E2518',
-    strokeWidth: 2.0,
-    shadowOffsetY: 0,
-    align: 'left',
-    maxWidth: timerW - 24
-  });
-
-  // Right Score & 3-Star Progress Bar (strictly ending <= maxRight)
-  const progX = timerX + timerW + 4;
-  const progW = Math.max(66, maxRight - progX);
-
-  UI.drawOutlinedText(c, String(score), progX + progW * 0.5, pillY + 7.5, {
-    size: 12.2,
-    minSize: 9.0,
+  drawHudWoodPill(timerX, pillY, timerW, pillH, isUrgentClock ? '#E85C5C' : '');
+  const clkSz = Math.min(18, Math.round(pillH * 0.68)) + pulse * 1.4;
+  UI.drawUiIcon(c, sprites, 'icon_clock', timerX + 14, pillY + pillH * 0.5, clkSz);
+  UI.drawOutlinedText(c, formatClockMMSS(timeLeft), timerX + 25, pillY + pillH * 0.5 + 0.6, {
+    size: 12.8,
+    minSize: 10.0,
     weight: 900,
-    fill: '#FFE58F',
-    stroke: '#3E2518',
+    fill: isUrgentClock ? '#FFB4A2' : '#FFF6E2',
+    stroke: '#361C0E',
     strokeWidth: 2.4,
+    shadowOffsetY: 0.5,
+    align: 'left',
+    maxWidth: timerW - 30
+  });
+
+  // 4. Right Score + 3-Star Progress Group (generous full-width layout matching Design 03!)
+  const progX = timerX + timerW + gap + 2;
+  const progW = Math.max(96, bx + bw - progX);
+
+  // Subtle recessed dark-navy capsule behind score number
+  const capH = Math.max(16, Math.round(bh * 0.54));
+  const capY = by;
+  c.save();
+  try {
+    UI.roundRectPath(c, progX + 2, capY, progW - 4, capH, capH * 0.5);
+    c.fillStyle = 'rgba(18, 26, 52, 0.68)';
+    c.fill();
+    c.lineWidth = 1.2;
+    c.strokeStyle = 'rgba(130, 162, 222, 0.26)';
+    c.stroke();
+  } finally {
+    c.restore();
+  }
+
+  UI.drawOutlinedText(c, String(score), progX + progW * 0.5, capY + capH * 0.52, {
+    size: 14.0,
+    minSize: 10.5,
+    weight: 900,
+    fill: '#FFE584',
+    stroke: '#2C170C',
+    strokeWidth: 2.6,
     shadowOffsetY: 0.6,
-    maxWidth: progW - 8
+    maxWidth: progW - 10
   });
 
   const barX = progX + 4;
-  const barW = Math.max(44, progW - 10);
-  const barY = pillY + pillH - 9;
-  const barH = 6.5;
+  const barW = Math.max(76, progW - 14);
+  const barH = 8.0;
+  const barY = by + bh - barH - 1.5;
   const star3 = Math.max(1, stars[2]);
   const fillRatio = clamp(score / star3, 0, 1);
 
   c.save();
   try {
-    c.fillStyle = '#4A3122';
+    // Dark recessed brown track with warm rim
+    c.fillStyle = '#4B3022';
     UI.roundRectPath(c, barX, barY, barW, barH, barH * 0.5);
     c.fill();
-    c.lineWidth = 1.5;
-    c.strokeStyle = '#2B1B12';
+    c.lineWidth = 1.8;
+    c.strokeStyle = '#2A180D';
     c.stroke();
 
     if (fillRatio > 0) {
-      const fg = c.createLinearGradient(barX, barY, barX + barW, barY);
-      fg.addColorStop(0, '#F5A623');
-      fg.addColorStop(1, '#FFE47A');
+      const fillW = Math.max(6, (barW - 2) * fillRatio);
+      const fg = c.createLinearGradient(barX, barY, barX, barY + barH);
+      fg.addColorStop(0, '#FFE87A');
+      fg.addColorStop(0.55, '#F8B82E');
+      fg.addColorStop(1, '#E28A14');
       c.fillStyle = fg;
-      UI.roundRectPath(c, barX + 1, barY + 1, Math.max(4, (barW - 2) * fillRatio), barH - 2, (barH - 2) * 0.5);
+      UI.roundRectPath(c, barX + 1, barY + 1, fillW, barH - 2, (barH - 2) * 0.5);
+      c.fill();
+
+      // Glossy top shine strip inside score progress bar
+      c.fillStyle = 'rgba(255, 255, 232, 0.42)';
+      UI.roundRectPath(c, barX + 2.5, barY + 1.5, Math.max(3, fillW - 3), (barH - 2) * 0.36, 2);
       c.fill();
     }
   } finally {
@@ -1505,17 +1774,17 @@ function renderPlayTopBar(ctx, geom, app, hits, nowSec) {
   }
 
   for (let i = 0; i < 3; i++) {
-    const ratio = clamp(stars[i] / star3, 0.14, 1.0);
+    const ratio = clamp(stars[i] / star3, 0.22, 1.0);
     const sx = barX + barW * ratio;
     const unlocked = score >= stars[i];
     const popTimer = app.starPopTimers && app.starPopTimers[i] > 0 ? app.starPopTimers[i] : 0;
     const scaleBoost = popTimer > 0 ? 1 + 0.45 * Math.sin((popTimer / 0.3) * Math.PI) : 1;
-    UI.drawStarIcon(c, sx, barY + barH * 0.5, 5.4 * scaleBoost, unlocked, { sprites });
+    UI.drawStarIcon(c, sx, barY + barH * 0.5, 7.2 * scaleBoost, unlocked, { sprites });
   }
 }
 
 /**
- * Square warm-wood tool button (`移位叉` / `升阶勺`) with coral-red circular count badge (Design 03)
+ * Square warm-wood tool button (`移位叉` / `升阶勺`) with wood-grain texture & glossy red count badge (Design 03)
  */
 function drawUtensilButton(ctx, x, y, w, h, kind, app, hits) {
   const c = getSafeCtx(ctx);
@@ -1530,51 +1799,69 @@ function drawUtensilButton(ctx, x, y, w, h, kind, app, hits) {
   UI.drawPillButton(c, x, y, w, h, {
     style: armed ? 'active' : count > 0 ? 'wood' : canEmergencyBuy ? 'walnut' : 'disabled',
     disabled: count === 0 && !canEmergencyBuy,
-    radius: 12,
+    woodGrain: true,
+    radius: 13,
     text: '',
     pressed: isHitPressed(app, hitId)
   });
 
   const iconKey = kind === 'fork' ? 'tool_swap_fork' : 'tool_upgrade_spoon';
-  UI.drawUiIcon(c, sprites, iconKey, x + w * 0.5, y + h * 0.38, Math.min(28, h * 0.52));
+  UI.drawUiIcon(c, sprites, iconKey, x + w * 0.5, y + h * 0.37, Math.min(31, h * 0.54));
 
-  // Bottom outlined label: 移位叉 / 升阶勺 / 取消
+  // Bottom bold white outlined label: 移位叉 / 升阶勺 / 取消 (Design 03)
   const bottomLabel = armed ? '取消' : def.shortName;
-  UI.drawOutlinedText(c, bottomLabel, x + w * 0.5, y + h * 0.78, {
-    size: 10.5,
-    minSize: 8.5,
-    weight: 800,
-    fill: armed ? '#5A3928' : '#FFF8EC',
-    stroke: armed ? '' : '#5A3928',
-    strokeWidth: armed ? 0 : 2.2,
-    shadowOffsetY: 0,
+  UI.drawOutlinedText(c, bottomLabel, x + w * 0.5, y + h * 0.77, {
+    size: 11.8,
+    minSize: 9.0,
+    weight: 900,
+    fill: armed ? '#5A3928' : '#FFFDF8',
+    stroke: armed ? '' : '#3E1F0E',
+    strokeWidth: armed ? 0 : 2.8,
+    shadowOffsetY: armed ? 0 : 0.7,
     maxWidth: w - 6
   });
 
-  // Top-right coral-red circular count badge (or emergency buy star tag)
+  // Top-right glossy crimson-red circular count badge (or emergency buy star tag, Design 03)
   const badgeText = count > 0 ? String(count) : canEmergencyBuy ? `${def.cost}` : '0';
-  const badgeR = count > 0 ? 9 : 10;
+  const badgeR = count > 0 ? 9.8 : 10.5;
   const bcx = x + w - 4;
   const bcy = y + 4;
   c.save();
   try {
+    const bg = c.createLinearGradient(bcx, bcy - badgeR, bcx, bcy + badgeR);
+    if (count > 0) {
+      bg.addColorStop(0, '#F55A4E');
+      bg.addColorStop(1, '#C62822');
+    } else if (canEmergencyBuy) {
+      bg.addColorStop(0, '#FFD45E');
+      bg.addColorStop(1, '#E89218');
+    } else {
+      bg.addColorStop(0, '#9B9084');
+      bg.addColorStop(1, '#756B60');
+    }
     c.beginPath();
     c.arc(bcx, bcy, badgeR, 0, Math.PI * 2);
-    c.fillStyle = count > 0 ? '#E84D42' : canEmergencyBuy ? '#F5A623' : '#8C8073';
+    c.fillStyle = bg;
     c.fill();
-    c.lineWidth = 1.8;
-    c.strokeStyle = '#5A3928';
+    c.lineWidth = 2.0;
+    c.strokeStyle = '#4A2210';
     c.stroke();
+
+    // Subtle specular highlight dot on red badge
+    c.fillStyle = 'rgba(255, 255, 255, 0.36)';
+    c.beginPath();
+    c.arc(bcx - badgeR * 0.30, bcy - badgeR * 0.32, badgeR * 0.24, 0, Math.PI * 2);
+    c.fill();
   } finally {
     c.restore();
   }
   UI.drawOutlinedText(c, badgeText, bcx, bcy + 0.5, {
-    size: badgeText.length > 1 ? 8.5 : 10.5,
+    size: badgeText.length > 1 ? 8.8 : 11.2,
     minSize: 7.5,
     weight: 900,
-    fill: '#FFF8EC',
-    stroke: '#5A3928',
-    strokeWidth: 1.8,
+    fill: '#FFFDF8',
+    stroke: '#4A1F0E',
+    strokeWidth: 2.0,
     shadowOffsetY: 0
   });
 
@@ -1582,7 +1869,7 @@ function drawUtensilButton(ctx, x, y, w, h, kind, app, hits) {
 }
 
 /**
- * Circular glowing Patron Active Skill Medallion (`patron_skill_btn`, Design 03 bottom-right)
+ * Circular glowing double-gold-ring Patron Active Skill Medallion (`patron_skill_btn`, Design 03 bottom-right)
  */
 function drawPatronSkillMedallion(ctx, x, y, w, h, app, hits, nowSec) {
   const c = getSafeCtx(ctx);
@@ -1597,73 +1884,99 @@ function drawPatronSkillMedallion(ctx, x, y, w, h, app, hits, nowSec) {
 
   const cx = x + w * 0.5;
   const cy = y + h * 0.5 + (pressed ? 1.5 : 0);
-  const rad = Math.min(w, h) * 0.48;
+  const rad = Math.min(w, h) * 0.49;
 
   c.save();
   try {
-    // Golden radiant aura when 100% charged
+    // Golden radiant outer aura when 100% charged (Design 03)
     if (ready) {
-      const aura = c.createRadialGradient(cx, cy, rad * 0.75, cx, cy, rad * (1.35 + pulse * 0.14));
-      aura.addColorStop(0, `rgba(255, 224, 112, ${(0.72 + pulse * 0.22).toFixed(3)})`);
-      aura.addColorStop(1, 'rgba(255, 200, 68, 0)');
+      const aura = c.createRadialGradient(cx, cy, rad * 0.70, cx, cy, rad * (1.42 + pulse * 0.14));
+      aura.addColorStop(0, `rgba(255, 232, 128, ${(0.82 + pulse * 0.18).toFixed(3)})`);
+      aura.addColorStop(0.65, `rgba(255, 198, 72, ${(0.34 + pulse * 0.12).toFixed(3)})`);
+      aura.addColorStop(1, 'rgba(255, 198, 72, 0)');
       c.fillStyle = aura;
       c.beginPath();
-      c.arc(cx, cy, rad * (1.35 + pulse * 0.14), 0, Math.PI * 2);
+      c.arc(cx, cy, rad * (1.42 + pulse * 0.14), 0, Math.PI * 2);
       c.fill();
     }
 
-    // Outer wood/gold medallion disc
-    const discG = c.createLinearGradient(cx, cy - rad, cx, cy + rad);
+    // Outer cream-gold ring (double-ring medallion style matching Design 03)
+    const outerG = c.createLinearGradient(cx, cy - rad, cx, cy + rad);
     if (ready) {
-      discG.addColorStop(0, '#FFE47A');
-      discG.addColorStop(1, '#F5A420');
+      outerG.addColorStop(0, '#FFF5B8');
+      outerG.addColorStop(0.5, '#FFE072');
+      outerG.addColorStop(1, '#EAA224');
     } else {
-      discG.addColorStop(0, '#9E6A45');
-      discG.addColorStop(1, '#6C432B');
+      outerG.addColorStop(0, '#B0794B');
+      outerG.addColorStop(1, '#6D4329');
     }
     c.beginPath();
     c.arc(cx, cy, rad, 0, Math.PI * 2);
-    c.fillStyle = discG;
+    c.fillStyle = outerG;
     c.fill();
     c.lineWidth = 2.4;
-    c.strokeStyle = '#5A3928';
+    c.strokeStyle = '#4A2410';
     c.stroke();
 
-    // Inner cream face
+    // Inner glowing amber-gold face (warm cream when charging)
+    const innerR = rad - 4.2;
+    const faceG = c.createRadialGradient(cx, cy - innerR * 0.2, innerR * 0.15, cx, cy, innerR);
+    if (ready) {
+      faceG.addColorStop(0, '#FFF6C4');
+      faceG.addColorStop(0.65, '#FFD35E');
+      faceG.addColorStop(1, '#F29A1E');
+    } else {
+      faceG.addColorStop(0, '#FFF6E4');
+      faceG.addColorStop(1, '#E8D5B8');
+    }
     c.beginPath();
-    c.arc(cx, cy, rad - 4, 0, Math.PI * 2);
-    c.fillStyle = ready ? '#FFF5D0' : '#F3E5CE';
+    c.arc(cx, cy, innerR, 0, Math.PI * 2);
+    c.fillStyle = faceG;
     c.fill();
-
-    // Charge ring arc
-    c.strokeStyle = 'rgba(90, 57, 40, 0.20)';
-    c.lineWidth = 3.2;
-    c.beginPath();
-    c.arc(cx, cy, rad - 2, 0, Math.PI * 2);
+    c.lineWidth = 1.8;
+    c.strokeStyle = ready ? '#5A2C12' : 'rgba(90, 57, 40, 0.35)';
     c.stroke();
 
-    if (charge > 0) {
-      c.strokeStyle = ready ? '#FFE875' : '#74C353';
-      c.lineWidth = 3.4;
-      c.lineCap = 'round';
+    // Circular charge progress arc when charging (< 100%)
+    if (!ready) {
+      c.strokeStyle = 'rgba(90, 57, 40, 0.22)';
+      c.lineWidth = 3.2;
       c.beginPath();
-      c.arc(cx, cy, rad - 2, -Math.PI * 0.5, -Math.PI * 0.5 + (charge / 100) * Math.PI * 2);
+      c.arc(cx, cy, rad - 2.1, 0, Math.PI * 2);
       c.stroke();
+
+      if (charge > 0) {
+        c.strokeStyle = '#7ED656';
+        c.lineWidth = 3.4;
+        c.lineCap = 'round';
+        c.beginPath();
+        c.arc(cx, cy, rad - 2.1, -Math.PI * 0.5, -Math.PI * 0.5 + (charge / 100) * Math.PI * 2);
+        c.stroke();
+      }
     }
   } finally {
     c.restore();
   }
 
-  UI.drawUiIcon(c, sprites, patron.id, cx, cy - 3, rad * 1.38);
+  // Patron portrait clipped inside the medallion ring (chef hat gently peeks near top!)
+  c.save();
+  try {
+    c.beginPath();
+    c.arc(cx, cy, rad - 2.5, 0, Math.PI * 2);
+    if (typeof c.clip === 'function') c.clip();
+    UI.drawUiIcon(c, sprites, patron.id, cx, cy - 2, rad * 1.62);
+  } finally {
+    c.restore();
+  }
 
-  // Bottom outlined label ('释放' or 'XX%')
-  UI.drawOutlinedText(c, ready ? '释放' : `${Math.floor(charge)}%`, cx, cy + rad * 0.62, {
-    size: ready ? 12.2 : 10.2,
-    minSize: 8.5,
+  // Bottom bold white outlined label ('释放' or 'XX%', Design 03)
+  UI.drawOutlinedText(c, ready ? '释放' : `${Math.floor(charge)}%`, cx, cy + rad * 0.60, {
+    size: ready ? 13.4 : 11.2,
+    minSize: 8.8,
     weight: 900,
-    fill: ready ? '#FFF8EC' : '#FFF4DC',
-    stroke: '#5A3928',
-    strokeWidth: 2.8,
+    fill: '#FFFDF8',
+    stroke: '#46200E',
+    strokeWidth: 3.0,
     shadowOffsetY: 0.8
   });
 
@@ -1681,8 +1994,6 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
   const guideTargets = {};
   app.guideTargets = guideTargets;
 
-  renderPlayTopBar(c, geom, app, hits, nowSec);
-
   const availH = bottomLimit - headerBottom;
   const compact = availH < 640;
   const isWide = width > 560;
@@ -1691,9 +2002,46 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
   const padX = 8;
   const innerX = stageX + padX;
   const innerW = stageW - padX * 2;
+  const fullBarX = isWide ? stageX : 0;
+  const fullBarW = isWide ? stageW : width;
 
-  const custY = headerBottom + (compact ? 4 : 6);
-  const custH = compact ? 108 : 122;
+  // Compute all 5 vertical HUD bands cleanly below WeChat capsule (`btnY >= headerBottom + 3`)
+  const playBarY = headerBottom + 2;
+  const playBarH = compact ? 30 : 31;
+  const playBarBottom = playBarY + playBarH + 1;
+
+  const custY = playBarBottom;
+  const custH = compact ? 108 : 132;
+
+  // Dark espresso tray rail sits FLUSH right underneath the oak customer counter ledge (Design 03!)
+  const trayY = custY + custH;
+  const trayRailH = compact ? 46 : 54;
+  const statusGap = compact ? 5 : 9;
+  const statusH = compact ? 27 : 33;
+  const trayH = trayRailH + statusGap + statusH;
+
+  const dockH = compact ? 58 : 66;
+  const dockY = bottomLimit - dockH;
+  const stageY = trayY + trayH + (compact ? 4 : 7);
+  const stageH = Math.max(190, dockY - (compact ? 5 : 8) - stageY);
+
+  // Pre-compute board layout so the Combo + Fever bar aligns horizontally with the baking tray width (Design 03!)
+  const preBoardLayout = BoardRenderer.computeBoardLayout(
+    { x: innerX, y: stageY, w: innerW, h: stageH },
+    gridState
+  );
+  const boardOuterW = preBoardLayout
+    ? preBoardLayout.gridW + preBoardLayout.bezelPad * 2
+    : Math.round(innerW * 0.86);
+  const statusW = clamp(boardOuterW, Math.min(innerW - 8, 292), innerW - 4);
+
+  // 1. Pixel-aligned Cafe Interior Wall, Walnut Tabletop & Starry Night Header Shelf
+  renderPlayInteriorBands(c, geom, playBarBottom, trayY, app.equippedTheme, nowSec);
+
+  // 2. Full-width Play Top HUD Bar (Pause | 关卡 X-Y | 🕒 MM:SS | Score + 3-Star Bar)
+  renderPlayTopBar(c, { x: innerX, y: playBarY, w: innerW, h: playBarH }, app, hits, nowSec);
+
+  // 3. 3-Seat Animal Customer Bar + Seamless Speech Bubbles + Full-Width Oak Counter Ledge
   BoardRenderer.renderCustomersBar(
     c,
     { x: innerX, y: custY, w: innerW, h: custH },
@@ -1703,14 +2051,15 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
     nowSec,
     {
       vertical: false,
+      fullBarX,
+      fullBarW,
       animState,
       guideTargets,
       onSelectSeat: (idx) => app.selectCustomerSeat(idx)
     }
   );
 
-  const trayY = custY + custH + (compact ? 3 : 5);
-  const trayH = compact ? 64 : 72;
+  // 4. Full-Width Dark Espresso Serving Tray Rail + Plates + Warm-Wood Trash + Flame-Crest Combo & Fever Bar
   BoardRenderer.renderTrayStrip(
     c,
     { x: innerX, y: trayY, w: innerW, h: trayH },
@@ -1720,6 +2069,11 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
     nowSec,
     {
       theme: app.equippedTheme,
+      fullBarX,
+      fullBarW,
+      statusH,
+      rowGap: statusGap,
+      statusW,
       animState,
       guideTargets,
       boardFullHint: app.boardFullHintTimer > 0,
@@ -1729,28 +2083,26 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
     }
   );
 
-  const dockH = compact ? 58 : 64;
-  const dockY = bottomLimit - dockH;
+  // 5. Bottom 4-Control Dock: 移位叉 | 揉面补料 | 升阶勺 | 搭档技能
   guideTargets.dock = { x: innerX, y: dockY, w: innerW, h: dockH };
-
-  // 4 strictly disjoint bottom controls: 移位叉 | 揉面补料 | 升阶勺 | 搭档招牌技
-  const forkW = 58;
-  const spoonW = 58;
-  const skillW = 62;
-  const forkX = innerX;
-  const skillX = innerX + innerW - skillW;
-  const spoonX = skillX - 6 - spoonW;
-  const kneadX = forkX + forkW + 6;
-  const kneadW = Math.max(106, spoonX - 6 - kneadX);
+  const forkW = compact ? 56 : 62;
+  const spoonW = compact ? 56 : 62;
+  const skillW = compact ? 60 : 68;
+  const dockGap = compact ? 6 : 8;
+  const forkX = innerX + 2;
+  const skillX = innerX + innerW - skillW - 2;
+  const spoonX = skillX - dockGap - spoonW;
+  const kneadX = forkX + forkW + dockGap;
+  const kneadW = Math.max(104, spoonX - dockGap - kneadX);
 
   drawUtensilButton(c, forkX, dockY + 2, forkW, dockH - 4, 'fork', app, hits);
 
   const kneadPressed = app.kneadPressTimer > 0 || isHitPressed(app, 'knead_btn');
   UI.drawPillButton(c, kneadX, dockY + 4, kneadW, dockH - 8, {
-    style: 'cta',
+    style: 'knead',
     label: '揉面补料',
-    fontSize: compact ? 16 : 17.5,
-    radius: Math.round((dockH - 8) * 0.45),
+    fontSize: compact ? 18.5 : 21.0,
+    radius: Math.round((dockH - 8) * 0.48),
     pressed: kneadPressed
   });
   hits.add('knead_btn', kneadX, dockY + 2, kneadW, dockH - 4, () => app.onTapKneadButton());
@@ -1759,8 +2111,7 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
   drawUtensilButton(c, spoonX, dockY + 2, spoonW, dockH - 4, 'spoon', app, hits);
   drawPatronSkillMedallion(c, skillX, dockY, skillW, dockH, app, hits, nowSec);
 
-  const stageY = trayY + trayH + 4;
-  const stageH = Math.max(190, dockY - 4 - stageY);
+  // 6. 3D Wooden Baking Tray Board Stage (Design 03)
   const layout = BoardRenderer.renderBoardStage(
     c,
     { x: innerX, y: stageY, w: innerW, h: stageH },
@@ -1771,6 +2122,7 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
     animState,
     nowSec,
     {
+      layout: preBoardLayout,
       activeTool: app.activeTool,
       forkSourceCell: app.forkSourceCell,
       guideTargets,
@@ -1793,6 +2145,7 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
     );
   }
 
+  app.playBoardTopY = stageY;
   app.currentBoardLayout = layout;
   return layout;
 }
@@ -1812,7 +2165,8 @@ function renderToast(ctx, width, headerBottom, app) {
   if (app.activeModal) {
     baseY = Math.max(headerBottom + 10, botLimit - 44);
   } else if (app.screen === 'playing') {
-    baseY = headerBottom + 122;
+    // Anchor toast cleanly at the top edge of the board stage so it NEVER covers customer orders or serving plates!
+    baseY = Number.isFinite(app.playBoardTopY) ? app.playBoardTopY + 4 : headerBottom + 236;
   } else if (app.screen === 'lobby' && Number.isFinite(app.lobbyHeaderBottomY)) {
     baseY = Math.max(headerBottom + 8, app.lobbyHeaderBottomY + 6);
   }

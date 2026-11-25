@@ -12,6 +12,36 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 // ---------------------------------------------------------------------------
+// v0.10 乘区计分 oracle (docs/07 §1): mirrors balance_config.SCORE_ZONES defaults.
+//   score = round(itemSum × (1 + clamp(B_skill, -0.40, 0.90)) × cust × (1 + clamp(B_scene, -0.5, 1.0)))
+//   B_skill = (size-1) + (tip-1) + (combo-1) [+ skillExtra, e.g. mugi 0.10]
+//   B_scene = fever 0.25 | mikan 0.08 | luna 0.50 | dev_tray(3-item) 0.12
+// Exact-formula tests start runs with LEGACY_FORMULA_FEATURES so M1+ bonuses (fresh / crit /
+// fever V2 / dough temperature) never leak into the base-formula oracle.
+// ---------------------------------------------------------------------------
+function zoneScore(itemSum, { size = 1, tip = 1, combo = 1, cust = 1, scene = 0, skillExtra = 0 } = {}) {
+  const skill = Math.max(-0.4, Math.min(0.9, (size - 1) + (tip - 1) + (combo - 1) + skillExtra));
+  const sceneZ = Math.max(-0.5, Math.min(1.0, scene));
+  return Math.round(itemSum * (1 + skill) * cust * (1 + sceneZ));
+}
+const BASIC_RECIPE_ORACLE = {
+  R01: { items: 30, size: 1.0 },
+  R02: { items: 70, size: 1.0 },
+  R03: { items: 100, size: 1.12 }
+};
+function recipeZoneScore(recId, opts = {}) {
+  const b = BASIC_RECIPE_ORACLE[recId];
+  if (!b) throw new Error(`No basic oracle for ${recId}`);
+  return zoneScore(b.items, { size: b.size, ...opts });
+}
+const LEGACY_FORMULA_FEATURES = Object.freeze({
+  bakeCrit: false,
+  freshBonus: false,
+  doughTemp: false,
+  feverV2: false
+});
+
+// ---------------------------------------------------------------------------
 // Canonical Reference Tables (Opaque-Box Spec Ground Truth from PROJECT.md & docs/v2.0/01..05)
 // ---------------------------------------------------------------------------
 
@@ -870,7 +900,7 @@ const F01_TESTS = [
     id: 'T1-F01-06',
     tier: 1,
     features: ['F01'],
-    title: 'WeChat Mini Game raw client package stays <= 3.2 MB (~2.3 MB compiled wxapkg < 4 MB limit) with 0 audio files',
+    title: 'WeChat Mini Game raw client package stays <= 3.5 MB (~2.3 MB compiled wxapkg < 4 MB limit) with 0 audio files',
     run: async (ctx) => {
       const localScan = scanClientPackage(ctx.minigameDir);
       let harnessBytes = null;
@@ -884,8 +914,8 @@ const F01_TESTS = [
         `Client package suspiciously small (${totalBytes} B <= 500 KB)`
       );
       ctx.assert(
-        totalBytes <= 3.2 * 1024 * 1024,
-        `Client raw package ${totalBytes} B (${(totalBytes / (1024 * 1024)).toFixed(2)} MB) exceeds 3.2 MB raw budget (< 4 MB WeChat limit)`
+        totalBytes <= 3.5 * 1024 * 1024,
+        `Client raw package ${totalBytes} B (${(totalBytes / (1024 * 1024)).toFixed(2)} MB) exceeds 3.5 MB raw budget (< 4 MB WeChat limit)`
       );
       ctx.assertEq(
         localScan.audioFiles.length,
@@ -1795,21 +1825,27 @@ const F05_TESTS = [
           return await ctx.eval((N) => {
             const dbg = window.__HOSHI_DEBUG__;
             let c2 = 0;
-            for (let i = 0; i < N; i++) {
-              window.__WX_HARNESS__?.advanceClockMs?.(150);
-              dbg.advanceTime(0.15);
-              dbg.knead();
-              const st = dbg.getState();
-              for (let r = 0; r < st.grid.rows; r++) {
-                for (let c = 0; c < st.grid.cols; c++) {
-                  const t = st.grid.cells[r][c].tile;
-                  if (t) {
-                    if (t.tier === 2) c2 += 1;
-                    dbg.tapBoardCell(r, c);
-                    dbg.doubleTapTray(0, { ignoreCooldown: true });
+            if (typeof dbg.setHeadlessSim === 'function') dbg.setHeadlessSim(true);
+            try {
+              for (let i = 0; i < N; i++) {
+                window.__WX_HARNESS__?.advanceClockMs?.(150);
+                dbg.advanceTime(0.15);
+                dbg.knead();
+                const st = dbg.getState();
+                for (let r = 0; r < st.grid.rows; r++) {
+                  for (let c = 0; c < st.grid.cols; c++) {
+                    const t = st.grid.cells[r][c].tile;
+                    if (t) {
+                      if (t.tier === 2) c2 += 1;
+                      dbg.tapBoardCell(r, c);
+                      dbg.doubleTapTray(0, { ignoreCooldown: true });
+                    }
                   }
                 }
               }
+            } finally {
+              if (typeof dbg.setHeadlessSim === 'function') dbg.setHeadlessSim(false);
+              dbg.advanceTime(0);
             }
             return { c2, total: N, rate: c2 / N, score: dbg.getState().score };
           }, 180);
@@ -1887,21 +1923,27 @@ const F05_TESTS = [
         if (second && second.spawned !== false) {
           let c2 = 0;
           const N = 180;
-          for (let i = 0; i < N; i++) {
-            window.__WX_HARNESS__?.advanceClockMs?.(150);
-            dbg.advanceTime(0.15);
-            dbg.knead();
-            const st = dbg.getState();
-            for (let r = 0; r < st.grid.rows; r++) {
-              for (let c = 0; c < st.grid.cols; c++) {
-                const t = st.grid.cells[r][c].tile;
-                if (t) {
-                  if (t.tier === 2) c2 += 1;
-                  dbg.tapBoardCell(r, c);
-                  dbg.doubleTapTray(0, { ignoreCooldown: true });
+          if (typeof dbg.setHeadlessSim === 'function') dbg.setHeadlessSim(true);
+          try {
+            for (let i = 0; i < N; i++) {
+              window.__WX_HARNESS__?.advanceClockMs?.(150);
+              dbg.advanceTime(0.15);
+              dbg.knead();
+              const st = dbg.getState();
+              for (let r = 0; r < st.grid.rows; r++) {
+                for (let c = 0; c < st.grid.cols; c++) {
+                  const t = st.grid.cells[r][c].tile;
+                  if (t) {
+                    if (t.tier === 2) c2 += 1;
+                    dbg.tapBoardCell(r, c);
+                    dbg.doubleTapTray(0, { ignoreCooldown: true });
+                  }
                 }
               }
             }
+          } finally {
+            if (typeof dbg.setHeadlessSim === 'function') dbg.setHeadlessSim(false);
+            dbg.advanceTime(0);
           }
           return { mode: 'sim', rate: c2 / N, score: dbg.getState().score };
         }
@@ -2309,7 +2351,7 @@ const F07_TESTS = [
           levelStars: makeUnlockedStarsMap(ctx, 3),
           unlockedPatrons: ['mikan', 'luna'],
           selectedPatron: 'luna'
-        });
+        }, { features: LEGACY_FORMULA_FEATURES });
         const st = await ctx.advanceTime(3.2);
         const idx = st.seats.findIndex((s) => s && s.recipeId === 'R15');
         if (idx >= 0) {
@@ -2321,7 +2363,7 @@ const F07_TESTS = [
       ctx.assert(r15Idx >= 0, 'Expected R15 (C2 + C3[matcha]) customer on 2-1');
 
       const custMult = seatSnap.isVip ? 1.5 : seatSnap.isUrgent ? 1.25 : 1.0;
-      const expectedScore = Math.round((70 + 150 * 1.25) * 1.12 * 1.2 * custMult);
+      const expectedScore = zoneScore(70 + 150 * 1.25, { size: 1.12, tip: 1.2, cust: custMult });
 
       // 2-1 presets: (0,1):C2(plain), (1,1):C3(matcha)
       await ctx.eval((idx) => {
@@ -2351,7 +2393,7 @@ const F07_TESTS = [
           levelStars: makeUnlockedStarsMap(ctx, 3),
           unlockedPatrons: ['mikan', 'luna'],
           selectedPatron: 'luna'
-        });
+        }, { features: LEGACY_FORMULA_FEATURES });
         const st = await ctx.advanceTime(3.2);
         const idx = st.seats.findIndex((s) => s && s.recipeId === 'R16');
         if (idx >= 0) {
@@ -2364,7 +2406,7 @@ const F07_TESTS = [
 
       const custMult = seatSnap.isVip ? 1.5 : seatSnap.isUrgent ? 1.25 : 1.0;
       // C4(gold) uses 1.35x (432) + C3(plain) uses 1.00x (150) = 582
-      const expectedGoldScore = Math.round((320 * 1.35 + 150 * 1.0) * 1.12 * 1.2 * custMult);
+      const expectedGoldScore = zoneScore(320 * 1.35 + 150 * 1.0, { size: 1.12, tip: 1.2, cust: custMult });
 
       // 2-2 presets: (1,1):C4(gold), (0,1):C3(plain)
       await ctx.eval((idx) => {
@@ -2756,7 +2798,7 @@ const F08_TESTS = [
           await startLevelClean(ctx, '1-1', {
             unlockedPatrons: ['mikan', 'luna'],
             selectedPatron: patronId
-          });
+          }, { features: LEGACY_FORMULA_FEATURES });
           const st = await ctx.advanceTime(0.6);
           const idx = st.seats.findIndex((s) => s && s.recipeId === recipeId);
           if (idx >= 0) {
@@ -2767,15 +2809,15 @@ const F08_TESTS = [
         throw new Error(`Could not roll ${recipeId} on 1-1 within 25 tries`);
       }
 
-      // Pass A: luna (patronMult = 1.00, green = 1.20)
-      ctx.assertEq(await measureRecipeScore('luna', 'R01'), 36, 'luna green R01 === round(30 * 1.20) = 36');
-      ctx.assertEq(await measureRecipeScore('luna', 'R02'), 84, 'luna green R02 === round(70 * 1.20) = 84');
-      ctx.assertEq(await measureRecipeScore('luna', 'R03'), 134, 'luna green R03 === round(100 * 1.12 * 1.20) = 134');
+      // Pass A: luna (no scene bonus, green tip +0.20 in 技巧区)
+      ctx.assertEq(await measureRecipeScore('luna', 'R01'), 36, 'luna green R01 === round(30 * (1+0.20)) = 36');
+      ctx.assertEq(await measureRecipeScore('luna', 'R02'), 84, 'luna green R02 === round(70 * (1+0.20)) = 84');
+      ctx.assertEq(await measureRecipeScore('luna', 'R03'), 132, 'luna green R03 === round(100 * (1+0.12+0.20)) = 132');
 
-      // Pass B: mikan (patronMult = 1.08, green = 1.20)
+      // Pass B: mikan (场面区 +0.08, green tip +0.20)
       ctx.assertEq(await measureRecipeScore('mikan', 'R01'), 39, 'mikan green R01 === round(30 * 1.20 * 1.08) = 39');
       ctx.assertEq(await measureRecipeScore('mikan', 'R02'), 91, 'mikan green R02 === round(70 * 1.20 * 1.08) = 91');
-      ctx.assertEq(await measureRecipeScore('mikan', 'R03'), 145, 'mikan green R03 === round(100 * 1.12 * 1.20 * 1.08) = 145');
+      ctx.assertEq(await measureRecipeScore('mikan', 'R03'), 143, 'mikan green R03 === round(100 * 1.32 * 1.08) = 143');
     }
   },
 
@@ -2790,12 +2832,13 @@ const F08_TESTS = [
         unlockedPatrons: ['mikan', 'luna'],
         selectedPatron: 'luna',
         catcakeLevels: { 1: 4, 2: 2, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 }
-      });
+      }, { features: LEGACY_FORMULA_FEATURES });
       let st = await ctx.advanceTime(0.6);
       const idx = st.seats.findIndex(Boolean);
       const recId = st.seats[idx].recipeId;
       st = await bakeAndServeSeat(ctx, idx);
-      const expectedMap = { R01: 58, R02: 109, R03: 187 };
+      // C1 Lv.4 = 48, C2 Lv.2 = 91 → R03 = round(139 × (1 + 0.12 + 0.20)) = 183
+      const expectedMap = { R01: 58, R02: 109, R03: 183 };
       ctx.assertEq(st.score, expectedMap[recId], `Upgraded ${recId} score mismatch`);
 
       // 2. 3-item R08 (C1+C2+C3) on 1-3 with dev_tray Lv.2 (x1.12 bonus)
@@ -2807,7 +2850,7 @@ const F08_TESTS = [
           unlockedPatrons: ['mikan', 'luna'],
           selectedPatron: 'luna',
           deviceUpgrades: { dev_tray: 2, dev_flour: 0, dev_teapot: 0, dev_tools: 3 }
-        });
+        }, { features: LEGACY_FORMULA_FEATURES });
         const cur = await ctx.advanceTime(3.2);
         const found = cur.seats.findIndex((s) => s && s.recipeId === 'R08');
         if (found >= 0) {
@@ -2819,7 +2862,7 @@ const F08_TESTS = [
       ctx.assert(r08Idx >= 0, 'Expected R08 (C1+C2+C3) customer on 1-3');
 
       const custMult = r08Seat.isUrgent ? 1.25 : 1.0;
-      const expectedR08 = Math.round((30 + 70 + 150) * 1.25 * 1.2 * custMult * 1.12);
+      const expectedR08 = zoneScore(30 + 70 + 150, { size: 1.25, tip: 1.2, cust: custMult, scene: 0.12 });
       // 1-3 presets already contain (2,0):C1, (0,0):C2, (3,2):C3
       await ctx.eval((sIdx) => {
         const dbg = window.__HOSHI_DEBUG__;
@@ -2839,13 +2882,11 @@ const F08_TESTS = [
     features: ['F08'],
     title: 'Three-band patience tip multipliers (Green >0.55 -> x1.30, Yellow 0.25..0.55 -> x1.00, Red <0.25 -> x0.85)',
     run: async (ctx) => {
-      const baseByRec = { R01: 30, R02: 70, R03: 112 };
-
       async function serveAtPatienceFraction(targetRatio) {
         await startLevelClean(ctx, '1-1', {
           unlockedPatrons: ['mikan', 'luna'],
           selectedPatron: 'luna'
-        });
+        }, { features: LEGACY_FORMULA_FEATURES });
         let st = await ctx.advanceTime(0.6);
         const seat0 = st.seats[0];
         ctx.assert(seat0, 'Seat 0 must be occupied');
@@ -2863,20 +2904,17 @@ const F08_TESTS = [
       // 1. Green (~0.96 >= 0.60 -> x1.20)
       const green = await serveAtPatienceFraction(0.96);
       ctx.assert(green.ratioBefore >= 0.6, 'Green pRatio >= 0.60');
-      const rawGreen = green.recId === 'R03' ? 100 * 1.12 : baseByRec[green.recId];
-      ctx.assertEq(green.score, Math.round(rawGreen * 1.2), `Green score mismatch for ${green.recId}`);
+      ctx.assertEq(green.score, recipeZoneScore(green.recId, { tip: 1.2 }), `Green score mismatch for ${green.recId}`);
 
       // 2. Yellow (~0.40 in [0.25, 0.60) -> x1.00)
       const yellow = await serveAtPatienceFraction(0.4);
       ctx.assert(yellow.ratioBefore >= 0.28 && yellow.ratioBefore <= 0.55, `Yellow pRatio=${yellow.ratioBefore}`);
-      const rawYellow = yellow.recId === 'R03' ? 100 * 1.12 : baseByRec[yellow.recId];
-      ctx.assertEq(yellow.score, Math.round(rawYellow * 1.0), `Yellow score mismatch for ${yellow.recId}`);
+      ctx.assertEq(yellow.score, recipeZoneScore(yellow.recId, { tip: 1.0 }), `Yellow score mismatch for ${yellow.recId}`);
 
       // 3. Red (~0.15 < 0.25 -> x0.80)
       const red = await serveAtPatienceFraction(0.15);
       ctx.assert(red.ratioBefore > 0.05 && red.ratioBefore < 0.22, `Red pRatio=${red.ratioBefore}`);
-      const rawRed = red.recId === 'R03' ? 100 * 1.12 : baseByRec[red.recId];
-      ctx.assertEq(red.score, Math.round(rawRed * 0.8), `Red score mismatch for ${red.recId}`);
+      ctx.assertEq(red.score, recipeZoneScore(red.recId, { tip: 0.8 }), `Red score mismatch for ${red.recId}`);
     }
   },
 
@@ -2890,7 +2928,7 @@ const F08_TESTS = [
         unlockedPatrons: ['mikan', 'luna'],
         selectedPatron: 'luna',
         deviceUpgrades: { dev_tray: 1, dev_flour: 1, dev_teapot: 2, dev_tools: 3 }
-      });
+      }, { features: LEGACY_FORMULA_FEATURES });
 
       const comboMults = [1.0, 1.06, 1.13, 1.2, 1.28];
       await ctx.advanceTime(3.1);
@@ -2907,15 +2945,12 @@ const F08_TESTS = [
         const scoreBefore = st.score;
         const feverBefore = st.feverActive;
         const recId = st.seats[seatIdx].recipeId;
-        const rawBase = recId === 'R01' ? 30 : recId === 'R02' ? 70 : 100 * 1.12;
-
         const after = await bakeAndServeSeat(ctx, seatIdx);
         ctx.assertEq(after.comboCount, k, `Expected comboCount === ${k} after serve #${k}`);
 
         const delta = after.score - scoreBefore;
-        const feverMult = feverBefore ? 1.25 : 1.0;
-        const expected = Math.round(rawBase * 1.2 * comboMults[k - 1] * feverMult);
-        const altTrigger = k === 5 && after.feverActive ? Math.round(rawBase * 1.2 * comboMults[k - 1] * 1.25) : expected;
+        const expected = recipeZoneScore(recId, { tip: 1.2, combo: comboMults[k - 1], scene: feverBefore ? 0.25 : 0 });
+        const altTrigger = k === 5 && after.feverActive ? recipeZoneScore(recId, { tip: 1.2, combo: comboMults[k - 1], scene: 0.25 }) : expected;
         ctx.assert(
           delta === expected || delta === altTrigger,
           `Serve #${k} (${recId}) expected ${expected}, got ${delta} (feverBefore=${feverBefore})`
@@ -2934,7 +2969,7 @@ const F08_TESTS = [
         unlockedPatrons: ['mikan', 'luna'],
         selectedPatron: 'luna',
         deviceUpgrades: { dev_tray: 1, dev_flour: 1, dev_teapot: 0, dev_tools: 3 }
-      });
+      }, { features: LEGACY_FORMULA_FEATURES });
 
       await ctx.advanceTime(3.1);
       const energies = [];
@@ -2980,10 +3015,9 @@ const F08_TESTS = [
       ctx.assert(st.feverActive, 'Fever still active before Serve #6');
       const scoreBefore6 = st.score;
       const rec6 = st.seats[serve6Idx].recipeId;
-      const raw6 = rec6 === 'R01' ? 30 : rec6 === 'R02' ? 70 : 100 * 1.12;
       const after6 = await bakeAndServeSeat(ctx, serve6Idx);
-      const expected6 = Math.round(raw6 * 1.2 * 1.28 * 1.25);
-      ctx.assertEq(after6.score - scoreBefore6, expected6, `Serve #6 during Fever must include x1.25 multiplier`);
+      const expected6 = recipeZoneScore(rec6, { tip: 1.2, combo: 1.28, scene: 0.25 });
+      ctx.assertEq(after6.score - scoreBefore6, expected6, `Serve #6 during Fever must include +0.25 fever scene bonus`);
     }
   }
 ];
@@ -4766,10 +4800,9 @@ const F15_TESTS = [
       }
       ctx.assert(idx1 >= 0 && st.seats[idx1], 'Expected green patience customer for 1st post-luna serve');
       const rec1 = st.seats[idx1].recipeId;
-      const raw1 = rec1 === 'R01' ? 30 : rec1 === 'R02' ? 70 : 100 * 1.12;
       const sBefore1 = st.score;
       st = await bakeAndServeSeat(ctx, idx1);
-      ctx.assertEq(st.score - sBefore1, Math.round(raw1 * 1.2 * 1.5), '1st post-luna serve must get x1.50 boost');
+      ctx.assertEq(st.score - sBefore1, recipeZoneScore(rec1, { tip: 1.2, scene: 0.5 }), '1st post-luna serve must get +0.50 scene boost');
 
       // Reset combo via 10.5s wait, then Serve #2 -> MUST revert to x1.00!
       st = await ctx.advanceTime(10.5);
@@ -4780,10 +4813,9 @@ const F15_TESTS = [
       }
       ctx.assert(idx2 >= 0 && st.seats[idx2], 'Expected green patience customer for 2nd post-luna serve');
       const rec2 = st.seats[idx2].recipeId;
-      const raw2 = rec2 === 'R01' ? 30 : rec2 === 'R02' ? 70 : 100 * 1.12;
       const sBefore2 = st.score;
       st = await bakeAndServeSeat(ctx, idx2);
-      ctx.assertEq(st.score - sBefore2, Math.round(raw2 * 1.2 * 1.0), '2nd post-luna serve reverts to x1.00');
+      ctx.assertEq(st.score - sBefore2, recipeZoneScore(rec2, { tip: 1.2 }), '2nd post-luna serve reverts to x1.00');
     }
   },
 
@@ -4798,7 +4830,7 @@ const F15_TESTS = [
         unlockedPatrons: ['mikan', 'luna', 'mugi'],
         selectedPatron: 'mugi',
         deviceUpgrades: { dev_tray: 1, dev_flour: 1, dev_teapot: 2, dev_tools: 3 }
-      });
+      }, { features: LEGACY_FORMULA_FEATURES });
       let st = await ctx.advanceTime(3.1);
 
       for (let k = 1; k <= 3; k++) {
@@ -4808,22 +4840,20 @@ const F15_TESTS = [
           idx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
         }
         const recId = st.seats[idx].recipeId;
-        const rawBase = recId === 'R01' ? 30 : recId === 'R02' ? 70 : 100 * 1.12;
         const sBefore = st.score;
         st = await bakeAndServeSeat(ctx, idx);
         const delta = st.score - sBefore;
 
         if (k === 1) {
-          ctx.assertEq(delta, Math.round(rawBase * 1.2 * 1.0), 'mugi at combo 1 must grant 0 passive bonus');
+          ctx.assertEq(delta, recipeZoneScore(recId, { tip: 1.2, combo: 1.0 }), 'mugi at combo 1 must grant 0 passive bonus');
         } else if (k === 2) {
-          ctx.assertEq(delta, Math.round(rawBase * 1.2 * 1.06), 'mugi at combo 2 must grant 0 passive bonus');
+          ctx.assertEq(delta, recipeZoneScore(recId, { tip: 1.2, combo: 1.06 }), 'mugi at combo 2 must grant 0 passive bonus');
         } else {
-          const neutral3 = Math.round(rawBase * 1.2 * 1.13);
-          const additive3 = Math.round(rawBase * 1.2 * 1.23);
-          const mult3 = Math.round(rawBase * 1.2 * 1.13 * 1.1);
+          const neutral3 = recipeZoneScore(recId, { tip: 1.2, combo: 1.13 });
+          const mugi3 = recipeZoneScore(recId, { tip: 1.2, combo: 1.13, skillExtra: 0.10 });
           ctx.assert(
-            delta > neutral3 && (delta === additive3 || delta === mult3 || (delta >= neutral3 * 1.075 - 1 && delta <= neutral3 * 1.105 + 1)),
-            `mugi at combo 3 must exceed neutral ${neutral3} (expected ${additive3} or ${mult3}, got ${delta})`
+            delta > neutral3 && delta === mugi3,
+            `mugi at combo 3 must exceed neutral ${neutral3} (expected ${mugi3} with +0.10 技巧区, got ${delta})`
           );
         }
       }

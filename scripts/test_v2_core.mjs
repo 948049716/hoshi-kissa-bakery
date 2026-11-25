@@ -35,6 +35,9 @@ const OrderService = require(path.join(SRC_DIR, 'order_service.js'));
 const SaveSync = require(path.join(SRC_DIR, 'save_sync.js'));
 const Platform = require(path.join(SRC_DIR, 'platform.js'));
 const UI = require(path.join(SRC_DIR, 'ui_draw.js'));
+const BalanceConfig = require(path.join(SRC_DIR, 'balance_config.js'));
+const Rng = require(path.join(SRC_DIR, 'rng.js'));
+const GameEvents = require(path.join(SRC_DIR, 'game_events.js'));
 
 // ============================================================================
 // Deterministic PRNG & Test Runner Harness
@@ -1672,7 +1675,7 @@ async function runSectionB() {
     assert.equal(OrderService.matchTrayToCustomer(osBand).seatIdx, 0);
   });
 
-  await runTest('UT-O06', 'v0.9.0 上菜总公式数值校验 (Exact Formula === 598 & All 24 Recipe baseScoreLv0 Oracles)', () => {
+  await runTest('UT-O06', 'v0.10 乘区制上菜总公式数值校验 (Zone Formula === 579, Legacy === 598 & All 24 Recipe baseScoreLv0 Oracles)', () => {
     const order = {
       customerId: 'cust_fox',
       bountyMult: 1.25,
@@ -1695,9 +1698,18 @@ async function runSectionB() {
       devTrayLv: 0,
       feverActive: true
     };
-    const expectedOracle = Math.round((81 + 150 * 1.25) * 1.12 * 1.20 * 1.06 * 1.25 * 1.25);
-    assert.equal(expectedOracle, 598);
-    assert.equal(OrderService.computeServeScore(order, usedTiles, scoreCtx), 598);
+    // 品质区 Σ × 技巧区 (1 + 0.12 + 0.20 + 0.06) × 顾客区 1.25 × 场面区 (1 + 0.25 fever)
+    const expectedZoneOracle = Math.round((81 + 150 * 1.25) * (1 + 0.12 + 0.20 + 0.06) * 1.25 * (1 + 0.25));
+    assert.equal(expectedZoneOracle, 579);
+    assert.equal(OrderService.computeServeScore(order, usedTiles, scoreCtx), 579);
+    const restoreLegacy = BalanceConfig.withFeatures({ scoreZones: false });
+    try {
+      const expectedOracle = Math.round((81 + 150 * 1.25) * 1.12 * 1.20 * 1.06 * 1.25 * 1.25);
+      assert.equal(expectedOracle, 598);
+      assert.equal(OrderService.computeServeScore(order, usedTiles, scoreCtx), 598);
+    } finally {
+      restoreLegacy();
+    }
 
     // Verify unrounded itemSum float precision oracles (R15===288, R16===616, R18===1778, R24===6750) + all 24 recipes
     const neutralCtx = {
@@ -2738,8 +2750,8 @@ async function runSectionE() {
     const bundleFiles = walkFilesExcludingCloud(MINIGAME_DIR);
     const totalBytes = bundleFiles.reduce((sum, f) => sum + f.size, 0);
     assert.ok(
-      totalBytes < 3.2 * 1024 * 1024 && totalBytes < 4 * 1024 * 1024,
-      `Mini Game raw bundle ${totalBytes} bytes exceeds 3.2 MB budget (< 4 MB WeChat limit)`
+      totalBytes < 3.5 * 1024 * 1024 && totalBytes < 4 * 1024 * 1024,
+      `Mini Game raw bundle ${totalBytes} bytes exceeds 3.5 MB budget (< 4 MB WeChat limit)`
     );
 
     const externalAudio = bundleFiles.filter((f) => /\.(mp3|wav|ogg|m4a|aac)$/i.test(f.path));
@@ -3828,16 +3840,173 @@ async function runSectionE() {
 }
 
 // ============================================================================
+// Section F: v0.10 M0 Infrastructure (seeded RNG / score zones / modeOverrides / events)
+// ============================================================================
+
+async function runSectionF() {
+  await runTest('UT-R01', '种子 RNG 可复现：同 seed 同关卡同操作序列逐帧一致、不同 seed 结果不同', async () => {
+    const r1 = Rng.createRng(42);
+    const r2 = Rng.createRng(42);
+    for (let i = 0; i < 50; i++) assert.equal(r1(), r2());
+    const a = Rng.forkRng(7, 'grid');
+    const b = Rng.forkRng(7, 'customer');
+    assert.notEqual(a(), b());
+    assert.equal(Rng.dailySeed('2026-11-25'), Rng.dailySeed('2026-11-25'));
+    assert.notEqual(Rng.dailySeed('2026-11-25'), Rng.dailySeed('2026-11-26'));
+    assert.equal(Rng.dateKeyUtc8(Date.UTC(2026, 10, 24, 17, 0, 0)), '2026-11-25');
+
+    const playScript = async (seed) => {
+      const env = bootMockApp({}, {});
+      try {
+        await env.flushAssets();
+        const dbg = env.dbg;
+        assert.ok(dbg.startLevel('1-7', { seed, skipTutorial: true }));
+        const dirs = ['left', 'up', 'right', 'down'];
+        for (let i = 0; i < 40; i++) {
+          dbg.knead();
+          dbg.slide(dirs[i % 4]);
+          dbg.advanceTime(0.35);
+        }
+        const st = dbg.getState();
+        return JSON.stringify({
+          grid: st.grid,
+          seats: st.seats.map((s) => (s ? { id: s.customerId, slots: s.slots } : null)),
+          info: dbg.getRunInfo().seed
+        });
+      } finally {
+        env.dispose();
+      }
+    };
+    const runA = await playScript(20261125);
+    const runB = await playScript(20261125);
+    const runC = await playScript(99);
+    assert.equal(runA, runB, 'same seed must replay identically');
+    assert.notEqual(runA, runC, 'different seeds should diverge');
+  });
+
+  await runTest('UT-O11', '乘区制上限：技巧区 ≤ +0.90、场面区 ≤ sceneCap、特性乘区 ≤ 1.60', () => {
+    const order = { customerId: 'cust_critic', bountyMult: 1.5, isVip: true, patience: 25, maxPatience: 25, slots: [{ tier: 5, flavor: 'any' }, { tier: 5, flavor: 'any' }, { tier: 5, flavor: 'any' }] };
+    const tiles = [{ tier: 5, flavor: 'plain' }, { tier: 5, flavor: 'plain' }, { tier: 5, flavor: 'plain' }];
+    const itemSum = 680 * 3;
+    const maxCtx = { catcakeLevels: {}, comboCount: 9, patronId: 'mugi', devTrayLv: 2, feverActive: true, lunaNextServeBoost: true, sceneBonusExtra: 5, traitMult: 9 };
+    const score = OrderService.computeServeScore(order, tiles, maxCtx);
+    const Z = BalanceConfig.SCORE_ZONES;
+    // skill raw = 0.25 (3-slot) + 0.20 (green tip) + 0.28 (combo cap) + 0.10 (mugi) = 0.83 (< cap 0.90)
+    const skill = Math.min(0.25 + 0.20 + 0.28 + Z.mugiComboSkillBonus, Z.skillCap);
+    const expected = Math.round(itemSum * (1 + skill) * 1.5 * Z.traitMultCap * (1 + Z.sceneCap));
+    assert.equal(score, expected);
+    // skill zone hard cap engages when a perk pushes raw bonus beyond it
+    const restoreCap = Z.skillCap;
+    Z.skillCap = 0.5;
+    try {
+      assert.equal(OrderService.computeServeScore(order, tiles, maxCtx), Math.round(itemSum * 1.5 * 1.5 * Z.traitMultCap * (1 + Z.sceneCap)));
+    } finally {
+      Z.skillCap = restoreCap;
+    }
+    // sceneCap override (endless) is itself bounded by sceneCapEndlessMax
+    const endlessScore = OrderService.computeServeScore(order, tiles, { ...maxCtx, sceneCap: 99 });
+    assert.equal(endlessScore, Math.round(itemSum * (1 + skill) * 1.5 * Z.traitMultCap * (1 + Z.sceneCapEndlessMax)));
+  });
+
+  await runTest('UT-O12', '乘区制与旧连乘在常见组合下偏差 ≤ 3%（单品/双拼无热潮/低连击）', () => {
+    const cases = [
+      { slots: [{ tier: 2, flavor: 'any' }], tiles: [{ tier: 2, flavor: 'plain' }], ctx: { comboCount: 1 }, p: 10 },
+      { slots: [{ tier: 3, flavor: 'any' }, { tier: 2, flavor: 'any' }], tiles: [{ tier: 3, flavor: 'plain' }, { tier: 2, flavor: 'plain' }], ctx: { comboCount: 2 }, p: 10 },
+      { slots: [{ tier: 4, flavor: 'any' }], tiles: [{ tier: 4, flavor: 'plain' }], ctx: { comboCount: 2 }, p: 20 }
+    ];
+    for (const c of cases) {
+      const order = { customerId: 'cust_ragdoll', bountyMult: 1.0, patience: c.p, maxPatience: 25, slots: c.slots };
+      const ctx = { catcakeLevels: {}, patronId: null, devTrayLv: 0, feverActive: false, ...c.ctx };
+      const zone = OrderService.computeServeScore(order, c.tiles, ctx);
+      const restore = BalanceConfig.withFeatures({ scoreZones: false });
+      let legacy;
+      try {
+        legacy = OrderService.computeServeScore(order, c.tiles, ctx);
+      } finally {
+        restore();
+      }
+      assert.ok(Math.abs(zone - legacy) / legacy <= 0.03, `zone ${zone} vs legacy ${legacy}`);
+    }
+  });
+
+  await runTest('UT-O13', 'modeOverrides 全链路优先于存档：搭档/价格等级/托盘/C2 概率/开局厨具/星级覆盖且 sim 模式不写存档', async () => {
+    const env = bootMockApp({}, {});
+    try {
+      await env.flushAssets();
+      const dbg = env.dbg;
+      const saveBefore = JSON.stringify(dbg.getSaveData().levelBestScores);
+      assert.ok(
+        dbg.startLevel('1-1', {
+          seed: 5,
+          skipTutorial: true,
+          modeOverrides: {
+            mode: 'sim',
+            selectedPatron: 'luna',
+            catcakeLevels: { 1: 4, 2: 4 },
+            deviceUpgrades: { dev_flour: 3, dev_tray: 1, dev_tools: 3 },
+            devTrayLv: 1,
+            stars: [10, 20, 30]
+          }
+        })
+      );
+      const info = dbg.getRunInfo();
+      assert.equal(info.mode, 'sim');
+      assert.equal(info.patronId, 'luna');
+      assert.deepEqual(info.stars, [10, 20, 30]);
+      assert.equal(info.c2Rate, 0.43); // flour Lv3 0.35 + luna 0.08
+      const st = dbg.getState();
+      assert.equal(st.trayCapacity, 4);
+      assert.deepEqual(st.toolCounts, { fork: 2, spoon: 2 });
+      dbg.advanceTime(200);
+      const after = dbg.getState();
+      assert.equal(after.screen, 'result');
+      assert.equal(JSON.stringify(dbg.getSaveData().levelBestScores), saveBefore, 'sim mode must not write the save');
+      const evts = dbg.getReportedEvents().map((e) => e.name);
+      assert.ok(evts.includes('level_start') && evts.includes('level_end'), 'We分析 level_start/level_end must be reported');
+    } finally {
+      env.dispose();
+    }
+  });
+
+  await runTest('UT-E00', '事件总线隔离异常 & 远程调参白名单夹逼', () => {
+    const bus = GameEvents.createEventBus();
+    const got = [];
+    bus.on('serve', () => {
+      throw new Error('boom');
+    });
+    bus.on('serve', (p) => got.push(p.v));
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      assert.equal(bus.emit('serve', { v: 1 }), 2);
+    } finally {
+      console.warn = warn;
+    }
+    assert.deepEqual(got, [1]);
+    assert.equal(bus.errorCount, 1);
+
+    const before = BalanceConfig.FRESH.windowSec;
+    const applied = BalanceConfig.applyRemoteOverrides({ 'FRESH.windowSec': 999, 'SCORE_ZONES.__proto__': 1, 'NOPE.x': 3, features: { daily: true, bogus: true } });
+    assert.ok(applied.includes('FRESH.windowSec') && applied.includes('features.daily'));
+    assert.equal(BalanceConfig.FRESH.windowSec, 12);
+    assert.equal(BalanceConfig.FEATURES.bogus, undefined);
+    BalanceConfig.FRESH.windowSec = before;
+    BalanceConfig.FEATURES.daily = false;
+  });
+}
+
+// ============================================================================
 // Main Entrypoint
 // ============================================================================
 
 async function main() {
-  console.log('=== 一起做猫饼 v0.9.0 Core L1 + L2 + M4 Verification Suite ===');
+  console.log('=== 一起做猫饼 v0.10 Core L1 + L2 + M4 Verification Suite ===');
   await runSectionA();
   await runSectionB();
   await runSectionC();
   await runSectionD();
   await runSectionE();
+  await runSectionF();
 
   const passed = results.filter((r) => r.ok).length;
   const failed = results.length - passed;

@@ -1202,6 +1202,44 @@ function vibrateShort(style = 'light') {
   } catch (_) {}
 }
 
+const reportedEventLog = [];
+const MAX_REPORTED_EVENT_LOG = 200;
+
+/**
+ * We分析 custom analytics event (wx.reportEvent). Values are coerced to string/number only,
+ * keys limited to [a-z0-9_]. In browser/dev the call is recorded to an in-memory log for tests.
+ */
+function reportEvent(name, data) {
+  try {
+    if (typeof name !== 'string' || !/^[a-z][a-z0-9_]{0,31}$/.test(name)) return false;
+    const payload = {};
+    if (isPlainRecord(data)) {
+      const keys = Object.keys(data);
+      for (let i = 0; i < keys.length && i < 40; i++) {
+        const k = String(keys[i]).replace(/[A-Z]/g, (m) => '_' + m.toLowerCase()).replace(/[^a-z0-9_]/g, '').slice(0, 32);
+        if (!k) continue;
+        const v = data[keys[i]];
+        if (typeof v === 'number' && Number.isFinite(v)) payload[k] = v;
+        else if (typeof v === 'string') payload[k] = v.slice(0, 64);
+        else if (typeof v === 'boolean') payload[k] = v ? 1 : 0;
+      }
+    }
+    reportedEventLog.push({ name, payload });
+    if (reportedEventLog.length > MAX_REPORTED_EVENT_LOG) reportedEventLog.shift();
+    const wxObj = getWxObject();
+    const fn = wxObj ? safeReadProp(wxObj, 'reportEvent') : null;
+    if (typeof fn === 'function') {
+      fn.call(wxObj, name, payload);
+      return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+function getReportedEventLog() {
+  return reportedEventLog.slice();
+}
+
 function normalizeSharePayload(rawPayload, fallbackTitle) {
   const p = isPlainRecord(rawPayload) ? rawPayload : {};
   const rawTitle = getOwn(p, 'title');
@@ -3253,6 +3291,8 @@ module.exports = {
   bindPointerEvents,
   bindKeyboard,
   vibrateShort,
+  reportEvent,
+  getReportedEventLog,
   setupShare,
   triggerShare,
   requestRewardAction,

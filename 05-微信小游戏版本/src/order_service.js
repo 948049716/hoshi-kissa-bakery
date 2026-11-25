@@ -23,6 +23,7 @@ const {
   RECIPES,
   getLevelById
 } = require('./levels_data');
+const BalanceConfig = require('./balance_config');
 
 const EPS = 1e-9;
 const CLOSING_GUARD_SEC = 8.0;
@@ -1612,7 +1613,7 @@ function computeServeScoreFromSnapshots(orderMeta, slotSnap, pairedTileSnaps, sc
   const slotCount = clamp(slotLen, 1, 3);
   const comboSizeMult = COMBO_SIZE_MULTS[slotCount] || 1.00;
 
-  // Patience tip band (> 0.55 green 1.30; >= 0.25 yellow 1.00; < 0.25 red 0.85)
+  // Patience tip band (> 0.60 green 1.20; >= 0.25 yellow 1.00; < 0.25 red 0.80) — see PATIENCE_TIP_BANDS
   let pRatio = 0.40;
   if (orderMeta && orderMeta.scorePRatio !== null) {
     pRatio = orderMeta.scorePRatio;
@@ -1691,27 +1692,80 @@ function computeServeScoreFromSnapshots(orderMeta, slotSnap, pairedTileSnaps, sc
   }
   const deviceMult = devTrayLv >= 2 && slotCount === 3 ? 1.12 : 1.00;
 
-  // Starlight Fever multiplier (x1.35)
+  // Starlight Fever scene bonus
   const isFever = Boolean(
     ctx &&
       (getOwn(ctx, 'isFever', false) ||
         getOwn(ctx, 'feverActive', false) ||
         toSafeNum(getOwn(ctx, 'feverTimer', 0)) > 0)
   );
-  const feverMult = isFever ? FEVER_CONFIG.scoreMult : 1.00;
 
-  const rawTotal =
-    itemSum *
-    comboSizeMult *
-    patienceTipMult *
-    serveComboMult *
-    customerMult *
-    patronMult *
-    deviceMult *
-    feverMult;
+  if (!BalanceConfig.isFeatureOn('scoreZones')) {
+    // Legacy fully multiplicative formula (kept behind flag for A/B & regression comparison)
+    const legacyTotal =
+      itemSum *
+      comboSizeMult *
+      patienceTipMult *
+      serveComboMult *
+      customerMult *
+      (mikanMult * (lunaActive ? 1.50 : 1.00)) *
+      deviceMult *
+      (isFever ? FEVER_CONFIG.scoreMult : 1.00);
+    return Number.isFinite(legacyTotal) && legacyTotal > 0 ? Math.round(legacyTotal) : 0;
+  }
+
+  const Z = BalanceConfig.SCORE_ZONES;
+
+  // 技巧区 (additive): combo size + patience tip + serve combo (+ mugi passive)
+  const skillBonusRaw =
+    (comboSizeMult - 1) + (patienceTipMult - 1) + (baseComboMult - 1) + (mugiComboBonus > 0 ? Z.mugiComboSkillBonus : 0);
+  const skillZone = 1 + clamp(skillBonusRaw, Z.skillFloor, Z.skillCap);
+
+  // 顾客区 (multiplicative): bounty × trait (trait capped)
+  let traitMult = 1.00;
+  if (ctx) {
+    const tmRead = readOwnPropOnce(ctx, 'traitMult');
+    if (tmRead.exists && !tmRead.threw) {
+      const tm = toSafeNum(tmRead.value);
+      if (Number.isFinite(tm) && tm > 0) traitMult = clamp(tm, 0.5, Z.traitMultCap);
+    }
+  }
+  const customerZone = customerMult * traitMult;
+
+  // 场面区 (additive): fever + patron + device + extra (events / perks / rules)
+  let feverBonus = Z.feverSceneBonus;
+  let sceneExtra = 0;
+  let sceneCap = Z.sceneCap;
+  if (ctx) {
+    const fbRead = readOwnPropOnce(ctx, 'feverSceneBonus');
+    if (fbRead.exists && !fbRead.threw) {
+      const fb = toSafeNum(fbRead.value);
+      if (Number.isFinite(fb)) feverBonus = clamp(fb, 0, 2);
+    }
+    const seRead = readOwnPropOnce(ctx, 'sceneBonusExtra');
+    if (seRead.exists && !seRead.threw) {
+      const se = toSafeNum(seRead.value);
+      if (Number.isFinite(se)) sceneExtra = clamp(se, -0.5, 3);
+    }
+    const scRead = readOwnPropOnce(ctx, 'sceneCap');
+    if (scRead.exists && !scRead.threw) {
+      const sc = toSafeNum(scRead.value);
+      if (Number.isFinite(sc)) sceneCap = clamp(sc, 0, Z.sceneCapEndlessMax);
+    }
+  }
+  const sceneBonusRaw =
+    (isFever ? feverBonus : 0) +
+    (patronId === 'mikan' ? Z.mikanSceneBonus : 0) +
+    (lunaActive ? Z.lunaSceneBonus : 0) +
+    (deviceMult > 1 ? Z.devTraySceneBonus : 0) +
+    sceneExtra;
+  const sceneZone = 1 + clamp(sceneBonusRaw, -0.5, sceneCap);
+
+  const rawTotal = itemSum * skillZone * customerZone * sceneZone;
 
   return Number.isFinite(rawTotal) && rawTotal > 0 ? Math.round(rawTotal) : 0;
 }
+
 
 /**
  * Computes exact single-serve score using unrounded itemSum floats and a single outer Math.round.

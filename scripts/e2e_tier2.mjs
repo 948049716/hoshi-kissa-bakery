@@ -24,6 +24,25 @@ const FORBIDDEN_V1_RUNTIME_ASSETS = (() => {
 
 const FORBIDDEN_V1_SRC_FILES = ['physics.js', 'physics_shapes.js', 'jar_renderer.js'];
 
+// v0.10 乘区计分 oracle (docs/07 §1) — see e2e_tier1.mjs zoneScore for the full contract.
+function zoneScore(itemSum, { size = 1, tip = 1, combo = 1, cust = 1, scene = 0, skillExtra = 0 } = {}) {
+  const skill = Math.max(-0.4, Math.min(0.9, (size - 1) + (tip - 1) + (combo - 1) + skillExtra));
+  const sceneZ = Math.max(-0.5, Math.min(1.0, scene));
+  return Math.round(itemSum * (1 + skill) * cust * (1 + sceneZ));
+}
+const BASIC_RECIPE_ORACLE = {
+  R01: { items: 30, size: 1.0 },
+  R02: { items: 70, size: 1.0 },
+  R03: { items: 100, size: 1.12 }
+};
+// Exact base-formula / fever-energy tests opt out of M1+ bonuses (fresh / crit / fever V2 / dough temp).
+const LEGACY_FORMULA_FEATURES = Object.freeze({
+  bakeCrit: false,
+  freshBonus: false,
+  doughTemp: false,
+  feverV2: false
+});
+
 const DEFAULT_TUTORIALS_SEEN = {
   intro_slide: true,
   tray_trash: true,
@@ -2403,7 +2422,7 @@ const TIER2_F01_TO_F08 = [
         selectedPatron: 'luna',
         deviceUpgrades: { dev_tray: 1, dev_flour: 1, dev_teapot: 3, dev_tools: 3 },
         seenTutorials: DEFAULT_TUTORIALS_SEEN,
-      });
+      }, { features: LEGACY_FORMULA_FEATURES });
 
       // Complete 5 consecutive fast serves
       for (let k = 1; k <= 5; k++) {
@@ -2423,8 +2442,8 @@ const TIER2_F01_TO_F08 = [
       const feverBefore6 = stBefore6.feverActive;
       const pRatio6 = seat6.patience / seat6.maxPatience;
       const tipMult6 = pRatio6 >= 0.60 ? 1.20 : pRatio6 >= 0.25 ? 1.00 : 0.80;
-      const baseMap = { R01: 30, R02: 70, R03: 112 };
-      const expected6 = Math.round(baseMap[seat6.recipeId] * tipMult6 * 1.28 * (feverBefore6 ? 1.25 : 1.00));
+      const orc6 = BASIC_RECIPE_ORACLE[seat6.recipeId];
+      const expected6 = zoneScore(orc6.items, { size: orc6.size, tip: tipMult6, combo: 1.28, scene: feverBefore6 ? 0.25 : 0 });
 
       const stAfter6 = await serveOneOrderOrganically(ctx, seatIdx6, { useHarness: false, allowSpoon: false });
       ctx.assertEq(stAfter6.comboCount, 6, 'comboCount reaches 6');
@@ -2456,7 +2475,7 @@ const TIER2_F01_TO_F08 = [
         selectedPatron: 'luna',
         deviceUpgrades: { dev_tray: 1, dev_flour: 1, dev_teapot: 2, dev_tools: 3 },
         seenTutorials: DEFAULT_TUTORIALS_SEEN,
-      });
+      }, { features: LEGACY_FORMULA_FEATURES });
 
       // Perform non-serve actions at t=0
       await ctx.slide('left');
@@ -2509,7 +2528,7 @@ const TIER2_F01_TO_F08 = [
         unlockedPatrons: ['mikan', 'luna'],
         selectedPatron: 'luna',
         seenTutorials: DEFAULT_TUTORIALS_SEEN,
-      });
+      }, { features: LEGACY_FORMULA_FEATURES });
       let st = await ctx.advanceTime(0.6);
       const maxP = st.seats[0].maxPatience;
       st = await ctx.advanceTime(maxP * 0.58); // pRatio ~ 0.40 (yellow band <= 0.55)
@@ -2534,7 +2553,7 @@ const TIER2_F01_TO_F08 = [
           selectedPatron: 'luna',
           deviceUpgrades: { dev_tray: 1, dev_flour: 2, dev_teapot: 0, dev_tools: 3 },
           seenTutorials: DEFAULT_TUTORIALS_SEEN,
-        });
+        }, { features: LEGACY_FORMULA_FEATURES });
         st = await ctx.advanceTime(3.2);
         // Step in 2.5s increments (0 fever gain!) so cust_critic is caught within <=2.5s of spawning (>85% patience)
         for (let step = 0; step < 44; step++) {
@@ -2573,7 +2592,7 @@ const TIER2_F01_TO_F08 = [
           catcakeLevels: { 1: 0, 2: 1, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 }, // C2 Lv.1 = 84, C3 Lv.0 = 150 -> C3[matcha] = 202.5
           deviceUpgrades: { dev_tray: 1, dev_flour: 0, dev_teapot: 3, dev_tools: 3 },
           seenTutorials: DEFAULT_TUTORIALS_SEEN,
-        });
+        }, { features: LEGACY_FORMULA_FEATURES });
         const st = await ctx.advanceTime(3.2);
         r15Idx = st.seats.findIndex((s) => s && s.recipeId === 'R15' && !s.isUrgent && !s.isVip);
         if (r15Idx < 0) r15Idx = st.seats.findIndex((s) => s && s.recipeId === 'R15');
@@ -2607,7 +2626,7 @@ const TIER2_F01_TO_F08 = [
       const seat2 = stAfter1.seats[r15Idx];
       ctx.assert(seat2.patience / seat2.maxPatience > 0.60, 'R15 seat must still be in green patience band');
       const custMult = seat2.isVip ? 1.50 : seat2.isUrgent ? 1.25 : 1.00;
-      const expectedExact = Math.round((81 + 187.5) * 1.12 * 1.20 * 1.06 * custMult);
+      const expectedExact = zoneScore(81 + 187.5, { size: 1.12, tip: 1.2, combo: 1.06, cust: custMult });
 
       // Now serve R15 using untouched presets (0,1):C2(plain) + (1,1):C3(matcha)
       await ctx.eval((sIdx) => {

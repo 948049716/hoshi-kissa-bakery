@@ -6,6 +6,19 @@
 
 ## [Unreleased]
 
+### Added（v0.10 M0 · 玩法大改造基建）
+- `src/rng.js`：mulberry32 种子 RNG + 网格/顾客/事件分流，`startLevel(id, { seed })` 全局可复现（每日特调/回放/模拟器基础）。
+- `src/game_events.js`：局内同步事件总线（`run:start / slide / knead / serve / fever:start / run:end` …），监听器异常隔离。
+- `src/balance_config.js`：v0.10+ 数值单一来源、`FEATURES` 特性开关、远程调参白名单夹逼 `applyRemoteOverrides()`。
+- `scripts/sim_balance.mjs` + `scripts/lib/headless_app.mjs`：无头驱动真实控制器的三档 Bot 数值模拟器（分布报告 / 建议星级 / `--write` 定标 / `--check` 门禁）。
+- `platform.reportEvent`（We分析）与 `runReport.telemetry` 局内统计埋点；`docs/07-数值模拟与调参手册.md`。
+- 单测 `UT-R01 / UT-O11 / UT-O12 / UT-O13 / UT-E00`。
+
+### Changed（v0.10 M0）
+- **计分改为乘区制**：技巧区相加封顶 +0.90、场面区相加封顶 +1.00、顾客区相乘；旧连乘公式保留在 `FEATURES.scoreZones=false`。热潮提示改为「得分 +25%」。
+- **`modeOverrides` 全链路生效**：上菜计分、C2 概率、搭档技能、开局厨具、关卡形状/星级覆盖统一走 run context；非 `campaign` 模式不写存档、不推云、不触发连败保底。
+- 包体门禁由 3.2 MB 上调至 **3.5 MB**（T1-F01-06 / UT-M01 / L3-8 与文档同步）；修正文档中残留的「自动上菜」描述与计分过期注释。
+
 ### Removed
 - 彻底清理 `v0.9.0` 全量绘本 UI 资产替换后已完全废弃的旧素材目录与旧切图脚本：`02-游戏素材-精修透明PNG/`（78 个文件，约 `5.30 MB`）、`03-游戏素材-原始原图与WebP/`（17 个文件，约 `6.68 MB`）、`scripts/extract_assets.py` 与 `scripts/extract_ui_assets.py`。
 

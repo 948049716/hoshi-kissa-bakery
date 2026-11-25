@@ -1196,7 +1196,8 @@ export const TIER3_TESTS = [
         const sizeMult = COMBO_SIZE_MULTS[slots.length] || 1.0;
 
         const { scoreGain } = await serveCustomerOrganic(ctx, otherIdx);
-        const expectedNoFever = Math.round(itemSum * sizeMult * pMult * comboMult);
+        const skillZone = 1 + (sizeMult - 1) + (pMult - 1) + (comboMult - 1);
+        const expectedNoFever = Math.round(itemSum * skillZone);
         ctx.assert(
           scoreGain > expectedNoFever * 1.15,
           `Fever serve score (${scoreGain}) must exceed non-Fever baseline (${expectedNoFever}) via 1.35x multiplier`
@@ -1639,10 +1640,11 @@ export const TIER3_TESTS = [
       await ctx.eval(
         (sIdx, coords) => {
           const dbg = globalThis.__HOSHI_DEBUG__;
-          dbg.clickHit(`seat_${sIdx}`);
+          // Plan A: load the tray first, then manually click the glowing seat to serve
           for (const pt of coords) {
             dbg.tapBoardCell(pt.r, pt.c);
           }
+          dbg.clickHit(`seat_${sIdx}`);
         },
         constrainedSeatIdx,
         matchedTiles.map((t) => ({ r: t.r, c: t.c }))
@@ -1664,8 +1666,9 @@ export const TIER3_TESTS = [
         goldFlavorSum += BASE_PRICES_LV0[s.tier] * m;
       }
       const sizeMult = COMBO_SIZE_MULTS[slots.length] || 1.0;
-      const expectedGoldServe = Math.round(goldFlavorSum * sizeMult * pMult * cMult);
-      const expectedStdServe = Math.round(standardFlavorSum * sizeMult * pMult * cMult);
+      const skillZone = 1 + (sizeMult - 1) + (pMult - 1);
+      const expectedGoldServe = Math.round(goldFlavorSum * skillZone * cMult);
+      const expectedStdServe = Math.round(standardFlavorSum * skillZone * cMult);
       ctx.assert(
         actualGain > expectedStdServe,
         `Gold wildcard serve (${actualGain}) must exceed standard 1.25x flavor score (${expectedStdServe})`
@@ -1836,10 +1839,11 @@ export const TIER3_TESTS = [
       await ctx.eval(
         (sIdx, coords) => {
           const dbg = globalThis.__HOSHI_DEBUG__;
-          dbg.clickHit(`seat_${sIdx}`);
+          // Plan A: load the tray first, then manually click the glowing seat to serve
           for (const pt of coords) {
             dbg.tapBoardCell(pt.r, pt.c);
           }
+          dbg.clickHit(`seat_${sIdx}`);
         },
         sIdx1,
         matched1.map((t) => ({ r: t.r, c: t.c }))
@@ -1847,7 +1851,8 @@ export const TIER3_TESTS = [
       const post1 = await ctx.advanceTime(0.65);
       const gain1 = post1.score - scorePre1;
       const sizeMult1 = COMBO_SIZE_MULTS[slots1.length] || 1.0;
-      const unbuffed1 = itemSum1 * sizeMult1 * pMult1 * cMult1;
+      const skillZone1 = 1 + (sizeMult1 - 1) + (pMult1 - 1);
+      const unbuffed1 = itemSum1 * skillZone1 * cMult1;
       ctx.assertClose(
         gain1,
         Math.round(unbuffed1 * 1.5),
@@ -1887,10 +1892,11 @@ export const TIER3_TESTS = [
       await ctx.eval(
         (sIdx, coords) => {
           const dbg = globalThis.__HOSHI_DEBUG__;
-          dbg.clickHit(`seat_${sIdx}`);
+          // Plan A: load the tray first, then manually click the glowing seat to serve
           for (const pt of coords) {
             dbg.tapBoardCell(pt.r, pt.c);
           }
+          dbg.clickHit(`seat_${sIdx}`);
         },
         sIdx2,
         matched2.map((t) => ({ r: t.r, c: t.c }))
@@ -1898,9 +1904,10 @@ export const TIER3_TESTS = [
       const post2 = await ctx.advanceTime(0.65);
       const gain2 = post2.score - scorePre2;
       const sizeMult2 = COMBO_SIZE_MULTS[slots2.length] || 1.0;
+      const skillZone2 = 1 + (sizeMult2 - 1) + (pMult2 - 1);
       ctx.assertClose(
         gain2,
-        Math.round(itemSum2 * sizeMult2 * pMult2 * cMult2),
+        Math.round(itemSum2 * skillZone2 * cMult2),
         3,
         'Second serve after Luna burst reverts to 1.00x'
       );
@@ -1942,6 +1949,8 @@ export const TIER3_TESTS = [
             prevCoordKeys = new Set();
           };
 
+          if (typeof dbg.setHeadlessSim === 'function') dbg.setHeadlessSim(true);
+          try {
           clearAll();
           for (let i = 0; i < N; i++) {
             let s0 = dbg.getState();
@@ -1977,6 +1986,10 @@ export const TIER3_TESTS = [
             prevCoordKeys = new Set(curTiles.map((t) => `${t.r},${t.c}`));
           }
           return { c1, c2, high, ratioC2: c2 / N };
+          } finally {
+            if (typeof dbg.setHeadlessSim === 'function') dbg.setHeadlessSim(false);
+            dbg.advanceTime(0);
+          }
         }, totalSamples);
 
         if (fastStats) {

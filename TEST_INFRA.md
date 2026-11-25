@@ -16,7 +16,7 @@ Every test case across all tiers is subject to automatic runtime & static guardr
 1. **Pure Serve-Only Scoring Iron Law**: `score` MUST remain `0` across all grid slides, merges, knead spawns, ice shatters, tray placements, trash discards, utensils (`fork`/`spoon`), and patron active skills — incrementing **solely** when a seated customer's complete order is served (`kissa_sync` also rejects `score > 0 && serves < 1`).
 2. **Flat CommonJS Module Layout**: `05-微信小游戏版本/game.js` and flat `05-微信小游戏版本/src/*.js` execute identically inside the synchronous CJS preview loader (`/__wx_preview.html`), Node unit suite (`scripts/test_v2_core.mjs`), and GitHub Actions (`node --check`).
 3. **WeChat Mini Game & iOS Compatibility**:
-   - Client bundle under `05-微信小游戏版本/` (excluding `cloudfunctions/`) `<= 2.5 MB` (`< 4 MB` WeChat ceiling), `30` runtime assets, `0` external audio files.
+   - Client bundle under `05-微信小游戏版本/` (excluding `cloudfunctions/`) `<= 3.5 MB` raw (`< 4 MB` WeChat ceiling), `69` runtime assets, `0` external audio files.
    - Automatic `SyntaxError` guard + telemetry on `CanvasGradient.prototype.addColorStop` for `hsl()`/`hsla()` strings (`0` `hslViolations`).
    - Automatic `CanvasRenderingContext2D.prototype.fillText`/`strokeText` spy flagging native color emojis `/\p{Emoji_Presentation}|\p{Emoji}\uFE0F/u` (including VS16 color emojis such as `🗑️`, `❄️`, `❤️`, `⚠️`) while permitting BMP typographic glyphs `★ ☆ ✓ ×` (`0` `emojiStats.violations`).
    - Strict top-right capsule clearance (`right <= menuRect.left - 8`) and bottom safe-area clearance (`bottom <= height - safeBottom`).

@@ -46,6 +46,9 @@ const BoardRenderer = require('./board_renderer');
 const SaveSync = require('./save_sync');
 const ScreensUI = require('./screens_ui');
 const ModalsUI = require('./modals_ui');
+const Rng = require('./rng');
+const GameEvents = require('./game_events');
+const BalanceConfig = require('./balance_config');
 
 let previousAppCleanup = null;
 
@@ -319,6 +322,28 @@ function createApp() {
   const initialLvl = getLevelById(initialFrontier) || getLevelById('1-1');
 
   let levelRng = Math.random;
+  let customerRng = Math.random;
+  let runCtx = null;
+  let headlessSimMode = false;
+
+  /** Per-run telemetry counters (fed into runReport / result diagnostics). */
+  function createRunStats() {
+    return {
+      slides: 0,
+      merges: 0,
+      kneads: 0,
+      crits: [0, 0, 0, 0, 0],
+      hotServes: 0,
+      hotItems: 0,
+      totalItemsServed: 0,
+      feverCount: 0,
+      overheats: 0,
+      angryWalkouts: 0,
+      eventsSeen: [],
+      goalDone: false,
+      earlyCloseBonus: 0
+    };
+  }
   let kneadCooldown = 0;
   let tutorialAutoFadeTimer = 0;
   let levelSkipTutorial = false;
@@ -1463,26 +1488,93 @@ function createApp() {
 
   // ==================== Core Gameplay Mechanics ====================
 
+  // ==================== Run Context (mode overrides / seeded RNG / event bus) ====================
+
+  function getModeOverrides() {
+    return runCtx && runCtx.modeOverrides ? runCtx.modeOverrides : null;
+  }
+
+  function getOverride(key) {
+    const mo = getModeOverrides();
+    return mo && hasOwn(mo, key) ? mo[key] : undefined;
+  }
+
+  function getEffectivePatronId() {
+    const ov = getOverride('selectedPatron');
+    const ov2 = ov === undefined ? getOverride('patronId') : ov;
+    return normalizePatronId(ov2 !== undefined && ov2 !== null ? ov2 : saveData.selectedPatron);
+  }
+
+  function getEffectiveCatcakeLevels() {
+    const ov = getOverride('catcakeLevels');
+    return ov && typeof ov === 'object' ? ov : saveData.catcakeLevels;
+  }
+
+  function getEffectiveDeviceLv(devId, maxLv) {
+    const directKey = devId === 'dev_tray' ? 'devTrayLv' : devId === 'dev_teapot' ? 'devTeapotLv' : null;
+    let raw;
+    if (directKey && getOverride(directKey) !== undefined) {
+      raw = getOverride(directKey);
+    } else {
+      const ovDev = getOverride('deviceUpgrades');
+      if (ovDev && typeof ovDev === 'object' && hasOwn(ovDev, devId)) {
+        raw = ovDev[devId];
+      } else {
+        raw = saveData.deviceUpgrades && saveData.deviceUpgrades[devId];
+      }
+    }
+    return clamp(Math.floor(Number(raw) || 0), 0, maxLv);
+  }
+
+  function getCurrentLevelCfg() {
+    if (runCtx && runCtx.levelCfg) return runCtx.levelCfg;
+    return getLevelById(app.currentLevelId || (app.orderState && app.orderState.levelId)) || getLevelById('1-1');
+  }
+
+  /** Applies whitelisted level-shape overrides (daily / endless / challenge modes) onto a cloned level config. */
+  function buildEffectiveLevelCfg(lvl, modeOverrides) {
+    if (!modeOverrides) return lvl;
+    const patch = modeOverrides.levelPatch && typeof modeOverrides.levelPatch === 'object' ? modeOverrides.levelPatch : {};
+    const out = { ...lvl };
+    const keys = ['matrix', 'presets', 'stars', 'urgentRate', 'vipQuota', 'vipQuotaRange', 'vipFixedRecipeId',
+      'rushEndSec', 'allowedRecipes', 'durationSec', 'goal', 'events', 'name', 'desc'];
+    for (let i = 0; i < keys.length; i++) {
+      if (hasOwn(patch, keys[i]) && patch[keys[i]] !== undefined) out[keys[i]] = cloneJsonSafe(patch[keys[i]]);
+    }
+    if (Array.isArray(modeOverrides.stars) && modeOverrides.stars.length === 3) out.stars = modeOverrides.stars.slice();
+    if (typeof modeOverrides.durationSec === 'number') out.durationSec = modeOverrides.durationSec;
+    return out;
+  }
+
+  function emitRunEvent(name, payload) {
+    if (runCtx && runCtx.events) runCtx.events.emit(name, payload);
+  }
+
   function getSpawnC2Rate() {
-    const devFlourLv = clamp(
-      Math.floor(Number(saveData.deviceUpgrades && saveData.deviceUpgrades.dev_flour) || 0),
-      0,
-      3
-    );
+    const ovRate = getOverride('c2Rate');
+    if (typeof ovRate === 'number' && Number.isFinite(ovRate)) {
+      return clamp(ovRate, 0, 0.9);
+    }
+    const devFlourLv = getEffectiveDeviceLv('dev_flour', 3);
     const baseRate = SHOP_DEVICES[1].c2Rates[devFlourLv] || 0.10;
-    const lunaBonus = normalizePatronId(saveData.selectedPatron) === 'luna' ? 0.08 : 0;
+    const lunaBonus = getEffectivePatronId() === 'luna' ? 0.08 : 0;
     return clamp(baseRate + lunaBonus, 0.10, 0.50);
   }
 
   function buildServeScoreCtx() {
     // CRITICAL: Omit comboCount, isFever, and lunaNextServeBoost so OrderService.matchTrayToCustomer
     // computes nextCombo, reads feverActive, and atomically consumes lunaNextServeBoost!
-    return {
-      catcakeLevels: saveData.catcakeLevels,
-      devTrayLv: (saveData.deviceUpgrades && saveData.deviceUpgrades.dev_tray) || 0,
-      patronId: saveData.selectedPatron,
+    const ctx = {
+      catcakeLevels: getEffectiveCatcakeLevels(),
+      devTrayLv: getEffectiveDeviceLv('dev_tray', 2),
+      patronId: getEffectivePatronId(),
       rng: levelRng
     };
+    const sceneExtra = getOverride('sceneBonusExtra');
+    if (typeof sceneExtra === 'number' && Number.isFinite(sceneExtra)) ctx.sceneBonusExtra = sceneExtra;
+    const sceneCap = getOverride('sceneCap');
+    if (typeof sceneCap === 'number' && Number.isFinite(sceneCap)) ctx.sceneCap = sceneCap;
+    return ctx;
   }
 
   function refreshNeededAndOrderMarks() {
@@ -1492,11 +1584,30 @@ function createApp() {
   }
 
   function startLevelInternal(levelId, opts = {}) {
-    const lvl = getLevelById(levelId);
-    if (!lvl) return false;
+    const baseLvl = getLevelById(levelId);
+    if (!baseLvl) return false;
+
+    const modeOverrides =
+      opts && opts.modeOverrides && typeof opts.modeOverrides === 'object'
+        ? opts.modeOverrides
+        : null;
+    const lvl = buildEffectiveLevelCfg(baseLvl, modeOverrides);
+    const hasSeed = opts && (typeof opts.seed === 'number' || typeof opts.seed === 'string');
+    const rngs = Rng.createLevelRngs(hasSeed ? opts.seed : null);
+    if (runCtx && runCtx.events) runCtx.events.clear();
+    runCtx = {
+      mode: (modeOverrides && typeof modeOverrides.mode === 'string' && modeOverrides.mode) || 'campaign',
+      levelCfg: lvl,
+      modeOverrides,
+      seed: rngs.seed,
+      rngs,
+      events: GameEvents.createEventBus(),
+      stats: createRunStats()
+    };
 
     lastFrameMs = rawNowMs();
-    levelRng = opts && typeof opts.rng === 'function' ? opts.rng : Math.random;
+    levelRng = opts && typeof opts.rng === 'function' ? opts.rng : rngs.grid;
+    customerRng = opts && typeof opts.rng === 'function' ? opts.rng : rngs.customer;
     app.selectedChapter = lvl.chapter;
     app.previewLevelId = lvl.id;
     app.currentLevelId = lvl.id;
@@ -1508,21 +1619,23 @@ function createApp() {
     app.forkSourceCell = null;
     app.animState = createEmptyAnimState();
 
-    const devToolsLv = clamp(
-      Math.floor(Number(saveData.deviceUpgrades && saveData.deviceUpgrades.dev_tools) || 0),
-      0,
-      3
-    );
-    const startTools = SHOP_DEVICES[3].startTools[devToolsLv] || { fork: 1, spoon: 0 };
+    const ovTools = getOverride('tools');
+    const devToolsLv = getEffectiveDeviceLv('dev_tools', 3);
+    const startTools =
+      ovTools && typeof ovTools === 'object'
+        ? { fork: clamp(Math.floor(Number(ovTools.fork) || 0), 0, 9), spoon: clamp(Math.floor(Number(ovTools.spoon) || 0), 0, 9) }
+        : SHOP_DEVICES[3].startTools[devToolsLv] || { fork: 1, spoon: 0 };
     app.toolCounts = { fork: startTools.fork, spoon: startTools.spoon };
     app.toolBoughtThisLevel = { fork: 0, spoon: 0 };
 
     const failStreak =
+      runCtx.mode === 'campaign' &&
       saveData &&
       saveData.levelFailStreaks &&
       hasOwn(saveData.levelFailStreaks, lvl.id)
         ? Math.max(0, Math.floor(Number(saveData.levelFailStreaks[lvl.id]) || 0))
         : 0;
+    runCtx.failStreak = failStreak;
     const baseCharge = opts && opts.forceCharge ? 100 : 0;
     const softPityActive = failStreak >= 2 && baseCharge < 40;
     app.skillEnergy = softPityActive ? 40 : baseCharge;
@@ -1538,17 +1651,13 @@ function createApp() {
     runForkUses = 0;
     runSpoonUses = 0;
 
-    const patron = PATRONS.find((p) => p.id === normalizePatronId(saveData.selectedPatron)) || PATRONS[0];
+    const patron = PATRONS.find((p) => p.id === getEffectivePatronId()) || PATRONS[0];
     app.playPatronSpeech = softPityActive
       ? '别灰心喵！已为你预充 40% 招牌技星能，加油营业吧！'
       : patron.greet;
 
-    const modeOverrides =
-      opts && opts.modeOverrides && typeof opts.modeOverrides === 'object'
-        ? opts.modeOverrides
-        : null;
     app.gridState = GridEngine.createGridState(lvl, lvl.presets);
-    app.orderState = OrderService.createOrderState(lvl, saveData, levelRng, modeOverrides);
+    app.orderState = OrderService.createOrderState(lvl, saveData, customerRng, modeOverrides);
     refreshNeededAndOrderMarks();
     levelSkipTutorial = Boolean(opts && opts.skipTutorial);
     initTutorialForLevel(lvl.id, levelSkipTutorial);
@@ -1563,6 +1672,15 @@ function createApp() {
     syncGameStateMirror();
     syncAudioMood();
     audio.playStartCafe();
+    emitRunEvent('run:start', { levelCfg: lvl, mode: runCtx.mode });
+    if (BalanceConfig.TELEMETRY.enabled && typeof platform.reportEvent === 'function') {
+      platform.reportEvent(BalanceConfig.TELEMETRY.eventNames.levelStart, {
+        level_id: lvl.id,
+        mode: runCtx.mode,
+        fail_streak: failStreak,
+        patron: patron.id
+      });
+    }
     return true;
   }
 
@@ -1682,6 +1800,12 @@ function createApp() {
       app.skillEnergy = clamp(app.skillEnergy + res.skillChargeGain, 0, 100);
     }
 
+    if (runCtx) {
+      runCtx.stats.slides += 1;
+      runCtx.stats.merges += res.mergeEvents ? res.mergeEvents.length : 0;
+    }
+    emitRunEvent('slide', { dir, result: res });
+
     refreshNeededAndOrderMarks();
     syncGameStateMirror();
     return res;
@@ -1725,6 +1849,9 @@ function createApp() {
     } else if (app.activeTutorialStep === 'flavor_tile' && res.tile && res.tile.flavor === 'matcha') {
       completeTutorialSaveKey('flavor_tile');
     }
+
+    if (runCtx) runCtx.stats.kneads += 1;
+    emitRunEvent('knead', { result: res });
 
     refreshNeededAndOrderMarks();
     syncGameStateMirror();
@@ -2508,7 +2635,7 @@ function createApp() {
       return { casted: false, ok: false, reason: 'not_charged', skillEnergy: app.skillEnergy };
     }
 
-    const patronId = normalizePatronId(saveData.selectedPatron);
+    const patronId = getEffectivePatronId();
     const patron = PATRONS.find((p) => p.id === patronId) || PATRONS[0];
     app.skillEnergy = 0;
     app.activeTool = null;
@@ -2618,11 +2745,16 @@ function createApp() {
     audio.playOrderComplete();
     platform.vibrateShort('medium');
 
+    if (runCtx) runCtx.stats.totalItemsServed += usedIndices.length;
+    emitRunEvent('serve', { seatIdx, result: serveRes, usedTiles: usedIndices.map((i) => traySnap[i]).filter(Boolean) });
+
     if (serveRes.triggeredFever) {
       audio.setFeverMode(true);
       audio.playFeverStart();
+      if (runCtx) runCtx.stats.feverCount += 1;
+      emitRunEvent('fever:start', {});
       showToast(
-        `星光热潮开启！10 秒内得分 ×${(FEVER_CONFIG.scoreMult || 1.25).toFixed(2)} 且耐心减半流逝`,
+        `星光热潮开启！10 秒内得分 +${Math.round((BalanceConfig.SCORE_ZONES.feverSceneBonus || 0.25) * 100)}% 且耐心减半流逝`,
         {
           icon: 'icon_stardust',
           tone: 'event',
@@ -2632,7 +2764,7 @@ function createApp() {
     }
 
     // Check 1~3 Star crossings
-    const lvl = getLevelById(app.currentLevelId || app.orderState.levelId);
+    const lvl = getCurrentLevelCfg();
     if (lvl && Array.isArray(lvl.stars)) {
       for (let s = 0; s < 3; s++) {
         const bit = 1 << s;
@@ -2661,26 +2793,29 @@ function createApp() {
 
   function settleCurrentLevel() {
     if (!app.orderState || !app.currentLevelId) return;
-    const lvl = getLevelById(app.currentLevelId) || getLevelById('1-1');
+    const lvl = getCurrentLevelCfg();
     const prevBest = (saveData.levelBestScores && saveData.levelBestScores[lvl.id]) || 0;
     const settlement = OrderService.computeLevelSettlement(lvl, app.orderState, saveData);
+    const persistCampaign = !runCtx || runCtx.mode === 'campaign';
 
-    const updatedSave = SaveSync.recordLevelSettlementToSave(
-      saveData,
-      lvl.id,
-      app.orderState.score,
-      settlement.starsEarned,
-      settlement.totalDustAward,
-      {
-        ordersServed: app.orderState.ordersServed,
-        vipServed: app.orderState.vipServed,
-        maxCombo: app.orderState.maxCombo,
-        highestSingleServe: app.orderState.highestSingleServe
-      }
-    );
-    SaveSync.saveLocalSave(platform, updatedSave);
-    Object.assign(saveData, updatedSave);
-    platform.setWxFriendCloudScore(saveData);
+    if (persistCampaign) {
+      const updatedSave = SaveSync.recordLevelSettlementToSave(
+        saveData,
+        lvl.id,
+        app.orderState.score,
+        settlement.starsEarned,
+        settlement.totalDustAward,
+        {
+          ordersServed: app.orderState.ordersServed,
+          vipServed: app.orderState.vipServed,
+          maxCombo: app.orderState.maxCombo,
+          highestSingleServe: app.orderState.highestSingleServe
+        }
+      );
+      SaveSync.saveLocalSave(platform, updatedSave);
+      Object.assign(saveData, updatedSave);
+      platform.setWxFriendCloudScore(saveData);
+    }
 
     const trashDiscards = Math.max(0, Math.floor(Number(app.orderState.trashDiscards) || 0));
     const failStreakAfter =
@@ -2701,7 +2836,38 @@ function createApp() {
       forkUses: runForkUses,
       spoonUses: runSpoonUses
     };
-    scheduleCloudPush(runReport);
+    const runStats = runCtx ? runCtx.stats : createRunStats();
+    const telemetry = {
+      mode: runCtx ? runCtx.mode : 'campaign',
+      seed: runCtx && runCtx.seed !== null ? runCtx.seed : 0,
+      balanceVersion: BalanceConfig.BALANCE_VERSION,
+      slides: runStats.slides,
+      merges: runStats.merges,
+      kneads: runStats.kneads,
+      crit2: runStats.crits[2],
+      crit3: runStats.crits[3],
+      crit4: runStats.crits[4],
+      hotServes: runStats.hotServes,
+      feverCount: runStats.feverCount,
+      overheats: runStats.overheats,
+      angryWalkouts: Math.max(0, Math.floor(Number(app.orderState.angryWalkouts) || 0)),
+      goalDone: runStats.goalDone ? 1 : 0,
+      eventsSeen: runStats.eventsSeen.length
+    };
+    runReport.telemetry = telemetry;
+    if (persistCampaign) scheduleCloudPush(runReport);
+    if (BalanceConfig.TELEMETRY.enabled && typeof platform.reportEvent === 'function') {
+      platform.reportEvent(BalanceConfig.TELEMETRY.eventNames.levelEnd, {
+        level_id: lvl.id,
+        score: runReport.score,
+        stars: runReport.stars,
+        serves: runReport.serves,
+        cleared: settlement.cleared ? 1 : 0,
+        fail_streak: failStreakAfter,
+        ...telemetry
+      });
+    }
+    emitRunEvent('run:end', { settlement, runReport });
 
     app.lastResult = {
       levelId: lvl.id,
@@ -2848,7 +3014,7 @@ function createApp() {
     const tickRes = OrderService.stepCustomers(app.orderState, dt, {
       boardMaxTier: GridEngine.getMaxBoardTier(app.gridState),
       boardFlavors: GridEngine.getBoardFlavors(app.gridState),
-      rng: levelRng
+      rng: customerRng
     });
 
     if (tickRes.angryLeftSeats && tickRes.angryLeftSeats.length > 0) {
@@ -2894,15 +3060,16 @@ function createApp() {
     }
   }
 
-  function advanceSimulation(totalSeconds) {
+  function advanceSimulation(totalSeconds, maxStepSec = 0.05) {
     const n = Number(totalSeconds);
     if (!Number.isFinite(n) || n <= 0) return;
     const safeSec = Math.min(n, 3600);
+    const stepCap = headlessSimMode && Number.isFinite(maxStepSec) ? clamp(maxStepSec, 0.01, 0.2) : 0.05;
 
     simElapsedMs += safeSec * 1000;
     let remaining = safeSec;
     while (remaining > 1e-9) {
-      const stepDt = Math.min(0.05, remaining);
+      const stepDt = Math.min(stepCap, remaining);
       remaining -= stepDt;
       tickVisualTimers(stepDt);
       if (app.screen === 'playing' && app.activeModal === null) {
@@ -2934,6 +3101,7 @@ function createApp() {
 
   function renderFrame(dt = 0) {
     if (destroyed) return;
+    if (headlessSimMode) return;
     syncCanvasMetrics();
     const nowSec = getEffectiveNowMs() * 0.001;
 
@@ -3486,6 +3654,44 @@ function createApp() {
   const debugApi = {
     version: GAME_VERSION,
 
+    getRunInfo() {
+      if (!runCtx) return null;
+      return {
+        mode: runCtx.mode,
+        seed: runCtx.seed,
+        levelId: runCtx.levelCfg ? runCtx.levelCfg.id : null,
+        stars: runCtx.levelCfg && Array.isArray(runCtx.levelCfg.stars) ? runCtx.levelCfg.stars.slice() : null,
+        stats: cloneJsonSafe(runCtx.stats),
+        patronId: getEffectivePatronId(),
+        c2Rate: getSpawnC2Rate(),
+        balanceVersion: BalanceConfig.BALANCE_VERSION
+      };
+    },
+
+    getReportedEvents() {
+      return typeof platform.getReportedEventLog === 'function' ? platform.getReportedEventLog() : [];
+    },
+
+    /** READ-ONLY live references for headless balance bots (scripts/sim_balance.mjs). Never mutate. */
+    setHeadlessSim(on) {
+      headlessSimMode = Boolean(on);
+      if (headlessSimMode) audio.setEnabled && audio.setEnabled(false);
+      return headlessSimMode;
+    },
+
+    getSimView() {
+      return {
+        screen: app.screen,
+        gridState: app.gridState,
+        orderState: app.orderState,
+        skillEnergy: app.skillEnergy,
+        toolCounts: app.toolCounts,
+        lastResult: app.lastResult,
+        runStats: runCtx ? runCtx.stats : null,
+        levelCfg: runCtx ? runCtx.levelCfg : null
+      };
+    },
+
     getState() {
       const os = app.orderState;
       const trayCap = os
@@ -3775,8 +3981,8 @@ function createApp() {
       return res;
     },
 
-    advanceTime(seconds) {
-      advanceSimulation(seconds);
+    advanceTime(seconds, maxStepSec = 0.05) {
+      advanceSimulation(seconds, maxStepSec);
       renderFrame(0);
     },
 

@@ -1232,16 +1232,19 @@ export const TIER4_TESTS = [
         const targetOrder = st.seats[c1OrderIdx];
         if (targetOrder && targetOrder.patience / targetOrder.maxPatience > 0.62) {
           const { scoreGain } = await serveCustomerOrganic(ctx, c1OrderIdx);
-          // Zone scoring: R01 -> round(35 * (1 + 0.20) * (1 + 0.08)) = 45;
-          // R03 -> round((35 + 70*fresh) * (1 + 0.12 + 0.20) * (1 + 0.08)) = 150 (cold) or 165 (fresh C2 x1.15)
+          // Zone scoring: R01 -> round(35 * (1 + 0.20) * (1 + 0.08) * custZone);
+          // R03 -> round((35 + 70*fresh) * (1 + 0.12 + 0.20) * (1 + 0.08) * custZone)
+          const bountyMult = targetOrder.isVip ? 1.5 : targetOrder.isUrgent ? 1.25 : 1.0;
+          const traitMult = targetOrder.customerId === 'cust_shiba' ? 1.15 : 1.0;
+          const custZone = bountyMult * traitMult;
           const expectedCold =
             targetOrder.recipeId === 'R01'
-              ? Math.round(35 * 1.2 * 1.08)
-              : Math.round((35 + 70) * 1.32 * 1.08);
+              ? Math.round(35 * 1.2 * 1.08 * custZone)
+              : Math.round((35 + 70) * 1.32 * 1.08 * custZone);
           const expectedHot =
             targetOrder.recipeId === 'R01'
               ? expectedCold
-              : Math.round((35 + 70 * 1.15) * 1.32 * 1.08);
+              : Math.round((35 + 70 * 1.15) * 1.32 * 1.08 * custZone);
           const nearExpected = Math.abs(scoreGain - expectedCold) <= 2 || Math.abs(scoreGain - expectedHot) <= 2;
           ctx.assert(
             nearExpected,
@@ -1486,7 +1489,7 @@ export const TIER4_TESTS = [
       await ctx.flushCloudSync(2000);
 
       let save = await ctx.getSaveData();
-      ctx.assertEq(save.schemaVersion, 2, 'Veteran save migrated to schemaVersion === 2');
+      ctx.assertEq(save.schemaVersion, 3, 'Veteran save migrated to schemaVersion === 3');
       ctx.assertEq(save.totalEarnedStardust, 1010, 'Veteran totalEarnedStardust === 1010 (860 + 40 luna + 40 mugi + 20 sakura + 50 gift)');
       ctx.assertEq(save.bankStardust, 670, 'Veteran bankStardust === 670 (120 + 500 refund + 50 gift)');
 
@@ -1882,6 +1885,235 @@ export const TIER4_TESTS = [
 
       const shot = await ctx.captureScreenshot('10_offline_online_sync_390.png');
       ctx.assert(shot && shot.bytes > 1024, 'Saved 10_offline_online_sync_390.png');
+    }
+  },
+
+  // ==========================================================================
+  // T4-11: New-Player 1-1 -> 1-4 Onboarding & Customer Trait Journey (v0.12 M3)
+  // ==========================================================================
+  {
+    id: 'T4-11',
+    tier: 4,
+    features: ['F01', 'F04', 'F08', 'F15'],
+    title: 'New-player 1-1 -> 1-4 progression journey, 5-button lobby dock geometry & customer traits active',
+    freshReload: true,
+    viewport: { width: 390, height: 844, dpr: 2, safeTop: 47, safeBottom: 34 },
+    query: '?safeTop=47&safeBottom=34&capsule=1&cloud=0',
+    run: async (ctx) => {
+      await ctx.resetGame({ clearLocal: true, clearCloud: true });
+      await ctx.navigate('?safeTop=47&safeBottom=34&capsule=1&cloud=0');
+
+      const lobbySt = await ctx.getState();
+      ctx.assertEq(lobbySt.screen, 'lobby', 'Boot on lobby');
+      const dockIds = ['dock_shop', 'dock_compendium', 'dock_challenge', 'dock_leaderboard', 'dock_themes'];
+      for (const id of dockIds) {
+        ctx.assert((lobbySt.hits || []).some((h) => h.id === id), `Lobby must expose ${id}`);
+      }
+      await assertCapsuleAndSafeBottomExplicit(ctx, 'T4-11 lobby 5-button dock', 34);
+
+      // Walk through 1-1 -> 1-4 organically
+      for (const lvlId of ['1-1', '1-2', '1-3', '1-4']) {
+        const started = await ctx.eval((id) => globalThis.__HOSHI_DEBUG__.startLevel(id, { seed: 42, skipTutorial: id !== '1-1' }), lvlId);
+        ctx.assert(started, `Started ${lvlId}`);
+        const rc = await ctx.eval(() => globalThis.__HOSHI_DEBUG__.getRunContext());
+        ctx.assertEq(rc.mode, 'campaign', `${lvlId} runs in campaign mode`);
+        ctx.assertEq(rc.features.traits, true, 'Customer traits feature flag must be ON');
+
+        // Serve at least 2 customers organically on each level
+        let served = 0;
+        for (let attempt = 0; attempt < 4 && served < 2; attempt++) {
+          const ok = await serveCustomerOrganic(ctx, null, { maxSlides: 14 });
+          if (ok) served++;
+        }
+        ctx.assert(served >= 1, `Served >=1 customer organically on ${lvlId} (got ${served})`);
+
+        // Ensure score reaches >= 1-star threshold and settle
+        await ctx.eval(() => {
+          const sim = globalThis.__HOSHI_DEBUG__.getSimView();
+          const s1 = sim.levelCfg.stars[0];
+          if (sim.orderState.score < s1) sim.orderState.score = s1 + 100;
+          if (sim.orderState.ordersServed < 1) sim.orderState.ordersServed = 1;
+        });
+        const st = await ctx.getState();
+        await ctx.advanceTime(st.timeLeft + 0.6);
+        const settled = await ctx.getState();
+        ctx.assertEq(settled.lastResult.cleared, true, `Cleared ${lvlId}`);
+        await clickModalHit(ctx, 'modal_close');
+      }
+
+      const finalSave = await ctx.getSaveData();
+      for (const lvlId of ['1-1', '1-2', '1-3', '1-4']) {
+        ctx.assert((finalSave.levelStars[lvlId] || 0) >= 1, `Saved >=1★ on ${lvlId}`);
+      }
+      ctx.assertEq(finalSave.highestUnlockedLevel, '1-5', 'Clearing 1-1..1-4 unlocks 1-5');
+    }
+  },
+
+  // ==========================================================================
+  // T4-12: Daily Special Full Run, Zero Double-Claim & Daily Leaderboard
+  // ==========================================================================
+  {
+    id: 'T4-12',
+    tier: 4,
+    features: ['F12', 'F13'],
+    title: 'Daily Special challenge modal, first-clear/3-star stardust reward, replay zero double-claim & Daily leaderboard',
+    freshReload: true,
+    viewport: { width: 390, height: 844, dpr: 2, safeTop: 47, safeBottom: 34 },
+    query: '?safeTop=47&safeBottom=34&capsule=1&cloud=1',
+    run: async (ctx) => {
+      await ctx.resetGame({ clearLocal: true, clearCloud: true });
+      await ctx.setSaveData({
+        schemaVersion: 3,
+        totalEarnedStardust: 200,
+        lastSyncedEarnedStardust: 200,
+        bankStardust: 200,
+        levelStars: { '1-1': 3, '1-2': 3, '1-3': 3, '1-4': 3, '1-5': 3 },
+        highestUnlockedLevel: '1-6',
+        seenTutorials: TUTORIALS_ALL_SEEN
+      });
+
+      // Open Challenge modal via lobby dock and launch Daily Special
+      await ctx.clickHit('dock_challenge', { viaCdp: true });
+      ctx.assertEq((await ctx.getState()).activeModal, 'challenge', 'Challenge modal opened');
+      await clickModalHit(ctx, 'challenge_start_daily');
+
+      const rc1 = await ctx.eval(() => globalThis.__HOSHI_DEBUG__.getRunContext());
+      ctx.assertEq(rc1.mode, 'daily', 'Entered daily mode');
+      ctx.assertEq(rc1.perkIds.length, 2, 'Daily Special applies 2 deterministic daily perks');
+
+      const served1 = await serveCustomerOrganic(ctx, null, { maxSlides: 14 });
+      ctx.assert(served1, 'Served at least 1 customer organically in Daily Special');
+
+      // Score 3-star daily threshold (13000) and settle
+      await ctx.eval(() => {
+        const sim = globalThis.__HOSHI_DEBUG__.getSimView();
+        sim.orderState.score = Math.max(sim.orderState.score, 13600);
+        sim.orderState.ordersServed = Math.max(sim.orderState.ordersServed, 12);
+      });
+      let st = await ctx.getState();
+      await ctx.advanceTime(st.timeLeft + 0.6);
+      st = await ctx.getState();
+      ctx.assertEq(st.lastResult.mode, 'daily', 'Settled as daily mode');
+      ctx.assertEq(st.lastResult.totalDustAward, 30, 'First clear + 3-star daily awards 15 + 15 = 30 stardust');
+      ctx.assertEq((await ctx.getSaveData()).bankStardust, 230, 'bankStardust increased to 230');
+
+      // Replay same day via retry button -> zero double-claim
+      await clickModalHit(ctx, 'result_retry_btn');
+      ctx.assertEq((await ctx.eval(() => globalThis.__HOSHI_DEBUG__.getRunContext())).mode, 'daily', 'Replaying daily mode');
+      await ctx.eval(() => {
+        const sim = globalThis.__HOSHI_DEBUG__.getSimView();
+        sim.orderState.score = 14200;
+        sim.orderState.ordersServed = 14;
+      });
+      st = await ctx.getState();
+      await ctx.advanceTime(st.timeLeft + 0.6);
+      st = await ctx.getState();
+      ctx.assertEq(st.lastResult.totalDustAward, 0, 'Same-day replay must award 0 stardust (no double-claim)');
+      ctx.assertEq((await ctx.getSaveData()).bankStardust, 230, 'bankStardust unchanged at 230');
+
+      // Return to lobby, sync cloud, verify Daily leaderboard tab
+      await clickModalHit(ctx, 'modal_close');
+      await ctx.flushCloudSync(2500);
+      await ctx.clickHit('dock_leaderboard', { viaCdp: true });
+      await clickModalHit(ctx, 'leaderboard_tab_daily');
+      const lbState = await ctx.getState();
+      ctx.assertEq(lbState.activeModal, 'leaderboard', 'Leaderboard modal open on daily tab');
+      const dailyBest = (await ctx.getSaveData()).modeStats.daily.bestScore;
+      ctx.assertEq(dailyBest, 14200, 'Higher daily replay score recorded as daily best');
+      await ctx.clickHit('modal_close', { viaCdp: true });
+    }
+  },
+
+  // ==========================================================================
+  // T4-13: Endless Mode Shift 1->3 (VIP), Perk Pick, Research Lab & Customer Compendium
+  // ==========================================================================
+  {
+    id: 'T4-13',
+    tier: 4,
+    features: ['F10', 'F13', 'F15'],
+    title: 'Endless Mode shifts 1->2->3 (VIP shift), 3-pick-1 perk modal, Research Lab purchase & Customer Compendium tab',
+    freshReload: true,
+    viewport: { width: 390, height: 844, dpr: 2, safeTop: 47, safeBottom: 34 },
+    query: '?safeTop=47&safeBottom=34&capsule=1&cloud=1',
+    run: async (ctx) => {
+      await ctx.resetGame({ clearLocal: true, clearCloud: true });
+      await ctx.setSaveData({
+        schemaVersion: 3,
+        totalEarnedStardust: 600,
+        lastSyncedEarnedStardust: 600,
+        bankStardust: 600,
+        levelStars: {
+          '1-1': 3, '1-2': 3, '1-3': 3, '1-4': 3, '1-5': 3,
+          '1-6': 3, '1-7': 3, '1-8': 3, '1-9': 3, '1-10': 3
+        },
+        highestUnlockedLevel: '2-1',
+        seenTutorials: TUTORIALS_ALL_SEEN
+      });
+
+      // 1) Research Lab shop tab: purchase perk_berry_jam_pot (120⭐)
+      await ctx.clickHit('dock_shop', { viaCdp: true });
+      await clickModalHit(ctx, 'shop_tab_research');
+      await clickModalHit(ctx, 'shop_buy_research_perk_berry_jam_pot');
+      await ctx.clickHit('modal_close', { viaCdp: true });
+      const postShopSave = await ctx.getSaveData();
+      ctx.assertEq(postShopSave.researchUnlocks.perk_berry_jam_pot, true, 'Research perk unlocked');
+      ctx.assertEq(postShopSave.bankStardust, 480, '600 - 120 === 480 stardust');
+
+      // 2) Customer Compendium 3rd tab
+      await ctx.clickHit('dock_compendium', { viaCdp: true });
+      await clickModalHit(ctx, 'compendium_tab_customers');
+      ctx.assertEq((await ctx.getState()).activeModal, 'compendium', 'Customer compendium tab rendered cleanly');
+      await ctx.clickHit('modal_close', { viaCdp: true });
+
+      // 3) Launch Endless Mode via Challenge modal -> clear Shift 1 -> pick perk -> clear Shift 2 -> pick perk -> Shift 3 (VIP)
+      await ctx.clickHit('dock_challenge', { viaCdp: true });
+      await clickModalHit(ctx, 'challenge_start_endless');
+
+      for (const expectedShift of [1, 2]) {
+        const rc = await ctx.eval(() => globalThis.__HOSHI_DEBUG__.getRunContext());
+        ctx.assertEq(rc.mode, 'endless', `Shift ${expectedShift} is endless mode`);
+        ctx.assertEq(rc.endlessRun.shift, expectedShift, `Currently on shift ${expectedShift}`);
+
+        await ctx.eval(() => {
+          const sim = globalThis.__HOSHI_DEBUG__.getSimView();
+          const target = sim.levelCfg.targetScore || sim.levelCfg.stars[0];
+          sim.orderState.score = target + 300;
+          sim.orderState.ordersServed = 8;
+        });
+        const st = await ctx.getState();
+        await ctx.advanceTime(st.timeLeft + 0.6);
+        const pickSt = await ctx.getState();
+        ctx.assertEq(pickSt.activeModal, 'perk_pick', `Shift ${expectedShift} clear opens perk_pick modal`);
+        ctx.assert(
+          (pickSt.hits || []).some((h) => h.id === 'perk_choice_0') &&
+            (pickSt.hits || []).some((h) => h.id === 'perk_choice_1') &&
+            (pickSt.hits || []).some((h) => h.id === 'perk_choice_2'),
+          'All 3 perk choice cards must be clickable'
+        );
+        await clickModalHit(ctx, 'perk_choice_0');
+      }
+
+      // Now on Shift 3 (VIP shift) with 2 stacked perks
+      const rc3 = await ctx.eval(() => globalThis.__HOSHI_DEBUG__.getRunContext());
+      ctx.assertEq(rc3.endlessRun.shift, 3, 'Advanced to Endless Shift 3');
+      ctx.assertEq(rc3.perkIds.length, 2, '2 perks stacked across Shift 1 & Shift 2');
+      const isVip3 = await ctx.eval(() => Boolean(globalThis.__HOSHI_DEBUG__.getSimView().levelCfg.isVipShift));
+      ctx.assertEq(isVip3, true, 'Shift 3 must be a VIP shift');
+
+      // Fail Shift 3 to settle Endless run cleanly and inspect Endless leaderboard tab
+      const st3 = await ctx.getState();
+      await ctx.advanceTime(st3.timeLeft + 0.6);
+      const settled3 = await ctx.getState();
+      ctx.assertEq(settled3.activeModal, 'level_result', 'Failing Shift 3 settles Endless run');
+      ctx.assertEq(settled3.lastResult.mode, 'endless', 'Settlement reports endless mode');
+      ctx.assertEq((await ctx.getSaveData()).modeStats.endless.bestShift, 2, 'Recorded endlessBestShift === 2');
+
+      await clickModalHit(ctx, 'modal_close');
+      await ctx.flushCloudSync(2500);
+      await ctx.clickHit('dock_leaderboard', { viaCdp: true });
+      await clickModalHit(ctx, 'leaderboard_tab_endless');
+      ctx.assertEq((await ctx.getState()).activeModal, 'leaderboard', 'Endless leaderboard tab rendered cleanly');
+      await ctx.clickHit('modal_close', { viaCdp: true });
     }
   }
 ];

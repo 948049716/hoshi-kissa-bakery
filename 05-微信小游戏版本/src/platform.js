@@ -1658,10 +1658,10 @@ function auditAndSanitizeSaveForCloud(rawMeta, warnings) {
   }
 
   const copy = safeShallowCopyPlain(rawMeta);
-  if (Number.isFinite(sv) && Math.floor(sv) > 2) {
+  if (Number.isFinite(sv) && Math.floor(sv) > 3) {
     copy.higherSchemaDetected = true;
   }
-  copy.schemaVersion = 2;
+  copy.schemaVersion = 3;
   copy.levelBestScores = cleanScores;
   copy.levelStars = cleanStars;
   return SaveSync.normalizeSaveData(copy);
@@ -1713,6 +1713,26 @@ function rollbackCloudLevelProgress(clientMeta, baseMeta, levelId) {
   );
 }
 
+function rollbackCloudModeStats(clientMeta, baseMeta, mode) {
+  const fallback = baseMeta && isPlainRecord(baseMeta.modeStats)
+    ? baseMeta.modeStats
+    : {
+        daily: { lastDate: '', bestScore: 0, claimedDate: '', claimed3Date: '' },
+        endless: { bestShift: 0, bestScore: 0, runs: 0, dailyDustDate: '', dailyDust: 0 }
+      };
+  if (!isPlainRecord(clientMeta.modeStats)) {
+    clientMeta.modeStats = {
+      daily: { lastDate: '', bestScore: 0, claimedDate: '', claimed3Date: '' },
+      endless: { bestShift: 0, bestScore: 0, runs: 0, dailyDustDate: '', dailyDust: 0 }
+    };
+  }
+  if (mode === 'daily') {
+    clientMeta.modeStats.daily = { ...fallback.daily };
+  } else if (mode === 'endless') {
+    clientMeta.modeStats.endless = { ...fallback.endless };
+  }
+}
+
 function applyRunReportValidation(clientMeta, baseMeta, runReport, warnings) {
   if (!isPlainRecord(runReport)) return;
 
@@ -1746,6 +1766,69 @@ function applyRunReportValidation(clientMeta, baseMeta, runReport, warnings) {
 
   const rawLid = getOwn(runReport, 'levelId');
   const lid = typeof rawLid === 'string' ? rawLid.trim() : '';
+  const rawModeVal = getOwn(runReport, 'mode');
+  const explicitMode = typeof rawModeVal === 'string' ? rawModeVal.trim() : '';
+  const rrMode =
+    explicitMode === 'daily' || explicitMode === 'endless'
+      ? explicitMode
+      : lid.indexOf('daily_') === 0
+      ? 'daily'
+      : lid.indexOf('endless_') === 0
+      ? 'endless'
+      : 'campaign';
+
+  if (rrMode === 'daily') {
+    let rolledBack = false;
+    if (rrServes < 1) {
+      addUniqueWarning(warnings, 'zero_serve_score_rejected');
+      rollbackCloudModeStats(clientMeta, baseMeta, 'daily');
+      rolledBack = true;
+    }
+    if (hasDur && (!Number.isFinite(rrDur) || rrDur < 3)) {
+      addUniqueWarning(warnings, 'implausible_run_duration');
+      if (!rolledBack) {
+        rollbackCloudModeStats(clientMeta, baseMeta, 'daily');
+        rolledBack = true;
+      }
+    }
+    if (!rolledBack && rrScore > 150000) {
+      addUniqueWarning(warnings, 'run_score_cap_clamped');
+      if (clientMeta.modeStats && clientMeta.modeStats.daily && clientMeta.modeStats.daily.bestScore > 150000) {
+        clientMeta.modeStats.daily.bestScore = 150000;
+      }
+    }
+    return;
+  }
+
+  if (rrMode === 'endless') {
+    const rrShift = clampSafeInt(
+      hasOwn(runReport, 'shift') ? getOwn(runReport, 'shift') : 1,
+      1,
+      99,
+      1
+    );
+    let rolledBack = false;
+    if (rrServes < 1) {
+      addUniqueWarning(warnings, 'zero_serve_score_rejected');
+      rollbackCloudModeStats(clientMeta, baseMeta, 'endless');
+      rolledBack = true;
+    }
+    if (hasDur && (!Number.isFinite(rrDur) || rrDur < 3)) {
+      addUniqueWarning(warnings, 'implausible_run_duration');
+      if (!rolledBack) {
+        rollbackCloudModeStats(clientMeta, baseMeta, 'endless');
+        rolledBack = true;
+      }
+    }
+    const shiftCap = Math.min(6000000, Math.max(1, rrShift) * 60000);
+    if (!rolledBack && rrScore > shiftCap) {
+      addUniqueWarning(warnings, 'run_score_cap_clamped');
+      if (clientMeta.modeStats && clientMeta.modeStats.endless && clientMeta.modeStats.endless.bestScore > shiftCap) {
+        clientMeta.modeStats.endless.bestScore = shiftCap;
+      }
+    }
+    return;
+  }
 
   let rolledBack = false;
   if (rrServes < 1) {
@@ -1783,8 +1866,27 @@ function applyRunReportValidation(clientMeta, baseMeta, runReport, warnings) {
   }
 }
 
+function isUntouchedModeStats(ms) {
+  if (!isPlainRecord(ms)) return true;
+  const d = isPlainRecord(ms.daily) ? ms.daily : {};
+  const e = isPlainRecord(ms.endless) ? ms.endless : {};
+  return Boolean(
+    !d.lastDate &&
+      !(d.bestScore > 0) &&
+      !d.claimedDate &&
+      !d.claimed3Date &&
+      !(e.bestShift > 0) &&
+      !(e.bestScore > 0) &&
+      !(e.runs > 0) &&
+      !e.dailyDustDate &&
+      !(e.dailyDust > 0)
+  );
+}
+
 function isUntouchedDefaultMeta(s) {
   const SaveSync = getSaveSync();
+  const st = isPlainRecord(s && s.settings) ? s.settings : null;
+  const defaultSettings = !st || (st.vibrateEnabled === true && !st.lowPowerMode && !st.colorblindMarks);
   return Boolean(
     isPlainRecord(s) &&
       s.totalEarnedStardust === DEFAULT_INITIAL_STARDUST &&
@@ -1796,6 +1898,10 @@ function isUntouchedDefaultMeta(s) {
       s.lifetimeStats.totalStars === 0 &&
       s.lifetimeStats.totalCumulativeScore === 0 &&
       (!isPlainRecord(s.levelFailStreaks) || Object.keys(s.levelFailStreaks).length === 0) &&
+      (!isPlainRecord(s.levelGoalsDone) || Object.keys(s.levelGoalsDone).length === 0) &&
+      (!isPlainRecord(s.researchUnlocks) || Object.keys(s.researchUnlocks).length === 0) &&
+      isUntouchedModeStats(s.modeStats) &&
+      defaultSettings &&
       !s.migratedFromV1GiftPending &&
       s.selectedPatron === 'mikan' &&
       s.equippedTheme === 'amber' &&
@@ -1824,6 +1930,9 @@ function isUntouchedInitialServerMeta(s, prevRevision) {
       s.lifetimeStats.totalStars === 0 &&
       s.lifetimeStats.totalCumulativeScore === 0 &&
       (!isPlainRecord(s.levelFailStreaks) || Object.keys(s.levelFailStreaks).length === 0) &&
+      (!isPlainRecord(s.levelGoalsDone) || Object.keys(s.levelGoalsDone).length === 0) &&
+      (!isPlainRecord(s.researchUnlocks) || Object.keys(s.researchUnlocks).length === 0) &&
+      isUntouchedModeStats(s.modeStats) &&
       !s.migratedFromV1GiftPending
   );
 }
@@ -2060,12 +2169,13 @@ function normalizeStoredCloudDoc(rawDoc, defaultSuffix = 'CAFE') {
       ? toSafeFiniteNumber(getOwn(rawMetaCandObj, 'schemaVersion'))
       : 0;
   const isExistingWrapperV2 = Boolean(Number.isFinite(rawMetaCandSv) && rawMetaCandSv >= 2);
+  const needsV2ToV3Persist = Boolean(Number.isFinite(rawMetaCandSv) && rawMetaCandSv >= 2 && rawMetaCandSv < 3);
 
   const profile = resolveMockStoredProfile(rawDoc, openidSuffix, metaSave.selectedPatron);
   metaSave.playerProfile = { ...profile };
 
   const doc = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     openidSuffix,
     profile,
     totalStars,
@@ -2081,6 +2191,7 @@ function normalizeStoredCloudDoc(rawDoc, defaultSuffix = 'CAFE') {
     isExistingWrapperV2,
     dirty:
       migratedFromV1 ||
+      needsV2ToV3Persist ||
       hadLegacyWrapperKeys ||
       hasOwn(rawDoc, 'playerProfile') ||
       hasCorruptedWrapperRevision ||
@@ -2103,6 +2214,8 @@ function persistMockCloudDoc(doc) {
 
 function normalizeBoardType(rawType) {
   if (rawType === 'score' || rawType === 'totalScore') return 'score';
+  if (rawType === 'endless') return 'endless';
+  if (rawType === 'daily' || (typeof rawType === 'string' && /^daily_\d{8}$/.test(rawType))) return 'daily';
   return 'stars';
 }
 
@@ -2122,12 +2235,21 @@ function rankLeaderboardEntries(rawBoardType, candidateRows, myStars, myScore, e
       'totalCumulativeScore',
       MAX_TOTAL_CUMULATIVE_SCORE
     );
-    if (stars < 0 || cumScore < 0) continue;
+    const dailyScore = readBoundedBoardMetric(row, 'dailyBestScore', 150000);
+    const endlessShift = readBoundedBoardMetric(row, 'endlessBestShift', 99);
+    const endlessScore = readBoundedBoardMetric(row, 'endlessBestScore', 6000000);
 
-    if (boardType === 'stars') {
-      if (stars <= 0) continue;
+    if (boardType === 'daily') {
+      if (dailyScore <= 0) continue;
+    } else if (boardType === 'endless') {
+      if (endlessShift <= 0 || endlessScore <= 0) continue;
     } else {
-      if (cumScore <= 0) continue;
+      if (stars < 0 || cumScore < 0) continue;
+      if (boardType === 'stars') {
+        if (stars <= 0) continue;
+      } else {
+        if (cumScore <= 0) continue;
+      }
     }
 
     const rawId = getOwn(row, 'id');
@@ -2149,6 +2271,12 @@ function rankLeaderboardEntries(rawBoardType, candidateRows, myStars, myScore, e
     const rawPreset = getOwn(row, 'avatarPreset');
     const avatarPreset = normalizePatronId(typeof rawPreset === 'string' ? rawPreset : 'mikan');
 
+    const safeStars = stars > 0 ? stars : 0;
+    const safeCum = cumScore > 0 ? cumScore : 0;
+    const safeDaily = dailyScore > 0 ? dailyScore : 0;
+    const safeShift = endlessShift > 0 ? endlessShift : 0;
+    const safeEndless = endlessScore > 0 ? endlessScore : 0;
+
     eligible.push({
       id,
       openidSuffix: suffix,
@@ -2158,10 +2286,20 @@ function rankLeaderboardEntries(rawBoardType, candidateRows, myStars, myScore, e
       nickName,
       avatarUrl,
       avatarPreset,
-      totalStars: stars,
-      totalCumulativeScore: cumScore,
-      totalScore: cumScore,
-      score: boardType === 'stars' ? stars : cumScore
+      totalStars: safeStars,
+      totalCumulativeScore: safeCum,
+      totalScore: safeCum,
+      dailyBestScore: safeDaily,
+      endlessBestShift: safeShift,
+      endlessBestScore: safeEndless,
+      score:
+        boardType === 'stars'
+          ? safeStars
+          : boardType === 'daily'
+          ? safeDaily
+          : boardType === 'endless'
+          ? safeEndless
+          : safeCum
     });
   }
 
@@ -2171,6 +2309,11 @@ function rankLeaderboardEntries(rawBoardType, candidateRows, myStars, myScore, e
       if (b.totalCumulativeScore !== a.totalCumulativeScore) {
         return b.totalCumulativeScore - a.totalCumulativeScore;
       }
+    } else if (boardType === 'daily') {
+      if (b.dailyBestScore !== a.dailyBestScore) return b.dailyBestScore - a.dailyBestScore;
+    } else if (boardType === 'endless') {
+      if (b.endlessBestShift !== a.endlessBestShift) return b.endlessBestShift - a.endlessBestShift;
+      if (b.endlessBestScore !== a.endlessBestScore) return b.endlessBestScore - a.endlessBestScore;
     } else {
       if (b.totalCumulativeScore !== a.totalCumulativeScore) {
         return b.totalCumulativeScore - a.totalCumulativeScore;
@@ -2203,7 +2346,7 @@ function rankLeaderboardEntries(rawBoardType, candidateRows, myStars, myScore, e
     myRank,
     totalPlayers,
     myStars: clampSafeInt(myStars, 0, MAX_TOTAL_STARS, 0),
-    myScore: clampSafeInt(myScore, 0, MAX_TOTAL_CUMULATIVE_SCORE, 0),
+    myScore: clampSafeInt(myScore, 0, Math.max(MAX_TOTAL_CUMULATIVE_SCORE, 6000000), 0),
     ...(extraProps || {})
   };
 }
@@ -2219,6 +2362,9 @@ function buildOfflineLeaderboard(boardType = 'stars', saveData = null, openidSuf
     let normalizedSave = null;
     let myStars = 0;
     let myScore = 0;
+    let myDailyScore = 0;
+    let myEndlessShift = 0;
+    let myEndlessScore = 0;
     let callerDisqualified = false;
 
     if (isPlainRecord(saveData)) {
@@ -2255,6 +2401,10 @@ function buildOfflineLeaderboard(boardType = 'stars', saveData = null, openidSuf
         if (myScore === 0 && rawExplicitScore > 0) {
           myScore = rawExplicitScore;
         }
+        const ms = normalizedSave.modeStats || {};
+        myDailyScore = ms.daily ? clampSafeInt(ms.daily.bestScore, 0, 150000, 0) : 0;
+        myEndlessShift = ms.endless ? clampSafeInt(ms.endless.bestShift, 0, 99, 0) : 0;
+        myEndlessScore = ms.endless ? clampSafeInt(ms.endless.bestScore, 0, 6000000, 0) : 0;
       }
     }
 
@@ -2266,7 +2416,15 @@ function buildOfflineLeaderboard(boardType = 'stars', saveData = null, openidSuf
       isNpc: true
     }));
 
-    if (!callerDisqualified && (myStars > 0 || myScore > 0)) {
+    const normBoard = normalizeBoardType(boardType);
+    const hasMyMetric =
+      normBoard === 'daily'
+        ? myDailyScore > 0
+        : normBoard === 'endless'
+        ? myEndlessShift > 0 && myEndlessScore > 0
+        : myStars > 0 || myScore > 0;
+
+    if (!callerDisqualified && hasMyMetric) {
       const prof = normalizedSave
         ? sanitizeCloudProfile(
             normalizedSave.playerProfile,
@@ -2283,12 +2441,18 @@ function buildOfflineLeaderboard(boardType = 'stars', saveData = null, openidSuf
         avatarUrl: prof.avatarUrl,
         avatarPreset: prof.avatarPreset,
         totalStars: myStars,
-        totalCumulativeScore: myScore
+        totalCumulativeScore: myScore,
+        dailyBestScore: myDailyScore,
+        endlessBestShift: myEndlessShift,
+        endlessBestScore: myEndlessScore
       });
     }
 
-    return rankLeaderboardEntries(boardType, rows, myStars, myScore, {
-      isLocalFallback: true
+    const primaryMyScore =
+      normBoard === 'daily' ? myDailyScore : normBoard === 'endless' ? myEndlessScore : myScore;
+    return rankLeaderboardEntries(boardType, rows, myStars, primaryMyScore, {
+      isLocalFallback: true,
+      myShift: normBoard === 'endless' ? myEndlessShift : 0
     });
   } catch (_) {
     return rankLeaderboardEntries(boardType, getDefaultNpcRivals(), 0, 0, {
@@ -2316,11 +2480,11 @@ function isHigherSchemaCloudDoc(rawObj) {
   const topSv = hasOwn(rawObj, 'schemaVersion')
     ? toSafeFiniteNumber(getOwn(rawObj, 'schemaVersion'))
     : 0;
-  if (Number.isFinite(topSv) && Math.floor(topSv) > 2) return true;
+  if (Number.isFinite(topSv) && Math.floor(topSv) > 3) return true;
   const rawMeta = getOwn(rawObj, 'metaSave');
   if (isPlainRecord(rawMeta) && hasOwn(rawMeta, 'schemaVersion')) {
     const metaSv = toSafeFiniteNumber(getOwn(rawMeta, 'schemaVersion'));
-    if (Number.isFinite(metaSv) && Math.floor(metaSv) > 2) return true;
+    if (Number.isFinite(metaSv) && Math.floor(metaSv) > 3) return true;
   }
   return false;
 }
@@ -2376,7 +2540,7 @@ function runBrowserMockCloudInner(data = {}) {
       freshMeta.playerProfile = { ...freshProf };
       freshMeta.updatedAt = now;
       doc = {
-        schemaVersion: 2,
+        schemaVersion: 3,
         openidSuffix,
         profile: freshProf,
         totalStars: 0,
@@ -2494,6 +2658,7 @@ function runBrowserMockCloudInner(data = {}) {
       const mergedScores = {};
       const mergedStars = {};
       const mergedFailStreaks = {};
+      const mergedGoalsDone = {};
       for (let i = 0; i < VALID_LEVEL_IDS.length; i++) {
         const id = VALID_LEVEL_IDS[i];
         const baseSc = hasOwn(baseMeta.levelBestScores, id) ? baseMeta.levelBestScores[id] : 0;
@@ -2525,6 +2690,12 @@ function runBrowserMockCloudInner(data = {}) {
                     : 0
                 );
           if (fs > 0) mergedFailStreaks[id] = fs;
+        }
+        if (
+          (isPlainRecord(baseMeta.levelGoalsDone) && Boolean(getOwn(baseMeta.levelGoalsDone, id))) ||
+          (isPlainRecord(clientMeta.levelGoalsDone) && Boolean(getOwn(clientMeta.levelGoalsDone, id)))
+        ) {
+          mergedGoalsDone[id] = true;
         }
       }
 
@@ -2583,13 +2754,15 @@ function runBrowserMockCloudInner(data = {}) {
         ice_tile: Boolean(baseMeta.seenTutorials.ice_tile || clientMeta.seenTutorials.ice_tile)
       };
 
+      const v3Combined = SaveSync.mergeSaveData(baseMeta, clientMeta);
+
       const migratedFromV1GiftPending =
         clientUntouched && !serverUntouched
           ? Boolean(baseMeta.migratedFromV1GiftPending)
           : Boolean(clientMeta.migratedFromV1GiftPending);
 
       mergedMeta = {
-        schemaVersion: 2,
+        schemaVersion: 3,
         bgmTrack: latest.bgmTrack,
         sfxEnabled: latest.sfxEnabled,
         bankStardust: 0,
@@ -2608,6 +2781,7 @@ function runBrowserMockCloudInner(data = {}) {
         levelStars: mergedStars,
         levelBestScores: mergedScores,
         levelFailStreaks: mergedFailStreaks,
+        levelGoalsDone: mergedGoalsDone,
         highestUnlockedLevel: SaveSync.computeHighestUnlockedLevel(mergedStars),
         catcakeLevels,
         deviceUpgrades,
@@ -2615,7 +2789,11 @@ function runBrowserMockCloudInner(data = {}) {
         unlockedPatrons,
         equippedTheme,
         unlockedThemes,
+        researchUnlocks: v3Combined.researchUnlocks,
+        modeStats: v3Combined.modeStats,
         seenTutorials,
+        seenTips: v3Combined.seenTips,
+        settings: latest.settings || v3Combined.settings,
         playerProfile: clientMeta.playerProfile,
         lifetimeStats: {
           runsPlayed: Math.max(
@@ -2764,7 +2942,7 @@ function runBrowserMockCloudInner(data = {}) {
 
     const nextRev = prevRev + 1;
     doc = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       openidSuffix,
       profile: mergedProf,
       totalStars,
@@ -2857,7 +3035,7 @@ function runBrowserMockCloudInner(data = {}) {
     baseMeta.updatedAt = now;
     const nextRev = doc ? doc.revision + 1 : 1;
     doc = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       openidSuffix,
       profile: updatedProf,
       totalStars: doc ? doc.totalStars : 0,
@@ -2974,7 +3152,29 @@ function runBrowserMockCloudInner(data = {}) {
       rows.push(copyR);
     }
 
-    if (!callerDisqualified && (myStars > 0 || myScore > 0)) {
+    const docModeStats = doc && doc.metaSave && isPlainRecord(doc.metaSave.modeStats) ? doc.metaSave.modeStats : {};
+    const myDailyScore =
+      doc && !callerDisqualified && docModeStats.daily
+        ? clampSafeInt(docModeStats.daily.bestScore, 0, 150000, 0)
+        : 0;
+    const myEndlessShift =
+      doc && !callerDisqualified && docModeStats.endless
+        ? clampSafeInt(docModeStats.endless.bestShift, 0, 99, 0)
+        : 0;
+    const myEndlessScore =
+      doc && !callerDisqualified && docModeStats.endless
+        ? clampSafeInt(docModeStats.endless.bestScore, 0, 6000000, 0)
+        : 0;
+
+    const normBoard = normalizeBoardType(rawBoard);
+    const hasMyMetric =
+      normBoard === 'daily'
+        ? myDailyScore > 0
+        : normBoard === 'endless'
+        ? myEndlessShift > 0 && myEndlessScore > 0
+        : myStars > 0 || myScore > 0;
+
+    if (!callerDisqualified && hasMyMetric) {
       const prof = doc
         ? sanitizeCloudProfile(doc.profile, openidSuffix, doc.metaSave.selectedPatron)
         : sanitizeCloudProfile(null, openidSuffix, 'mikan');
@@ -2987,13 +3187,19 @@ function runBrowserMockCloudInner(data = {}) {
         avatarUrl: prof.avatarUrl,
         avatarPreset: prof.avatarPreset,
         totalStars: myStars,
-        totalCumulativeScore: myScore
+        totalCumulativeScore: myScore,
+        dailyBestScore: myDailyScore,
+        endlessBestShift: myEndlessShift,
+        endlessBestScore: myEndlessScore
       });
     }
 
+    const primaryMyScore =
+      normBoard === 'daily' ? myDailyScore : normBoard === 'endless' ? myEndlessScore : myScore;
     return Promise.resolve(
-      rankLeaderboardEntries(rawBoard, rows, myStars, myScore, {
-        isMockCloud: true
+      rankLeaderboardEntries(rawBoard, rows, myStars, primaryMyScore, {
+        isMockCloud: true,
+        myShift: normBoard === 'endless' ? myEndlessShift : 0
       })
     );
   }

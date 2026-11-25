@@ -14,6 +14,8 @@ const {
   BOARD_THEMES
 } = require('./constants');
 const UI = require('./ui_draw');
+const CustomerTraits = require('./customer_traits');
+const BalanceConfig = require('./balance_config');
 
 const OWN = Object.prototype.hasOwnProperty;
 
@@ -1202,6 +1204,29 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
             UI.drawCheckmarkBadge(ctx, icx + itemS * 0.31, itemCy + itemS * 0.28, Math.max(5.5, itemS * 0.21), {
               sprites
             });
+          }
+        }
+      }
+
+      // v0.12 M3: Circular customer trait tag badge at top-left of speech bubble
+      if (BalanceConfig.isFeatureOn('traits')) {
+        const trait = CustomerTraits.getCustomerTrait(custId);
+        if (trait && trait.shortTag) {
+          const bx = bubbleX + 8;
+          const by = bubbleY + 2;
+          const br = 8.5;
+          ctx.save();
+          try {
+            ctx.beginPath();
+            ctx.arc(bx, by, br, 0, Math.PI * 2);
+            ctx.fillStyle = trait.badgeColor || '#E89B4A';
+            ctx.fill();
+            ctx.lineWidth = 1.6;
+            ctx.strokeStyle = '#4A2B1A';
+            ctx.stroke();
+            UI.drawFitText(ctx, trait.shortTag, bx, by + 0.4, br * 1.6, 9.6, 8.0, 900, '#FFFDF5', 'center', 'middle');
+          } finally {
+            try { ctx.restore(); } catch (_) {}
           }
         }
       }

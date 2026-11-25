@@ -40,7 +40,8 @@ const LEGACY_FORMULA_FEATURES = Object.freeze({
   doughTemp: false,
   feverV2: false,
   goals: false,
-  events: false
+  events: false,
+  traits: false
 });
 
 // ---------------------------------------------------------------------------
@@ -3588,7 +3589,7 @@ const F11_TESTS = [
     id: 'T1-F11-01',
     tier: 1,
     features: ['F11'],
-    title: 'Fresh boot initializes canonical schemaVersion: 2 save with 30 stardust on ?cloud=0',
+    title: 'Fresh boot initializes canonical schemaVersion: 3 save with 15 stardust on ?cloud=0',
     freshReload: true,
     query: '?safeTop=47&safeBottom=34&capsule=1&cloud=0',
     run: async (ctx) => {
@@ -3599,7 +3600,7 @@ const F11_TESTS = [
       await ctx.navigate('?safeTop=47&safeBottom=34&capsule=1&cloud=0');
 
       const save = await ctx.getSaveData();
-      ctx.assertEq(save.schemaVersion, 2, 'schemaVersion === 2');
+      ctx.assertEq(save.schemaVersion, 3, 'schemaVersion === 3');
       ctx.assertEq(save.bankStardust, 15, 'Fresh bankStardust === 15');
       ctx.assertEq(save.totalEarnedStardust, 15, 'Fresh totalEarnedStardust === 15');
       ctx.assertEq(save.highestUnlockedLevel, '1-1', 'highestUnlockedLevel === 1-1');
@@ -3623,7 +3624,7 @@ const F11_TESTS = [
     id: 'T1-F11-02',
     tier: 1,
     features: ['F11'],
-    title: 'Exact UT-S01 v1->v2 lossless migration yields 230 bankStardust and 390 totalEarnedStardust',
+    title: 'Exact UT-S01 v1->v3 lossless migration yields 230 bankStardust and 430 totalEarnedStardust',
     query: '?safeTop=47&safeBottom=34&capsule=1&cloud=0',
     run: async (ctx) => {
       await ctx.eval(() => {
@@ -3640,7 +3641,7 @@ const F11_TESTS = [
       await ctx.navigate('?safeTop=47&safeBottom=34&capsule=1&cloud=0');
 
       const save = await ctx.getSaveData();
-      ctx.assertEq(save.schemaVersion, 2, 'Migrated schemaVersion === 2');
+      ctx.assertEq(save.schemaVersion, 3, 'Migrated schemaVersion === 3');
       ctx.assert(save.unlockedPatrons.includes('luna'), 'luna retained in unlockedPatrons');
       ctx.assert(save.unlockedThemes.includes('sakura'), 'sakura retained in unlockedThemes');
       ctx.assertEq(save.totalEarnedStardust, 430, 'UT-S01 totalEarnedStardust === 430 (320 + 40 luna diff + 20 sakura diff + 50 gift)');
@@ -3669,7 +3670,7 @@ const F11_TESTS = [
       await ctx.navigate('?safeTop=47&safeBottom=34&capsule=1&cloud=0');
 
       const save = await ctx.getSaveData();
-      ctx.assertEq(save.schemaVersion, 2, 'Migrated schemaVersion === 2');
+      ctx.assertEq(save.schemaVersion, 3, 'Migrated schemaVersion === 3');
       ctx.assert(
         save.unlockedPatrons.includes('mikan') &&
           save.unlockedPatrons.includes('luna') &&

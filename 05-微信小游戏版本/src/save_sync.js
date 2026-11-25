@@ -1,6 +1,6 @@
 /**
- * Save Data Schema v2, Lossless v1->v2 Migration & Multi-Device Cloud Merge Engine
- * Shared by client `game_app.js` and `platform.js` for Hoshi Kissa Bakery v2.0.
+ * Save Data Schema v3, Lossless v1->v2->v3 Migration & Multi-Device Cloud Merge Engine
+ * Shared by client `game_app.js` and `platform.js` for Hoshi Kissa Bakery v2.0+.
  */
 'use strict';
 
@@ -12,7 +12,9 @@ const {
   PATRON_COSTS,
   normalizePatronId,
   THEME_COSTS,
-  SHOP_TOTAL_CAP
+  SHOP_TOTAL_CAP,
+  RESEARCH_COSTS,
+  RESEARCH_TOTAL_CAP
 } = require('./constants');
 
 const {
@@ -23,11 +25,15 @@ const {
   isLevelUnlocked
 } = require('./levels_data');
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const MAX_OFFLINE_STARDUST_DELTA = 1500;
 const MAX_SAFE_STARDUST = 9999999;
-const MAX_CONSUMABLE_SPENT_STARDUST = MAX_SAFE_STARDUST - SHOP_TOTAL_CAP;
+const MAX_CONSUMABLE_SPENT_STARDUST = MAX_SAFE_STARDUST - SHOP_TOTAL_CAP - RESEARCH_TOTAL_CAP;
 const MAX_TOTAL_CUMULATIVE_SCORE = 3450000;
+const MAX_DAILY_SCORE = 150000;
+const MAX_ENDLESS_SHIFT = 99;
+const MAX_ENDLESS_SCORE = 6000000;
+const MAX_ENDLESS_DAILY_DUST = 60;
 const MAX_TIMESTAMP_MS = 9999999999999;
 
 const LEGACY_RUN_STORAGE_KEYS = [
@@ -137,6 +143,149 @@ function clampSafeInt(val, min, max, fallback = min) {
   if (floored < min) return min === 0 ? 0 : min;
   if (floored > max) return max === 0 ? 0 : max;
   return floored === 0 ? 0 : floored;
+}
+
+function sanitizeDateKey(val) {
+  if (typeof val !== 'string') return '';
+  const cleaned = val.trim().replace(/-/g, '');
+  return /^\d{8}$/.test(cleaned) ? cleaned : '';
+}
+
+function maxDateKey(a, b) {
+  const ka = sanitizeDateKey(a);
+  const kb = sanitizeDateKey(b);
+  if (!ka) return kb;
+  if (!kb) return ka;
+  return ka >= kb ? ka : kb;
+}
+
+function createDefaultModeStats() {
+  return {
+    daily: {
+      lastDate: '',
+      bestScore: 0,
+      claimedDate: '',
+      claimed3Date: ''
+    },
+    endless: {
+      bestShift: 0,
+      bestScore: 0,
+      runs: 0,
+      dailyDustDate: '',
+      dailyDust: 0
+    }
+  };
+}
+
+function sanitizeModeStats(raw) {
+  const out = createDefaultModeStats();
+  if (!isPlainRecord(raw)) return out;
+  const rawDaily = getOwn(raw, 'daily');
+  if (isPlainRecord(rawDaily)) {
+    out.daily.lastDate = sanitizeDateKey(getOwn(rawDaily, 'lastDate'));
+    out.daily.bestScore = clampSafeInt(getOwn(rawDaily, 'bestScore'), 0, MAX_DAILY_SCORE, 0);
+    out.daily.claimedDate = sanitizeDateKey(getOwn(rawDaily, 'claimedDate'));
+    out.daily.claimed3Date = sanitizeDateKey(getOwn(rawDaily, 'claimed3Date'));
+  }
+  const rawEndless = getOwn(raw, 'endless');
+  if (isPlainRecord(rawEndless)) {
+    out.endless.bestShift = clampSafeInt(getOwn(rawEndless, 'bestShift'), 0, MAX_ENDLESS_SHIFT, 0);
+    out.endless.bestScore = clampSafeInt(getOwn(rawEndless, 'bestScore'), 0, MAX_ENDLESS_SCORE, 0);
+    out.endless.runs = clampSafeInt(getOwn(rawEndless, 'runs'), 0, 999999, 0);
+    out.endless.dailyDustDate = sanitizeDateKey(getOwn(rawEndless, 'dailyDustDate'));
+    out.endless.dailyDust = clampSafeInt(getOwn(rawEndless, 'dailyDust'), 0, MAX_ENDLESS_DAILY_DUST, 0);
+  }
+  return out;
+}
+
+function mergeModeStats(aRaw, bRaw) {
+  const a = sanitizeModeStats(aRaw);
+  const b = sanitizeModeStats(bRaw);
+  const dLast = maxDateKey(a.daily.lastDate, b.daily.lastDate);
+  let dBest = 0;
+  if (a.daily.lastDate === b.daily.lastDate) {
+    dBest = Math.max(a.daily.bestScore, b.daily.bestScore);
+  } else if (a.daily.lastDate === dLast) {
+    dBest = a.daily.bestScore;
+  } else {
+    dBest = b.daily.bestScore;
+  }
+  const eDustDate = maxDateKey(a.endless.dailyDustDate, b.endless.dailyDustDate);
+  let eDust = 0;
+  if (a.endless.dailyDustDate === b.endless.dailyDustDate) {
+    eDust = Math.max(a.endless.dailyDust, b.endless.dailyDust);
+  } else if (a.endless.dailyDustDate === eDustDate) {
+    eDust = a.endless.dailyDust;
+  } else {
+    eDust = b.endless.dailyDust;
+  }
+  return {
+    daily: {
+      lastDate: dLast,
+      bestScore: dBest,
+      claimedDate: maxDateKey(a.daily.claimedDate, b.daily.claimedDate),
+      claimed3Date: maxDateKey(a.daily.claimed3Date, b.daily.claimed3Date)
+    },
+    endless: {
+      bestShift: Math.max(a.endless.bestShift, b.endless.bestShift),
+      bestScore: Math.max(a.endless.bestScore, b.endless.bestScore),
+      runs: Math.max(a.endless.runs, b.endless.runs),
+      dailyDustDate: eDustDate,
+      dailyDust: eDust
+    }
+  };
+}
+
+function sanitizeResearchUnlocks(raw) {
+  const out = {};
+  if (!isPlainRecord(raw)) return out;
+  const keys = Object.keys(RESEARCH_COSTS);
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i];
+    if (hasOwn(raw, k) && Boolean(getOwn(raw, k))) {
+      out[k] = true;
+    }
+  }
+  return out;
+}
+
+function sanitizeLevelGoalsDone(raw) {
+  const out = {};
+  if (!isPlainRecord(raw)) return out;
+  for (let i = 0; i < VALID_LEVEL_IDS.length; i++) {
+    const id = VALID_LEVEL_IDS[i];
+    if (hasOwn(raw, id) && Boolean(getOwn(raw, id))) {
+      out[id] = true;
+    }
+  }
+  return out;
+}
+
+function sanitizeSeenTips(raw) {
+  const out = {};
+  if (!isPlainRecord(raw)) return out;
+  const keys = Object.keys(raw);
+  let kept = 0;
+  for (let i = 0; i < keys.length && kept < 32; i++) {
+    const k = keys[i];
+    if (/^[a-z0-9_]{1,32}$/.test(k) && Boolean(getOwn(raw, k))) {
+      out[k] = true;
+      kept += 1;
+    }
+  }
+  return out;
+}
+
+function sanitizeSettings(raw) {
+  const src = isPlainRecord(raw) ? raw : {};
+  const rawVib = getOwn(src, 'vibrateEnabled');
+  const rawLow = getOwn(src, 'lowPowerMode');
+  const rawCb = getOwn(src, 'colorblindMarks');
+  return {
+    vibrateEnabled: typeof rawVib === 'boolean' ? rawVib : true,
+    lowPowerMode: typeof rawLow === 'boolean' ? rawLow : false,
+    colorblindMarks: typeof rawCb === 'boolean' ? rawCb : false
+  };
 }
 
 function canonicalizeKnownPatronId(rawId) {
@@ -250,6 +399,7 @@ function createDefaultSave() {
     levelStars: {},
     levelBestScores: {},
     levelFailStreaks: {},
+    levelGoalsDone: {},
     highestUnlockedLevel: '1-1',
     catcakeLevels: {
       '1': 0,
@@ -270,12 +420,16 @@ function createDefaultSave() {
     unlockedPatrons: ['mikan'],
     equippedTheme: 'amber',
     unlockedThemes: ['amber'],
+    researchUnlocks: {},
+    modeStats: createDefaultModeStats(),
     seenTutorials: {
       intro_slide: false,
       tray_trash: false,
       flavor_tile: false,
       ice_tile: false
     },
+    seenTips: {},
+    settings: sanitizeSettings(null),
     playerProfile: {
       nickName: '',
       avatarUrl: '',
@@ -382,6 +536,17 @@ function computeSpentStardust(save) {
     }
   }
 
+  const rawResearch = getOwn(save, 'researchUnlocks');
+  if (isPlainRecord(rawResearch)) {
+    const rKeys = Object.keys(RESEARCH_COSTS);
+    for (let i = 0; i < rKeys.length; i++) {
+      const rk = rKeys[i];
+      if (hasOwn(rawResearch, rk) && Boolean(getOwn(rawResearch, rk))) {
+        spent += RESEARCH_COSTS[rk] || 0;
+      }
+    }
+  }
+
   if (hasOwn(save, 'consumableSpentStardust')) {
     spent += clampSafeInt(
       getOwn(save, 'consumableSpentStardust'),
@@ -408,7 +573,7 @@ function sanitizeLevelFailStreaks(rawStreaks) {
   return out;
 }
 
-function normalizeV2Save(raw) {
+function normalizeV3Save(raw) {
   if (!isPlainRecord(raw)) return createDefaultSave();
 
   const higherSchema = isHigherSchemaRecord(raw);
@@ -456,6 +621,7 @@ function normalizeV2Save(raw) {
   }
 
   const levelFailStreaks = sanitizeLevelFailStreaks(getOwn(raw, 'levelFailStreaks'));
+  const levelGoalsDone = sanitizeLevelGoalsDone(getOwn(raw, 'levelGoalsDone'));
   const highestUnlockedLevel = computeHighestUnlockedLevel(levelStars);
 
   const rawCc = getOwn(raw, 'catcakeLevels');
@@ -479,6 +645,9 @@ function normalizeV2Save(raw) {
     dev_tools: inDev && hasOwn(inDev, 'dev_tools') ? clampSafeInt(getOwn(inDev, 'dev_tools'), 0, 3, 0) : 0
   };
 
+  const researchUnlocks = sanitizeResearchUnlocks(getOwn(raw, 'researchUnlocks'));
+  const modeStats = sanitizeModeStats(getOwn(raw, 'modeStats'));
+
   const rawTut = getOwn(raw, 'seenTutorials');
   const inTut = isPlainRecord(rawTut) ? rawTut : null;
   const seenTutorials = {
@@ -487,6 +656,8 @@ function normalizeV2Save(raw) {
     flavor_tile: Boolean(inTut && getOwn(inTut, 'flavor_tile')),
     ice_tile: Boolean(inTut && getOwn(inTut, 'ice_tile'))
   };
+  const seenTips = sanitizeSeenTips(getOwn(raw, 'seenTips'));
+  const settings = sanitizeSettings(getOwn(raw, 'settings'));
 
   const rawStats = getOwn(raw, 'lifetimeStats');
   const stRaw = isPlainRecord(rawStats) ? rawStats : {};
@@ -521,6 +692,7 @@ function normalizeV2Save(raw) {
     levelStars,
     levelBestScores,
     levelFailStreaks,
+    levelGoalsDone,
     highestUnlockedLevel,
     catcakeLevels,
     deviceUpgrades,
@@ -528,7 +700,11 @@ function normalizeV2Save(raw) {
     unlockedPatrons,
     equippedTheme,
     unlockedThemes,
+    researchUnlocks,
+    modeStats,
     seenTutorials,
+    seenTips,
+    settings,
     playerProfile: normalizeProfile(getOwn(raw, 'playerProfile'), selectedPatron),
     lifetimeStats: {
       runsPlayed: hasOwn(stRaw, 'runsPlayed') ? clampSafeInt(getOwn(stRaw, 'runsPlayed'), 0, 999999, 0) : 0,
@@ -574,14 +750,31 @@ function normalizeV2Save(raw) {
   return out;
 }
 
+const normalizeV2Save = normalizeV3Save;
+
+/**
+ * Lossless additive v2 -> v3 migration: preserves every v2 field verbatim and attaches
+ * default v3 fields (modeStats, researchUnlocks, levelGoalsDone, seenTips, settings).
+ */
+function migrateV2ToV3(parsed) {
+  if (!isPlainRecord(parsed)) {
+    return createDefaultSave();
+  }
+  const sv = hasOwn(parsed, 'schemaVersion') ? toSafeNum(getOwn(parsed, 'schemaVersion')) : 0;
+  if (!Number.isFinite(sv) || sv < 2) {
+    return migrateV1ToV2(parsed);
+  }
+  return normalizeV3Save(parsed);
+}
+
 function migrateV1ToV2(parsed) {
   if (!isPlainRecord(parsed)) {
     return createDefaultSave();
   }
 
   const sv = hasOwn(parsed, 'schemaVersion') ? toSafeNum(getOwn(parsed, 'schemaVersion')) : 0;
-  if (Number.isFinite(sv) && sv >= SCHEMA_VERSION) {
-    return normalizeV2Save(parsed);
+  if (Number.isFinite(sv) && sv >= 2) {
+    return normalizeV3Save(parsed);
   }
 
   const rawUnlockedPatrons = getOwn(parsed, 'unlockedPatrons');
@@ -734,10 +927,13 @@ function normalizeSaveData(raw) {
     return createDefaultSave();
   }
   const sv = hasOwn(raw, 'schemaVersion') ? toSafeNum(getOwn(raw, 'schemaVersion')) : 0;
-  if (!Number.isFinite(sv) || sv < SCHEMA_VERSION) {
+  if (!Number.isFinite(sv) || sv < 2) {
     return migrateV1ToV2(raw);
   }
-  return normalizeV2Save(raw);
+  if (sv < SCHEMA_VERSION) {
+    return migrateV2ToV3(raw);
+  }
+  return normalizeV3Save(raw);
 }
 
 function isPlaceholderNickName(nick) {
@@ -833,6 +1029,8 @@ function isDefaultPlaceholderProfile(prof) {
 }
 
 function isUntouchedDefaultSave(s) {
+  const ms = s && isPlainRecord(s.modeStats) ? s.modeStats : null;
+  const st = s && isPlainRecord(s.settings) ? s.settings : null;
   return Boolean(
     s &&
       s.totalEarnedStardust === DEFAULT_INITIAL_STARDUST &&
@@ -843,6 +1041,12 @@ function isUntouchedDefaultSave(s) {
       s.lifetimeStats.totalStars === 0 &&
       s.lifetimeStats.totalCumulativeScore === 0 &&
       (!isPlainRecord(s.levelFailStreaks) || Object.keys(s.levelFailStreaks).length === 0) &&
+      (!isPlainRecord(s.levelGoalsDone) || Object.keys(s.levelGoalsDone).length === 0) &&
+      (!isPlainRecord(s.researchUnlocks) || Object.keys(s.researchUnlocks).length === 0) &&
+      (!ms ||
+        ((!ms.daily || ms.daily.bestScore === 0) &&
+          (!ms.endless || (ms.endless.runs === 0 && ms.endless.bestShift === 0 && ms.endless.bestScore === 0)))) &&
+      (!st || (st.vibrateEnabled === true && !st.lowPowerMode && !st.colorblindMarks)) &&
       !s.migratedFromV1GiftPending &&
       s.selectedPatron === 'mikan' &&
       s.equippedTheme === 'amber' &&
@@ -892,6 +1096,7 @@ function mergeSaveData(localRaw, cloudRaw, cloudProfile = null) {
   const levelStars = {};
   const levelBestScores = {};
   const levelFailStreaks = {};
+  const levelGoalsDone = {};
   for (let i = 0; i < VALID_LEVEL_IDS.length; i++) {
     const id = VALID_LEVEL_IDS[i];
     const s = Math.max(
@@ -905,6 +1110,10 @@ function mergeSaveData(localRaw, cloudRaw, cloudProfile = null) {
       hasOwn(cloud.levelBestScores, id) ? cloud.levelBestScores[id] : 0
     );
     if (sc > 0) levelBestScores[id] = sc;
+
+    if ((local.levelGoalsDone && local.levelGoalsDone[id]) || (cloud.levelGoalsDone && cloud.levelGoalsDone[id])) {
+      levelGoalsDone[id] = true;
+    }
 
     if (s === 0) {
       const fs = hasOwn(latest.levelFailStreaks, id)
@@ -950,11 +1159,22 @@ function mergeSaveData(localRaw, cloudRaw, cloudProfile = null) {
     ? latest.equippedTheme
     : 'amber';
 
+  const researchUnlocks = sanitizeResearchUnlocks({
+    ...(local.researchUnlocks || {}),
+    ...(cloud.researchUnlocks || {})
+  });
+  const modeStats = mergeModeStats(local.modeStats, cloud.modeStats);
+
   const seenTutorials = {};
   for (let i = 0; i < TUTORIAL_KEYS.length; i++) {
     const k = TUTORIAL_KEYS[i];
     seenTutorials[k] = Boolean(local.seenTutorials[k] || cloud.seenTutorials[k]);
   }
+  const seenTips = sanitizeSeenTips({
+    ...(local.seenTips || {}),
+    ...(cloud.seenTips || {})
+  });
+  const settings = sanitizeSettings(latest.settings);
 
   let migratedFromV1GiftPending;
   if (cloudUntouched && !localUntouched) {
@@ -996,6 +1216,7 @@ function mergeSaveData(localRaw, cloudRaw, cloudProfile = null) {
     levelStars,
     levelBestScores,
     levelFailStreaks,
+    levelGoalsDone,
     highestUnlockedLevel,
     catcakeLevels,
     deviceUpgrades,
@@ -1003,7 +1224,11 @@ function mergeSaveData(localRaw, cloudRaw, cloudProfile = null) {
     unlockedPatrons,
     equippedTheme,
     unlockedThemes,
+    researchUnlocks,
+    modeStats,
     seenTutorials,
+    seenTips,
+    settings,
     playerProfile: mergedProfile,
     lifetimeStats: {
       runsPlayed: Math.max(local.lifetimeStats.runsPlayed, cloud.lifetimeStats.runsPlayed),
@@ -1121,12 +1346,12 @@ function loadLocalSave(platform) {
 
   const raw = readPlatformJSON(platform, STORAGE_KEY);
   const rawSv = isPlainRecord(raw) ? getOwn(raw, 'schemaVersion') : undefined;
-  const wasLegacyV1 =
+  const wasLegacy =
     isPlainRecord(raw) &&
     (!hasOwn(raw, 'schemaVersion') || !(toSafeNum(rawSv) >= SCHEMA_VERSION));
 
   const save = normalizeSaveData(raw);
-  if (wasLegacyV1) {
+  if (wasLegacy) {
     writePlatformJSON(platform, STORAGE_KEY, save);
   }
   return save;
@@ -1189,6 +1414,7 @@ function recordLevelSettlementToSave(
   const nextLevelStars = { ...base.levelStars };
   const nextLevelBestScores = { ...base.levelBestScores };
   const nextLevelFailStreaks = { ...(base.levelFailStreaks || {}) };
+  const nextLevelGoalsDone = { ...(base.levelGoalsDone || {}) };
 
   if (lvl) {
     const cap = getLevelScoreCap(lvl.id);
@@ -1222,6 +1448,9 @@ function recordLevelSettlementToSave(
 
     if (cleanStars >= 1) {
       delete nextLevelFailStreaks[lvl.id];
+      if (lvl.goal && lvl.goal.type && lvl.goal.type !== 'score') {
+        nextLevelGoalsDone[lvl.id] = true;
+      }
     } else {
       const prevStreak = hasOwn(nextLevelFailStreaks, lvl.id) ? nextLevelFailStreaks[lvl.id] : 0;
       nextLevelFailStreaks[lvl.id] = Math.min(999, prevStreak + 1);
@@ -1265,6 +1494,7 @@ function recordLevelSettlementToSave(
     levelStars: nextLevelStars,
     levelBestScores: nextLevelBestScores,
     levelFailStreaks: nextLevelFailStreaks,
+    levelGoalsDone: nextLevelGoalsDone,
     lifetimeStats: {
       runsPlayed: Math.min(999999, base.lifetimeStats.runsPlayed + runsDelta),
       ordersServed: Math.min(9999999, base.lifetimeStats.ordersServed + ordersDelta),
@@ -1277,18 +1507,20 @@ function recordLevelSettlementToSave(
     updatedAt: Date.now()
   };
 
-  return normalizeV2Save(candidate);
+  return normalizeV3Save(candidate);
 }
 
 module.exports = {
   SCHEMA_VERSION,
   SHOP_TOTAL_CAP,
+  RESEARCH_TOTAL_CAP,
   DEFAULT_INITIAL_STARDUST,
   MAX_OFFLINE_STARDUST_DELTA,
   LEGACY_RUN_STORAGE_KEYS,
   isHigherSchemaRecord,
   createDefaultSave,
   migrateV1ToV2,
+  migrateV2ToV3,
   computeSpentStardust,
   normalizeProfile,
   computeHighestUnlockedLevel,

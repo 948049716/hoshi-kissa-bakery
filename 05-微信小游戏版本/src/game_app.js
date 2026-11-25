@@ -23,6 +23,8 @@ const {
   TOOLS,
   BOARD_THEMES,
   THEME_COSTS,
+  RESEARCH_ITEMS,
+  RESEARCH_COSTS,
   ASSET_PATHS,
   V090_ASSET_LIST,
   TUTORIAL_STEPS,
@@ -53,6 +55,9 @@ const DoughTemp = require('./dough_temp');
 const LevelGoals = require('./level_goals');
 const LevelEvents = require('./level_events');
 const RunDiagnostics = require('./run_diagnostics');
+const CustomerTraits = require('./customer_traits');
+const PerksData = require('./perks_data');
+const RunModifiers = require('./run_modifiers');
 
 let previousAppCleanup = null;
 
@@ -584,6 +589,19 @@ function createApp() {
       }
       return false;
     }
+    if (tabId === 'research') {
+      const unlocked =
+        saveData.researchUnlocks && typeof saveData.researchUnlocks === 'object'
+          ? saveData.researchUnlocks
+          : {};
+      for (let i = 0; i < RESEARCH_ITEMS.length; i++) {
+        const item = RESEARCH_ITEMS[i];
+        if (!unlocked[item.id] && bank >= item.cost) {
+          return true;
+        }
+      }
+      return false;
+    }
     return false;
   };
 
@@ -594,11 +612,12 @@ function createApp() {
       app.hasAffordableShopTab('catcakes') ||
       app.hasAffordableShopTab('devices') ||
       app.hasAffordableShopTab('patrons') ||
-      app.hasAffordableShopTab('themes')
+      app.hasAffordableShopTab('themes') ||
+      app.hasAffordableShopTab('research')
     );
   };
 
-  // ==================== Cloud Sync & Dual Leaderboard ====================
+  // ==================== Cloud Sync & Multi-Board Leaderboard ====================
 
   function markHigherSchemaBlocked(showNotice = true) {
     saveData.higherSchemaDetected = true;
@@ -626,13 +645,21 @@ function createApp() {
     );
   }
 
+  function normalizeUiBoardType(raw) {
+    if (raw === 'score' || raw === 'totalScore') return 'score';
+    if (raw === 'daily') return 'daily';
+    if (raw === 'endless') return 'endless';
+    if (raw === 'friends') return 'friends';
+    return 'stars';
+  }
+
   function fetchLeaderboard(boardType) {
-    if (boardType === 'friends') {
+    const cleanType = normalizeUiBoardType(boardType);
+    if (cleanType === 'friends') {
       app.leaderboardBoardType = 'friends';
       app.leaderboardLoading = false;
       return;
     }
-    const cleanType = boardType === 'score' ? 'score' : 'stars';
     app.leaderboardBoardType = cleanType;
     refreshOfflineLeaderboardFallback();
 
@@ -643,11 +670,15 @@ function createApp() {
 
     const reqEpoch = saveEpoch;
     app.leaderboardLoading = true;
+    const reqPayload = {
+      action: 'leaderboard',
+      boardType: cleanType
+    };
+    if (cleanType === 'daily') {
+      reqPayload.dateKey = RunModifiers.getDailyDateKeyUTC8();
+    }
     platform
-      .callCloudFunction(CloudConfig.CLOUD_FUNCTION_NAME, {
-        action: 'leaderboard',
-        boardType: cleanType
-      })
+      .callCloudFunction(CloudConfig.CLOUD_FUNCTION_NAME, reqPayload)
       .then((res) => {
         if (destroyed || reqEpoch !== saveEpoch) return;
         app.leaderboardLoading = false;
@@ -655,8 +686,10 @@ function createApp() {
           app.leaderboardData = {
             ok: true,
             boardType: cleanType,
+            dateKey: res.dateKey || reqPayload.dateKey || '',
             list: res.list,
             myRank: res.myRank || null,
+            myShift: res.myShift || 0,
             totalPlayers: res.totalPlayers || res.list.length
           };
           if (cloudState.status === 'idle') cloudState.status = 'synced';
@@ -971,7 +1004,9 @@ function createApp() {
 
   app.openShop = function openShop(tab = 'catcakes') {
     const validTab =
-      tab === 'devices' || tab === 'patrons' || tab === 'themes' ? tab : 'catcakes';
+      tab === 'devices' || tab === 'patrons' || tab === 'themes' || tab === 'research'
+        ? tab
+        : 'catcakes';
     app.activeShopTab = validTab;
     app.activeModal = 'shop';
     app.modalScrollY = 0;
@@ -999,7 +1034,13 @@ function createApp() {
   };
 
   app.setShopTab = function setShopTab(tabId) {
-    if (tabId === 'catcakes' || tabId === 'devices' || tabId === 'patrons' || tabId === 'themes') {
+    if (
+      tabId === 'catcakes' ||
+      tabId === 'devices' ||
+      tabId === 'patrons' ||
+      tabId === 'themes' ||
+      tabId === 'research'
+    ) {
       if (app.activeShopTab !== tabId) {
         app.uiAnim.tabSwitchTimer = 0;
       }
@@ -1139,8 +1180,32 @@ function createApp() {
     return true;
   };
 
+  app.buyResearchItem = function buyResearchItem(itemId) {
+    const item = RESEARCH_ITEMS.find((it) => it.id === itemId);
+    if (!item) return false;
+    if (!saveData.researchUnlocks || typeof saveData.researchUnlocks !== 'object') {
+      saveData.researchUnlocks = {};
+    }
+    if (saveData.researchUnlocks[item.id]) {
+      showToast(`${item.name} 已解锁`, { icon: 'icon_check' });
+      return false;
+    }
+    const cost = hasOwn(RESEARCH_COSTS, item.id) ? RESEARCH_COSTS[item.id] : item.cost || 0;
+    if ((saveData.bankStardust || 0) < cost) {
+      audio.playGridBlocked();
+      showToast('星尘不足，暂时无法解锁该茶研成果', { icon: 'icon_stardust', tone: 'warn' });
+      return false;
+    }
+    saveData.researchUnlocks[item.id] = true;
+    persistSave(true);
+    audio.playShopBuy();
+    showToast(`茶研所解锁：${item.name}！`, { icon: 'icon_stardust', tone: 'event', level: 'major' });
+    return true;
+  };
+
   app.openCompendium = function openCompendium(tab = 'catcakes') {
-    app.activeCompendiumTab = tab === 'recipes' ? 'recipes' : 'catcakes';
+    app.activeCompendiumTab =
+      tab === 'recipes' || tab === 'customers' ? tab : 'catcakes';
     app.activeModal = 'compendium';
     app.modalScrollY = 0;
     app.uiAnim.modalOpenTimer = 0;
@@ -1150,7 +1215,7 @@ function createApp() {
   };
 
   app.setCompendiumTab = function setCompendiumTab(tab) {
-    const next = tab === 'recipes' ? 'recipes' : 'catcakes';
+    const next = tab === 'recipes' || tab === 'customers' ? tab : 'catcakes';
     if (app.activeCompendiumTab !== next) {
       app.uiAnim.tabSwitchTimer = 0;
     }
@@ -1167,7 +1232,7 @@ function createApp() {
   };
 
   app.openLeaderboard = function openLeaderboard(boardType = 'stars') {
-    const bt = boardType === 'score' ? 'score' : boardType === 'friends' ? 'friends' : 'stars';
+    const bt = normalizeUiBoardType(boardType);
     app.leaderboardBoardType = bt;
     app.activeModal = 'leaderboard';
     app.modalScrollY = 0;
@@ -1179,13 +1244,152 @@ function createApp() {
   };
 
   app.setLeaderboardBoardType = function setLeaderboardBoardType(boardType) {
-    const bt = boardType === 'score' ? 'score' : boardType === 'friends' ? 'friends' : 'stars';
+    const bt = normalizeUiBoardType(boardType);
     if (app.leaderboardBoardType !== bt) {
       app.modalScrollY = 0;
       app.uiAnim.tabSwitchTimer = 0;
       audio.playPatronSelect();
     }
     fetchLeaderboard(bt);
+  };
+
+  app.isDailyUnlocked = function isDailyUnlocked() {
+    const req = (BalanceConfig.DAILY && BalanceConfig.DAILY.unlockLevel) || '1-5';
+    return Boolean(saveData.levelStars && Number(saveData.levelStars[req] || 0) >= 1);
+  };
+
+  app.isEndlessUnlocked = function isEndlessUnlocked() {
+    const req = (BalanceConfig.ENDLESS && BalanceConfig.ENDLESS.unlockLevel) || '1-10';
+    return Boolean(saveData.levelStars && Number(saveData.levelStars[req] || 0) >= 1);
+  };
+
+  app.openChallenge = function openChallenge() {
+    app.activeModal = 'challenge';
+    app.modalScrollY = 0;
+    app.uiAnim.modalOpenTimer = 0;
+    app.uiAnim.tabSwitchTimer = 1;
+    audio.playPatronSelect();
+    syncAudioMood();
+    return true;
+  };
+
+  app.startDailySpecial = function startDailySpecial(opts = {}) {
+    if (!BalanceConfig.isFeatureOn('daily')) {
+      showToast('每天特调暂未开启', { icon: 'icon_warn', tone: 'warn' });
+      return false;
+    }
+    if (!(opts && opts.forceUnlock) && !app.isDailyUnlocked()) {
+      audio.playGridBlocked();
+      showToast(`通关第 ${BalanceConfig.DAILY.unlockLevel || '1-5'} 关后解锁每天特调`, {
+        icon: 'icon_warn',
+        tone: 'warn'
+      });
+      return false;
+    }
+    app.endlessRun = null;
+    const cfg = RunModifiers.buildDailyChallengeConfig(opts && opts.dateKey);
+    const started = startLevelInternal(cfg.id, {
+      ...(opts || {}),
+      customLevelCfg: cfg,
+      seed: cfg.seed,
+      skipTutorial: true,
+      modeOverrides: {
+        ...((opts && opts.modeOverrides) || {}),
+        mode: 'daily',
+        perkIds: cfg.perkIds.slice()
+      }
+    });
+    if (started && BalanceConfig.TELEMETRY.enabled && typeof platform.reportEvent === 'function') {
+      platform.reportEvent(BalanceConfig.TELEMETRY.eventNames.modeStart, {
+        mode: 'daily',
+        date_key: cfg.dateKey,
+        perks: cfg.perkIds.join(',')
+      });
+    }
+    return started;
+  };
+
+  app.startEndlessMode = function startEndlessMode(opts = {}) {
+    if (!BalanceConfig.isFeatureOn('endless')) {
+      showToast('无限营业暂未开启', { icon: 'icon_warn', tone: 'warn' });
+      return false;
+    }
+    if (!(opts && opts.forceUnlock) && !app.isEndlessUnlocked()) {
+      audio.playGridBlocked();
+      showToast(`通关第 ${BalanceConfig.ENDLESS.unlockLevel || '1-10'} 关后解锁无限营业`, {
+        icon: 'icon_warn',
+        tone: 'warn'
+      });
+      return false;
+    }
+    const seedBase =
+      opts && (typeof opts.seed === 'number' || typeof opts.seed === 'string')
+        ? opts.seed
+        : Date.now();
+    const initialPerks = opts && Array.isArray(opts.perkIds) ? opts.perkIds.slice() : [];
+    app.endlessRun = {
+      active: true,
+      shift: 1,
+      totalScore: 0,
+      totalServes: 0,
+      totalDustEarned: 0,
+      perkIds: initialPerks,
+      seedBase,
+      pendingChoices: [],
+      pendingRerollUsed: false
+    };
+    const cfg = RunModifiers.buildEndlessShiftConfig(1, seedBase);
+    const started = startLevelInternal(cfg.id, {
+      ...(opts || {}),
+      customLevelCfg: cfg,
+      seed: cfg.seed,
+      skipTutorial: true,
+      modeOverrides: {
+        ...((opts && opts.modeOverrides) || {}),
+        mode: 'endless',
+        shiftNum: 1,
+        perkIds: app.endlessRun.perkIds.slice()
+      }
+    });
+    if (started && BalanceConfig.TELEMETRY.enabled && typeof platform.reportEvent === 'function') {
+      platform.reportEvent(BalanceConfig.TELEMETRY.eventNames.modeStart, {
+        mode: 'endless',
+        shift: 1
+      });
+    }
+    return started;
+  };
+
+  app.pickEndlessPerk = function pickEndlessPerk(choiceIdx) {
+    if (!app.endlessRun || !app.endlessRun.active) return false;
+    const choices = Array.isArray(app.endlessRun.pendingChoices) ? app.endlessRun.pendingChoices : [];
+    if (choices.length === 0) return false;
+    const idx = clamp(Math.floor(Number(choiceIdx) || 0), 0, choices.length - 1);
+    const picked = choices[idx];
+    if (picked && picked.id && !app.endlessRun.perkIds.includes(picked.id)) {
+      app.endlessRun.perkIds.push(picked.id);
+    }
+    app.endlessRun.pendingChoices = [];
+    app.endlessRun.pendingRerollUsed = false;
+    app.endlessRun.shift += 1;
+    const nextCfg = RunModifiers.buildEndlessShiftConfig(
+      app.endlessRun.shift,
+      app.endlessRun.seedBase
+    );
+    audio.playShopBuy();
+    if (picked) {
+      showToast(`获得加持：${picked.name}`, { icon: 'icon_stardust', tone: 'event' });
+    }
+    return startLevelInternal(nextCfg.id, {
+      customLevelCfg: nextCfg,
+      seed: nextCfg.seed,
+      skipTutorial: true,
+      modeOverrides: {
+        mode: 'endless',
+        shiftNum: app.endlessRun.shift,
+        perkIds: app.endlessRun.perkIds.slice()
+      }
+    });
   };
 
   app.cycleProfileAvatar = function cycleProfileAvatar() {
@@ -1273,6 +1477,8 @@ function createApp() {
       'shop',
       'compendium',
       'leaderboard',
+      'challenge',
+      'perk_pick',
       'pause',
       'help',
       'confirm'
@@ -1314,6 +1520,7 @@ function createApp() {
     app.forkSourceCell = null;
     app.activeTutorialStep = null;
     app.tutorialSkipRect = null;
+    app.endlessRun = null;
     levelSkipTutorial = false;
     syncGameStateMirror();
     syncAudioMood();
@@ -1322,6 +1529,10 @@ function createApp() {
   app.closeModal = function closeModal() {
     if (!app.activeModal) return;
     const prevModal = app.activeModal;
+    if (prevModal === 'perk_pick') {
+      // Picking a perk is required to advance endless shift; allow escape only via picking #0
+      return;
+    }
     app.activeModal = null;
     app.confirmDialog = null;
     if (prevModal === 'level_result') {
@@ -1382,7 +1593,7 @@ function createApp() {
 
   app.onResultNext = function onResultNext() {
     const res = app.lastResult;
-    if (!res || !res.cleared) {
+    if (!res || res.mode === 'daily' || res.mode === 'endless' || !res.cleared) {
       returnToLobbyInternal();
       return;
     }
@@ -1566,6 +1777,10 @@ function createApp() {
     if (runCtx && runCtx.events) runCtx.events.emit(name, payload);
   }
 
+  function getActiveMods() {
+    return runCtx && runCtx.mods ? runCtx.mods : null;
+  }
+
   function getSpawnC2Rate() {
     const ovRate = getOverride('c2Rate');
     if (typeof ovRate === 'number' && Number.isFinite(ovRate)) {
@@ -1574,19 +1789,23 @@ function createApp() {
     const devFlourLv = getEffectiveDeviceLv('dev_flour', 3);
     const baseRate = SHOP_DEVICES[1].c2Rates[devFlourLv] || 0.10;
     const lunaBonus = getEffectivePatronId() === 'luna' ? 0.08 : 0;
-    return clamp(baseRate + lunaBonus, 0.10, 0.50);
+    const mods = getActiveMods();
+    const perkBonus = mods && Number.isFinite(mods.c2RateDelta) ? mods.c2RateDelta : 0;
+    return clamp(baseRate + lunaBonus + perkBonus, 0.10, 0.65);
   }
 
   function getEffectiveFreshWindowSec() {
     const base = BalanceConfig.FRESH.windowSec || 6.0;
+    const mods = getActiveMods();
+    const perkDelta = mods && Number.isFinite(mods.freshWindowDelta) ? mods.freshWindowDelta : 0;
     const mult =
       runCtx && runCtx.levelEvents && BalanceConfig.isFeatureOn('events')
         ? LevelEvents.getFreshWindowMultiplier(runCtx.levelEvents)
         : 1.0;
-    return base * mult;
+    return (base + perkDelta) * mult;
   }
 
-  function buildServeScoreCtx() {
+  function buildServeScoreCtx(extraCtx) {
     // CRITICAL: Omit comboCount, isFever, and lunaNextServeBoost so OrderService.matchTrayToCustomer
     // computes nextCombo, reads feverActive, and atomically consumes lunaNextServeBoost!
     const ctx = {
@@ -1595,19 +1814,35 @@ function createApp() {
       patronId: getEffectivePatronId(),
       rng: levelRng
     };
+    const mods = getActiveMods();
     let sceneExtra = 0;
     const ovExtra = getOverride('sceneBonusExtra');
     if (typeof ovExtra === 'number' && Number.isFinite(ovExtra)) sceneExtra += ovExtra;
     if (runCtx && runCtx.levelEvents && BalanceConfig.isFeatureOn('events')) {
       sceneExtra += LevelEvents.getEventSceneBonus(runCtx.levelEvents);
     }
+    if (mods && Number.isFinite(mods.flatSceneBonus) && mods.flatSceneBonus !== 0) {
+      sceneExtra += mods.flatSceneBonus;
+    }
     if (sceneExtra !== 0) ctx.sceneBonusExtra = sceneExtra;
-    const sceneCap = getOverride('sceneCap');
+    let sceneCap = getOverride('sceneCap');
+    if (!(typeof sceneCap === 'number' && Number.isFinite(sceneCap))) {
+      sceneCap = mods && mods.sceneCapOverride > 0 ? mods.sceneCapOverride : undefined;
+    }
     if (typeof sceneCap === 'number' && Number.isFinite(sceneCap)) ctx.sceneCap = sceneCap;
-    // v0.10 M1 + v0.11 M2: fresh bonus clock (品质区) + hot_oven window + Fever V2 scene bonus (场面区)
+    // v0.10 M1 + v0.11 M2 + v0.12 M3: fresh bonus clock (品质区) + hot_oven window + Fever V2 scene bonus (场面区) + customer trait (顾客区)
     if (app.orderState) ctx.nowSec = Number(app.orderState.elapsedSec) || 0;
     ctx.freshWindowSec = getEffectiveFreshWindowSec();
-    if (BalanceConfig.isFeatureOn('feverV2')) ctx.feverSceneBonus = BalanceConfig.FEVER_V2.sceneBonus;
+    const baseFeverScene = BalanceConfig.isFeatureOn('feverV2')
+      ? BalanceConfig.FEVER_V2.sceneBonus
+      : BalanceConfig.SCORE_ZONES.feverSceneBonus;
+    const perkFeverDelta = mods && Number.isFinite(mods.feverSceneDelta) ? mods.feverSceneDelta : 0;
+    if (BalanceConfig.isFeatureOn('feverV2') || perkFeverDelta !== 0) {
+      ctx.feverSceneBonus = baseFeverScene + perkFeverDelta;
+    }
+    if (extraCtx && typeof extraCtx.traitMult === 'number' && Number.isFinite(extraCtx.traitMult)) {
+      ctx.traitMult = extraCtx.traitMult;
+    }
     return ctx;
   }
 
@@ -1622,7 +1857,10 @@ function createApp() {
   }
 
   function startLevelInternal(levelId, opts = {}) {
-    const baseLvl = getLevelById(levelId);
+    const baseLvl =
+      opts && opts.customLevelCfg && typeof opts.customLevelCfg === 'object'
+        ? opts.customLevelCfg
+        : getLevelById(levelId);
     if (!baseLvl) return false;
 
     const modeOverrides =
@@ -1641,10 +1879,21 @@ function createApp() {
     if (opts && opts.features && typeof opts.features === 'object') {
       restoreRunFeatures = BalanceConfig.withFeatures(opts.features);
     }
+
+    const perkIds =
+      modeOverrides && Array.isArray(modeOverrides.perkIds)
+        ? modeOverrides.perkIds.slice()
+        : Array.isArray(lvl.perkIds)
+        ? lvl.perkIds.slice()
+        : [];
+    const mods = RunModifiers.compileRunModifiers(perkIds);
+
     runCtx = {
-      mode: (modeOverrides && typeof modeOverrides.mode === 'string' && modeOverrides.mode) || 'campaign',
+      mode: (modeOverrides && typeof modeOverrides.mode === 'string' && modeOverrides.mode) || lvl.mode || 'campaign',
       levelCfg: lvl,
       modeOverrides,
+      mods,
+      traits: CustomerTraits.createTraitRunState(),
       seed: rngs.seed,
       rngs,
       events: GameEvents.createEventBus(),
@@ -1658,8 +1907,10 @@ function createApp() {
     lastFrameMs = rawNowMs();
     levelRng = opts && typeof opts.rng === 'function' ? opts.rng : rngs.grid;
     customerRng = opts && typeof opts.rng === 'function' ? opts.rng : rngs.customer;
-    app.selectedChapter = lvl.chapter;
-    app.previewLevelId = lvl.id;
+    if (runCtx.mode === 'campaign') {
+      app.selectedChapter = lvl.chapter;
+      app.previewLevelId = lvl.id;
+    }
     app.currentLevelId = lvl.id;
     app.screen = 'playing';
     app.activeModal = null;
@@ -1675,7 +1926,10 @@ function createApp() {
       ovTools && typeof ovTools === 'object'
         ? { fork: clamp(Math.floor(Number(ovTools.fork) || 0), 0, 9), spoon: clamp(Math.floor(Number(ovTools.spoon) || 0), 0, 9) }
         : SHOP_DEVICES[3].startTools[devToolsLv] || { fork: 1, spoon: 0 };
-    app.toolCounts = { fork: startTools.fork, spoon: startTools.spoon };
+    app.toolCounts = {
+      fork: clamp((startTools.fork || 0) + (mods.grantFork || 0), 0, 9),
+      spoon: clamp((startTools.spoon || 0) + (mods.grantSpoon || 0), 0, 9)
+    };
     app.toolBoughtThisLevel = { fork: 0, spoon: 0 };
 
     const failStreak =
@@ -1707,7 +1961,22 @@ function createApp() {
       : patron.greet;
 
     app.gridState = GridEngine.createGridState(lvl, lvl.presets);
-    app.orderState = OrderService.createOrderState(lvl, saveData, customerRng, modeOverrides);
+    if (Array.isArray(mods.startSpawnTiers) && mods.startSpawnTiers.length > 0) {
+      for (let i = 0; i < mods.startSpawnTiers.length; i++) {
+        const spTier = mods.startSpawnTiers[i];
+        GridEngine.kneadSpawn(app.gridState, { tierTable: [[spTier, 1]], rng: levelRng });
+      }
+    }
+
+    const orderOverrides = {
+      ...(modeOverrides || {}),
+      trayCapDelta: (modeOverrides && Number(modeOverrides.trayCapDelta) ? Number(modeOverrides.trayCapDelta) : 0) + (mods.trayCapDelta || 0),
+      trashCooldownMult: (modeOverrides && Number(modeOverrides.trashCooldownMult) > 0 ? Number(modeOverrides.trashCooldownMult) : 1) * (mods.trashCooldownMult || 1),
+      comboWindowDelta: (modeOverrides && Number(modeOverrides.comboWindowDelta) ? Number(modeOverrides.comboWindowDelta) : 0) + (mods.comboWindowDelta || 0),
+      patienceMultExtra: (modeOverrides && Number(modeOverrides.patienceMultExtra) > 0 ? Number(modeOverrides.patienceMultExtra) : 1) * (mods.patienceMult || 1),
+      urgentBountyDelta: (modeOverrides && Number(modeOverrides.urgentBountyDelta) ? Number(modeOverrides.urgentBountyDelta) : 0) + (mods.urgentBountyDelta || 0)
+    };
+    app.orderState = OrderService.createOrderState(lvl, saveData, customerRng, orderOverrides);
     const initialIce = GridEngine.countFrozenTiles(app.gridState);
     runCtx.goal = BalanceConfig.isFeatureOn('goals')
       ? LevelGoals.createGoalState(lvl.goal, { initialIce })
@@ -1719,7 +1988,7 @@ function createApp() {
       forcedEvents: opts && opts.forcedEvents
     });
     refreshNeededAndOrderMarks();
-    levelSkipTutorial = Boolean(opts && opts.skipTutorial);
+    levelSkipTutorial = Boolean(opts && opts.skipTutorial) || runCtx.mode !== 'campaign';
     initTutorialForLevel(lvl.id, levelSkipTutorial);
 
     if (softPityActive) {
@@ -1745,6 +2014,12 @@ function createApp() {
   }
 
   app.startLevel = function startLevel(levelId, opts = {}) {
+    if (typeof levelId === 'string' && levelId.indexOf('daily_') === 0) {
+      return app.startDailySpecial({ ...(opts || {}), dateKey: levelId.slice(6), forceUnlock: true });
+    }
+    if (typeof levelId === 'string' && levelId.indexOf('endless_') === 0) {
+      return app.startEndlessMode({ ...(opts || {}), forceUnlock: true });
+    }
     return startLevelInternal(levelId, opts);
   };
 
@@ -1758,23 +2033,32 @@ function createApp() {
     fever_v2: '星光热潮中滑动可连锁合成，揉面必出 C2/C3，每次上菜还能延长热潮！'
   };
 
-  /** One-time gameplay tips (major toast). Skipped in headless sim and skip-tutorial runs. */
+  /** One-time gameplay tips (major toast). Persisted into v3 saveData.seenTips (keeps seenTutorials at exact 4 keys). */
   function maybeShowTip(key) {
     if (headlessSimMode || levelSkipTutorial || !hasOwn(M1_TIPS, key)) return false;
-    let seen = null;
-    try {
-      seen = platform.getStorageJSON(TIPS_STORAGE_KEY);
-    } catch (e) {
-      seen = null;
+    if (!saveData.seenTips || typeof saveData.seenTips !== 'object') {
+      saveData.seenTips = {};
     }
-    const seenObj = seen && typeof seen === 'object' && !Array.isArray(seen) ? seen : {};
-    if (seenObj[key] === true) return false;
-    seenObj[key] = true;
+    if (saveData.seenTips[key] === true) return false;
+    let legacySeen = null;
     try {
-      platform.setStorageJSON(TIPS_STORAGE_KEY, seenObj);
+      legacySeen = platform.getStorageJSON(TIPS_STORAGE_KEY);
     } catch (e) {
-      // storage failure only means the tip may show again next time
+      legacySeen = null;
     }
+    const legacyObj = legacySeen && typeof legacySeen === 'object' && !Array.isArray(legacySeen) ? legacySeen : {};
+    if (legacyObj[key] === true) {
+      saveData.seenTips[key] = true;
+      return false;
+    }
+    saveData.seenTips[key] = true;
+    legacyObj[key] = true;
+    try {
+      platform.setStorageJSON(TIPS_STORAGE_KEY, legacyObj);
+    } catch (e) {
+      // storage failure only means legacy key wasn't mirrored
+    }
+    SaveSync.saveLocalSave(platform, saveData);
     showToast(M1_TIPS[key], { icon: 'icon_stardust', tone: 'event', level: 'major', duration: 3.2 });
     return true;
   }
@@ -1783,7 +2067,9 @@ function createApp() {
     const z = BalanceConfig.isFeatureOn('feverV2')
       ? BalanceConfig.FEVER_V2.sceneBonus
       : BalanceConfig.SCORE_ZONES.feverSceneBonus || 0.25;
-    return Math.round(z * 100);
+    const mods = getActiveMods();
+    const extra = mods && Number.isFinite(mods.feverSceneDelta) ? mods.feverSceneDelta : 0;
+    return Math.round((z + extra) * 100);
   }
 
   /** Shared Fever start FX (serve-triggered or crit-triggered). */
@@ -1817,9 +2103,12 @@ function createApp() {
     const tierCfg = BalanceConfig.BAKE_CRIT.tiers[level] || BalanceConfig.BAKE_CRIT.tiers[2];
     if (!tierCfg) return null;
 
-    if (tierCfg.skill > 0) app.skillEnergy = clamp(app.skillEnergy + tierCfg.skill, 0, 100);
-    const feverRes = tierCfg.fever > 0
-      ? OrderService.addFeverEnergy(app.orderState, tierCfg.fever)
+    const mods = getActiveMods();
+    const skillAdd = tierCfg.skill + (mods ? mods.critExtraSkill || 0 : 0);
+    const feverAdd = tierCfg.fever + (mods ? mods.critExtraFever || 0 : 0);
+    if (skillAdd > 0) app.skillEnergy = clamp(app.skillEnergy + skillAdd, 0, 100);
+    const feverRes = feverAdd > 0
+      ? OrderService.addFeverEnergy(app.orderState, feverAdd)
       : { gained: 0, triggered: false };
     const reward = GridEngine.applyBakeCritReward(app.gridState, res.mergeEvents || [], {
       gild: tierCfg.gild > 0,
@@ -2014,6 +2303,7 @@ function createApp() {
     };
 
     if (res.mergeEvents && res.mergeEvents.length > 0) {
+      RunModifiers.applyMergePerkEffects(app.gridState, res.mergeEvents, getActiveMods());
       app.animState.mergeEvents = res.mergeEvents;
       app.animState.mergeTimer = 0.22;
       app.animState.mergeDuration = 0.22;
@@ -2024,6 +2314,13 @@ function createApp() {
         const me = res.mergeEvents[i];
         const nt = me.newTier || me.tier || 2;
         if (nt > maxMergedTier) maxMergedTier = nt;
+        const cellTile =
+          Number.isInteger(me.r) &&
+          Number.isInteger(me.c) &&
+          app.gridState.cells[me.r] &&
+          app.gridState.cells[me.r][me.c] &&
+          app.gridState.cells[me.r][me.c].tile;
+        if (cellTile && cellTile.flavor) me.flavor = cellTile.flavor;
         if (me.flavor === 'gold') hasGoldMerge = true;
       }
       audio.playMerge(maxMergedTier, res.mergeEvents.length, maxMergedTier >= 6);
@@ -2142,6 +2439,7 @@ function createApp() {
     let flourSaleHit = null;
     // Only heat the dough when the knead can actually land (board-full presses are free).
     if (realistic && countEmptyPlayableCells() > 0) {
+      const mods = getActiveMods();
       if (runCtx && runCtx.levelEvents && BalanceConfig.isFeatureOn('events')) {
         flourSaleHit = LevelEvents.consumeKneadEvent(runCtx.levelEvents);
       }
@@ -2149,7 +2447,11 @@ function createApp() {
         spawnOpts.tierTable = BalanceConfig.FEVER_V2.kneadTierTable;
         kneadInfo = { zone: 'fever', pity: false, overheated: false };
       } else if (dough && BalanceConfig.isFeatureOn('doughTemp')) {
-        kneadInfo = DoughTemp.onKnead(dough, { failStreak: runCtx ? runCtx.failStreak : 0, inFever });
+        kneadInfo = DoughTemp.onKnead(dough, {
+          failStreak: runCtx ? runCtx.failStreak : 0,
+          inFever,
+          warmMinDelta: mods ? mods.doughWarmMinDelta || 0 : 0
+        });
         if (kneadInfo.forceTier) {
           spawnOpts.tierTable = [[kneadInfo.forceTier, 1]];
           if (kneadInfo.pity) spawnOpts.flavor = pickPityFlavor();
@@ -2159,6 +2461,17 @@ function createApp() {
       }
       if (flourSaleHit && flourSaleHit.forceTier && !(kneadInfo && kneadInfo.overheated) && !(kneadInfo && kneadInfo.pity)) {
         spawnOpts.tierTable = [[flourSaleHit.forceTier, 1]];
+      }
+      if (
+        runCtx &&
+        runCtx.traits &&
+        runCtx.traits.pendingKneadOverride &&
+        !(kneadInfo && kneadInfo.overheated)
+      ) {
+        const ov = runCtx.traits.pendingKneadOverride;
+        runCtx.traits.pendingKneadOverride = null;
+        spawnOpts.tierTable = [[ov.tier, 1]];
+        if (ov.flavor) spawnOpts.flavor = ov.flavor;
       }
     }
 
@@ -2820,8 +3133,14 @@ function createApp() {
           duration: 0.12
         });
       }
-      const newTier = res.tile ? res.tile.tier : 2;
-      const newFlavor = res.tile ? res.tile.flavor : 'plain';
+      RunModifiers.applyMergePerkEffects(app.gridState, [{ r: toR, c: toC }], getActiveMods());
+      const mergedCellTile =
+        app.gridState.cells[toR] &&
+        app.gridState.cells[toR][toC] &&
+        app.gridState.cells[toR][toC].tile;
+      const newTier = mergedCellTile ? mergedCellTile.tier : res.tile ? res.tile.tier : 2;
+      const newFlavor = mergedCellTile ? mergedCellTile.flavor : res.tile ? res.tile.flavor : 'plain';
+      if (res.tile && mergedCellTile) res.tile.flavor = mergedCellTile.flavor;
       app.animState.mergeEvents = [{ r: toR, c: toC, newTier, flavor: newFlavor }];
       app.animState.mergeTimer = 0.22;
       app.animState.mergeDuration = 0.22;
@@ -3090,10 +3409,39 @@ function createApp() {
         ? app.orderState.seats[targetSeatIdx]
         : null;
     const traySnap = app.orderState.tray.slice();
+    const trayCap = Math.max(1, Number(app.orderState.trayCapacity) || 3);
+    let trayFilledBefore = 0;
+    for (let i = 0; i < trayCap; i++) {
+      if (app.orderState.tray[i]) trayFilledBefore += 1;
+    }
+    const trayWasFull = trayFilledBefore >= trayCap;
+
+    // Pre-evaluate allHot & customer trait score multiplier (顾客区) before serve consumes tray
+    let previewAllHot = false;
+    if (seatBefore && BalanceConfig.isFeatureOn('freshBonus')) {
+      const preMatch = OrderService.matchCustomerWithTray(seatBefore, app.orderState.tray);
+      if (preMatch && preMatch.matched && preMatch.usedTrayIndices.length > 0) {
+        const nowPre = getNowSec();
+        const freshWin = getEffectiveFreshWindowSec();
+        const minFreshTier = BalanceConfig.FRESH.minTier || 2;
+        previewAllHot = preMatch.usedTrayIndices.every((idx) => {
+          const t = app.orderState.tray[idx];
+          if (!t || (Number(t.tier) || 0) < minFreshTier) return false;
+          if (typeof t.bakedAt !== 'number' || !Number.isFinite(t.bakedAt)) return false;
+          const age = nowPre - t.bakedAt;
+          return age >= -1e-6 && age <= freshWin;
+        });
+      }
+    }
+    const traitMult =
+      BalanceConfig.isFeatureOn('traits') && seatBefore
+        ? CustomerTraits.computeTraitScoreMult(seatBefore, { allHot: previewAllHot })
+        : 1.0;
+
     const serveRes = OrderService.serveCustomerSeat(
       app.orderState,
       targetSeatIdx,
-      buildServeScoreCtx()
+      buildServeScoreCtx({ traitMult })
     );
     if (!serveRes || !serveRes.served) {
       return { served: false, reason: 'not_ready' };
@@ -3136,6 +3484,20 @@ function createApp() {
       app.skillEnergy = clamp(app.skillEnergy + serveRes.skillChargeGain, 0, 100);
     }
 
+    const mods = getActiveMods();
+    if (trayWasFull && mods && mods.fullTraySkillGain > 0) {
+      app.skillEnergy = clamp(app.skillEnergy + mods.fullTraySkillGain, 0, 100);
+      app.animState.popups.push({
+        text: `满盘欢赞 +${mods.fullTraySkillGain}%`,
+        subText: '',
+        x: toPt.x,
+        y: toPt.y - 32,
+        color: '#A7F3B5',
+        timer: 0.65,
+        duration: 0.65
+      });
+    }
+
     audio.playServeBell();
     audio.playOrderComplete();
     platform.vibrateShort('medium');
@@ -3162,6 +3524,54 @@ function createApp() {
         duration: 0.6
       });
     }
+
+    // v0.12 M3: Customer trait post-serve side effects (never directly add score)
+    if (BalanceConfig.isFeatureOn('traits') && seatBefore && runCtx && runCtx.traits) {
+      const maxP = Math.max(1, Number(seatBefore.maxPatience) || 1);
+      const pRatio = (Number(seatBefore.patience) || 0) / maxP;
+      const tr = CustomerTraits.evaluateServeTrait(
+        runCtx.traits,
+        {
+          customerId: seatBefore.customerId,
+          pRatio,
+          itemCount: usedTiles.length,
+          usedTiles,
+          slots: seatBefore.slots,
+          allHot: Boolean(serveRes.allHot)
+        },
+        customerRng
+      );
+      if (tr && tr.triggered) {
+        if (tr.patienceOthers > 0) {
+          OrderService.boostSeatsPatience(app.orderState, tr.patienceOthers, seatIdx);
+        }
+        if (tr.patienceAll > 0) {
+          OrderService.boostSeatsPatience(app.orderState, tr.patienceAll, -1);
+        }
+        if (tr.feverGain > 0) {
+          const traitFev = OrderService.addFeverEnergy(app.orderState, tr.feverGain);
+          if (traitFev && traitFev.triggered) onFeverTriggered('trait');
+        }
+        if (tr.skillGain > 0) {
+          app.skillEnergy = clamp(app.skillEnergy + tr.skillGain, 0, 100);
+        }
+        if (tr.giftTool === 'fork' || tr.giftTool === 'spoon') {
+          app.toolCounts[tr.giftTool] = clamp((app.toolCounts[tr.giftTool] || 0) + 1, 0, 9);
+        }
+        if (tr.text) {
+          app.animState.popups.push({
+            text: tr.text,
+            subText: '',
+            x: toPt.x,
+            y: toPt.y + 42,
+            color: '#FFD998',
+            timer: 0.78,
+            duration: 0.78
+          });
+        }
+      }
+    }
+
     if (runCtx && runCtx.goal && BalanceConfig.isFeatureOn('goals')) {
       const newlyDone = LevelGoals.onServeForGoal(
         runCtx.goal,
@@ -3178,15 +3588,20 @@ function createApp() {
     }
     emitRunEvent('serve', { seatIdx, result: serveRes, usedTiles });
 
-    // Fever V2: every serve during Fever extends it (capped per Fever)
+    // Fever V2: every serve during Fever extends it (capped per Fever unless eternal_fever perk is active)
     if (
       serveRes.wasInFever &&
       !serveRes.triggeredFever &&
       runCtx &&
       BalanceConfig.isFeatureOn('feverV2')
     ) {
-      const room = Math.max(0, BalanceConfig.FEVER_V2.extendCap - (runCtx.feverExtended || 0));
-      const want = Math.min(BalanceConfig.FEVER_V2.extendPerServe, room);
+      let want = 0;
+      if (mods && mods.eternalFeverExtend > 0) {
+        want = mods.eternalFeverExtend;
+      } else {
+        const room = Math.max(0, BalanceConfig.FEVER_V2.extendCap - (runCtx.feverExtended || 0));
+        want = Math.min(BalanceConfig.FEVER_V2.extendPerServe, room);
+      }
       if (want > 1e-6) {
         const added = OrderService.extendFever(app.orderState, want);
         if (added > 0) {
@@ -3238,9 +3653,26 @@ function createApp() {
     };
   }
 
+  function ensureSaveModeStats() {
+    if (!saveData.modeStats || typeof saveData.modeStats !== 'object') {
+      saveData.modeStats = {
+        daily: { lastDate: '', bestScore: 0, claimedDate: '', claimed3Date: '' },
+        endless: { bestShift: 0, bestScore: 0, runs: 0, dailyDustDate: '', dailyDust: 0 }
+      };
+    }
+    if (!saveData.modeStats.daily || typeof saveData.modeStats.daily !== 'object') {
+      saveData.modeStats.daily = { lastDate: '', bestScore: 0, claimedDate: '', claimed3Date: '' };
+    }
+    if (!saveData.modeStats.endless || typeof saveData.modeStats.endless !== 'object') {
+      saveData.modeStats.endless = { bestShift: 0, bestScore: 0, runs: 0, dailyDustDate: '', dailyDust: 0 };
+    }
+    return saveData.modeStats;
+  }
+
   function settleCurrentLevel(settleExtra) {
     if (!app.orderState || !app.currentLevelId) return;
     const lvl = getCurrentLevelCfg();
+    const mode = runCtx ? runCtx.mode : 'campaign';
     const prevBest = (saveData.levelBestScores && saveData.levelBestScores[lvl.id]) || 0;
     const earlyCloseBonus =
       settleExtra && Number.isFinite(Number(settleExtra.earlyCloseBonus)) && Number(settleExtra.earlyCloseBonus) > 0
@@ -3253,7 +3685,240 @@ function createApp() {
       earlyCloseBonus
     });
     const finalScore = settlement.finalScore;
-    const persistCampaign = !runCtx || runCtx.mode === 'campaign';
+    const trashDiscards = Math.max(0, Math.floor(Number(app.orderState.trashDiscards) || 0));
+    const runStats = runCtx ? runCtx.stats : createRunStats();
+    runStats.angryWalkouts = Math.max(0, Math.floor(Number(app.orderState.angryWalkouts) || 0));
+
+    // ---- Mode: Endless Shift Settlement ----
+    if (mode === 'endless') {
+      const eRun = app.endlessRun || {
+        active: true,
+        shift: lvl.shiftNum || 1,
+        totalScore: 0,
+        totalServes: 0,
+        totalDustEarned: 0,
+        perkIds: [],
+        seedBase: 1,
+        pendingChoices: [],
+        pendingRerollUsed: false
+      };
+      const targetScore = Number(lvl.targetScore) || (Array.isArray(lvl.stars) ? lvl.stars[0] : 1800);
+      const shiftCleared = Boolean(app.orderState.ordersServed >= 1 && finalScore >= targetScore);
+      eRun.totalScore += finalScore;
+      eRun.totalServes += app.orderState.ordersServed;
+
+      const ms = ensureSaveModeStats();
+      const todayKey = RunModifiers.getDailyDateKeyUTC8();
+      if (ms.endless.dailyDustDate !== todayKey) {
+        ms.endless.dailyDustDate = todayKey;
+        ms.endless.dailyDust = 0;
+      }
+      const dustCap = (BalanceConfig.ENDLESS && BalanceConfig.ENDLESS.dailyDustCap) || 60;
+      const dustPerShift = (BalanceConfig.ENDLESS && BalanceConfig.ENDLESS.dustPerShift) || 2;
+      const dustRoom = Math.max(0, dustCap - (ms.endless.dailyDust || 0));
+      const shiftDust = shiftCleared ? Math.min(dustRoom, dustPerShift) : 0;
+      if (shiftDust > 0) {
+        ms.endless.dailyDust += shiftDust;
+        eRun.totalDustEarned += shiftDust;
+        saveData.totalEarnedStardust = (saveData.totalEarnedStardust || DEFAULT_INITIAL_STARDUST) + shiftDust;
+      }
+      const shiftsDone = shiftCleared ? eRun.shift : Math.max(0, eRun.shift - 1);
+      const prevEndlessBest = ms.endless.bestScore || 0;
+      ms.endless.bestShift = Math.max(ms.endless.bestShift || 0, shiftsDone);
+      ms.endless.bestScore = Math.max(ms.endless.bestScore || 0, eRun.totalScore);
+      if (!shiftCleared) {
+        ms.endless.runs = (ms.endless.runs || 0) + 1;
+        saveData.lifetimeStats.runsPlayed = Math.min(999999, (saveData.lifetimeStats.runsPlayed || 0) + 1);
+      }
+      saveData.lifetimeStats.ordersServed = Math.min(9999999, (saveData.lifetimeStats.ordersServed || 0) + app.orderState.ordersServed);
+      saveData.lifetimeStats.vipServed = Math.min(9999999, (saveData.lifetimeStats.vipServed || 0) + app.orderState.vipServed);
+      saveData.lifetimeStats.maxComboEver = Math.max(saveData.lifetimeStats.maxComboEver || 0, app.orderState.maxCombo || 0);
+      saveData.lifetimeStats.highestSingleServe = Math.max(saveData.lifetimeStats.highestSingleServe || 0, app.orderState.highestSingleServe || 0);
+
+      const savedNorm = SaveSync.saveLocalSave(platform, saveData);
+      Object.assign(saveData, savedNorm);
+      const eRunReport = {
+        mode: 'endless',
+        levelId: lvl.id,
+        shift: eRun.shift,
+        score: eRun.totalServes === 0 ? 0 : eRun.totalScore,
+        serves: Math.max(app.orderState.ordersServed, eRun.totalServes),
+        ordersServed: Math.max(app.orderState.ordersServed, eRun.totalServes),
+        stars: shiftCleared ? 3 : 0,
+        durationSec: Math.max(3, Math.round(app.orderState.elapsedSec || lvl.durationSec))
+      };
+      scheduleCloudPush(eRunReport);
+
+      if (shiftCleared) {
+        const choices = RunModifiers.pickPerkChoices(
+          eRun.perkIds,
+          saveData.researchUnlocks,
+          runCtx && runCtx.rngs ? runCtx.rngs.event : customerRng,
+          3
+        );
+        app.endlessRun = eRun;
+        if (choices.length > 0) {
+          eRun.pendingChoices = choices;
+          eRun.pendingRerollUsed = false;
+          app.activeTool = null;
+          app.forkSourceCell = null;
+          app.activeModal = 'perk_pick';
+          app.modalScrollY = 0;
+          app.uiAnim.modalOpenTimer = 0;
+          audio.playShiftClear();
+          if (shiftDust > 0) {
+            showToast(`第 ${eRun.shift} 班达成！星尘 +${shiftDust}`, { icon: 'icon_stardust', tone: 'success' });
+          }
+          syncGameStateMirror();
+          syncAudioMood();
+          return;
+        }
+        // All perks collected: advance directly to next shift
+        eRun.shift += 1;
+        const nextCfg = RunModifiers.buildEndlessShiftConfig(eRun.shift, eRun.seedBase);
+        startLevelInternal(nextCfg.id, {
+          customLevelCfg: nextCfg,
+          seed: nextCfg.seed,
+          skipTutorial: true,
+          modeOverrides: {
+            mode: 'endless',
+            shiftNum: eRun.shift,
+            perkIds: eRun.perkIds.slice()
+          }
+        });
+        return;
+      }
+
+      eRun.active = false;
+      app.endlessRun = eRun;
+      const diagnostics = RunDiagnostics.buildRunDiagnostics({ ...settlement, cleared: false }, runStats);
+      app.lastResult = {
+        mode: 'endless',
+        levelId: lvl.id,
+        score: finalScore,
+        endlessTotalScore: eRun.totalScore,
+        shiftReached: eRun.shift,
+        shiftsCleared: Math.max(0, eRun.shift - 1),
+        targetScore,
+        perkIds: eRun.perkIds.slice(),
+        serveScore: app.orderState.ordersServed >= 1 ? app.orderState.score : 0,
+        ordersServed: app.orderState.ordersServed,
+        vipServed: app.orderState.vipServed,
+        maxCombo: app.orderState.maxCombo,
+        trashDiscards,
+        forkUses: runForkUses,
+        spoonUses: runSpoonUses,
+        failStreak: 0,
+        softPityNextRun: false,
+        isNewBest: eRun.totalScore > prevEndlessBest && eRun.totalServes > 0,
+        elapsedRevealSec: 0,
+        diagnostics,
+        goalBadge: null,
+        ...settlement,
+        cleared: false,
+        starsEarned: 0,
+        totalDustAward: eRun.totalDustEarned
+      };
+      app.screen = 'result';
+      app.activeTool = null;
+      app.forkSourceCell = null;
+      app.activeTutorialStep = null;
+      app.tutorialSkipRect = null;
+      app.activeModal = 'level_result';
+      app.uiAnim.modalOpenTimer = 0;
+      audio.playGameOver();
+      syncGameStateMirror();
+      syncAudioMood();
+      return;
+    }
+
+    // ---- Mode: Daily Special Settlement ----
+    if (mode === 'daily') {
+      const dateKey = (lvl && lvl.dateKey) || RunModifiers.getDailyDateKeyUTC8();
+      const ms = ensureSaveModeStats();
+      const dStat = ms.daily;
+      const prevDailyBest = dStat.lastDate === dateKey ? (dStat.bestScore || 0) : 0;
+      let dailyDust = 0;
+      const alreadyClaimedClear = dStat.claimedDate === dateKey;
+      const alreadyClaimed3 = dStat.claimed3Date === dateKey;
+      if (settlement.cleared && !alreadyClaimedClear) {
+        dailyDust += (BalanceConfig.DAILY && BalanceConfig.DAILY.clearDust) || 15;
+        dStat.claimedDate = dateKey;
+      }
+      if (settlement.starsEarned >= 3 && !alreadyClaimed3) {
+        dailyDust += (BalanceConfig.DAILY && BalanceConfig.DAILY.threeStarDust) || 15;
+        dStat.claimed3Date = dateKey;
+      }
+      if (app.orderState.ordersServed >= 1) {
+        dStat.lastDate = dateKey;
+        dStat.bestScore = Math.max(prevDailyBest, finalScore);
+      }
+      if (dailyDust > 0) {
+        saveData.totalEarnedStardust = (saveData.totalEarnedStardust || DEFAULT_INITIAL_STARDUST) + dailyDust;
+      }
+      saveData.lifetimeStats.runsPlayed = Math.min(999999, (saveData.lifetimeStats.runsPlayed || 0) + 1);
+      saveData.lifetimeStats.ordersServed = Math.min(9999999, (saveData.lifetimeStats.ordersServed || 0) + app.orderState.ordersServed);
+      saveData.lifetimeStats.vipServed = Math.min(9999999, (saveData.lifetimeStats.vipServed || 0) + app.orderState.vipServed);
+      saveData.lifetimeStats.maxComboEver = Math.max(saveData.lifetimeStats.maxComboEver || 0, app.orderState.maxCombo || 0);
+      saveData.lifetimeStats.highestSingleServe = Math.max(saveData.lifetimeStats.highestSingleServe || 0, app.orderState.highestSingleServe || 0);
+
+      const savedNorm = SaveSync.saveLocalSave(platform, saveData);
+      Object.assign(saveData, savedNorm);
+      const dRunReport = {
+        mode: 'daily',
+        levelId: lvl.id,
+        dateKey,
+        score: app.orderState.ordersServed === 0 ? 0 : finalScore,
+        serves: app.orderState.ordersServed,
+        ordersServed: app.orderState.ordersServed,
+        stars: settlement.starsEarned,
+        durationSec: Math.max(3, Math.round(app.orderState.elapsedSec || lvl.durationSec))
+      };
+      scheduleCloudPush(dRunReport);
+
+      const diagnostics = RunDiagnostics.buildRunDiagnostics(settlement, runStats);
+      app.lastResult = {
+        mode: 'daily',
+        dateKey,
+        perks: Array.isArray(lvl.perks) ? lvl.perks.slice() : [],
+        levelId: lvl.id,
+        score: finalScore,
+        serveScore: app.orderState.ordersServed >= 1 ? app.orderState.score : 0,
+        ordersServed: app.orderState.ordersServed,
+        vipServed: app.orderState.vipServed,
+        maxCombo: app.orderState.maxCombo,
+        trashDiscards,
+        forkUses: runForkUses,
+        spoonUses: runSpoonUses,
+        failStreak: 0,
+        softPityNextRun: false,
+        isNewBest: app.orderState.ordersServed >= 1 && finalScore > prevDailyBest,
+        elapsedRevealSec: 0,
+        diagnostics,
+        goalBadge: null,
+        ...settlement,
+        totalDustAward: dailyDust
+      };
+      app.screen = 'result';
+      app.activeTool = null;
+      app.forkSourceCell = null;
+      app.activeTutorialStep = null;
+      app.tutorialSkipRect = null;
+      app.activeModal = 'level_result';
+      app.uiAnim.modalOpenTimer = 0;
+      if (settlement.cleared) {
+        audio.playShiftClear();
+        for (let s = 1; s <= settlement.starsEarned; s++) audio.playStarUnlock(s);
+      } else {
+        audio.playGameOver();
+      }
+      syncGameStateMirror();
+      syncAudioMood();
+      return;
+    }
+
+    // ---- Mode: Campaign Settlement ----
+    const persistCampaign = mode === 'campaign';
 
     if (persistCampaign) {
       const updatedSave = SaveSync.recordLevelSettlementToSave(
@@ -3266,7 +3931,8 @@ function createApp() {
           ordersServed: app.orderState.ordersServed,
           vipServed: app.orderState.vipServed,
           maxCombo: app.orderState.maxCombo,
-          highestSingleServe: app.orderState.highestSingleServe
+          highestSingleServe: app.orderState.highestSingleServe,
+          goalDone
         }
       );
       SaveSync.saveLocalSave(platform, updatedSave);
@@ -3274,7 +3940,6 @@ function createApp() {
       platform.setWxFriendCloudScore(saveData);
     }
 
-    const trashDiscards = Math.max(0, Math.floor(Number(app.orderState.trashDiscards) || 0));
     const failStreakAfter =
       !settlement.cleared &&
       saveData.levelFailStreaks &&
@@ -3283,6 +3948,7 @@ function createApp() {
         : 0;
 
     const runReport = {
+      mode: 'campaign',
       levelId: lvl.id,
       score: app.orderState.ordersServed === 0 ? 0 : finalScore,
       earlyCloseBonus: settlement.earlyCloseBonus || 0,
@@ -3294,11 +3960,9 @@ function createApp() {
       forkUses: runForkUses,
       spoonUses: runSpoonUses
     };
-    const runStats = runCtx ? runCtx.stats : createRunStats();
-    runStats.angryWalkouts = Math.max(0, Math.floor(Number(app.orderState.angryWalkouts) || 0));
     const diagnostics = RunDiagnostics.buildRunDiagnostics(settlement, runStats);
     const telemetry = {
-      mode: runCtx ? runCtx.mode : 'campaign',
+      mode,
       seed: runCtx && runCtx.seed !== null ? runCtx.seed : 0,
       balanceVersion: BalanceConfig.BALANCE_VERSION,
       slides: runStats.slides,
@@ -3330,6 +3994,7 @@ function createApp() {
     emitRunEvent('run:end', { settlement, runReport });
 
     app.lastResult = {
+      mode: 'campaign',
       levelId: lvl.id,
       score: finalScore,
       serveScore: app.orderState.ordersServed >= 1 ? app.orderState.score : 0,
@@ -4230,9 +4895,11 @@ function createApp() {
   function buildDoughSnapshot() {
     const d = runCtx ? runCtx.dough : null;
     if (!d) return null;
+    const mods = getActiveMods();
+    const warmMinDelta = mods ? mods.doughWarmMinDelta || 0 : 0;
     return {
       temp: Math.round(d.temp * 100) / 100,
-      zone: DoughTemp.getZone(d),
+      zone: DoughTemp.getZone(d, { warmMinDelta }),
       ratio: DoughTemp.getTempRatio(d),
       locked: Boolean(d.locked),
       lockTimer: d.lockTimer,
@@ -4276,6 +4943,8 @@ function createApp() {
   }
   app.getActiveEventView = buildActiveEventSnapshot;
   app.getEffectiveFreshWindowSec = getEffectiveFreshWindowSec;
+  app.getActivePerks = () => (runCtx && runCtx.mods && Array.isArray(runCtx.mods.perks) ? runCtx.mods.perks : []);
+  app.getRunMode = () => (runCtx ? runCtx.mode : 'campaign');
 
   const debugApi = {
     version: GAME_VERSION,
@@ -4290,11 +4959,18 @@ function createApp() {
         stats: cloneJsonSafe(runCtx.stats),
         goal: buildGoalSnapshot(),
         activeEvent: buildActiveEventSnapshot(),
+        perkIds: runCtx.mods ? runCtx.mods.perkIds.slice() : [],
+        traits: runCtx.traits ? cloneJsonSafe(runCtx.traits) : null,
+        endlessRun: app.endlessRun ? cloneJsonSafe(app.endlessRun) : null,
         patronId: getEffectivePatronId(),
         c2Rate: getSpawnC2Rate(),
         balanceVersion: BalanceConfig.BALANCE_VERSION,
         features: { ...BalanceConfig.FEATURES }
       };
+    },
+
+    getRunContext() {
+      return this.getRunInfo();
     },
 
     triggerEvent(eventId) {
@@ -4368,11 +5044,13 @@ function createApp() {
 
       return {
         screen: app.screen,
+        runMode: runCtx ? runCtx.mode : 'campaign',
         selectedChapter: app.selectedChapter,
         previewLevelId: app.previewLevelId,
         currentLevelId: app.currentLevelId,
         activeModal: app.activeModal,
         activeShopTab: app.activeShopTab,
+        activeCompendiumTab: app.activeCompendiumTab,
         leaderboardBoardType: app.leaderboardBoardType,
         activeTutorialStep: app.activeTutorialStep,
         score: os
@@ -4407,6 +5085,7 @@ function createApp() {
         dough: buildDoughSnapshot(),
         goal: buildGoalSnapshot(),
         activeEvent: buildActiveEventSnapshot(),
+        endlessRun: app.endlessRun ? cloneJsonSafe(app.endlessRun) : null,
         feverTimer: os ? Number(os.feverTimer) || 0 : 0,
         preferredSeatIdx: os ? os.preferredSeatIdx : null,
         grid: buildNormalizedGridSnapshot(),
@@ -4448,10 +5127,10 @@ function createApp() {
       cloudState.retryCount = 0;
 
       let inputObj = rawObj;
-      let rawRequestedSv = 2;
+      let rawRequestedSv = SaveSync.SCHEMA_VERSION;
       if (rawObj && typeof rawObj === 'object' && !Array.isArray(rawObj)) {
         inputObj = { ...rawObj };
-        if (Number.isFinite(Number(rawObj.schemaVersion)) && Number(rawObj.schemaVersion) > 2) {
+        if (Number.isFinite(Number(rawObj.schemaVersion)) && Number(rawObj.schemaVersion) > SaveSync.SCHEMA_VERSION) {
           rawRequestedSv = Math.floor(Number(rawObj.schemaVersion));
         }
         const isSpreadFromCurrent =
@@ -4513,7 +5192,7 @@ function createApp() {
             ? cloudState.openidSuffix
             : 'CAFE';
         const seededMeta = cloneJsonSafe(saveData) || {};
-        if (rawRequestedSv > 2) {
+        if (rawRequestedSv > SaveSync.SCHEMA_VERSION) {
           seededMeta.schemaVersion = rawRequestedSv;
         }
         platform.setStorageJSON('__hoshi_browser_cloud_doc_v1__', {
@@ -4585,6 +5264,30 @@ function createApp() {
 
     startLevel(levelId, opts = {}) {
       const ok = startLevelInternal(levelId, opts);
+      renderFrame(0);
+      return ok;
+    },
+
+    startDailySpecial(opts = {}) {
+      const ok = app.startDailySpecial(opts);
+      renderFrame(0);
+      return ok;
+    },
+
+    startEndlessMode(opts = {}) {
+      const ok = app.startEndlessMode(opts);
+      renderFrame(0);
+      return ok;
+    },
+
+    pickEndlessPerk(choiceIdx) {
+      const ok = app.pickEndlessPerk(choiceIdx);
+      renderFrame(0);
+      return ok;
+    },
+
+    buyResearchItem(itemId) {
+      const ok = app.buyResearchItem(itemId);
       renderFrame(0);
       return ok;
     },

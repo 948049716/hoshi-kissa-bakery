@@ -1153,8 +1153,15 @@ function renderLobbyBottomDock(ctx, rect, app, hits) {
     c.restore();
   }
 
-  const gap = 4;
-  const colW = Math.floor((w - gap * 3) / 4);
+  const gap = 3;
+  const colW = Math.floor((w - gap * 4) / 5);
+  const saveData = app.saveData || {};
+  const dailyUnlocked = typeof app.isDailyUnlocked === 'function' ? app.isDailyUnlocked() : false;
+  const dailyClaimed =
+    saveData.modeStats &&
+    saveData.modeStats.daily &&
+    saveData.modeStats.daily.claimedDate &&
+    saveData.modeStats.daily.claimedDate.length === 8;
   const items = [
     {
       id: 'dock_shop',
@@ -1169,6 +1176,13 @@ function renderLobbyBottomDock(ctx, rect, app, hits) {
       icon: 'dock_compendium',
       redDot: false,
       onClick: () => app.openCompendium('catcakes')
+    },
+    {
+      id: 'dock_challenge',
+      label: '挑战',
+      icon: 'icon_trophy',
+      redDot: Boolean(dailyUnlocked && !dailyClaimed),
+      onClick: () => app.openChallenge()
     },
     {
       id: 'dock_leaderboard',
@@ -1187,8 +1201,8 @@ function renderLobbyBottomDock(ctx, rect, app, hits) {
   ];
 
   // Larger icons slightly elevated so their tops gently pop above the walnut rim (exact 02a/02b/02c look)
-  const iconS = Math.min(44, Math.max(36, Math.round(h * 0.72)));
-  const iconCyBase = y + Math.round(h * 0.27);
+  const iconS = Math.min(40, Math.max(32, Math.round(h * 0.66)));
+  const iconCyBase = y + Math.round(h * 0.28);
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
     const bx = x + i * (colW + gap);
@@ -1198,16 +1212,16 @@ function renderLobbyBottomDock(ctx, rect, app, hits) {
 
     UI.drawUiIcon(c, sprites, it.icon, cx, iconCyBase + dy, iconS);
     UI.drawOutlinedText(c, it.label, cx, y + h * 0.80 + dy, {
-      size: h >= 58 ? 12.5 : 11.5,
+      size: h >= 58 ? 11.8 : 10.8,
       weight: 800,
       fill: '#FFF8EC',
       stroke: '#351C0F',
-      strokeWidth: 2.5,
+      strokeWidth: 2.4,
       shadowOffsetY: 0.7,
-      maxWidth: colW - 6
+      maxWidth: colW - 4
     });
     if (it.redDot) {
-      drawRedDot(c, cx + iconS * 0.35, iconCyBase - iconS * 0.33 + dy, 4.5);
+      drawRedDot(c, cx + iconS * 0.35, iconCyBase - iconS * 0.33 + dy, 4.2);
     }
     hits.add(it.id, bx, y, colW, h, it.onClick);
   }
@@ -1631,8 +1645,16 @@ function renderPlayTopBar(ctx, barRect, app, hits, nowSec) {
   const { x: bx, y: by, w: bw, h: bh } = barRect;
   const sprites = app.sprites || {};
   const orderState = app.orderState || {};
-  const lvl = getLevelById(app.currentLevelId || orderState.levelId || '1-1') || getLevelById('1-1');
-  const stars = lvl && Array.isArray(lvl.stars) ? lvl.stars : [850, 1250, 1750];
+  const curId = String(app.currentLevelId || orderState.levelId || '1-1');
+  const isDaily = curId.indexOf('daily_') === 0;
+  const isEndless = curId.indexOf('endless_') === 0;
+  const lvl = getLevelById(curId) || getLevelById('1-1');
+  const stars =
+    Array.isArray(orderState.starsOverride) && orderState.starsOverride.length >= 3
+      ? orderState.starsOverride
+      : lvl && Array.isArray(lvl.stars)
+      ? lvl.stars
+      : [850, 1250, 1750];
   const score = Math.max(0, Math.floor(Number(orderState.score) || 0));
   const timeLeft = Math.max(0, Number(orderState.timeLeft) || 0);
 
@@ -1672,11 +1694,16 @@ function renderPlayTopBar(ctx, barRect, app, hits, nowSec) {
     }
   };
 
-  // 2. Dark wood '关卡 X-Y' pill (always shows full `关卡 X-Y`, Design 03)
+  // 2. Dark wood '关卡 X-Y' / '每天特调' / '无限 N班' pill (Design 03)
   const lvlX = bx + btnS + gap;
   const lvlW = clamp(Math.round(bw * 0.22), 70, 88);
   drawHudWoodPill(lvlX, pillY, lvlW, pillH);
-  UI.drawOutlinedText(c, `关卡 ${lvl ? lvl.id : '1-1'}`, lvlX + lvlW * 0.5, pillY + pillH * 0.5 + 0.5, {
+  const pillLabel = isDaily
+    ? '每天特调'
+    : isEndless
+    ? `无限 ${curId.slice(8) || '1'}班`
+    : `关卡 ${lvl ? lvl.id : '1-1'}`;
+  UI.drawOutlinedText(c, pillLabel, lvlX + lvlW * 0.5, pillY + pillH * 0.5 + 0.5, {
     size: 12.6,
     minSize: 9.8,
     weight: 900,

@@ -13,7 +13,7 @@
  */
 'use strict';
 
-const BALANCE_VERSION = '0.11.0-m2';
+const BALANCE_VERSION = '0.12.0-m3';
 
 const FEATURES = {
   scoreZones: true,
@@ -23,9 +23,9 @@ const FEATURES = {
   feverV2: true,
   goals: true,
   events: true,
-  traits: false,
-  daily: false,
-  endless: false
+  traits: true,
+  daily: true,
+  endless: true
 };
 
 const SCORE_ZONES = {
@@ -95,6 +95,21 @@ const GOALS = {
 const CELLS = {
   ovenSec: 6.0,
   ovenMaxTier: 5
+};
+
+const DAILY = {
+  unlockLevel: '1-5',
+  clearDust: 15,
+  threeStarDust: 15,
+  maxScoreAntiCheatCap: 150000
+};
+
+const ENDLESS = {
+  unlockLevel: '1-10',
+  shiftDurationSec: 60,
+  dustPerShift: 2,
+  dailyDustCap: 60,
+  maxScorePerShiftCap: 60000
 };
 
 const TELEMETRY = {
@@ -201,6 +216,8 @@ module.exports = {
   FEVER_V2,
   GOALS,
   CELLS,
+  DAILY,
+  ENDLESS,
   TELEMETRY,
   REMOTE_OVERRIDE_BOUNDS,
   applyRemoteOverrides,

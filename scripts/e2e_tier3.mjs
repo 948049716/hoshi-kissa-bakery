@@ -47,7 +47,8 @@ const LEGACY_FORMULA_FEATURES = Object.freeze({
   doughTemp: false,
   feverV2: false,
   goals: false,
-  events: false
+  events: false,
+  traits: false
 });
 
 const TUTORIALS_ALL_SEEN = {
@@ -1035,7 +1036,7 @@ export const TIER3_TESTS = [
           totalEarnedStardust: 500,
           bankStardust: 70,
           seenTutorials: TUTORIALS_ALL_SEEN
-        });
+        }, { features: LEGACY_FORMULA_FEATURES });
         const stWave = await ctx.advanceTime(3.2);
         r07SeatIdx = (stWave.seats || []).findIndex((s) => s && s.recipeId === 'R07');
         if (r07SeatIdx >= 0) break;
@@ -1091,7 +1092,7 @@ export const TIER3_TESTS = [
           totalEarnedStardust: 500,
           bankStardust: 70,
           seenTutorials: TUTORIALS_ALL_SEEN
-        });
+        }, { features: LEGACY_FORMULA_FEATURES });
         const stWave = await ctx.advanceTime(3.2);
         r07GoldIdx = (stWave.seats || []).findIndex((s) => s && s.recipeId === 'R07');
         if (r07GoldIdx >= 0) break;
@@ -2390,7 +2391,7 @@ export const TIER3_TESTS = [
 
       await ctx.reload();
       const saveMigrated = await ctx.getSaveData();
-      ctx.assertEq(saveMigrated.schemaVersion, 2, 'Migrated save has schemaVersion === 2');
+      ctx.assertEq(saveMigrated.schemaVersion, 3, 'Migrated save has schemaVersion === 3');
       ctx.assertEq(saveMigrated.totalEarnedStardust, 430, 'UT-S01 totalEarnedStardust === 430');
       ctx.assertEq(saveMigrated.bankStardust, 230, 'UT-S01 bankStardust === 230 (50 + 130 refund + 50 gift)');
       ctx.assert(saveMigrated.unlockedPatrons.includes('luna'), 'Retains unlocked luna');
@@ -2410,7 +2411,7 @@ export const TIER3_TESTS = [
       // Reload page to verify idempotency and persistence (no double migration or lost purchases)
       await ctx.reload();
       const saveReloaded = await ctx.getSaveData();
-      ctx.assertEq(saveReloaded.schemaVersion, 2, 'Post-reload schemaVersion === 2');
+      ctx.assertEq(saveReloaded.schemaVersion, 3, 'Post-reload schemaVersion === 3');
       ctx.assertEq(saveReloaded.totalEarnedStardust, 430, 'Post-reload totalEarnedStardust invariant at 430');
       ctx.assertEq(saveReloaded.bankStardust, 15, 'Post-reload bankStardust invariant at 15');
       ctx.assertEq(saveReloaded.deviceUpgrades.dev_tray, 1, 'dev_tray Lv.1 persisted');

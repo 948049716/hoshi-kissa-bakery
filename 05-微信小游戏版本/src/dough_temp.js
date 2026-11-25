@@ -32,11 +32,13 @@ function createDoughTemp() {
   };
 }
 
-function getZone(st) {
+function getZone(st, opts) {
   if (!st) return 'cold';
   if (st.locked) return 'locked';
   const c = cfg();
-  if (st.temp >= c.warmMin) return 'warm';
+  const delta = opts && Number.isFinite(Number(opts.warmMinDelta)) ? Number(opts.warmMinDelta) : 0;
+  const effWarmMin = Math.max(10, c.warmMin + delta);
+  if (st.temp >= effWarmMin) return 'warm';
   return 'cold';
 }
 
@@ -70,7 +72,7 @@ function tickDoughTemp(st, dt) {
 /**
  * Registers one knead press.
  * @param {object} st state from createDoughTemp()
- * @param {object} [opts] { failStreak, inFever }
+ * @param {object} [opts] { failStreak, inFever, warmMinDelta }
  * @returns {{allowed:boolean, zone:string, c2Bonus:number, forceTier:number|null,
  *            pity:boolean, overheated:boolean, reason?:string}}
  */
@@ -108,7 +110,9 @@ function onKnead(st, opts) {
     return { allowed: true, zone: 'overheat', c2Bonus: 0, forceTier: 1, pity: false, overheated: true };
   }
 
-  if (st.temp >= c.warmMin) {
+  const warmDelta = Number.isFinite(Number(o.warmMinDelta)) ? Number(o.warmMinDelta) : 0;
+  const effWarmMin = Math.max(10, c.warmMin + warmDelta);
+  if (st.temp >= effWarmMin) {
     st.warmStreak += 1;
     st.warmKneads += 1;
     const every = Math.max(1, Math.floor(c.pityEvery));

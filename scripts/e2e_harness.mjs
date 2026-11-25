@@ -1794,7 +1794,7 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
   }
   function migrateV1ToV2Mock(raw) {
     if (!raw || typeof raw !== 'object' || Object.keys(raw).length === 0) {
-      return sanitizeV2Mock({ schemaVersion: 2, bankStardust: 15, totalEarnedStardust: 15, lastSyncedEarnedStardust: 0 });
+      return sanitizeV2Mock({ schemaVersion: 3, bankStardust: 15, totalEarnedStardust: 15, lastSyncedEarnedStardust: 0 });
     }
     const src = raw;
     const unlockedPatrons = ['mikan'];
@@ -1826,7 +1826,7 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
       totalEarned += 50;
     }
     const out = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       bgmTrack: src.bgmTrack === 'bossa' || src.bgmTrack === 'off' ? src.bgmTrack : 'waltz',
       sfxEnabled: typeof src.sfxEnabled === 'boolean' ? src.sfxEnabled : true,
       bankStardust: 0,
@@ -1864,10 +1864,10 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
 
   function sanitizeV2Mock(raw, warnings = []) {
     if (!raw || typeof raw !== 'object' || Object.keys(raw).length === 0) {
-      return sanitizeV2Mock({ schemaVersion: 2, bankStardust: 15, totalEarnedStardust: 15, lastSyncedEarnedStardust: 0 });
+      return sanitizeV2Mock({ schemaVersion: 3, bankStardust: 15, totalEarnedStardust: 15, lastSyncedEarnedStardust: 0 });
     }
     if (!raw.schemaVersion || raw.schemaVersion < 2) return migrateV1ToV2Mock(raw);
-    const higherSchemaDetected = Number(raw.schemaVersion) > 2;
+    const higherSchemaDetected = Number(raw.schemaVersion) > 3;
     const unlockedPatrons = ['mikan'];
     for (const p of raw.unlockedPatrons || []) {
       const np = normPatron(p);
@@ -1915,7 +1915,7 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
     const tut = raw.seenTutorials || {};
     const ls = raw.lifetimeStats || {};
     const out = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       bgmTrack: raw.bgmTrack === 'bossa' || raw.bgmTrack === 'off' ? raw.bgmTrack : 'waltz',
       sfxEnabled: typeof raw.sfxEnabled === 'boolean' ? raw.sfxEnabled : true,
       bankStardust: 0,
@@ -1971,8 +1971,8 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
 
     const isHigherCloudDoc = Boolean(
       myDoc &&
-        ((Number(myDoc.schemaVersion) || 0) > 2 ||
-          (myDoc.metaSave && (Number(myDoc.metaSave.schemaVersion) || 0) > 2))
+        ((Number(myDoc.schemaVersion) || 0) > 3 ||
+          (myDoc.metaSave && (Number(myDoc.metaSave.schemaVersion) || 0) > 3))
     );
 
     if (action === 'pull') {
@@ -1990,7 +1990,7 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
         };
       }
       if (!myDoc) {
-        const initMeta = sanitizeV2Mock({ schemaVersion: 2, bankStardust: 15, totalEarnedStardust: 15, lastSyncedEarnedStardust: 15 });
+        const initMeta = sanitizeV2Mock({ schemaVersion: 3, bankStardust: 15, totalEarnedStardust: 15, lastSyncedEarnedStardust: 15 });
         myDoc = {
           openidSuffix,
           profile: { nickName: '星夜店长#' + openidSuffix, avatarUrl: '', avatarPreset: 'mikan', authorized: false, updatedAt: 0 },
@@ -4052,13 +4052,18 @@ export function createTestContext({
           'unlockedPatrons',
           'unlockedThemes',
           'selectedPatron',
-          'equippedTheme'
+          'equippedTheme',
+          'modeStats',
+          'researchUnlocks',
+          'levelGoalsDone',
+          'seenTips',
+          'settings'
         ];
         const hasV1Key = v1LegacyKeys.some((k) => Object.prototype.hasOwnProperty.call(rawObj, k));
         const hasV2Key = v2Keys.some((k) => Object.prototype.hasOwnProperty.call(rawObj, k));
         if (!hasV1Key && hasV2Key) {
           const cur = (await ctx.getSaveData()) || {};
-          effectivePayload = { ...cur, ...rawObj, schemaVersion: 2 };
+          effectivePayload = { ...cur, ...rawObj, schemaVersion: 3 };
           if (rawObj.totalEarnedStardust === undefined && rawObj.bankStardust !== undefined) {
             delete effectivePayload.totalEarnedStardust;
           }

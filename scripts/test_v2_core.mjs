@@ -41,6 +41,9 @@ const GameEvents = require(path.join(SRC_DIR, 'game_events.js'));
 const LevelGoals = require(path.join(SRC_DIR, 'level_goals.js'));
 const LevelEvents = require(path.join(SRC_DIR, 'level_events.js'));
 const RunDiagnostics = require(path.join(SRC_DIR, 'run_diagnostics.js'));
+const CustomerTraits = require(path.join(SRC_DIR, 'customer_traits.js'));
+const PerksData = require(path.join(SRC_DIR, 'perks_data.js'));
+const RunModifiers = require(path.join(SRC_DIR, 'run_modifiers.js'));
 
 // ============================================================================
 // Deterministic PRNG & Test Runner Harness
@@ -1957,9 +1960,9 @@ async function runSectionC() {
     bestChef: 8000
   };
 
-  await runTest('UT-S01', 'v1 -> v2 无损退还与差价补齐 (migrateV1ToV2 & Legacy Run Storage Cleanup)', () => {
+  await runTest('UT-S01', 'v1 -> v3 无损退还与差价补齐 (migrateV1ToV2 & Legacy Run Storage Cleanup)', () => {
     const v2 = SaveSync.migrateV1ToV2(v1Fixture);
-    assert.equal(v2.schemaVersion, 2);
+    assert.equal(v2.schemaVersion, 3);
     assert.ok(v2.unlockedPatrons.includes('luna'));
     assert.equal(v2.selectedPatron, 'luna');
     assert.ok(v2.unlockedThemes.includes('sakura'));
@@ -1969,7 +1972,7 @@ async function runSectionC() {
     assert.equal(v2.bankStardust, 230); // zero deduction vs v1 balance + 130 refund + 50 gift!
     assert.equal(v2.migratedFromV1GiftPending, true);
 
-    // Verify loadLocalSave purges legacy active_run keys and persists migrated v2 save
+    // Verify loadLocalSave purges legacy active_run keys and persists migrated v3 save
     const memMap = new Map([
       [Constants.STORAGE_KEY, JSON.stringify(v1Fixture)],
       ['hoshi_kissa_active_run_v1', '{"score":999}'],
@@ -1989,7 +1992,7 @@ async function runSectionC() {
     };
 
     const loaded = SaveSync.loadLocalSave(mockStoragePlatform);
-    assert.equal(loaded.schemaVersion, 2);
+    assert.equal(loaded.schemaVersion, 3);
     assert.equal(loaded.bankStardust, 230);
     assert.equal(memMap.has('hoshi_kissa_active_run_v1'), false);
     assert.equal(memMap.has('hoshi_kissa_active_runs_v2'), false);
@@ -1999,7 +2002,7 @@ async function runSectionC() {
   await runTest('UT-S02', '双端星尘合并防丢失 (mergeSaveData Offline Delta Conservation & >1500 Clamp)', () => {
     const localSave = {
       ...SaveSync.createDefaultSave(),
-      schemaVersion: 2,
+      schemaVersion: 3,
       totalEarnedStardust: 345,
       lastSyncedEarnedStardust: 300,
       bankStardust: 345,
@@ -2009,7 +2012,7 @@ async function runSectionC() {
     };
     const cloudSave = {
       ...SaveSync.createDefaultSave(),
-      schemaVersion: 2,
+      schemaVersion: 3,
       totalEarnedStardust: 300,
       lastSyncedEarnedStardust: 300,
       bankStardust: 200,
@@ -2070,8 +2073,8 @@ async function runSectionC() {
     const pullMock = await Platform.runBrowserMockCloud({ action: 'pull' });
     assert.equal(pullCloud.ok, true);
     assert.equal(pullMock.ok, true);
-    assert.equal(pullCloud.metaSave.schemaVersion, 2);
-    assert.equal(pullMock.metaSave.schemaVersion, 2);
+    assert.equal(pullCloud.metaSave.schemaVersion, 3);
+    assert.equal(pullMock.metaSave.schemaVersion, 3);
     assert.equal(pullCloud.metaSave.bankStardust, 15);
     assert.equal(pullMock.metaSave.bankStardust, 15);
 
@@ -2158,9 +2161,9 @@ async function runSectionC() {
   });
 
   await runTest('UT-S04', '高版本 schemaVersion 防覆盖写保护、连败 >=2 开局 +40% 充能保底与 requestRewardAction 桩位', async () => {
-    // 1) Client normalizeSaveData / mergeSaveData marks higherSchemaDetected when schemaVersion > 2
+    // 1) Client normalizeSaveData / mergeSaveData marks higherSchemaDetected when schemaVersion > 3
     const futureRaw = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       totalEarnedStardust: 500,
       lastSyncedEarnedStardust: 500,
       bankStardust: 500,
@@ -2172,16 +2175,16 @@ async function runSectionC() {
     const mergedFuture = SaveSync.mergeSaveData(SaveSync.createDefaultSave(), futureRaw);
     assert.equal(mergedFuture.higherSchemaDetected, true);
 
-    // 2) Cloud function & browser mock cloud both block overwrite when cloud doc has schemaVersion > 2
-    const cloudVm = loadCloudFunctionInMemory('openid_future_schema_03');
+    // 2) Cloud function & browser mock cloud both block overwrite when cloud doc has schemaVersion > 3
+    const cloudVm = loadCloudFunctionInMemory('openid_future_schema_04');
     const { main: cloudMain } = cloudVm.exports;
     cloudVm.docs.set(
       'players',
       new Map([
         [
-          'openid_future_schema_03',
+          'openid_future_schema_04',
           {
-            _id: 'openid_future_schema_03',
+            _id: 'openid_future_schema_04',
             revision: 9,
             metaSave: futureRaw
           }
@@ -2191,9 +2194,9 @@ async function runSectionC() {
     const pullFuture = await cloudMain({ action: 'pull' });
     assert.equal(pullFuture.ok, true);
     assert.equal(pullFuture.higherSchemaDetected, true);
-    // Original v3 field in DB must remain intact (not overwritten on pull)
+    // Original v4 field in DB must remain intact (not overwritten on pull)
     assert.deepEqual(
-      cloudVm.docs.get('players').get('openid_future_schema_03').metaSave.futureExpansionData,
+      cloudVm.docs.get('players').get('openid_future_schema_04').metaSave.futureExpansionData,
       { endlessBestWave: 18 }
     );
     const pushFuture = await cloudMain({
@@ -2206,9 +2209,9 @@ async function runSectionC() {
     assert.equal(pushFuture.reason, 'higher_schema_version_on_cloud');
     assert.equal(pushFuture.higherSchemaDetected, true);
 
-    // Browser mock cloud parity for schemaVersion: 3
+    // Browser mock cloud parity for schemaVersion: 4
     Platform.setStorageJSON('__hoshi_browser_cloud_doc_v1__', {
-      schemaVersion: 3,
+      schemaVersion: 4,
       revision: 4,
       metaSave: futureRaw
     });
@@ -3990,12 +3993,13 @@ async function runSectionF() {
     assert.equal(bus.errorCount, 1);
 
     const before = BalanceConfig.FRESH.windowSec;
-    const applied = BalanceConfig.applyRemoteOverrides({ 'FRESH.windowSec': 999, 'SCORE_ZONES.__proto__': 1, 'NOPE.x': 3, features: { daily: true, bogus: true } });
+    const beforeDaily = BalanceConfig.FEATURES.daily;
+    const applied = BalanceConfig.applyRemoteOverrides({ 'FRESH.windowSec': 999, 'SCORE_ZONES.__proto__': 1, 'NOPE.x': 3, features: { daily: !beforeDaily, bogus: true } });
     assert.ok(applied.includes('FRESH.windowSec') && applied.includes('features.daily'));
     assert.equal(BalanceConfig.FRESH.windowSec, 12);
     assert.equal(BalanceConfig.FEATURES.bogus, undefined);
     BalanceConfig.FRESH.windowSec = before;
-    BalanceConfig.FEATURES.daily = false;
+    BalanceConfig.FEATURES.daily = beforeDaily;
   });
 }
 
@@ -4491,11 +4495,415 @@ async function runSectionH() {
 }
 
 // ============================================================================
+// Section I: M3 (v0.12) Customer Traits, 18 Perks, Daily/Endless, Schema v3 & Research Lab
+// ============================================================================
+
+async function runSectionI() {
+  await runTest('UT-T01..08', '8 位顾客专属特性：分值乘区与端菜副作用全量校验', () => {
+    const allIds = [
+      'cust_ragdoll',
+      'cust_orange',
+      'cust_silver',
+      'cust_rabbit',
+      'cust_raccoon',
+      'cust_shiba',
+      'cust_fox',
+      'cust_critic'
+    ];
+    assert.equal(Object.keys(CustomerTraits.TRAIT_CATALOG).length, 8);
+    for (const id of allIds) {
+      const tr = CustomerTraits.getCustomerTrait(id);
+      assert.ok(tr && tr.shortTag && tr.badgeColor, `trait ${id} must define metadata`);
+    }
+
+    const state = CustomerTraits.createTraitRunState();
+
+    // T01: cust_ragdoll (gentle) green-zone serve boosts other seats +10%
+    const r1 = CustomerTraits.evaluateServeTrait(state, { customerId: 'cust_ragdoll', pRatio: 0.72 });
+    assert.equal(r1.triggered, true);
+    assert.equal(r1.patienceOthers, 0.1);
+    const r1Miss = CustomerTraits.evaluateServeTrait(state, { customerId: 'cust_ragdoll', pRatio: 0.5 });
+    assert.equal(r1Miss.triggered, false);
+
+    // T02: cust_orange (big_appetite) 3-item serve gives +10 fever
+    const r2 = CustomerTraits.evaluateServeTrait(state, { customerId: 'cust_orange', itemCount: 3 });
+    assert.equal(r2.triggered, true);
+    assert.equal(r2.feverGain, 10);
+    assert.equal(CustomerTraits.evaluateServeTrait(state, { customerId: 'cust_orange', itemCount: 2 }).triggered, false);
+
+    // T03: cust_silver (matcha_fan) matcha order gives +12% skill
+    const r3 = CustomerTraits.evaluateServeTrait(state, {
+      customerId: 'cust_silver',
+      usedTiles: [{ tier: 3, flavor: 'matcha' }]
+    });
+    assert.equal(r3.triggered, true);
+    assert.equal(r3.skillGain, 12);
+
+    // T04: cust_rabbit (berry_sweet) berry order primes nextKnead C3 berry
+    const r4 = CustomerTraits.evaluateServeTrait(state, {
+      customerId: 'cust_rabbit',
+      usedTiles: [{ tier: 3, flavor: 'berry' }]
+    });
+    assert.equal(r4.triggered, true);
+    assert.deepEqual(r4.nextKnead, { tier: 3, flavor: 'berry' });
+    assert.deepEqual(state.pendingKneadOverride, { tier: 3, flavor: 'berry' });
+
+    // T05: cust_raccoon (gift_back) 30% tool gift capped at once per run
+    const r5 = CustomerTraits.evaluateServeTrait(state, { customerId: 'cust_raccoon' }, () => 0.1);
+    assert.equal(r5.triggered, true);
+    assert.ok(r5.giftTool === 'fork' || r5.giftTool === 'spoon');
+    assert.equal(state.raccoonGifted, true);
+    const r5Second = CustomerTraits.evaluateServeTrait(state, { customerId: 'cust_raccoon' }, () => 0.01);
+    assert.equal(r5Second.triggered, false, 'cust_raccoon gift must trigger at most once per run');
+
+    // T06: cust_shiba (impatient_tip) >=60% patience -> x1.15
+    assert.equal(
+      CustomerTraits.computeTraitScoreMult({ customerId: 'cust_shiba', patience: 18, maxPatience: 28 }, {}),
+      1.15
+    );
+    assert.equal(
+      CustomerTraits.computeTraitScoreMult({ customerId: 'cust_shiba', patience: 10, maxPatience: 28 }, {}),
+      1.0
+    );
+
+    // T07: cust_fox (good_word) +15% all seats patience
+    const r7 = CustomerTraits.evaluateServeTrait(state, { customerId: 'cust_fox' });
+    assert.equal(r7.triggered, true);
+    assert.equal(r7.patienceAll, 0.15);
+
+    // T08: cust_critic (connoisseur) allHot -> x1.30
+    assert.equal(
+      CustomerTraits.computeTraitScoreMult({ customerId: 'cust_critic', patience: 20, maxPatience: 30 }, { allHot: true }),
+      1.3
+    );
+    assert.equal(
+      CustomerTraits.computeTraitScoreMult({ customerId: 'cust_critic', patience: 20, maxPatience: 30 }, { allHot: false }),
+      1.0
+    );
+  });
+
+  await runTest('UT-P01..18', '18 张流派卡牌数据完整、修饰器编译与核心钩子生效', () => {
+    assert.equal(PerksData.PERK_LIST.length, 18);
+    const byRarity = { common: 0, rare: 0, legendary: 0 };
+    let defaultCount = 0;
+    let researchCount = 0;
+    for (const p of PerksData.PERK_LIST) {
+      byRarity[p.rarity] = (byRarity[p.rarity] || 0) + 1;
+      if (p.researchCost > 0) researchCount++;
+      else defaultCount++;
+    }
+    assert.deepEqual(byRarity, { common: 8, rare: 6, legendary: 4 });
+    assert.equal(defaultCount, 12);
+    assert.equal(researchCount, 6);
+
+    // Default pool has 12 perks; unlocking perk_golden_touch expands it to 13
+    assert.equal(PerksData.getUnlockedPerkPool({}).length, 12);
+    assert.equal(PerksData.getUnlockedPerkPool({ perk_golden_touch: true }).length, 13);
+
+    // Compiling all 18 perks exercises every hook aggregator without error
+    const allMods = RunModifiers.compileRunModifiers(PerksData.PERK_LIST.map((p) => p.id));
+    assert.equal(allMods.perkIds.length, 18);
+    assert.equal(allMods.doughWarmMinDelta, -8);
+    assert.equal(allMods.trayCapDelta, 1);
+    assert.equal(allMods.urgentBountyDelta, 0.15);
+    assert.equal(allMods.trashCooldownMult, 0.5);
+    assert.ok(Math.abs(allMods.patienceMult - 1.18) < 1e-6);
+    assert.ok(Math.abs(allMods.c2RateDelta - 0.1) < 1e-6);
+    assert.equal(allMods.comboWindowDelta, 3.0);
+    assert.equal(allMods.grantFork, 1);
+    assert.equal(allMods.grantSpoon, 1);
+    assert.equal(allMods.onMergeDyes.length, 2);
+    assert.equal(allMods.fullTraySkillGain, 30);
+    assert.equal(allMods.freshWindowDelta, 4.0);
+    assert.equal(allMods.critExtraFever, 8);
+    assert.equal(allMods.critExtraSkill, 8);
+    assert.ok(Math.abs(allMods.feverSceneDelta - 0.2) < 1e-6);
+    assert.equal(allMods.eternalFeverExtend, 0.5);
+    assert.deepEqual(allMods.startSpawnTiers, [5]);
+    assert.equal(allMods.onMergeGoldMinTier, 5);
+    assert.ok(Math.abs(allMods.flatSceneBonus - 0.25) < 1e-6);
+    assert.equal(allMods.sceneCapOverride, 1.6);
+
+    // DoughTemp respects warm_hearth (-8 deg warmMinDelta: 40 -> 32)
+    assert.equal(DoughTemp.getZone({ temp: 35 }), 'cold');
+    assert.equal(DoughTemp.getZone({ temp: 35 }, { warmMinDelta: -8 }), 'warm');
+
+    // applyMergePerkEffects: matcha_dyehouse on C4, golden_touch on C5
+    const gs = GridEngine.createGridState(Levels.getLevelById('1-1'), []);
+    gs.cells[0][0].tile = { uid: 1, tier: 4, flavor: 'plain', frozenHp: 0 };
+    gs.cells[0][1].tile = { uid: 2, tier: 5, flavor: 'plain', frozenHp: 0 };
+    const modsMatchaGold = RunModifiers.compileRunModifiers(['matcha_dyehouse', 'golden_touch']);
+    const mutated = RunModifiers.applyMergePerkEffects(
+      gs,
+      [
+        { r: 0, c: 0, tier: 4 },
+        { r: 0, c: 1, tier: 5 }
+      ],
+      modsMatchaGold
+    );
+    assert.equal(mutated, 2);
+    assert.equal(gs.cells[0][0].tile.flavor, 'matcha');
+    assert.equal(gs.cells[0][1].tile.flavor, 'gold');
+
+    // OrderService respects perk overrides + boostSeatsPatience
+    const save = SaveSync.createDefaultSave();
+    const oState = OrderService.createOrderState(Levels.getLevelById('1-1'), save, fixedRng, {
+      trayCapDelta: 1,
+      trashCooldownMult: 0.5,
+      comboWindowDelta: 3.0,
+      patienceMultExtra: 1.18,
+      urgentBountyDelta: 0.15
+    });
+    assert.equal(oState.trayCapacity, 4);
+    assert.equal(oState.trashCooldownMult, 0.5);
+    assert.equal(oState.comboWindowSec, 11.0);
+    assert.ok(Math.abs(oState.patienceMultExtra - 1.18) < 1e-6);
+    assert.equal(oState.urgentBountyDelta, 0.15);
+    oState.seats[0] = { customerId: 'cust_ragdoll', patience: 10, maxPatience: 20 };
+    oState.seats[1] = { customerId: 'cust_fox', patience: 10, maxPatience: 20 };
+    OrderService.boostSeatsPatience(oState, 0.1, 0);
+    assert.equal(oState.seats[0].patience, 10, 'excluded seat must not change');
+    assert.equal(oState.seats[1].patience, 12, 'other seat gets +10% of maxPatience');
+
+    // pickPerkChoices excludes owned & unresearched perks
+    const rng = Rng.createRng(99);
+    const choices = RunModifiers.pickPerkChoices(['warm_hearth', 'extra_tray'], {}, rng, 3);
+    assert.equal(choices.length, 3);
+    const ids = new Set(choices.map((p) => p.id));
+    assert.equal(ids.size, 3);
+    assert.equal(ids.has('warm_hearth'), false);
+    assert.equal(ids.has('extra_tray'), false);
+    for (const p of choices) assert.equal(p.researchCost, 0);
+  });
+
+  await runTest('UT-D01', '每天特调跨端确定性 (UTC+8 种子/盘面/规则一致) 与无限营业班次配置', () => {
+    const a = RunModifiers.buildDailyChallengeConfig('20261125');
+    const b = RunModifiers.buildDailyChallengeConfig('2026-11-25');
+    const c = RunModifiers.buildDailyChallengeConfig('20261126');
+    assert.equal(a.dateKey, '20261125');
+    assert.equal(a.seed, b.seed);
+    assert.deepEqual(a.matrix, b.matrix);
+    assert.deepEqual(a.perkIds, b.perkIds);
+    assert.equal(a.perkIds.length, 2);
+    assert.notEqual(a.seed, c.seed);
+
+    // UTC+8 date boundary: 2026-11-25T16:30:00Z is 2026-11-26 00:30 UTC+8
+    const ts = Date.parse('2026-11-25T16:30:00Z');
+    assert.equal(RunModifiers.getDailyDateKeyUTC8(ts), '20261126');
+
+    // Endless shifts scale strictly monotonically and mark every 3rd shift as VIP
+    const s1 = RunModifiers.buildEndlessShiftConfig(1, 123);
+    const s2 = RunModifiers.buildEndlessShiftConfig(2, 123);
+    const s3 = RunModifiers.buildEndlessShiftConfig(3, 123);
+    assert.equal(s1.isVipShift, false);
+    assert.equal(s3.isVipShift, true);
+    assert.ok(s1.targetScore < s2.targetScore && s2.targetScore < s3.targetScore);
+    assert.equal(s1.durationSec, 60);
+  });
+
+  await runTest('UT-S05', 'v2 -> v3 无损本地与云端迁移 (不误标 v1、保留进度、补齐 v3 字段、保持 4 键教程)', async () => {
+    const v2Save = {
+      schemaVersion: 2,
+      bgmTrack: 'bossa',
+      sfxEnabled: false,
+      bankStardust: 175,
+      totalEarnedStardust: 250,
+      lastSyncedEarnedStardust: 250,
+      consumableSpentStardust: 0,
+      levelStars: { '1-1': 3, '1-2': 2 },
+      levelBestScores: { '1-1': 2600, '1-2': 3900 },
+      levelFailStreaks: { '1-3': 1 },
+      highestUnlockedLevel: '1-3',
+      catcakeLevels: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 },
+      deviceUpgrades: { dev_tray: 1, dev_flour: 0, dev_teapot: 0, dev_tools: 0 }, // 75
+      selectedPatron: 'mikan',
+      unlockedPatrons: ['mikan'],
+      equippedTheme: 'amber',
+      unlockedThemes: ['amber'],
+      seenTutorials: { intro_slide: true, tray_trash: false, flavor_tile: false, ice_tile: false },
+      playerProfile: { nickName: '测试店长', avatarUrl: '', avatarPreset: 'mikan', authorized: true, updatedAt: 1000 },
+      lifetimeStats: {
+        runsPlayed: 5,
+        ordersServed: 42,
+        vipServed: 1,
+        maxComboEver: 5,
+        highestSingleServe: 620,
+        totalStars: 5,
+        totalCumulativeScore: 6500
+      },
+      updatedAt: 5000
+    };
+
+    const localV3 = SaveSync.normalizeSaveData(v2Save);
+    assert.equal(localV3.schemaVersion, 3);
+    assert.equal(localV3.bankStardust, 175);
+    assert.equal(localV3.totalEarnedStardust, 250);
+    assert.equal(localV3.levelStars['1-1'], 3);
+    assert.equal(localV3.levelBestScores['1-2'], 3900);
+    assert.equal(localV3.migratedFromV1GiftPending, false);
+    assert.deepEqual(Object.keys(localV3.seenTutorials).sort(), ['flavor_tile', 'ice_tile', 'intro_slide', 'tray_trash']);
+    assert.ok(localV3.modeStats && typeof localV3.modeStats === 'object');
+    assert.ok(localV3.researchUnlocks && typeof localV3.researchUnlocks === 'object');
+    assert.ok(localV3.levelGoalsDone && typeof localV3.levelGoalsDone === 'object');
+    assert.ok(localV3.seenTips && typeof localV3.seenTips === 'object');
+    assert.ok(localV3.settings && localV3.settings.vibrateEnabled === true);
+
+    // Cloud pull on a stored v2 doc upgrades losslessly with migratedFromV1: false
+    const cloudVm = loadCloudFunctionInMemory('openid_v2_upgrade_01');
+    const { main: cloudMain } = cloudVm.exports;
+    cloudVm.docs.set(
+      'players',
+      new Map([
+        [
+          'openid_v2_upgrade_01',
+          {
+            _id: 'openid_v2_upgrade_01',
+            revision: 4,
+            totalStars: 5,
+            totalCumulativeScore: 6500,
+            metaSave: deepClone(v2Save)
+          }
+        ]
+      ])
+    );
+    const pullRes = await cloudMain({ action: 'pull' });
+    assert.equal(pullRes.ok, true);
+    assert.equal(pullRes.migratedFromV1, false);
+    assert.equal(pullRes.metaSave.schemaVersion, 3);
+    assert.equal(pullRes.metaSave.bankStardust, 175);
+    assert.equal(pullRes.metaSave.levelStars['1-1'], 3);
+    assert.equal(pullRes.higherSchemaDetected, undefined);
+  });
+
+  await runTest('UT-S06', '茶研所成本客户端↔云端同构 (2000⭐ 独立于 5650⭐ 小铺上限) 与每日/无尽双榜同步', async () => {
+    const cloudVm = loadCloudFunctionInMemory('openid_m3_leader_01');
+    const { _internal, main: cloudMain } = cloudVm.exports;
+
+    assert.equal(Constants.SHOP_TOTAL_CAP, 5650);
+    assert.equal(_internal.SHOP_TOTAL_CAP, 5650);
+    assert.equal(Constants.RESEARCH_TOTAL_CAP, 2000);
+    assert.equal(_internal.RESEARCH_TOTAL_CAP, 2000);
+    assert.deepEqual(deepClone(_internal.RESEARCH_COSTS), deepClone(Constants.RESEARCH_COSTS));
+    const sumResearch = Object.values(Constants.RESEARCH_COSTS).reduce((a, b) => a + b, 0);
+    assert.equal(sumResearch, 2000);
+
+    // Pull initial doc then push daily & endless modeStats + research unlock
+    Platform.removeStorage('__hoshi_browser_cloud_doc_v1__');
+    const pullCloud = await cloudMain({ action: 'pull' });
+    await Platform.runBrowserMockCloud({ action: 'pull' });
+
+    const todayKey = RunModifiers.getDailyDateKeyUTC8();
+    const save = SaveSync.createDefaultSave();
+    save.totalEarnedStardust = 500;
+    save.lastSyncedEarnedStardust = 15;
+    save.researchUnlocks.perk_berry_jam_pot = true; // 120
+    save.bankStardust = 500 - 120;
+    save.modeStats.daily = {
+      lastDate: todayKey,
+      bestScore: 14200,
+      claimedDate: todayKey,
+      claimed3Date: todayKey
+    };
+    save.modeStats.endless = {
+      bestShift: 4,
+      bestScore: 26800,
+      runs: 1,
+      dailyDustDate: todayKey,
+      dailyDust: 8
+    };
+
+    const pushPayload = {
+      action: 'push',
+      baseRevision: pullCloud.revision,
+      metaSave: save,
+      runReport: { mode: 'daily', dateKey: todayKey, score: 14200, serves: 16, durationSec: 110 }
+    };
+    const pushCloud = await cloudMain(pushPayload);
+    const pushMock = await Platform.runBrowserMockCloud(pushPayload);
+    assert.equal(pushCloud.ok, true);
+    assert.equal(pushMock.ok, true);
+    assert.equal(pushCloud.metaSave.bankStardust, 380);
+    assert.equal(pushMock.metaSave.bankStardust, 380);
+    assert.equal(pushCloud.metaSave.researchUnlocks.perk_berry_jam_pot, true);
+
+    for (const board of ['daily', 'endless']) {
+      const lbC = await cloudMain({ action: 'leaderboard', boardType: board, dateKey: todayKey });
+      const lbM = await Platform.runBrowserMockCloud({ action: 'leaderboard', boardType: board, dateKey: todayKey });
+      assert.equal(lbC.ok, true);
+      assert.equal(lbM.ok, true);
+      assert.ok(Array.isArray(lbC.list) && lbC.list.length >= 1);
+      assert.ok(Array.isArray(lbM.list) && lbM.list.length >= 1);
+      assert.ok(lbC.myRank >= 1 && lbM.myRank >= 1);
+    }
+
+    Platform.removeStorage('__hoshi_browser_cloud_doc_v1__');
+  });
+
+  await runTest('UT-M11', 'M3 控制器闭环：茶研所购买、每天特调首通不重领与无限营业 3选1 跨班衔接', async () => {
+    const env = bootMockApp({}, {});
+    try {
+      await env.flushAssets();
+      const dbg = env.dbg;
+      // Seed progress so both Daily (1-5) and Endless (1-10) are unlocked with 500 stardust
+      dbg.setSaveData({
+        schemaVersion: 3,
+        totalEarnedStardust: 500,
+        lastSyncedEarnedStardust: 500,
+        bankStardust: 500,
+        levelStars: { '1-1': 3, '1-2': 3, '1-3': 3, '1-4': 3, '1-5': 3, '1-6': 3, '1-7': 3, '1-8': 3, '1-9': 3, '1-10': 3 },
+        highestUnlockedLevel: '2-1'
+      });
+
+      // 1) Research Lab purchase deducts exact cost & persists
+      assert.equal(dbg.buyResearchItem('perk_berry_jam_pot'), true);
+      assert.equal(dbg.getSaveData().researchUnlocks.perk_berry_jam_pot, true);
+      assert.equal(dbg.getSaveData().bankStardust, 380);
+      assert.equal(dbg.buyResearchItem('perk_berry_jam_pot'), false, 'duplicate research purchase must fail');
+
+      // 2) Daily Special: start, score >= 13000, settle awards 15+15=30 dust; replay awards 0 dust
+      assert.equal(dbg.startDailySpecial({ dateKey: '20261125', skipTutorial: true }), true);
+      const rcDaily = dbg.getRunContext();
+      assert.equal(rcDaily.mode, 'daily');
+      assert.equal(rcDaily.perkIds.length, 2);
+      Object.assign(dbg.getSimView().orderState, { score: 13500, ordersServed: 14 });
+      dbg.advanceTime(112);
+      const res1 = dbg.getState().lastResult;
+      assert.equal(res1.mode, 'daily');
+      assert.equal(res1.totalDustAward, 30);
+      assert.equal(dbg.getSaveData().bankStardust, 410);
+
+      // Replay same day -> zero double-claim
+      assert.equal(dbg.startDailySpecial({ dateKey: '20261125', skipTutorial: true }), true);
+      Object.assign(dbg.getSimView().orderState, { score: 14000, ordersServed: 15 });
+      dbg.advanceTime(112);
+      const res2 = dbg.getState().lastResult;
+      assert.equal(res2.totalDustAward, 0, 'Daily replay on same day must not double-claim stardust');
+      assert.equal(dbg.getSaveData().bankStardust, 410);
+
+      // 3) Endless Mode: shift 1 clear -> perk_pick modal -> pickEndlessPerk(0) -> shift 2 starts with perk
+      assert.equal(dbg.startEndlessMode({ seedBase: 777, skipTutorial: true }), true);
+      assert.equal(dbg.getRunContext().mode, 'endless');
+      assert.equal(dbg.getRunContext().endlessRun.shift, 1);
+      Object.assign(dbg.getSimView().orderState, { score: 2400, ordersServed: 8 });
+      dbg.advanceTime(62);
+      assert.equal(dbg.getState().activeModal, 'perk_pick');
+      assert.equal(dbg.pickEndlessPerk(0), true);
+      assert.equal(dbg.getState().activeModal, null);
+      assert.equal(dbg.getRunContext().endlessRun.shift, 2);
+      assert.equal(dbg.getRunContext().perkIds.length, 1);
+      assert.equal(dbg.getSaveData().modeStats.endless.bestShift, 1);
+    } finally {
+      env.dispose();
+    }
+  });
+}
+
+// ============================================================================
 // Main Entrypoint
 // ============================================================================
 
 async function main() {
-  console.log('=== 一起做猫饼 v0.11 Core L1 + L2 + M4 Verification Suite ===');
+  console.log('=== 一起做猫饼 v0.12 Core L1 + L2 + M3 Verification Suite ===');
   await runSectionA();
   await runSectionB();
   await runSectionC();
@@ -4504,6 +4912,7 @@ async function main() {
   await runSectionF();
   await runSectionG();
   await runSectionH();
+  await runSectionI();
 
   const passed = results.filter((r) => r.ok).length;
   const failed = results.length - passed;

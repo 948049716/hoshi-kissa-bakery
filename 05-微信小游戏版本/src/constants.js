@@ -8,7 +8,7 @@ const { LEVEL_MAP, MAX_CAMPAIGN_STARS } = require('./levels_data');
 
 const STORAGE_KEY = 'hoshi_kissa_bakery_save_v1';
 const GAME_TITLE = '一起做猫饼';
-const GAME_VERSION = '0.11.0';
+const GAME_VERSION = '0.12.0';
 const DEFAULT_INITIAL_STARDUST = 15;
 
 const CATCAKE_UPGRADE_COSTS = {
@@ -1348,13 +1348,120 @@ const ACHIEVEMENTS = [
   }
 ];
 
+// v0.12 M3 茶研所（独立于 5,650 基础吃茶小铺总价，合计 2,000 星尘）
+const RESEARCH_ITEMS = Object.freeze([
+  Object.freeze({
+    id: 'perk_berry_jam_pot',
+    category: 'perk',
+    perkId: 'berry_jam_pot',
+    name: '星牌·果酱甜杯',
+    icon: 'flavor_berry',
+    cost: 120,
+    desc: '解锁进入无限星牌池：合出 C4 猫饼自动染草莓'
+  }),
+  Object.freeze({
+    id: 'perk_crit_spark',
+    category: 'perk',
+    perkId: 'crit_spark',
+    name: '星牌·暴击星火',
+    icon: 'icon_flame',
+    cost: 140,
+    desc: '解锁进入无限星牌池：暴击额外 +8 热潮与 +8% 技能'
+  }),
+  Object.freeze({
+    id: 'perk_fever_feast',
+    category: 'perk',
+    perkId: 'fever_feast',
+    name: '星牌·热潮盛宴',
+    icon: 'icon_fever_badge',
+    cost: 160,
+    desc: '解锁进入无限星牌池：星光热潮场面区额外 +20%'
+  }),
+  Object.freeze({
+    id: 'perk_neko_blessing',
+    category: 'perk',
+    perkId: 'neko_blessing',
+    name: '星牌·猫神护福',
+    icon: 'catcake_5',
+    cost: 180,
+    desc: '解锁进入无限星牌池：开局自动投放 1 块 C5 猫饼'
+  }),
+  Object.freeze({
+    id: 'perk_golden_touch',
+    category: 'perk',
+    perkId: 'golden_touch',
+    name: '星牌·点石成金',
+    icon: 'flavor_gold',
+    cost: 220,
+    desc: '解锁进入无限星牌池：合出 C5+ 猫饼自动镀金'
+  }),
+  Object.freeze({
+    id: 'perk_starlight_crown',
+    category: 'perk',
+    perkId: 'starlight_crown',
+    name: '星牌·星冠加持',
+    icon: 'icon_crown',
+    cost: 260,
+    desc: '解锁进入无限星牌池：场面区 +25% 且封顶 1.60'
+  }),
+  Object.freeze({
+    id: 'secret_traits_regular',
+    category: 'secret',
+    name: '常客心法',
+    icon: 'icon_book',
+    cost: 140,
+    desc: '解锁顾客图鉴全部常客特性与搭配说明'
+  }),
+  Object.freeze({
+    id: 'secret_traits_vip',
+    category: 'secret',
+    name: '名家品鉴',
+    icon: 'cust_vip_cat',
+    cost: 180,
+    desc: '解锁急单狐狸与星冠美食家品鉴说明'
+  }),
+  Object.freeze({
+    id: 'badge_star_bell',
+    category: 'badge',
+    name: '星夜风铃徽',
+    icon: 'icon_stardust',
+    cost: 160,
+    desc: '星夜茶屋台面专属徽章'
+  }),
+  Object.freeze({
+    id: 'badge_matcha_whisk',
+    category: 'badge',
+    name: '抹茶大师徽',
+    icon: 'flavor_matcha',
+    cost: 200,
+    desc: '宇治抹茶手作专属徽章'
+  }),
+  Object.freeze({
+    id: 'badge_cat_crown',
+    category: 'badge',
+    name: '猫神皇冠徽',
+    icon: 'medal_gold',
+    cost: 240,
+    desc: '星冠猫神星夜专属徽章'
+  })
+]);
+
+const RESEARCH_COSTS = Object.freeze(
+  RESEARCH_ITEMS.reduce((acc, it) => {
+    acc[it.id] = it.cost;
+    return acc;
+  }, Object.create(null))
+);
+
+const RESEARCH_TOTAL_CAP = RESEARCH_ITEMS.reduce((sum, it) => sum + it.cost, 0);
+
 const DEFAULT_NPC_RIVALS = [
-  { nickName: '月光甜点师·小葵', avatarPreset: 'luna', totalStars: 87, totalCumulativeScore: 618400, isNpc: true },
-  { nickName: '甜点大师喵', avatarPreset: 'mikan', totalStars: 76, totalCumulativeScore: 462800, isNpc: true },
-  { nickName: '柴柴烘焙坊', avatarPreset: 'mugi', totalStars: 58, totalCumulativeScore: 284500, isNpc: true },
-  { nickName: '焦糖布丁喵', avatarPreset: 'mikan', totalStars: 39, totalCumulativeScore: 146200, isNpc: true },
-  { nickName: '星露茶会·奈奈', avatarPreset: 'luna', totalStars: 22, totalCumulativeScore: 54800, isNpc: true },
-  { nickName: '晚风猫饼屋', avatarPreset: 'mugi', totalStars: 9, totalCumulativeScore: 12600, isNpc: true }
+  { nickName: '月光甜点师·小葵', avatarPreset: 'luna', totalStars: 87, totalCumulativeScore: 618400, dailyBestScore: 14200, endlessBestShift: 8, endlessBestScore: 64200, isNpc: true },
+  { nickName: '甜点大师喵', avatarPreset: 'mikan', totalStars: 76, totalCumulativeScore: 462800, dailyBestScore: 11800, endlessBestShift: 6, endlessBestScore: 41600, isNpc: true },
+  { nickName: '柴柴烘焙坊', avatarPreset: 'mugi', totalStars: 58, totalCumulativeScore: 284500, dailyBestScore: 9600, endlessBestShift: 5, endlessBestScore: 28900, isNpc: true },
+  { nickName: '焦糖布丁喵', avatarPreset: 'mikan', totalStars: 39, totalCumulativeScore: 146200, dailyBestScore: 7400, endlessBestShift: 4, endlessBestScore: 17800, isNpc: true },
+  { nickName: '星露茶会·奈奈', avatarPreset: 'luna', totalStars: 22, totalCumulativeScore: 54800, dailyBestScore: 5200, endlessBestShift: 3, endlessBestScore: 9800, isNpc: true },
+  { nickName: '晚风猫饼屋', avatarPreset: 'mugi', totalStars: 9, totalCumulativeScore: 12600, dailyBestScore: 3100, endlessBestShift: 2, endlessBestScore: 4600, isNpc: true }
 ];
 
 const CHEF_RANK_TIERS = [
@@ -1454,6 +1561,9 @@ module.exports = {
   BOARD_THEME_LIST,
   THEME_COSTS,
   SHOP_TOTAL_CAP,
+  RESEARCH_ITEMS,
+  RESEARCH_COSTS,
+  RESEARCH_TOTAL_CAP,
   ASSET_PATHS,
   V090_ASSET_LIST,
   LOBBY_LAYOUT_NORMALIZED,

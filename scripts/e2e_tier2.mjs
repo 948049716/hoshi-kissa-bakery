@@ -42,7 +42,8 @@ const LEGACY_FORMULA_FEATURES = Object.freeze({
   doughTemp: false,
   feverV2: false,
   goals: false,
-  events: false
+  events: false,
+  traits: false
 });
 
 const DEFAULT_TUTORIALS_SEEN = {
@@ -2698,7 +2699,7 @@ const TIER2_F01_TO_F08 = [
         selectedPatron: 'luna',
         deviceUpgrades: { dev_tray: 1, dev_flour: 0, dev_teapot: 3, dev_tools: 3 },
         seenTutorials: DEFAULT_TUTORIALS_SEEN,
-      });
+      }, { features: LEGACY_FORMULA_FEATURES });
       for (let i = 0; i < 4; i++) {
         await serveOneOrderOrganically(ctx, null, { useHarness: false });
       }
@@ -3519,7 +3520,7 @@ const TIER2_F09_TO_F16 = [
           }, raw);
           await ctx.navigate('?safeTop=47&safeBottom=34&capsule=1&cloud=0');
           const save = await ctx.getSaveData();
-          ctx.assertEq(save.schemaVersion, 2, `Corrupted payload ${raw} must initialize schemaVersion=2`);
+          ctx.assertEq(save.schemaVersion, 3, `Corrupted payload ${raw} must initialize schemaVersion=3`);
           ctx.assertEq(save.bankStardust, 15, `Corrupted payload ${raw} must initialize bankStardust=15`);
           ctx.assertEq(save.totalEarnedStardust, 15, `Corrupted payload ${raw} must initialize totalEarnedStardust=15`);
           ctx.assertEq(save.highestUnlockedLevel, '1-1');
@@ -3535,7 +3536,7 @@ const TIER2_F09_TO_F16 = [
     id: 'T2-F11-02',
     tier: 2,
     features: ['F11'],
-    title: 'Fresh zero-score v1 save (bestChef/Rush/Zen = 0) migrates to schemaVersion=2 WITHOUT granting +50 veteran gift',
+    title: 'Fresh zero-score v1 save (bestChef/Rush/Zen = 0) migrates to schemaVersion=3 WITHOUT granting +50 veteran gift',
     run: async (ctx) => {
       try {
         await ctx.eval(() => {
@@ -3554,7 +3555,7 @@ const TIER2_F09_TO_F16 = [
         });
         await ctx.navigate('?safeTop=47&safeBottom=34&capsule=1&cloud=0');
         const save = await ctx.getSaveData();
-        ctx.assertEq(save.schemaVersion, 2);
+        ctx.assertEq(save.schemaVersion, 3);
         ctx.assertEq(save.totalEarnedStardust, 30, 'Zero-score v1 save must NOT receive +50 veteran gift');
         ctx.assertEq(save.bankStardust, 30);
       } finally {
@@ -3567,7 +3568,7 @@ const TIER2_F09_TO_F16 = [
     id: 'T2-F11-03',
     tier: 2,
     features: ['F11'],
-    title: 'v1->v2 migration (UT-S01: 230 bank / 390 earned) is strictly idempotent across 3 consecutive reloads and setSaveData',
+    title: 'v1->v3 migration (UT-S01: 230 bank / 430 earned) is strictly idempotent across 3 consecutive reloads and setSaveData',
     run: async (ctx) => {
       try {
         await ctx.eval(() => {
@@ -3585,7 +3586,7 @@ const TIER2_F09_TO_F16 = [
         await ctx.navigate('?safeTop=47&safeBottom=34&capsule=1&cloud=0');
 
         let save = await ctx.getSaveData();
-        ctx.assertEq(save.schemaVersion, 2);
+        ctx.assertEq(save.schemaVersion, 3);
         ctx.assertEq(save.totalEarnedStardust, 430);
         ctx.assertEq(save.bankStardust, 230);
 
@@ -3821,7 +3822,7 @@ const TIER2_F09_TO_F16 = [
     id: 'T2-F12-03',
     tier: 2,
     features: ['F12', 'F11'],
-    title: 'Server-side v1 cloud document auto-migrates on pull (bank=230, schemaVersion=2) and strips legacy activeRun/savedRuns',
+    title: 'Server-side v1 cloud document auto-migrates on pull (bank=230, schemaVersion=3) and strips legacy activeRun/savedRuns',
     run: async (ctx) => {
       await ctx.resetGame({ clearCloud: true, clearLocal: true });
       await ctx.eval(() => localStorage.removeItem('wx_hoshi_kissa_bakery_save_v1'));
@@ -3846,7 +3847,7 @@ const TIER2_F09_TO_F16 = [
 
       const pullRes = await callKissaSync(ctx, { action: 'pull' });
       ctx.assertEq(pullRes.ok, true);
-      ctx.assertEq(pullRes.metaSave.schemaVersion, 2, 'Server pull must migrate legacy v1 cloud doc to schemaVersion=2');
+      ctx.assertEq(pullRes.metaSave.schemaVersion, 3, 'Server pull must migrate legacy v1 cloud doc to schemaVersion=3');
       ctx.assertEq(pullRes.metaSave.bankStardust, 230, 'Server migrateV1ToV2 must refund up_tools + luna/sakura diff + 50 gift -> 230');
       ctx.assertEq(pullRes.metaSave.totalEarnedStardust, 430);
       ctx.assertEq(pullRes.metaSave.activeRun, undefined, 'Legacy activeRun must be stripped');

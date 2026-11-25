@@ -730,7 +730,24 @@ function createOrderState(levelCfgOrId, saveData, rng, modeOverrides) {
     }
   }
 
-  const trayCapacity = devTrayLv >= 1 ? 4 : 3;
+  const ovTrayDeltaRead = resolvedOverrides ? readOwnPropOnce(resolvedOverrides, 'trayCapDelta') : { exists: false };
+  const trayCapDelta = ovTrayDeltaRead.exists && !ovTrayDeltaRead.threw
+    ? safeInt(ovTrayDeltaRead.value, 0, 0, 2)
+    : 0;
+  const trayCapacity = clamp((devTrayLv >= 1 ? 4 : 3) + trayCapDelta, 3, 5);
+  const ovTrashMultRead = resolvedOverrides ? readOwnPropOnce(resolvedOverrides, 'trashCooldownMult') : { exists: false };
+  const rawTrashMult = ovTrashMultRead.exists && !ovTrashMultRead.threw ? toSafeNum(ovTrashMultRead.value) : 1.0;
+  const trashCooldownMult = Number.isFinite(rawTrashMult) && rawTrashMult > 0 ? clamp(rawTrashMult, 0.2, 2.0) : 1.0;
+  const ovComboWinRead = resolvedOverrides ? readOwnPropOnce(resolvedOverrides, 'comboWindowDelta') : { exists: false };
+  const rawComboDelta = ovComboWinRead.exists && !ovComboWinRead.threw ? toSafeNum(ovComboWinRead.value) : 0;
+  const comboWindowSec = clamp(SERVE_COMBO_WINDOW_SEC + (Number.isFinite(rawComboDelta) ? rawComboDelta : 0), 4.0, 20.0);
+  const ovPatExtraRead = resolvedOverrides ? readOwnPropOnce(resolvedOverrides, 'patienceMultExtra') : { exists: false };
+  const rawPatExtra = ovPatExtraRead.exists && !ovPatExtraRead.threw ? toSafeNum(ovPatExtraRead.value) : 1.0;
+  const patienceMultExtra = Number.isFinite(rawPatExtra) && rawPatExtra > 0 ? clamp(rawPatExtra, 0.5, 2.5) : 1.0;
+  const ovUrgBountyRead = resolvedOverrides ? readOwnPropOnce(resolvedOverrides, 'urgentBountyDelta') : { exists: false };
+  const rawUrgBounty = ovUrgBountyRead.exists && !ovUrgBountyRead.threw ? toSafeNum(ovUrgBountyRead.value) : 0;
+  const urgentBountyDelta = Number.isFinite(rawUrgBounty) ? clamp(rawUrgBounty, 0, 1.0) : 0;
+
   const tray = createNullArray(trayCapacity);
   const seats = createNullArray(SEAT_COUNT);
   const seatCooldowns = [];
@@ -759,7 +776,11 @@ function createOrderState(levelCfgOrId, saveData, rng, modeOverrides) {
     trayCapacity,
     tray,
     trashCooldown: 0,
+    trashCooldownMult,
     trashDiscards: 0,
+    comboWindowSec,
+    patienceMultExtra,
+    urgentBountyDelta,
     nextOrderUid: 1,
     nextTrayUid: 10001,
     comboCount: 0,
@@ -1500,9 +1521,12 @@ function discardTraySlot(state, slotIdx, opts) {
     return { discarded: false, tile: null };
   }
 
-  // Commit trashCooldown = 8.0s & trashDiscards += 1
+  // Commit trashCooldown = 8.0s * trashCooldownMult & trashDiscards += 1
+  const trashMultRead = readOwnPropOnce(state, 'trashCooldownMult');
+  const rawTrashMult = trashMultRead.exists && !trashMultRead.threw ? toSafeNum(trashMultRead.value) : 1.0;
+  const effTrashCd = TRASH_CONFIG.cooldownSec * (Number.isFinite(rawTrashMult) && rawTrashMult > 0 ? clamp(rawTrashMult, 0.2, 2.0) : 1.0);
   if (prevTrashCdRead.exists || safeIsExtensible(state)) {
-    if (!verifiedWriteProp(state, 'trashCooldown', TRASH_CONFIG.cooldownSec)) {
+    if (!verifiedWriteProp(state, 'trashCooldown', effTrashCd)) {
       restorePropSnapshot(state, 'trashCooldown', prevTrashCdRead);
     }
   }
@@ -2270,7 +2294,10 @@ function matchTrayToCustomer(state, arg2, arg3) {
   if (!verifiedWriteProp(state, 'comboCount', nextCombo)) {
     restorePropSnapshot(state, 'comboCount', prevComboRead);
   }
-  if (!verifiedWriteProp(state, 'comboTimer', SERVE_COMBO_WINDOW_SEC)) {
+  const cwRead = readOwnPropOnce(state, 'comboWindowSec');
+  const rawCw = cwRead.exists && !cwRead.threw ? toSafeNum(cwRead.value) : NaN;
+  const effComboWindow = Number.isFinite(rawCw) && rawCw > 0 ? clamp(rawCw, 4.0, 20.0) : SERVE_COMBO_WINDOW_SEC;
+  if (!verifiedWriteProp(state, 'comboTimer', effComboWindow)) {
     restorePropSnapshot(state, 'comboTimer', prevComboTimerRead);
   }
   const maxComboRead = readOwnPropOnce(state, 'maxCombo');
@@ -2526,7 +2553,7 @@ function pickWeightedItem(items, weights, rng) {
   return items[items.length - 1];
 }
 
-function computeOrderPatienceSec(recipe, customerDef, devTeapotLv) {
+function computeOrderPatienceSec(recipe, customerDef, devTeapotLv, patienceMultExtra) {
   const recSlots = isPlainObj(recipe) ? getOwn(recipe, 'slots', null) : null;
   const slotCount = clamp(safeArrayLen(recSlots, MAX_ORDER_SLOTS), 1, 3);
   const maxRecipeTier = getRecipeMaxTier(recipe);
@@ -2538,7 +2565,10 @@ function computeOrderPatienceSec(recipe, customerDef, devTeapotLv) {
     ? toSafeNum(getOwn(customerDef, 'patienceMult', 1.0), 1.0)
     : 1.0;
   const patMult = Number.isFinite(rawPatMult) && rawPatMult > 0 ? rawPatMult : 1.0;
-  const mult = patMult * (1 + teapotBonus);
+  const extra = Number.isFinite(Number(patienceMultExtra)) && Number(patienceMultExtra) > 0
+    ? clamp(Number(patienceMultExtra), 0.5, 2.5)
+    : 1.0;
+  const mult = patMult * (1 + teapotBonus) * extra;
   return Math.round(basePatienceSec * mult * 100) / 100;
 }
 
@@ -2624,6 +2654,14 @@ function buildSpawnContextOnce(state, boardFlavors) {
     ? safeInt(teapotRead.value, 0, 0, 3)
     : 0;
 
+  const patExtraRead = readOwnPropOnce(state, 'patienceMultExtra');
+  const rawPatExtra = patExtraRead.exists && !patExtraRead.threw ? toSafeNum(patExtraRead.value) : 1.0;
+  const patienceMultExtra = Number.isFinite(rawPatExtra) && rawPatExtra > 0 ? clamp(rawPatExtra, 0.5, 2.5) : 1.0;
+
+  const urgBountyRead = readOwnPropOnce(state, 'urgentBountyDelta');
+  const rawUrgBounty = urgBountyRead.exists && !urgBountyRead.threw ? toSafeNum(urgBountyRead.value) : 0;
+  const urgentBountyDelta = Number.isFinite(rawUrgBounty) ? clamp(rawUrgBounty, 0, 1.0) : 0;
+
   const nextUidRead = readOwnPropOnce(state, 'nextOrderUid');
   const nextOrderUid = nextUidRead.exists && !nextUidRead.threw
     ? safeInt(nextUidRead.value, 1, 1, 1000000000)
@@ -2651,6 +2689,8 @@ function buildSpawnContextOnce(state, boardFlavors) {
     baseUrgRate,
     chapter,
     devTeapotLv,
+    patienceMultExtra,
+    urgentBountyDelta,
     nextOrderUid,
     nextUidRead
   };
@@ -2910,7 +2950,12 @@ function planCustomerForSeatFromSnap(
     chosenRecipe = pickWeightedItem(candidates, recipeWeights, rng);
   }
 
-  const maxPatience = computeOrderPatienceSec(chosenRecipe, customerDef, spawnCtx.devTeapotLv);
+  const maxPatience = computeOrderPatienceSec(
+    chosenRecipe,
+    customerDef,
+    spawnCtx.devTeapotLv,
+    spawnCtx.patienceMultExtra
+  );
   const uid = spawnCtx.nextOrderUid;
 
   const chosenSlots = isPlainObj(chosenRecipe) ? getOwn(chosenRecipe, 'slots', null) : null;
@@ -2942,11 +2987,15 @@ function planCustomerForSeatFromSnap(
     ? getOwn(customerDef, 'id', 'cust_ragdoll')
     : 'cust_ragdoll';
   const customerName = isPlainObj(customerDef) ? getOwn(customerDef, 'name', '') : '';
-  const bountyMult = isPlainObj(customerDef)
-    ? toSafeNum(getOwn(customerDef, 'bountyMult', 1.0), 1.0)
-    : 1.0;
   const isVip = Boolean(isPlainObj(customerDef) && getOwn(customerDef, 'isVip', false));
   const isUrgent = Boolean(isPlainObj(customerDef) && getOwn(customerDef, 'isUrgent', false));
+  const baseBounty = isPlainObj(customerDef)
+    ? toSafeNum(getOwn(customerDef, 'bountyMult', 1.0), 1.0)
+    : 1.0;
+  const bountyMult =
+    isUrgent && Number(spawnCtx.urgentBountyDelta) > 0
+      ? Math.round((baseBounty + Number(spawnCtx.urgentBountyDelta)) * 100) / 100
+      : baseBounty;
   const rewardDustBonus = isPlainObj(customerDef)
     ? safeInt(getOwn(customerDef, 'rewardDustBonus', 0), 0, 0, 50)
     : 0;
@@ -3153,11 +3202,14 @@ function stepCustomers(state, dt, arg3, arg4) {
   const rawComboTimer = prevComboTimerRead.exists && !prevComboTimerRead.threw
     ? toSafeNum(prevComboTimerRead.value, 0)
     : 0;
+  const cwReadStep = readOwnPropOnce(state, 'comboWindowSec');
+  const rawCwStep = cwReadStep.exists && !cwReadStep.threw ? toSafeNum(cwReadStep.value) : NaN;
+  const effComboWindowStep = Number.isFinite(rawCwStep) && rawCwStep > 0 ? clamp(rawCwStep, 4.0, 20.0) : SERVE_COMBO_WINDOW_SEC;
   const effComboTimer =
     Number.isFinite(rawComboTimer) && rawComboTimer > 0
       ? rawComboTimer
       : hadCombo
-        ? SERVE_COMBO_WINDOW_SEC
+        ? effComboWindowStep
         : 0;
   if (effComboTimer > 0) {
     const nextComboTimer = effComboTimer > safeDt + EPS ? effComboTimer - safeDt : 0;
@@ -3452,6 +3504,44 @@ function applyMikanComfortTea(state) {
 }
 
 /**
+ * v0.12 M3: restores +ratio*maxPatience to seated customers (optionally excluding one seat).
+ * Never mutates score and clamps strictly to maxPatience.
+ */
+function boostSeatsPatience(state, ratio, excludeSeatIdx) {
+  const r = toSafeNum(ratio);
+  if (safeIsFrozen(state) || !Number.isFinite(r) || r <= 0) return { boostedSeats: 0 };
+  const arrs = readOrderStateArrays(state);
+  if (!arrs) return { boostedSeats: 0 };
+  const { seats } = arrs;
+  const ex = typeof excludeSeatIdx === 'number' && Number.isInteger(excludeSeatIdx) ? excludeSeatIdx : -1;
+  const clampedR = clamp(r, 0, 1.0);
+  let boostedSeats = 0;
+  const seatLimit = safeArrayLen(seats, SEAT_COUNT);
+  const seenSeats = new Set();
+  for (let i = 0; i < seatLimit; i++) {
+    if (i === ex) continue;
+    const seatRead = readOwnPropOnce(seats, i);
+    const seat = seatRead.exists && !seatRead.threw ? seatRead.value : null;
+    if (!isPlainObj(seat) || seenSeats.has(seat)) continue;
+    seenSeats.add(seat);
+    if (safeIsFrozen(seat) || !canMutateProp(seat, 'patience')) continue;
+    const mpRead = readOwnPropOnce(seat, 'maxPatience');
+    const pRead = readOwnPropOnce(seat, 'patience');
+    const mp = mpRead.exists && !mpRead.threw ? toSafeNum(mpRead.value, 0) : 0;
+    const p = pRead.exists && !pRead.threw ? toSafeNum(pRead.value, 0) : 0;
+    if (Number.isFinite(mp) && mp > 0 && Number.isFinite(p)) {
+      const nextPat = Math.min(mp, Math.max(0, p) + clampedR * mp);
+      if (verifiedWriteProp(seat, 'patience', nextPat)) {
+        boostedSeats += 1;
+      } else {
+        restorePropSnapshot(seat, 'patience', pRead);
+      }
+    }
+  }
+  return { boostedSeats };
+}
+
+/**
  * Computes end-of-level 0..3 star rating and stardust breakdown.
  * Enforces Pure Serve-Only Scoring Iron Law: 0 serves => 0 valid score and 0 consolation dust.
  */
@@ -3576,6 +3666,7 @@ module.exports = {
   serveCustomerSeat,
   computeServeScore,
   applyMikanComfortTea,
+  boostSeatsPatience,
   computeLevelSettlement,
   addFeverEnergy,
   extendFever

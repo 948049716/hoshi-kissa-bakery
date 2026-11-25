@@ -14,43 +14,6 @@ for (let ch = 1; ch <= 3; ch++) {
   }
 }
 
-const RETAINED_V1_ASSETS = [
-  'bakery_bg.jpg',
-  'chef_mikan.png',
-  'icon_shop_sign.png',
-  'patron_luna.png',
-  'patron_mugi.png',
-  'tool_fork.png',
-  'tool_spoon.png',
-  'ui_atlas.png',
-  'ui_atlas_2.png',
-  'ui_atlas_3.png',
-  'ui_patron_stage.png',
-  'ui_serve_bell.png',
-  'ui_title_plaque.png',
-];
-
-const NEW_V2_PNG_ASSETS = [
-  'catcake_1.png',
-  'catcake_2.png',
-  'catcake_3.png',
-  'catcake_4.png',
-  'catcake_5.png',
-  'catcake_6.png',
-  'catcake_7.png',
-  'catcake_1_happy.png',
-  'catcake_2_happy.png',
-  'catcake_3_happy.png',
-  'catcake_4_happy.png',
-  'catcake_5_happy.png',
-  'catcake_6_happy.png',
-  'catcake_7_happy.png',
-  'customers_atlas.png',
-  'board_tiles_atlas.png',
-];
-
-const EXPECTED_30_RUNTIME_ASSETS = [...RETAINED_V1_ASSETS, ...NEW_V2_PNG_ASSETS, 'title_hero_v2.jpg'].sort();
-
 const FORBIDDEN_V1_RUNTIME_ASSETS = (() => {
   const list = ['title_hero.jpg', 'event_yarn_ball.png', 'tool_shake.png'];
   for (let t = 1; t <= 9; t++) {
@@ -715,6 +678,14 @@ const TIER2_F01_TO_F08 = [
         ctx.assert(!fs.existsSync(path.join(srcDir, legacySrc)), `Deprecated physics/jar module still exists: src/${legacySrc}`);
       }
       ctx.assert(!fs.existsSync(legacyScript), 'Deprecated scripts/extract_physics_shapes.py must be deleted');
+      for (const legacyRel of [
+        '02-游戏素材-精修透明PNG',
+        '03-游戏素材-原始原图与WebP',
+        'scripts/extract_assets.py',
+        'scripts/extract_ui_assets.py',
+      ]) {
+        ctx.assert(!fs.existsSync(path.join(ctx.repoRoot, legacyRel)), `Deprecated asset/script still exists: ${legacyRel}`);
+      }
     },
   },
 
@@ -770,7 +741,7 @@ const TIER2_F01_TO_F08 = [
     id: 'T2-F01-06',
     tier: 2,
     features: ['F01'],
-    title: 'All 69 v0.9.0 WebP sprites stay compact (<100KB each) and upload_minigame.mjs excludes cloudfunctions/',
+    title: 'All 69 v0.9.0 PNG/JPG sprites stay compact (<100KB each) and upload_minigame.mjs excludes cloudfunctions/',
     run: async (ctx) => {
       const consts = await ctx.requireBundledModule('./src/constants.js');
       for (const item of consts.V090_ASSET_LIST || []) {

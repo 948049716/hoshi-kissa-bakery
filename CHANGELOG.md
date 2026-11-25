@@ -6,6 +6,13 @@
 
 ## [Unreleased]
 
+### Removed
+- 彻底清理 `v0.9.0` 全量绘本 UI 资产替换后已完全废弃的旧素材目录与旧切图脚本：`02-游戏素材-精修透明PNG/`（78 个文件，约 `5.30 MB`）、`03-游戏素材-原始原图与WebP/`（17 个文件，约 `6.68 MB`）、`scripts/extract_assets.py` 与 `scripts/extract_ui_assets.py`。
+
+### Changed
+- 更新 `scripts/test_v2_core.mjs`（`inferSpriteDims` 对齐 `v0.9.0` 尺寸、`UT-M01` 新增上述 4 项清理路径零残留断言）与 `scripts/e2e_tier2.mjs`（清理过时常量、补充 `T2-F01-04` 零残留检查并修正 `T2-F01-06` 标题文案）。
+- 同步更新 `.gitignore`、`README.md`、`05-微信小游戏版本/README.md`、`PROJECT.md`、`docs/04-美术与音频素材制作规范.md`、`docs/05-技术架构重构与代码改造方案.md` 与 `docs/HANDOVER.md`。
+
 ---
 
 ## [0.9.0] - 2026-11-24

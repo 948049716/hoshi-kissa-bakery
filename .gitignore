@@ -9,7 +9,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Python 缓存与虚拟环境 (scripts/extract_assets.py 等管线脚本)
+# Python 缓存与虚拟环境 (scripts/build_font_subset.py 等辅助脚本)
 __pycache__/
 *.py[cod]
 *$py.class

@@ -32,9 +32,9 @@
 ## 3. 工程代码与资产现状（`v0.9.0` 基线已完备）
 
 1. **客户端与云函数源码（扁平 CommonJS 架构）**：
-   - 全部核心模块均已按 `v0.9.0` 落地于 `05-微信小游戏版本/src/*.js`（含 `constants.js`, `levels_data.js`, `grid_engine.js`, `order_service.js`, `board_renderer.js`, `screens_ui.js`, `modals_ui.js`, `game_app.js`, `save_sync.js`, `platform.js`, `audio.js`, `ui_draw.js`）及 `05-微信小游戏版本/cloudfunctions/kissa_sync/index.js`。
-2. **美术资产与包体**：
-   - `scripts/extract_assets.py --v2` 已切分导出全部 14 张猫饼双态 PNG、`customers_atlas.png`、`board_tiles_atlas.png` 与无字主视觉 `title_hero_v2.jpg`，旧版物理玻璃罐资源已清理，客户端主包约 `2.1 MB`（远低于 `4 MB` 微信上限）。
+   - 全部核心模块均已按 `v0.9.0` 落地于 `05-微信小游戏版本/src/*.js`（含 `constants.js`, `levels_data.js`, `grid_engine.js`, `order_service.js`, `board_renderer.js`, `screens_ui.js`, `modals_ui.js`, `game_app.js`, `save_sync.js`, `platform.js`, `audio.js`, `ui_draw.js`, `ui_v090_skin_patch.js`）及 `05-微信小游戏版本/cloudfunctions/kissa_sync/index.js`。
+2. **美术资产、圆体字体与包体**：
+   - 现行唯一运行时资产为 `05-微信小游戏版本/assets/ui_v090/` 下的 **69 张微信白名单纯 ASCII PNG/JPG**（65 PNG + 4 JPG）与 `scripts/build_font_subset.py` 生成的 `assets/fonts/kissa_round.ttf`（`367.7 KB`）；早期过渡目录 `02-游戏素材-精修透明PNG/`（78 文件）、`03-游戏素材-原始原图与WebP/`（17 文件）及旧切图脚本 `scripts/extract_assets.py`、`scripts/extract_ui_assets.py` 已彻底清理移除，编译后主包约 `2.3 MB`（远低于 `4 MB` 微信上限）。
 3. **测试套件**：
    - 已配备 `scripts/test_v2_core.mjs`（含 `v0.9.0` 客户端↔云函数同构单测、移位叉 5 模式、厨余冷却、重刷衰减与高版本防覆盖测试）及 `scripts/verify_minigame_e2e.mjs`（含 `e2e_tier1..4.mjs` 无头 Chromium CDP 端到端测试）。
 

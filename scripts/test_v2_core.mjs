@@ -521,13 +521,12 @@ function createMockCanvas2D(canvas, spy) {
 
 function inferSpriteDims(src) {
   const s = String(src || '');
-  if (s.includes('customers_atlas')) return { w: 1024, h: 512 };
-  if (s.includes('board_tiles_atlas')) return { w: 512, h: 256 };
-  if (s.includes('ui_atlas')) return { w: 512, h: 512 };
-  if (s.includes('ui_title_plaque')) return { w: 475, h: 290 };
-  if (s.includes('title_hero_v2')) return { w: 1280, h: 720 };
-  if (s.includes('catcake_')) return { w: 192, h: 192 };
-  return { w: 256, h: 256 };
+  if (s.includes('bg_lobby_ch') || s.includes('title_hero_v2')) return { w: 750, h: 1334 };
+  if (s.includes('title_plaque_banner')) return { w: 640, h: 491 };
+  if (s.includes('lobby_plaque_blank')) return { w: 428, h: 290 };
+  if (s.includes('patron_')) return { w: 320, h: 320 };
+  if (s.includes('catcake_')) return { w: 256, h: 256 };
+  return { w: 192, h: 192 };
 }
 
 function createMockWebAudioContext(spy) {
@@ -2596,11 +2595,20 @@ function serveOneCustomerOnLevel1(dbg) {
 }
 
 async function runSectionE() {
-  await runTest('UT-M01', '清理后旧版 65 文件零残留、69 张微信白名单 ASCII PNG/JPG 双射、KissaRound 圆体子集与包体门禁', () => {
+  await runTest('UT-M01', '清理后旧版文件与废弃素材目录零残留、69 张微信白名单 ASCII PNG/JPG 双射、KissaRound 圆体子集与包体门禁', () => {
     const legacyPaths = buildExpected65DeletedPaths();
     assert.equal(legacyPaths.length, 65);
     const lingering = legacyPaths.filter((rel) => fs.existsSync(path.join(REPO_ROOT, rel)));
     assert.deepEqual(lingering, [], `Legacy v1 files still present: ${lingering.join(', ')}`);
+
+    const deprecatedV080Paths = [
+      '02-游戏素材-精修透明PNG',
+      '03-游戏素材-原始原图与WebP',
+      'scripts/extract_assets.py',
+      'scripts/extract_ui_assets.py'
+    ];
+    const lingeringV080 = deprecatedV080Paths.filter((rel) => fs.existsSync(path.join(REPO_ROOT, rel)));
+    assert.deepEqual(lingeringV080, [], `Deprecated legacy asset dirs/scripts still present: ${lingeringV080.join(', ')}`);
 
     const constAssetSet = collectAssetPathsFromConstants(Constants.ASSET_PATHS);
     assert.equal(constAssetSet.size, 69);

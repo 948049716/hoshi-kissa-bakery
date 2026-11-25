@@ -2860,7 +2860,7 @@ ${shimScript}
   wx.showShareMenu({ withShareTicket: true, menus: ['shareAppMessage', 'shareTimeline'] });
   wx.onShareAppMessage(() => ({
     title: '一起做猫饼 · 治愈猫咪甜品屋',
-    imageUrl: 'assets/ui_v090/08_首屏主视觉与结算辅助件/01_首屏纯主视觉底图_title_hero_v2.webp'
+    imageUrl: 'assets/ui_v090/title_hero_v2.jpg'
   }));
   wx.setUserCloudStorage({
     KVDataList: [

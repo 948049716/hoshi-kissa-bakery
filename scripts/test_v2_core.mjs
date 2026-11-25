@@ -2596,7 +2596,7 @@ function serveOneCustomerOnLevel1(dbg) {
 }
 
 async function runSectionE() {
-  await runTest('UT-M01', '清理后旧版 65 文件零残留、69 张 v0.9.0 WebP 双射、圆体子集字体与 <2.5MB 包体门禁', () => {
+  await runTest('UT-M01', '清理后旧版 65 文件零残留、69 张微信白名单 ASCII PNG/JPG 双射、KissaRound 圆体子集与包体门禁', () => {
     const legacyPaths = buildExpected65DeletedPaths();
     assert.equal(legacyPaths.length, 65);
     const lingering = legacyPaths.filter((rel) => fs.existsSync(path.join(REPO_ROOT, rel)));
@@ -2611,15 +2611,19 @@ async function runSectionE() {
       .filter((rel) => !path.basename(rel).startsWith('.'))
       .sort();
 
-    // Zero legacy PNG/JPG residue inside assets/
-    const legacyRaster = allDiskAssets.filter((p) => /\.(png|jpe?g)$/i.test(p));
-    assert.deepEqual(legacyRaster, [], `Legacy PNG/JPG files left in assets/: ${legacyRaster.join(', ')}`);
+    // Zero non-whitelisted .webp files inside assets/ (WeChat Mini Game silently strips .webp on upload!)
+    const forbiddenWebp = allDiskAssets.filter((p) => /\.webp$/i.test(p));
+    assert.deepEqual(forbiddenWebp, [], `Non-whitelisted .webp files found in assets/: ${forbiddenWebp.join(', ')}`);
 
-    // Exact 69 WebP bijection under assets/ui_v090/
-    const diskWebpFiles = allDiskAssets.filter((p) => p.endsWith('.webp')).sort();
-    assert.equal(diskWebpFiles.length, 69);
-    const onlyOnDisk = diskWebpFiles.filter((p) => !constAssetSet.has(p));
-    const onlyInConst = [...constAssetSet].filter((p) => !diskWebpFiles.includes(p));
+    // Pure ASCII asset paths for iOS WeChat Mini Game compatibility
+    const nonAsciiAssets = allDiskAssets.filter((p) => /[^\x20-\x7E]/.test(p));
+    assert.deepEqual(nonAsciiAssets, [], `Non-ASCII asset paths found in assets/: ${nonAsciiAssets.join(', ')}`);
+
+    // Exact 69 WeChat-whitelisted PNG/JPG sprites bijection under assets/ui_v090/
+    const diskRasterFiles = allDiskAssets.filter((p) => /\.(png|jpe?g)$/i.test(p)).sort();
+    assert.equal(diskRasterFiles.length, 69);
+    const onlyOnDisk = diskRasterFiles.filter((p) => !constAssetSet.has(p));
+    const onlyInConst = [...constAssetSet].filter((p) => !diskRasterFiles.includes(p));
     assert.deepEqual(onlyOnDisk, []);
     assert.deepEqual(onlyInConst, []);
 
@@ -2642,8 +2646,8 @@ async function runSectionE() {
     const bundleFiles = walkFilesExcludingCloud(MINIGAME_DIR);
     const totalBytes = bundleFiles.reduce((sum, f) => sum + f.size, 0);
     assert.ok(
-      totalBytes < 2.5 * 1024 * 1024 && totalBytes < 2500000,
-      `Mini Game bundle ${totalBytes} bytes exceeds 2.5 MB budget`
+      totalBytes < 3.2 * 1024 * 1024 && totalBytes < 4 * 1024 * 1024,
+      `Mini Game raw bundle ${totalBytes} bytes exceeds 3.2 MB budget (< 4 MB WeChat limit)`
     );
 
     const externalAudio = bundleFiles.filter((f) => /\.(mp3|wav|ogg|m4a|aac)$/i.test(f.path));

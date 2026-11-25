@@ -114,6 +114,52 @@ def run_subset(font_path: Path, chars_file: Path, out_path: Path) -> None:
         raise RuntimeError(
             "pyftsubset 执行失败。请确认已安装 fonttools：pip install fonttools"
         )
+    normalize_wechat_font_names(out_path, family_name="KissaRound")
+
+
+def normalize_wechat_font_names(ttf_path: Path, family_name: str = "KissaRound") -> None:
+    """
+    统一 TTF 的 Windows/Mac 名称表与 Regular 字重标记（保留原始圆体粗字形轮廓），
+    彻底避免微信小游戏 iOS 端 CoreText 因 Family/FullName/PostScriptName 不一致或含空格导致 wx.loadFont 失效。
+    """
+    from fontTools.ttLib import TTFont
+
+    font = TTFont(str(ttf_path))
+    name_tbl = font["name"]
+    copyright_str = ""
+    version_str = "1.000"
+    for rec in name_tbl.names:
+        if rec.nameID == 0 and not copyright_str:
+            copyright_str = rec.toUnicode()
+        elif rec.nameID == 5 and version_str == "1.000":
+            version_str = rec.toUnicode()
+
+    name_tbl.names = []
+    entries = [
+        (0, copyright_str or "SIL OFL 1.1 Resource Han Rounded CN subset"),
+        (1, family_name),
+        (2, "Regular"),
+        (3, f"{family_name} {version_str}"),
+        (4, family_name),
+        (5, version_str),
+        (6, family_name),
+    ]
+    for nid, val in entries:
+        # Windows Unicode BMP (platformID=3, platEncID=1, langID=0x0409)
+        name_tbl.setName(val, nid, 3, 1, 0x0409)
+        # Macintosh Roman (platformID=1, platEncID=0, langID=0) — iOS CoreText compatibility
+        mac_val = val.encode("mac_roman", errors="replace").decode("mac_roman")
+        name_tbl.setName(mac_val, nid, 1, 0, 0)
+
+    if "OS/2" in font:
+        font["OS/2"].usWeightClass = 400
+        # Clear Bold (0x20) and Italic (0x01), set Regular (0x40)
+        font["OS/2"].fsSelection = (font["OS/2"].fsSelection & ~0x21) | 0x40
+    if "head" in font:
+        font["head"].macStyle &= ~0x03
+
+    font.save(str(ttf_path))
+    font.close()
 
 
 def main() -> None:

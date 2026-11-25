@@ -656,15 +656,15 @@ const F01_TESTS = [
     id: 'T1-F01-02',
     tier: 1,
     features: ['F01'],
-    title: '7 v0.9.0 cat-cake standalone WebPs (cake_c1..c7) decode cleanly with transparent corners and distinct art',
+    title: '7 v0.9.0 cat-cake standalone PNGs (cake_c1..c7) decode cleanly with transparent corners and distinct art',
     run: async (ctx) => {
       const consts = await ctx.requireBundledModule('./src/constants.js');
       const cakePaths = [];
       for (let k = 1; k <= 7; k++) {
         const rel = consts.ASSET_PATHS.catcakes[k];
-        ctx.assert(typeof rel === 'string' && rel.endsWith('.webp'), `Missing WebP path for C${k}: ${rel}`);
+        ctx.assert(typeof rel === 'string' && rel.endsWith('.png'), `Missing PNG path for C${k}: ${rel}`);
         const abs = path.join(ctx.minigameDir, rel);
-        ctx.assert(fs.existsSync(abs) && fs.statSync(abs).size > 500, `Missing catcake WebP on disk: ${abs}`);
+        ctx.assert(fs.existsSync(abs) && fs.statSync(abs).size > 500, `Missing catcake PNG on disk: ${abs}`);
         cakePaths.push({ tier: k, rel });
       }
 
@@ -732,7 +732,7 @@ const F01_TESTS = [
     id: 'T1-F01-03',
     tier: 1,
     features: ['F01'],
-    title: 'All v0.9.0 standalone customer, tile, patron, medal & supplementary WebP sprites decode cleanly with alpha',
+    title: 'All v0.9.0 standalone customer, tile, patron, medal & supplementary PNG sprites decode cleanly with alpha',
     run: async (ctx) => {
       const consts = await ctx.requireBundledModule('./src/constants.js');
       const inspectIds = [
@@ -764,7 +764,7 @@ const F01_TESTS = [
         const rel = byId.get(id);
         ctx.assert(Boolean(rel), `Missing V090_ASSET_LIST entry for ${id}`);
         const abs = path.join(ctx.minigameDir, rel);
-        ctx.assert(fs.existsSync(abs) && fs.statSync(abs).size > 300, `Missing WebP on disk for ${id}: ${abs}`);
+        ctx.assert(fs.existsSync(abs) && fs.statSync(abs).size > 300, `Missing PNG on disk for ${id}: ${abs}`);
         return { id, rel };
       });
 
@@ -805,13 +805,13 @@ const F01_TESTS = [
     id: 'T1-F01-04',
     tier: 1,
     features: ['F01'],
-    title: 'v0.9.0 chapter backgrounds, reserve title_hero_v2.webp, and subsetted TrueType font kissa_round.ttf load cleanly',
+    title: 'v0.9.0 chapter JPG backgrounds, reserve title_hero_v2.jpg, and subsetted TrueType font kissa_round.ttf load cleanly',
     run: async (ctx) => {
       const consts = await ctx.requireBundledModule('./src/constants.js');
       const byId = new Map((consts.V090_ASSET_LIST || []).map((a) => [a.id, a.path]));
       for (const bgId of ['bg_lobby_ch1_amber', 'bg_lobby_ch2_sakura', 'bg_lobby_ch3_moonlight', 'title_hero_v2']) {
         const rel = byId.get(bgId);
-        ctx.assert(Boolean(rel), `Missing ${bgId} in V090_ASSET_LIST`);
+        ctx.assert(Boolean(rel) && rel.endsWith('.jpg'), `Missing JPG ${bgId} in V090_ASSET_LIST`);
         const abs = path.join(ctx.minigameDir, rel);
         ctx.assert(fs.existsSync(abs) && fs.statSync(abs).size > 8_000, `Missing or tiny background ${rel}`);
         const decoded = await ctx.eval(async (src) => {
@@ -838,7 +838,7 @@ const F01_TESTS = [
     id: 'T1-F01-05',
     tier: 1,
     features: ['F01'],
-    title: 'Live Mini Game runtime preloader completes exact 69/69 v0.9.0 WebP assets without network or console errors',
+    title: 'Live Mini Game runtime preloader completes exact 69/69 v0.9.0 PNG/JPG assets without network or console errors',
     freshReload: true,
     query: '?safeTop=20&safeBottom=0&capsule=1&cloud=1',
     run: async (ctx) => {
@@ -853,8 +853,8 @@ const F01_TESTS = [
         },
         { timeoutMs: 8000, label: 'assetsLoaded === assetsTotal' }
       );
-      ctx.assertEq(st.assetsTotal, 69, 'Expected exact 69 v0.9.0 runtime WebP assets');
-      ctx.assertEq(st.assetsLoaded, 69, 'Expected all 69 runtime WebP assets loaded');
+      ctx.assertEq(st.assetsTotal, 69, 'Expected exact 69 v0.9.0 runtime PNG/JPG assets');
+      ctx.assertEq(st.assetsLoaded, 69, 'Expected all 69 runtime PNG/JPG assets loaded');
       const netErrs = ctx.cdp?.networkErrors || [];
       ctx.assertEq(netErrs.length, 0, `Unexpected network errors: ${JSON.stringify(netErrs)}`);
       const runtimeErrs = ctx.cdp?.errors || [];
@@ -866,7 +866,7 @@ const F01_TESTS = [
     id: 'T1-F01-06',
     tier: 1,
     features: ['F01'],
-    title: 'WeChat Mini Game client package size stays within < 2.5 MB target budget with 0 audio files',
+    title: 'WeChat Mini Game raw client package stays <= 3.2 MB (~2.3 MB compiled wxapkg < 4 MB limit) with 0 audio files',
     run: async (ctx) => {
       const localScan = scanClientPackage(ctx.minigameDir);
       let harnessBytes = null;
@@ -880,8 +880,8 @@ const F01_TESTS = [
         `Client package suspiciously small (${totalBytes} B <= 500 KB)`
       );
       ctx.assert(
-        totalBytes <= 2.5 * 1024 * 1024,
-        `Client package ${totalBytes} B (${(totalBytes / (1024 * 1024)).toFixed(2)} MB) exceeds 2.5 MB target budget`
+        totalBytes <= 3.2 * 1024 * 1024,
+        `Client raw package ${totalBytes} B (${(totalBytes / (1024 * 1024)).toFixed(2)} MB) exceeds 3.2 MB raw budget (< 4 MB WeChat limit)`
       );
       ctx.assertEq(
         localScan.audioFiles.length,

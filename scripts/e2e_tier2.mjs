@@ -683,7 +683,7 @@ const TIER2_F01_TO_F08 = [
     id: 'T2-F01-04',
     tier: 2,
     features: ['F01'],
-    title: 'Post-v0.9.0 cutover holds exact 69 WebP sprites + kissa_round.ttf with zero legacy PNG/JPG or physics files',
+    title: 'Post-v0.9.0 cutover holds exact 69 WeChat-whitelisted ASCII PNG/JPG sprites + kissa_round.ttf with zero WebP or legacy files',
     run: async (ctx) => {
       const assetsDir = path.join(ctx.minigameDir, 'assets');
       const srcDir = path.join(ctx.minigameDir, 'src');
@@ -700,10 +700,12 @@ const TIER2_F01_TO_F08 = [
       };
       const allAssets = walkRel(assetsDir).sort();
       const webpFiles = allAssets.filter((f) => f.endsWith('.webp'));
-      const legacyRaster = allAssets.filter((f) => /\.(png|jpe?g)$/i.test(f));
+      const nonAscii = allAssets.filter((f) => /[^\x20-\x7E]/.test(f));
+      const uiRaster = allAssets.filter((f) => f.startsWith('assets/ui_v090/') && /\.(png|jpe?g)$/i.test(f));
 
-      ctx.assertEq(webpFiles.length, 69, `Expected exact 69 WebP files under assets/ui_v090/, got ${webpFiles.length}`);
-      ctx.assertEq(legacyRaster.length, 0, `Legacy PNG/JPG files must be purged from assets/: ${legacyRaster.join(', ')}`);
+      ctx.assertEq(webpFiles.length, 0, `Non-whitelisted .webp files must not exist in assets/: ${webpFiles.join(', ')}`);
+      ctx.assertEq(nonAscii.length, 0, `Non-ASCII paths must not exist in assets/: ${nonAscii.join(', ')}`);
+      ctx.assertEq(uiRaster.length, 69, `Expected exact 69 PNG/JPG files under assets/ui_v090/, got ${uiRaster.length}`);
       ctx.assert(allAssets.includes('assets/fonts/kissa_round.ttf'), 'Missing assets/fonts/kissa_round.ttf');
 
       for (const legacyAsset of FORBIDDEN_V1_RUNTIME_ASSETS) {
@@ -720,7 +722,7 @@ const TIER2_F01_TO_F08 = [
     id: 'T2-F01-05',
     tier: 2,
     features: ['F01'],
-    title: 'Zero stale v1 asset string references in runtime JS and share cover points to v0.9.0 title_hero_v2.webp',
+    title: 'Zero stale v1 asset string references in runtime JS and share cover points to v0.9.0 title_hero_v2.jpg',
     run: async (ctx) => {
       const jsFiles = [
         path.join(ctx.minigameDir, 'game.js'),
@@ -754,8 +756,8 @@ const TIER2_F01_TO_F08 = [
       });
       ctx.assert(shareInfo && typeof shareInfo === 'object', 'wx.onShareAppMessage handler should return a share payload');
       ctx.assert(
-        typeof shareInfo.imageUrl === 'string' && shareInfo.imageUrl.includes('title_hero_v2.webp'),
-        `Share imageUrl must reference title_hero_v2.webp, got ${shareInfo?.imageUrl}`
+        typeof shareInfo.imageUrl === 'string' && shareInfo.imageUrl.includes('title_hero_v2.jpg'),
+        `Share imageUrl must reference title_hero_v2.jpg, got ${shareInfo?.imageUrl}`
       );
       ctx.assert(
         typeof shareInfo.title === 'string' && shareInfo.title.includes('一起做猫饼'),

@@ -679,7 +679,7 @@ async function runSelfTest(cliOpts = {}) {
       assert(hs.sharePreview && hs.sharePreview.title.includes('一起做猫饼'), 'v2 share title');
       assertEq(
         hs.sharePreview.imageUrl,
-        'assets/ui_v090/08_首屏主视觉与结算辅助件/01_首屏纯主视觉底图_title_hero_v2.webp',
+        'assets/ui_v090/title_hero_v2.jpg',
         'v2 share imageUrl'
       );
       assertEq(ctx.cdp.errors.length, 0, `expected 0 CDP errors, got ${JSON.stringify(ctx.cdp.errors)}`);

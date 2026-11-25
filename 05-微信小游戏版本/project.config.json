@@ -37,8 +37,8 @@
       "disablePlugins": [],
       "outputPath": ""
     },
-    "ignoreDevUnusedFiles": true,
-    "ignoreUploadUnusedFiles": true,
+    "ignoreDevUnusedFiles": false,
+    "ignoreUploadUnusedFiles": false,
     "compileWorklet": false,
     "packNpmManually": false,
     "packNpmRelationList": [],

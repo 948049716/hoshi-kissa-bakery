@@ -25,9 +25,9 @@
   - 动态派生 `MAX_CAMPAIGN_STARS` 与小铺/图鉴自适应滚动列表；
   - 新增 `higherSchemaDetected` 高版本云存档防覆盖写保护、`modeOverrides` 模式解耦桩位、激励桩位 `requestRewardAction` 及客户端↔云函数常量 100% 同构单测门禁。
 - **全量绘本 UI、圆体字体与过渡动效重构（严格对齐 13 张 `v0.9.0` 设计定稿图）**：
-  - **原画设计图无损替换**：删除 `01-游戏效果图/` 旧版 8 张草图，无损替换为 13 张 `768×1376` 原画定稿图并新增索引文档 [`01-游戏效果图/README.md`](./01-游戏效果图/README.md)；启动默认**直达选关大厅**，保留 `01_标题首屏_TitleScreen（备用）.jpg`、`title_hero_v2.webp` 及 `renderTitleScreen()` 作为备用首屏。
-  - **69 张独立 WebP 资产切换与 4 枚补充素材**：全面移除旧版 30 张 PNG/JPG，接入 `assets/ui_v090/` 下 65 张设计切图 + 严格同风格补充生成的 4 枚透明 WebP（`10_补充素材/`：`icon_avatar_default`、`icon_urgent_flame`、`icon_fever_badge`、`icon_cloud_sync`），客户端总包体仅 **`2.055 MB`**（`< 2.5 MB` 门禁）。
-  - **圆体子集字体管线**：新增 `scripts/build_font_subset.py`，由 SIL OFL 1.1 `ResourceHanRoundedCN-Bold.ttf` 裁剪生成 `367.7 KB`（体积缩减 `97.3%`）的 `assets/fonts/kissa_round.ttf`，在 `game.js` 启动时通过 `UI.initGameFont()` 全局注入，并搭配 `src/ui_v090_skin_patch.js` 升级全站暖木框、羊皮纸、雨棚、分段进度条、滑块开关与无黑遮罩暖木厨余冷却格。
+  - **原画设计图无损替换**：删除 `01-游戏效果图/` 旧版 8 张草图，无损替换为 13 张 `768×1376` 原画定稿图并新增索引文档 [`01-游戏效果图/README.md`](./01-游戏效果图/README.md)；启动默认**直达选关大厅**，保留 `01_标题首屏_TitleScreen（备用）.jpg`、`title_hero_v2.jpg` 及 `renderTitleScreen()` 作为备用首屏。
+  - **69 张微信白名单纯 ASCII PNG/JPG 资产与 4 枚补充素材**：因微信小游戏代码包白名单不包含 `.webp` 且 iOS 需避免中文资源路径，将 65 张官方切图与严格同风格补充生成的 4 枚徽章（`icon_avatar_default`、`icon_urgent_flame`、`icon_fever_badge`、`icon_cloud_sync`）统一压制为纯 ASCII 路径的 **65 PNG + 4 JPG**（`assets/ui_v090/<id>.(png|jpg)`，总计 `1.41 MB`），并在 `scripts/upload_minigame.mjs` 新增上传前白名单/ASCII 校验与上传后 `__FULL__` 包体防漏校验（编译后整包约 `2.3 MB`，远低于微信 `4.0 MB` 限额）。
+  - **圆体子集字体管线与 iOS 真机适配**：新增 `scripts/build_font_subset.py`，由 SIL OFL 1.1 `ResourceHanRoundedCN-Bold.ttf` 裁剪生成 `367.7 KB`（体积缩减 `97.3%`）的 `assets/fonts/kissa_round.ttf`，统一 Windows/Mac 名称表为无空格 `KissaRound`（`Regular` 标记保留粗圆体字形），并在 `src/ui_v090_skin_patch.js` 中适配 iOS 微信 Canvas 2D 整数像素单一字体名格式（`${px}px KissaRound`），全面升级全站暖木框、羊皮纸、雨棚、分段进度条、滑块开关与无黑遮罩暖木厨余冷却格。
   - **全界面与 8 大弹窗精细还原**：全面重做大厅 3 章手绘地图、局内吧台/托盘/热潮条、关卡备战、打烊结算、星夜小铺（4 页签 + 烤盘主题实景缩略图）、星夜图鉴（3 列网格 + 底部详情条）、猫饼排行榜（3 页签：默认`全服总星榜` + `累计营业榜` + `微信好友榜[正在开发中]`，全面应用金/银/铜牌与渐变行底色）、暂停开关弹窗及 4 卡插图玩法说明。
   - **丝滑 UI 过渡动画**：加入弹窗春弹入场与遮罩淡入、页签切换淡入微滑、章节切换背景交叉淡化、3D 按钮按压厚边下陷、暂停滑块平滑滑动、推进关猫爪跳动与结算星级阶梯弹入/分数滚动计数。
 

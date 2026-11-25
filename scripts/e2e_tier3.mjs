@@ -2745,7 +2745,7 @@ export const TIER3_TESTS = [
     id: 'T3-18',
     tier: 3,
     features: ['F01', 'F14'],
-    title: 'v0.9.0 storybook WebP assets (69/69), kissa_round.ttf font & 3 board themes visual integrity',
+    title: 'v0.9.0 storybook PNG/JPG assets (69/69), kissa_round.ttf font & 3 board themes visual integrity',
     run: async (ctx) => {
       await ctx.setViewport(390, 844, true, 2, { safeTop: 47, safeBottom: 34, showCapsule: true });
       await ctx.resetGame({ clearCloud: true, clearLocal: true });
@@ -2763,7 +2763,7 @@ export const TIER3_TESTS = [
 
       let st = await ctx.getState();
       ctx.assertEq(st.assetsTotal, 69, 'v0.9.0 runtime assetsTotal === 69');
-      ctx.assertEq(st.assetsLoaded, 69, 'All 69 runtime WebP assets loaded cleanly');
+      ctx.assertEq(st.assetsLoaded, 69, 'All 69 runtime PNG/JPG assets loaded cleanly');
 
       const consts = await ctx.requireBundledModule('./src/constants.js');
       const byId = new Map((consts.V090_ASSET_LIST || []).map((a) => [a.id, a.path]));

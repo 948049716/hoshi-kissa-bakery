@@ -127,32 +127,53 @@ function _imgDims(img) {
 }
 
 /**
- * 启动时加载裁剪后的圆体 TTF（约 180~280KB），自动注入全站 fontStr()
- * 保留系统字体回退以防微信好友榜生僻昵称变方块
+ * 启动时加载裁剪后的圆体 TTF（约 368KB，统一名称表 KissaRound），自动注入全站 fontStr()
+ * iOS 微信小游戏 Canvas 2D 要求整数 px、无引号单一自定义字体名（CoreText/Skia 自动回退系统字体显示生僻昵称）
  */
 function initGameFont(fontPath = 'assets/fonts/kissa_round.ttf') {
   if (_customFontFamily) return getFontFamily();
   if (typeof wx !== 'undefined' && wx && typeof wx.loadFont === 'function') {
-    try {
-      const fam = wx.loadFont(fontPath);
-      if (typeof fam === 'string' && fam.trim()) {
-        _customFontFamily = fam.trim();
+    const clean = String(fontPath || 'assets/fonts/kissa_round.ttf').replace(/^\/+/, '');
+    const candidates = [clean, `/${clean}`];
+    for (let i = 0; i < candidates.length; i++) {
+      try {
+        const fam = wx.loadFont(candidates[i]);
+        if (typeof fam === 'string' && fam.trim()) {
+          _customFontFamily = fam.trim();
+          break;
+        }
+      } catch (_) {
+        // 尝试备用路径或降级为系统字体
       }
-    } catch (_) {
-      // 降级为系统圆体/无衬线字体
     }
   }
   return getFontFamily();
 }
 
 function getFontFamily() {
-  return _customFontFamily ? `"${_customFontFamily}", ${DEFAULT_FALLBACK_FONT}` : DEFAULT_FALLBACK_FONT;
+  if (_customFontFamily) {
+    // 微信小游戏真机（尤其 iOS 原生 Canvas 2D）解析多字体逗号列表/双引号时容易失效，
+    // 当字体名无空格（如 KissaRound）直接返回纯字体名，缺失生僻字由系统 CoreText/Skia 自动回退。
+    if (typeof wx !== 'undefined' && wx && typeof wx.loadFont === 'function') {
+      return /\s/.test(_customFontFamily) ? `"${_customFontFamily}"` : _customFontFamily;
+    }
+    return `"${_customFontFamily}", ${DEFAULT_FALLBACK_FONT}`;
+  }
+  return DEFAULT_FALLBACK_FONT;
 }
 
 function fontStr(px, weight = 700) {
-  const safePx = Math.max(6, Math.min(120, _num(px, 14)));
-  const safeW = Math.max(100, Math.min(900, Math.round(_num(weight, 700))));
-  return `${safeW} ${safePx}px ${getFontFamily()}`;
+  const safePx = Math.max(6, Math.min(120, Math.round(_num(px, 14))));
+  const isBold =
+    typeof weight === 'string'
+      ? /bold|[6-9]00/i.test(weight)
+      : _num(weight, 700) >= 600;
+  // 微信真机上 kissa_round.ttf 本身已是 Bold 粗圆体字形（表内标记为 Regular 以避开 iOS 权重匹配失配），
+  // 因此加载成功后直接输出 `${safePx}px KissaRound`；未加载时使用标准 `bold` 关键字避免 iOS 忽略 700/800 数值字重。
+  if (_customFontFamily && typeof wx !== 'undefined' && wx && typeof wx.loadFont === 'function') {
+    return `${safePx}px ${getFontFamily()}`;
+  }
+  return `${isBold ? 'bold' : 'normal'} ${safePx}px ${getFontFamily()}`;
 }
 
 /**

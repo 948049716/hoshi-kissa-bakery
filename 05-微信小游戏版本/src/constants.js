@@ -32,8 +32,8 @@ const CATCAKES = [
     maxUpgradeLv: 4,
     upgradeCosts: CATCAKE_UPGRADE_COSTS[1],
     unlockLevel: '1-1',
-    src: 'assets/ui_v090/01_猫饼与面团/01_C1_奶团小猫饼_catcake_1.webp',
-    happySrc: 'assets/ui_v090/06_猫饼开心态_happy/01_C1_奶团小猫饼开心_catcake_1_happy.webp',
+    src: 'assets/ui_v090/catcake_1.png',
+    happySrc: 'assets/ui_v090/catcake_1_happy.png',
     desc: '松软香甜的招牌入门猫饼，1-1 关解锁。'
   },
   {
@@ -46,8 +46,8 @@ const CATCAKES = [
     maxUpgradeLv: 4,
     upgradeCosts: CATCAKE_UPGRADE_COSTS[2],
     unlockLevel: '1-1',
-    src: 'assets/ui_v090/01_猫饼与面团/02_C2_焦糖猫爪曲奇_catcake_2.webp',
-    happySrc: 'assets/ui_v090/06_猫饼开心态_happy/02_C2_焦糖猫爪曲奇开心_catcake_2_happy.webp',
+    src: 'assets/ui_v090/catcake_2.png',
+    happySrc: 'assets/ui_v090/catcake_2_happy.png',
     desc: '烘烤金黄酥脆的猫爪黄油曲奇，焦糖肉垫香气四溢。'
   },
   {
@@ -60,8 +60,8 @@ const CATCAKES = [
     maxUpgradeLv: 4,
     upgradeCosts: CATCAKE_UPGRADE_COSTS[3],
     unlockLevel: '1-1',
-    src: 'assets/ui_v090/01_猫饼与面团/03_C3_抹茶猫耳团子_catcake_3.webp',
-    happySrc: 'assets/ui_v090/06_猫饼开心态_happy/03_C3_抹茶猫耳团子开心_catcake_3_happy.webp',
+    src: 'assets/ui_v090/catcake_3.png',
+    happySrc: 'assets/ui_v090/catcake_3_happy.png',
     desc: '软糯回甘的宇治抹茶三色猫团，点缀暖粉腮红。'
   },
   {
@@ -74,8 +74,8 @@ const CATCAKES = [
     maxUpgradeLv: 4,
     upgradeCosts: CATCAKE_UPGRADE_COSTS[4],
     unlockLevel: '1-3',
-    src: 'assets/ui_v090/01_猫饼与面团/04_C4_蜂蜜猫猫布丁_catcake_4.webp',
-    happySrc: 'assets/ui_v090/06_猫饼开心态_happy/04_C4_蜂蜜猫猫布丁开心_catcake_4_happy.webp',
+    src: 'assets/ui_v090/catcake_4.png',
+    happySrc: 'assets/ui_v090/catcake_4_happy.png',
     desc: '焦糖顶盖玻璃碟布丁，琥珀蜂蜜小猫慵懒趴在布丁顶上。'
   },
   {
@@ -88,8 +88,8 @@ const CATCAKES = [
     maxUpgradeLv: 4,
     upgradeCosts: CATCAKE_UPGRADE_COSTS[5],
     unlockLevel: '1-6',
-    src: 'assets/ui_v090/01_猫饼与面团/05_C5_草莓猫咪大福_catcake_5.webp',
-    happySrc: 'assets/ui_v090/06_猫饼开心态_happy/05_C5_草莓猫咪大福开心_catcake_5_happy.webp',
+    src: 'assets/ui_v090/catcake_5.png',
+    happySrc: 'assets/ui_v090/catcake_5_happy.png',
     desc: '樱粉软糯麻薯裹着雪白奶油，切开是鲜甜多汁的甜心草莓。'
   },
   {
@@ -102,8 +102,8 @@ const CATCAKES = [
     maxUpgradeLv: 4,
     upgradeCosts: CATCAKE_UPGRADE_COSTS[6],
     unlockLevel: '2-1',
-    src: 'assets/ui_v090/01_猫饼与面团/06_C6_星空猫马卡龙_catcake_6.webp',
-    happySrc: 'assets/ui_v090/06_猫饼开心态_happy/06_C6_星空猫马卡龙开心_catcake_6_happy.webp',
+    src: 'assets/ui_v090/catcake_6.png',
+    happySrc: 'assets/ui_v090/catcake_6_happy.png',
     desc: '薰衣草紫双层星空糖霜马卡龙，夹着银星糖珠与云朵奶霜。'
   },
   {
@@ -116,8 +116,8 @@ const CATCAKES = [
     maxUpgradeLv: 4,
     upgradeCosts: CATCAKE_UPGRADE_COSTS[7],
     unlockLevel: '3-1',
-    src: 'assets/ui_v090/01_猫饼与面团/07_C7_星冠猫神蛋糕_catcake_7.webp',
-    happySrc: 'assets/ui_v090/06_猫饼开心态_happy/07_C7_星冠猫神蛋糕开心_catcake_7_happy.webp',
+    src: 'assets/ui_v090/catcake_7.png',
+    happySrc: 'assets/ui_v090/catcake_7_happy.png',
     desc: '头戴闪耀小皇冠的蓬松双层舒芙蕾猫神蛋糕，星夜烘焙至高献礼。'
   }
 ];
@@ -509,7 +509,7 @@ const PATRONS = [
     shortName: '小蜜柑',
     badge: 'mode_chef',
     cost: PATRON_COSTS.mikan,
-    src: 'assets/ui_v090/03_搭档立绘/01_搭档_小蜜柑_patron_mikan.webp',
+    src: 'assets/ui_v090/patron_mikan.png',
     skillName: '安抚猫薄荷茶',
     activeSkill: {
       id: 'comfort_tea',
@@ -546,7 +546,7 @@ const PATRONS = [
     shortName: '眠眠星兔',
     badge: 'icon_moon',
     cost: PATRON_COSTS.luna,
-    src: 'assets/ui_v090/03_搭档立绘/02_搭档_眠眠星兔_patron_luna.webp',
+    src: 'assets/ui_v090/patron_luna.png',
     skillName: '星月整盘术',
     activeSkill: {
       id: 'lunar_tidy',
@@ -584,7 +584,7 @@ const PATRONS = [
     shortName: '蜂蜜柴柴',
     badge: 'icon_flame',
     cost: PATRON_COSTS.mugi,
-    src: 'assets/ui_v090/03_搭档立绘/03_搭档_蜂蜜柴柴_patron_mugi.webp',
+    src: 'assets/ui_v090/patron_mugi.png',
     skillName: '元气烤炉暴击',
     activeSkill: {
       id: 'oven_crit',
@@ -626,7 +626,7 @@ const TOOLS = {
     icon: 'tool_fork',
     cost: 20,
     maxBuyPerLevel: 1,
-    src: 'assets/ui_v090/04_道具盘格与底部图标/01_道具_移位叉_tool_swap_fork.webp',
+    src: 'assets/ui_v090/tool_swap_fork.png',
     shortcutKey: '1',
     desc: '跨障挪移猫饼并染色、异阶互换、同阶跨格合并破邻冰、单点破冰，或直投厨余篮销毁'
   },
@@ -637,7 +637,7 @@ const TOOLS = {
     icon: 'tool_spoon',
     cost: 25,
     maxBuyPerLevel: 1,
-    src: 'assets/ui_v090/04_道具盘格与底部图标/02_道具_升阶勺_tool_upgrade_spoon.webp',
+    src: 'assets/ui_v090/tool_upgrade_spoon.png',
     shortcutKey: '2',
     desc: '点选烤盘内任意一颗 1~6 阶非冰封猫饼，立即升为下一阶并保留原有风味'
   }
@@ -798,97 +798,99 @@ const LOBBY_LAYOUT_NORMALIZED = {
 };
 
 /**
- * v0.9.0 全量 69 张 WebP 资产表（65 张官方设计切图 + 4 张同风格补充素材 10_补充素材/）
+ * v0.9.0 全量 69 张绘本资产表（65 张官方设计切图 + 4 张同风格补充素材）
+ * 全部采用微信小游戏代码包官方白名单格式（4 张全屏底图 .jpg + 65 张透明精灵 .png）与纯 ASCII 文件名，
+ * 确保 iOS / Android 真机、微信开发者工具与 miniprogram-ci 100% 完整打包与零异常加载。
  */
 const V090_ASSET_LIST = [
   // 01_猫饼与面团 (8)
-  { id: 'catcake_1', path: 'assets/ui_v090/01_猫饼与面团/01_C1_奶团小猫饼_catcake_1.webp' },
-  { id: 'catcake_2', path: 'assets/ui_v090/01_猫饼与面团/02_C2_焦糖猫爪曲奇_catcake_2.webp' },
-  { id: 'catcake_3', path: 'assets/ui_v090/01_猫饼与面团/03_C3_抹茶猫耳团子_catcake_3.webp' },
-  { id: 'catcake_4', path: 'assets/ui_v090/01_猫饼与面团/04_C4_蜂蜜猫猫布丁_catcake_4.webp' },
-  { id: 'catcake_5', path: 'assets/ui_v090/01_猫饼与面团/05_C5_草莓猫咪大福_catcake_5.webp' },
-  { id: 'catcake_6', path: 'assets/ui_v090/01_猫饼与面团/06_C6_星空猫马卡龙_catcake_6.webp' },
-  { id: 'catcake_7', path: 'assets/ui_v090/01_猫饼与面团/07_C7_星冠猫神蛋糕_catcake_7.webp' },
-  { id: 'knead_dough', path: 'assets/ui_v090/01_猫饼与面团/08_揉面团子_knead_dough.webp' },
+  { id: 'catcake_1', path: 'assets/ui_v090/catcake_1.png' },
+  { id: 'catcake_2', path: 'assets/ui_v090/catcake_2.png' },
+  { id: 'catcake_3', path: 'assets/ui_v090/catcake_3.png' },
+  { id: 'catcake_4', path: 'assets/ui_v090/catcake_4.png' },
+  { id: 'catcake_5', path: 'assets/ui_v090/catcake_5.png' },
+  { id: 'catcake_6', path: 'assets/ui_v090/catcake_6.png' },
+  { id: 'catcake_7', path: 'assets/ui_v090/catcake_7.png' },
+  { id: 'knead_dough', path: 'assets/ui_v090/knead_dough.png' },
 
   // 06_猫饼开心态_happy (7)
-  { id: 'catcake_1_happy', path: 'assets/ui_v090/06_猫饼开心态_happy/01_C1_奶团小猫饼开心_catcake_1_happy.webp' },
-  { id: 'catcake_2_happy', path: 'assets/ui_v090/06_猫饼开心态_happy/02_C2_焦糖猫爪曲奇开心_catcake_2_happy.webp' },
-  { id: 'catcake_3_happy', path: 'assets/ui_v090/06_猫饼开心态_happy/03_C3_抹茶猫耳团子开心_catcake_3_happy.webp' },
-  { id: 'catcake_4_happy', path: 'assets/ui_v090/06_猫饼开心态_happy/04_C4_蜂蜜猫猫布丁开心_catcake_4_happy.webp' },
-  { id: 'catcake_5_happy', path: 'assets/ui_v090/06_猫饼开心态_happy/05_C5_草莓猫咪大福开心_catcake_5_happy.webp' },
-  { id: 'catcake_6_happy', path: 'assets/ui_v090/06_猫饼开心态_happy/06_C6_星空猫马卡龙开心_catcake_6_happy.webp' },
-  { id: 'catcake_7_happy', path: 'assets/ui_v090/06_猫饼开心态_happy/07_C7_星冠猫神蛋糕开心_catcake_7_happy.webp' },
+  { id: 'catcake_1_happy', path: 'assets/ui_v090/catcake_1_happy.png' },
+  { id: 'catcake_2_happy', path: 'assets/ui_v090/catcake_2_happy.png' },
+  { id: 'catcake_3_happy', path: 'assets/ui_v090/catcake_3_happy.png' },
+  { id: 'catcake_4_happy', path: 'assets/ui_v090/catcake_4_happy.png' },
+  { id: 'catcake_5_happy', path: 'assets/ui_v090/catcake_5_happy.png' },
+  { id: 'catcake_6_happy', path: 'assets/ui_v090/catcake_6_happy.png' },
+  { id: 'catcake_7_happy', path: 'assets/ui_v090/catcake_7_happy.png' },
 
   // 02_顾客头像 (8)
-  { id: 'cust_ragdoll', path: 'assets/ui_v090/02_顾客头像/01_奶糖布偶猫_cust_ragdoll.webp' },
-  { id: 'cust_orange_uncle', path: 'assets/ui_v090/02_顾客头像/02_焦糖橘猫大叔_cust_orange_uncle.webp' },
-  { id: 'cust_scholar', path: 'assets/ui_v090/02_顾客头像/03_银渐层书生猫_cust_scholar.webp' },
-  { id: 'cust_lop_bunny', path: 'assets/ui_v090/02_顾客头像/04_奶油垂耳兔_cust_lop_bunny.webp' },
-  { id: 'cust_fox', path: 'assets/ui_v090/02_顾客头像/05_焦糖小狐狸_cust_fox.webp' },
-  { id: 'cust_raccoon', path: 'assets/ui_v090/02_顾客头像/06_栗子小浣熊_cust_raccoon.webp' },
-  { id: 'cust_shiba', path: 'assets/ui_v090/02_顾客头像/07_蓝莓小柴犬_cust_shiba.webp' },
-  { id: 'cust_vip_cat', path: 'assets/ui_v090/02_顾客头像/08_星冠美食家白猫_cust_vip_cat.webp' },
+  { id: 'cust_ragdoll', path: 'assets/ui_v090/cust_ragdoll.png' },
+  { id: 'cust_orange_uncle', path: 'assets/ui_v090/cust_orange_uncle.png' },
+  { id: 'cust_scholar', path: 'assets/ui_v090/cust_scholar.png' },
+  { id: 'cust_lop_bunny', path: 'assets/ui_v090/cust_lop_bunny.png' },
+  { id: 'cust_fox', path: 'assets/ui_v090/cust_fox.png' },
+  { id: 'cust_raccoon', path: 'assets/ui_v090/cust_raccoon.png' },
+  { id: 'cust_shiba', path: 'assets/ui_v090/cust_shiba.png' },
+  { id: 'cust_vip_cat', path: 'assets/ui_v090/cust_vip_cat.png' },
 
   // 03_搭档立绘 (3)
-  { id: 'patron_mikan', path: 'assets/ui_v090/03_搭档立绘/01_搭档_小蜜柑_patron_mikan.webp' },
-  { id: 'patron_luna', path: 'assets/ui_v090/03_搭档立绘/02_搭档_眠眠星兔_patron_luna.webp' },
-  { id: 'patron_mugi', path: 'assets/ui_v090/03_搭档立绘/03_搭档_蜂蜜柴柴_patron_mugi.webp' },
+  { id: 'patron_mikan', path: 'assets/ui_v090/patron_mikan.png' },
+  { id: 'patron_luna', path: 'assets/ui_v090/patron_luna.png' },
+  { id: 'patron_mugi', path: 'assets/ui_v090/patron_mugi.png' },
 
   // 04_道具盘格与底部图标 (12)
-  { id: 'tool_swap_fork', path: 'assets/ui_v090/04_道具盘格与底部图标/01_道具_移位叉_tool_swap_fork.webp' },
-  { id: 'tool_upgrade_spoon', path: 'assets/ui_v090/04_道具盘格与底部图标/02_道具_升阶勺_tool_upgrade_spoon.webp' },
-  { id: 'icon_trash', path: 'assets/ui_v090/04_道具盘格与底部图标/03_图标_厨余篮_icon_trash.webp' },
-  { id: 'tile_obstacle', path: 'assets/ui_v090/04_道具盘格与底部图标/04_盘格_石块障碍格_tile_obstacle.webp' },
-  { id: 'tile_ice', path: 'assets/ui_v090/04_道具盘格与底部图标/05_盘格_冰封格_tile_ice.webp' },
-  { id: 'flavor_matcha', path: 'assets/ui_v090/04_道具盘格与底部图标/06_风味_宇治抹茶_flavor_matcha.webp' },
-  { id: 'flavor_berry', path: 'assets/ui_v090/04_道具盘格与底部图标/07_风味_甜心草莓_flavor_berry.webp' },
-  { id: 'flavor_gold', path: 'assets/ui_v090/04_道具盘格与底部图标/08_风味_星光金箔_flavor_gold.webp' },
-  { id: 'dock_shop', path: 'assets/ui_v090/04_道具盘格与底部图标/09_底部栏_小铺_dock_shop.webp' },
-  { id: 'dock_compendium', path: 'assets/ui_v090/04_道具盘格与底部图标/10_底部栏_图鉴_dock_compendium.webp' },
-  { id: 'dock_rank', path: 'assets/ui_v090/04_道具盘格与底部图标/11_底部栏_排行_dock_rank.webp' },
-  { id: 'dock_theme', path: 'assets/ui_v090/04_道具盘格与底部图标/12_底部栏_主题_dock_theme.webp' },
+  { id: 'tool_swap_fork', path: 'assets/ui_v090/tool_swap_fork.png' },
+  { id: 'tool_upgrade_spoon', path: 'assets/ui_v090/tool_upgrade_spoon.png' },
+  { id: 'icon_trash', path: 'assets/ui_v090/icon_trash.png' },
+  { id: 'tile_obstacle', path: 'assets/ui_v090/tile_obstacle.png' },
+  { id: 'tile_ice', path: 'assets/ui_v090/tile_ice.png' },
+  { id: 'flavor_matcha', path: 'assets/ui_v090/flavor_matcha.png' },
+  { id: 'flavor_berry', path: 'assets/ui_v090/flavor_berry.png' },
+  { id: 'flavor_gold', path: 'assets/ui_v090/flavor_gold.png' },
+  { id: 'dock_shop', path: 'assets/ui_v090/dock_shop.png' },
+  { id: 'dock_compendium', path: 'assets/ui_v090/dock_compendium.png' },
+  { id: 'dock_rank', path: 'assets/ui_v090/dock_rank.png' },
+  { id: 'dock_theme', path: 'assets/ui_v090/dock_theme.png' },
 
   // 05_HUD通用徽章图标 (8)
-  { id: 'icon_star_coin', path: 'assets/ui_v090/05_HUD通用徽章图标/01_星尘币_icon_star_coin.webp' },
-  { id: 'icon_vip_crown', path: 'assets/ui_v090/05_HUD通用徽章图标/02_VIP皇冠_icon_vip_crown.webp' },
-  { id: 'icon_clock', path: 'assets/ui_v090/05_HUD通用徽章图标/03_倒计时小闹钟_icon_clock.webp' },
-  { id: 'icon_lock', path: 'assets/ui_v090/05_HUD通用徽章图标/04_未解锁锁头_icon_lock.webp' },
-  { id: 'icon_music', path: 'assets/ui_v090/05_HUD通用徽章图标/05_音乐_icon_music.webp' },
-  { id: 'icon_sfx', path: 'assets/ui_v090/05_HUD通用徽章图标/06_音效_icon_sfx.webp' },
-  { id: 'icon_paw_marker', path: 'assets/ui_v090/05_HUD通用徽章图标/07_当前关卡猫爪_icon_paw_marker.webp' },
-  { id: 'icon_check', path: 'assets/ui_v090/05_HUD通用徽章图标/08_完成绿勾_icon_check.webp' },
+  { id: 'icon_star_coin', path: 'assets/ui_v090/icon_star_coin.png' },
+  { id: 'icon_vip_crown', path: 'assets/ui_v090/icon_vip_crown.png' },
+  { id: 'icon_clock', path: 'assets/ui_v090/icon_clock.png' },
+  { id: 'icon_lock', path: 'assets/ui_v090/icon_lock.png' },
+  { id: 'icon_music', path: 'assets/ui_v090/icon_music.png' },
+  { id: 'icon_sfx', path: 'assets/ui_v090/icon_sfx.png' },
+  { id: 'icon_paw_marker', path: 'assets/ui_v090/icon_paw_marker.png' },
+  { id: 'icon_check', path: 'assets/ui_v090/icon_check.png' },
 
   // 07_小铺设备与烤盘主题 (7)
-  { id: 'device_tray', path: 'assets/ui_v090/07_小铺设备与烤盘主题/01_设备_宽大木托盘_device_tray.webp' },
-  { id: 'device_flour', path: 'assets/ui_v090/07_小铺设备与烤盘主题/02_设备_精选猫饼粉_device_flour.webp' },
-  { id: 'device_teapot', path: 'assets/ui_v090/07_小铺设备与烤盘主题/03_设备_暖心红茶壶_device_teapot.webp' },
-  { id: 'device_rack', path: 'assets/ui_v090/07_小铺设备与烤盘主题/04_设备_备货厨具架_device_rack.webp' },
-  { id: 'theme_amber', path: 'assets/ui_v090/07_小铺设备与烤盘主题/05_主题_经典星夜琥珀盘_theme_amber.webp' },
-  { id: 'theme_sakura', path: 'assets/ui_v090/07_小铺设备与烤盘主题/06_主题_樱花和果子盘_theme_sakura.webp' },
-  { id: 'theme_moonlight', path: 'assets/ui_v090/07_小铺设备与烤盘主题/07_主题_月光星辰盘_theme_moonlight.webp' },
+  { id: 'device_tray', path: 'assets/ui_v090/device_tray.png' },
+  { id: 'device_flour', path: 'assets/ui_v090/device_flour.png' },
+  { id: 'device_teapot', path: 'assets/ui_v090/device_teapot.png' },
+  { id: 'device_rack', path: 'assets/ui_v090/device_rack.png' },
+  { id: 'theme_amber', path: 'assets/ui_v090/theme_amber.png' },
+  { id: 'theme_sakura', path: 'assets/ui_v090/theme_sakura.png' },
+  { id: 'theme_moonlight', path: 'assets/ui_v090/theme_moonlight.png' },
 
   // 08_首屏主视觉与结算辅助件 (8)
-  { id: 'title_hero_v2', path: 'assets/ui_v090/08_首屏主视觉与结算辅助件/01_首屏纯主视觉底图_title_hero_v2.webp' },
-  { id: 'title_plaque_banner', path: 'assets/ui_v090/08_首屏主视觉与结算辅助件/02_首屏猫耳木牌横幅_title_plaque_banner.webp' },
-  { id: 'serving_plate', path: 'assets/ui_v090/08_首屏主视觉与结算辅助件/03_配餐木质餐盘底托_serving_plate.webp' },
-  { id: 'icon_star_dim', path: 'assets/ui_v090/08_首屏主视觉与结算辅助件/04_灰态暗星_icon_star_dim.webp' },
-  { id: 'medal_gold', path: 'assets/ui_v090/08_首屏主视觉与结算辅助件/05_奖牌_第1名金牌_medal_gold.webp' },
-  { id: 'medal_silver', path: 'assets/ui_v090/08_首屏主视觉与结算辅助件/06_奖牌_第2名银牌_medal_silver.webp' },
-  { id: 'medal_bronze', path: 'assets/ui_v090/08_首屏主视觉与结算辅助件/07_奖牌_第3名铜牌_medal_bronze.webp' },
-  { id: 'result_ribbon', path: 'assets/ui_v090/08_首屏主视觉与结算辅助件/08_结算丝带横幅_result_ribbon.webp' },
+  { id: 'title_hero_v2', path: 'assets/ui_v090/title_hero_v2.jpg' },
+  { id: 'title_plaque_banner', path: 'assets/ui_v090/title_plaque_banner.png' },
+  { id: 'serving_plate', path: 'assets/ui_v090/serving_plate.png' },
+  { id: 'icon_star_dim', path: 'assets/ui_v090/icon_star_dim.png' },
+  { id: 'medal_gold', path: 'assets/ui_v090/medal_gold.png' },
+  { id: 'medal_silver', path: 'assets/ui_v090/medal_silver.png' },
+  { id: 'medal_bronze', path: 'assets/ui_v090/medal_bronze.png' },
+  { id: 'result_ribbon', path: 'assets/ui_v090/result_ribbon.png' },
 
   // 09_选关纯背景底图与灯串木牌 (4)
-  { id: 'bg_lobby_ch1_amber', path: 'assets/ui_v090/09_选关纯背景底图与灯串木牌/01_第1章选关底图_bg_lobby_ch1_amber.webp' },
-  { id: 'bg_lobby_ch2_sakura', path: 'assets/ui_v090/09_选关纯背景底图与灯串木牌/02_第2章选关底图_bg_lobby_ch2_sakura.webp' },
-  { id: 'bg_lobby_ch3_moonlight', path: 'assets/ui_v090/09_选关纯背景底图与灯串木牌/03_第3章选关底图_bg_lobby_ch3_moonlight.webp' },
-  { id: 'lobby_plaque_blank', path: 'assets/ui_v090/09_选关纯背景底图与灯串木牌/04_灯串空白木牌_lobby_plaque_blank.webp' },
+  { id: 'bg_lobby_ch1_amber', path: 'assets/ui_v090/bg_lobby_ch1_amber.jpg' },
+  { id: 'bg_lobby_ch2_sakura', path: 'assets/ui_v090/bg_lobby_ch2_sakura.jpg' },
+  { id: 'bg_lobby_ch3_moonlight', path: 'assets/ui_v090/bg_lobby_ch3_moonlight.jpg' },
+  { id: 'lobby_plaque_blank', path: 'assets/ui_v090/lobby_plaque_blank.png' },
 
   // 10_补充素材 (4 — 严格遵循设计图同风格生成)
-  { id: 'icon_avatar_default', path: 'assets/ui_v090/10_补充素材/01_默认店长头像_icon_avatar_default.webp' },
-  { id: 'icon_urgent_flame', path: 'assets/ui_v090/10_补充素材/02_热潮急单火焰_icon_urgent_flame.webp' },
-  { id: 'icon_fever_badge', path: 'assets/ui_v090/10_补充素材/03_星光热潮徽章_icon_fever_badge.webp' },
-  { id: 'icon_cloud_sync', path: 'assets/ui_v090/10_补充素材/04_云端同步徽章_icon_cloud_sync.webp' }
+  { id: 'icon_avatar_default', path: 'assets/ui_v090/icon_avatar_default.png' },
+  { id: 'icon_urgent_flame', path: 'assets/ui_v090/icon_urgent_flame.png' },
+  { id: 'icon_fever_badge', path: 'assets/ui_v090/icon_fever_badge.png' },
+  { id: 'icon_cloud_sync', path: 'assets/ui_v090/icon_cloud_sync.png' }
 ];
 
 const ASSET_BY_ID = {};

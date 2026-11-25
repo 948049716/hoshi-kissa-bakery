@@ -88,6 +88,43 @@ async function main() {
   const privateKey = (process.env.WECHAT_PRIVATE_KEY || '').trim();
   const privateKeyPath = (args.keyPath || process.env.WECHAT_PRIVATE_KEY_PATH || '').trim();
 
+  // Pre-upload guard: verify all assets under assets/ use WeChat Mini Game whitelisted extensions & pure ASCII paths
+  const WECHAT_ALLOWED_ASSET_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.ttf', '.fnt', '.json', '.mp3', '.wav', '.m4a']);
+  const assetsRoot = path.join(MINIGAME_DIR, 'assets');
+  let totalAssetBytes = 0;
+  let totalAssetCount = 0;
+  if (fs.existsSync(assetsRoot)) {
+    const stack = [assetsRoot];
+    while (stack.length > 0) {
+      const cur = stack.pop();
+      for (const entry of fs.readdirSync(cur, { withFileTypes: true })) {
+        const full = path.join(cur, entry.name);
+        if (entry.isDirectory()) {
+          stack.push(full);
+          continue;
+        }
+        if (entry.name.startsWith('.')) continue;
+        const rel = path.relative(MINIGAME_DIR, full).split(path.sep).join('/');
+        const ext = path.extname(entry.name).toLowerCase();
+        if (!WECHAT_ALLOWED_ASSET_EXTS.has(ext)) {
+          throw new Error(
+            `[miniprogram-ci] Asset '${rel}' uses non-whitelisted extension '${ext}'. WeChat Mini Game silently drops non-whitelisted files (e.g. .webp) during upload!`
+          );
+        }
+        if (/[^\x20-\x7E]/.test(rel)) {
+          throw new Error(
+            `[miniprogram-ci] Asset '${rel}' contains non-ASCII characters which may fail on iOS WeChat Mini Game.`
+          );
+        }
+        totalAssetBytes += fs.statSync(full).size;
+        totalAssetCount += 1;
+      }
+    }
+  }
+  console.log(
+    `[miniprogram-ci] Asset preflight OK: ${totalAssetCount} whitelisted ASCII assets (${(totalAssetBytes / 1024).toFixed(1)} KB)`
+  );
+
   if (args.dryRun) {
     console.log(
       JSON.stringify(
@@ -100,6 +137,8 @@ async function main() {
           version,
           desc,
           robot,
+          totalAssetCount,
+          totalAssetBytes,
           hasPrivateKey: Boolean(privateKey || (privateKeyPath && fs.existsSync(privateKeyPath)))
         },
         null,
@@ -151,6 +190,21 @@ async function main() {
   console.log(`[miniprogram-ci] Starting ${action} for appid=${appid}, version=${version}, robot=${robot}`);
   console.log(`[miniprogram-ci] Desc: ${desc}`);
 
+  const assertPackedIncludesAssets = (res) => {
+    const pkgs = (res && res.subPackageInfo) || [];
+    const fullPkg = pkgs.find((p) => p && p.name === '__FULL__') || pkgs[0];
+    if (fullPkg && Number.isFinite(fullPkg.size) && totalAssetBytes > 0) {
+      if (fullPkg.size < totalAssetBytes) {
+        throw new Error(
+          `[miniprogram-ci] Packed __FULL__ size (${fullPkg.size} bytes) is smaller than local assets/ (${totalAssetBytes} bytes)! Some assets were dropped during packaging.`
+        );
+      }
+      console.log(
+        `[miniprogram-ci] Post-pack verification OK: __FULL__=${(fullPkg.size / 1024).toFixed(1)} KB >= assets=${(totalAssetBytes / 1024).toFixed(1)} KB`
+      );
+    }
+  };
+
   if (action === 'preview') {
     const outDir = process.env.RUNNER_TEMP || '/tmp';
     const qrcodeOutputDest = path.join(outDir, 'wechat_preview_qrcode.jpg');
@@ -160,7 +214,7 @@ async function main() {
       setting: compileSetting,
       qrcodeFormat: 'image',
       qrcodeOutputDest,
-      allowIgnoreUnusedFiles: true,
+      allowIgnoreUnusedFiles: false,
       robot,
       onProgressUpdate: (task) => {
         if (task && task.status === 'doing') return;
@@ -168,6 +222,7 @@ async function main() {
       }
     });
     console.log('[miniprogram-ci] Preview succeeded:', JSON.stringify(previewRes));
+    assertPackedIncludesAssets(previewRes);
     console.log(`[miniprogram-ci] QR code saved at: ${qrcodeOutputDest}`);
   } else {
     const uploadRes = await ci.upload({
@@ -175,7 +230,7 @@ async function main() {
       version,
       desc,
       setting: compileSetting,
-      allowIgnoreUnusedFiles: true,
+      allowIgnoreUnusedFiles: false,
       robot,
       onProgressUpdate: (task) => {
         if (task && task.status === 'doing') return;
@@ -183,6 +238,7 @@ async function main() {
       }
     });
     console.log('[miniprogram-ci] Upload succeeded:', JSON.stringify(uploadRes));
+    assertPackedIncludesAssets(uploadRes);
   }
 }
 

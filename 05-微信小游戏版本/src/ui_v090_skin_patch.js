@@ -462,6 +462,31 @@ function drawParchmentSheet(
       ctx.strokeStyle = borderCol;
       ctx.stroke();
     }
+
+    // Storybook subtle parchment edge notches (top-right & left-mid, matching Designs 04/06/07/10/11)
+    if (sw > 140 && sh > 140 && lw > 0) {
+      ctx.fillStyle = V090_EXT_COLORS.woodDark;
+      ctx.strokeStyle = borderCol;
+      ctx.lineWidth = Math.max(1.2, lw * 0.7);
+
+      const n1x = sx + sw * 0.78;
+      ctx.beginPath();
+      ctx.moveTo(n1x - 4, sy);
+      ctx.lineTo(n1x, sy + 4.5);
+      ctx.lineTo(n1x + 4, sy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      const n2y = sy + sh * 0.62;
+      ctx.beginPath();
+      ctx.moveTo(sx, n2y - 4);
+      ctx.lineTo(sx + 4.5, n2y);
+      ctx.lineTo(sx, n2y + 4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
   } catch (_) {} finally {
     ctx.restore();
   }
@@ -588,12 +613,15 @@ function drawPillButton(ctx, x, y, w, h, opts = {}) {
   };
 
   const pal = PRESETS[styleKey] || PRESETS.primary;
+  const useOutline = o.textOutline !== undefined ? Boolean(o.textOutline) : Boolean(pal.outline);
+  const useGlossDot = o.glossDot !== undefined ? Boolean(o.glossDot) : Boolean(pal.glossDot);
   const maxBevel = disabled ? 2 : Math.min(6, Math.max(2.5, Math.round(sh * 0.12)));
   const bevelH = Math.max(1.5, maxBevel * (1 - pressAmt * 0.65));
   const dy = pressAmt * Math.min(2.5, maxBevel * 0.65);
   const bodyH = Math.max(8, sh - maxBevel);
   const fontSize = Math.max(9.5, _num(o.fontSize, Math.round(sh * 0.40)));
-  const textColor = typeof o.textColor === 'string' && o.textColor ? o.textColor : pal.text;
+  const textColor = typeof o.textColor === 'string' && o.textColor ? o.textColor : useOutline && !pal.outline ? '#FFFDF8' : pal.text;
+  const strokeColor = typeof o.strokeColor === 'string' && o.strokeColor ? o.strokeColor : pal.stroke || '#4A230D';
   const hasRichSub = Boolean(o.subIcon || o.subPrefix || o.subSuffix);
   const hasAnySub = Boolean(subLabel || hasRichSub);
 
@@ -647,10 +675,10 @@ function drawPillButton(ctx, x, y, w, h, opts = {}) {
       const hlW = Math.max(4, sw - insetX * 2);
       const hlH = Math.max(3, Math.min(7, bodyH * 0.20));
       _roundRect(ctx, hlX, sy + dy + 2.8, hlW, hlH, hlH * 0.5);
-      ctx.fillStyle = pal.glossDot ? 'rgba(255, 255, 232, 0.44)' : 'rgba(255, 255, 255, 0.34)';
+      ctx.fillStyle = useGlossDot ? 'rgba(255, 255, 232, 0.44)' : 'rgba(255, 255, 255, 0.34)';
       ctx.fill();
 
-      if (pal.glossDot && sw > 70) {
+      if (useGlossDot && sw > 70) {
         ctx.fillStyle = 'rgba(255, 254, 240, 0.78)';
         ctx.beginPath();
         if (typeof ctx.ellipse === 'function') {
@@ -690,8 +718,8 @@ function drawPillButton(ctx, x, y, w, h, opts = {}) {
             size: fontSize,
             weight: 800,
             fill: textColor,
-            stroke: pal.outline ? pal.stroke : '',
-            strokeWidth: pal.outline ? 2.4 : 0,
+            stroke: useOutline ? strokeColor : '',
+            strokeWidth: useOutline ? _num(pal.strokeW, 2.6) : 0,
             shadowOffsetY: 0,
             align: 'left',
             baseline: 'middle',
@@ -706,8 +734,8 @@ function drawPillButton(ctx, x, y, w, h, opts = {}) {
         size: Math.max(11, Math.round(bodyH * 0.50)),
         weight: 800,
         fill: textColor,
-        stroke: pal.outline ? pal.stroke : '',
-        strokeWidth: pal.outline ? 2.2 : 0,
+        stroke: useOutline ? strokeColor : '',
+        strokeWidth: useOutline ? 2.2 : 0,
         shadowOffsetY: 0,
         maxWidth: sw - 8
       });
@@ -725,8 +753,8 @@ function drawPillButton(ctx, x, y, w, h, opts = {}) {
           size: fontSize,
           weight: 800,
           fill: textColor,
-          stroke: pal.outline ? pal.stroke : '',
-          strokeWidth: pal.outline ? 2.2 : 0,
+          stroke: useOutline ? strokeColor : '',
+          strokeWidth: useOutline ? 2.2 : 0,
           shadowOffsetY: 0,
           align: 'left',
           baseline: 'middle',
@@ -746,9 +774,9 @@ function drawPillButton(ctx, x, y, w, h, opts = {}) {
           size: fontSize,
           weight: 900,
           fill: textColor,
-          stroke: pal.outline ? pal.stroke : '',
-          strokeWidth: pal.outline ? _num(pal.strokeW, 2.6) : 0,
-          shadowOffsetY: pal.glossDot ? 1.4 : 0,
+          stroke: useOutline ? strokeColor : '',
+          strokeWidth: useOutline ? _num(pal.strokeW, 3.0) : 0,
+          shadowOffsetY: useGlossDot ? 1.4 : 0,
           maxWidth: sw - 14
         });
       }
@@ -1104,45 +1132,56 @@ function drawPriorityTargetBadge(ctx, cx, cy, radius = 8, nowSec = 0, opts = {})
 /**
  * 星夜小铺 / 烤盘主题弹窗红白条纹波浪雨棚（对应设计图 06 & 09）
  */
-function drawAwningHeader(ctx, x, y, w, h, stripes = 9) {
+function drawAwningHeader(ctx, x, y, w, h, stripes = 11) {
   if (!_isCtx(ctx)) return;
   const sx0 = _num(x, 0);
   const sy0 = _num(y, 0);
   const sw0 = _num(w, 0);
   const sh0 = _num(h, 0);
   if (!(sw0 > 0 && sh0 > 0)) return;
-  const count = Math.max(3, Math.floor(_num(stripes, 9)));
-  const sw = sw0 / count;
-  const r = Math.min(sw * 0.5, sh0 * 0.42);
+  const count = Math.max(5, Math.floor(_num(stripes, 11)));
+  const topInset = 5;
+  const topW = Math.max(20, sw0 - topInset * 2);
+  const topSw = topW / count;
+  const botSw = sw0 / count;
+  const r = Math.min(botSw * 0.48, sh0 * 0.34);
 
   ctx.save();
   try {
-    // 顶部木檐底影
-    ctx.shadowColor = 'rgba(30, 16, 10, 0.32)';
-    ctx.shadowBlur = 8;
-    ctx.shadowOffsetY = 3;
+    // 遮阳篷底面暖棕投影（投射到下方羊皮纸上）
+    ctx.shadowColor = 'rgba(42, 20, 10, 0.36)';
+    ctx.shadowBlur = 7;
+    ctx.shadowOffsetY = 3.5;
+
     for (let i = 0; i < count; i++) {
-      const sx = sx0 + i * sw;
+      const tx0 = sx0 + topInset + i * topSw;
+      const tx1 = tx0 + topSw;
+      const bx0 = sx0 + i * botSw;
+      const bx1 = bx0 + botSw;
+      const midBx = (bx0 + bx1) * 0.5;
+
       ctx.beginPath();
-      ctx.moveTo(sx, sy0);
-      ctx.lineTo(sx + sw, sy0);
-      ctx.lineTo(sx + sw, sy0 + sh0 - r);
-      ctx.arc(sx + sw * 0.5, sy0 + sh0 - r, r, 0, Math.PI, false);
+      ctx.moveTo(tx0, sy0);
+      ctx.lineTo(tx1, sy0);
+      ctx.lineTo(bx1, sy0 + sh0 - r);
+      ctx.arc(midBx, sy0 + sh0 - r, r, 0, Math.PI, false);
+      ctx.lineTo(bx0, sy0 + sh0 - r);
       ctx.closePath();
 
       const isRed = i % 2 === 0;
-      const g = _linearGrad(ctx, sx, sy0, sx, sy0 + sh0, isRed ? V090_EXT_COLORS.awningRed : V090_EXT_COLORS.awningCream);
-      _addStop(g, 0, isRed ? '#E36B55' : '#FFF8EC');
-      _addStop(g, 0.72, isRed ? V090_EXT_COLORS.awningRed : V090_EXT_COLORS.awningCream);
-      _addStop(g, 1, isRed ? '#BC4634' : '#EEDBC0');
+      const g = _linearGrad(ctx, midBx, sy0, midBx, sy0 + sh0, isRed ? '#DC5845' : '#FFF9EE');
+      _addStop(g, 0, isRed ? '#E86E58' : '#FFFBF3');
+      _addStop(g, 0.68, isRed ? '#D14B38' : '#F8EBDA');
+      _addStop(g, 1, isRed ? '#B33B2A' : '#E7D3B8');
       ctx.fillStyle = g;
       ctx.fill();
 
       ctx.shadowColor = 'rgba(0, 0, 0, 0)';
       ctx.shadowBlur = 0;
       ctx.shadowOffsetY = 0;
-      ctx.lineWidth = 2.0;
+      ctx.lineWidth = 1.9;
       ctx.strokeStyle = V090_KISSA_THEME.ink;
+      ctx.lineJoin = 'round';
       ctx.stroke();
     }
   } catch (_) {} finally {

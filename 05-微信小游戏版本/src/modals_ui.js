@@ -187,20 +187,14 @@ function beginModalFrame(ctx, metrics, app, opts = {}) {
   // Outer warm wood frame
   UI.drawWoodBoard(c, x, y, w, h, 18, Boolean(opts.withRivets));
 
-  // Optional red/cream scalloped awning (Design 06 & 09)
-  let awningDrop = 0;
-  if (hasAwning) {
-    const awningH = Math.min(34, Math.max(24, Math.round(h * 0.062)));
-    UI.drawAwningHeader(c, x - 3, y + 2, w + 6, awningH, 9);
-    awningDrop = awningH - 4;
-  }
-
   // Inner cream parchment sheet
   const padX = 9;
+  const awningH = hasAwning ? Math.min(38, Math.max(28, Math.round(h * 0.068))) : 0;
+  const awningDrop = hasAwning ? awningH - 4 : 0;
   const topInset = Number(opts.sheetTopInset);
   const sheetTop = Number.isFinite(topInset)
     ? y + topInset
-    : y + (hasAwning ? awningDrop + 32 : subtitle ? 44 : 16);
+    : y + (hasAwning ? awningH - 6 : subtitle ? 44 : 16);
   const sheetBotPad = Number.isFinite(opts.sheetBottomPad) ? opts.sheetBottomPad : 11;
   const sheetX = x + padX;
   const sheetW = w - padX * 2;
@@ -227,15 +221,20 @@ function beginModalFrame(ctx, metrics, app, opts = {}) {
     }
   }
 
-  // Floating centered wooden title plaque (Designs 04, 06, 07, 08, 09, 10, 11)
+  // Red/cream scalloped awning draped cleanly OVER the parchment top edge (Designs 06 & 09)
+  if (hasAwning) {
+    UI.drawAwningHeader(c, x - 3, y + 1, w + 6, awningH, 11);
+  }
+
+  // Floating centered arched wooden title plaque (Designs 04, 06, 07, 08, 09, 10, 11)
   if (hasPlaque && title) {
-    const plaqueW = Math.min(w - 68, Math.max(156, Math.round(w * 0.56)));
+    const plaqueW = Math.min(w - 66, Math.max(158, Math.round(w * 0.56)));
     const plaqueH = 40;
     const plaqueX = Math.round(x + (w - plaqueW) * 0.5);
     const plaqueY = Math.max(topBound + 1, y - 16);
 
     if (subtitle) {
-      const subW = Math.min(w - 50, plaqueW + 8);
+      const subW = Math.min(w - 48, plaqueW + 10);
       const subH = 22;
       const subX = Math.round(x + (w - subW) * 0.5);
       const subY = plaqueY + plaqueH - 6;
@@ -259,15 +258,80 @@ function beginModalFrame(ctx, metrics, app, opts = {}) {
       });
     }
 
-    UI.drawWoodBoard(c, plaqueX, plaqueY, plaqueW, plaqueH, 13, false);
-    UI.drawOutlinedText(c, title, plaqueX + plaqueW * 0.5, plaqueY + plaqueH * 0.5 + 1, {
+    // Arched wooden signboard silhouette
+    c.save();
+    try {
+      const pr = 12;
+      const arch = 6.5;
+      c.shadowColor = 'rgba(26, 14, 8, 0.34)';
+      c.shadowBlur = 8;
+      c.shadowOffsetY = 3;
+
+      const traceArchPlaque = (px, py, pw, ph, rad, archLift) => {
+        c.beginPath();
+        c.moveTo(px + rad, py);
+        c.quadraticCurveTo(px + pw * 0.5, py - archLift * 2, px + pw - rad, py);
+        c.quadraticCurveTo(px + pw, py, px + pw, py + rad);
+        c.lineTo(px + pw, py + ph - rad);
+        c.quadraticCurveTo(px + pw, py + ph, px + pw - rad, py + ph);
+        c.lineTo(px + rad, py + ph);
+        c.quadraticCurveTo(px, py + ph, px, py + ph - rad);
+        c.lineTo(px, py + rad);
+        c.quadraticCurveTo(px, py, px + rad, py);
+        c.closePath();
+      };
+
+      const pg = c.createLinearGradient(plaqueX, plaqueY - arch, plaqueX, plaqueY + plaqueH);
+      pg.addColorStop(0, '#9A6340');
+      pg.addColorStop(0.24, '#7E4D30');
+      pg.addColorStop(1, '#5D3620');
+      traceArchPlaque(plaqueX, plaqueY, plaqueW, plaqueH, pr, arch);
+      c.fillStyle = pg;
+      c.fill();
+
+      c.shadowColor = 'rgba(0, 0, 0, 0)';
+      c.shadowBlur = 0;
+      c.shadowOffsetY = 0;
+
+      // Woodgrain streaks inside plaque
+      c.save();
+      try {
+        traceArchPlaque(plaqueX + 2, plaqueY + 2, plaqueW - 4, plaqueH - 4, pr - 2, Math.max(2, arch - 1.5));
+        if (typeof c.clip === 'function') c.clip();
+        c.strokeStyle = 'rgba(56, 28, 14, 0.22)';
+        c.lineWidth = 1.2;
+        for (let gy = plaqueY + 8; gy < plaqueY + plaqueH - 4; gy += 9) {
+          c.beginPath();
+          c.moveTo(plaqueX + 4, gy);
+          c.lineTo(plaqueX + plaqueW - 4, gy);
+          c.stroke();
+        }
+      } finally {
+        c.restore();
+      }
+
+      // Inner warm highlight rim + crisp dark-brown outer stroke
+      traceArchPlaque(plaqueX + 2.5, plaqueY + 2.5, plaqueW - 5, plaqueH - 5, pr - 2.5, Math.max(2, arch - 2));
+      c.lineWidth = 1.3;
+      c.strokeStyle = 'rgba(255, 232, 196, 0.32)';
+      c.stroke();
+
+      traceArchPlaque(plaqueX, plaqueY, plaqueW, plaqueH, pr, arch);
+      c.lineWidth = 2.8;
+      c.strokeStyle = '#4A2B1A';
+      c.stroke();
+    } finally {
+      c.restore();
+    }
+
+    UI.drawOutlinedText(c, title, plaqueX + plaqueW * 0.5, plaqueY + plaqueH * 0.48, {
       size: 20,
       minSize: 14,
       weight: 900,
-      fill: '#FFE27D',
-      stroke: '#5A3928',
+      fill: '#FFE77A',
+      stroke: '#4A230D',
       strokeWidth: 4.0,
-      shadowOffsetY: 1.5,
+      shadowOffsetY: 1.4,
       maxWidth: plaqueW - 22
     });
   }
@@ -839,9 +903,9 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
     // 1. Arching 3 Large Stars above top border with staggered pop animation (Design 05)
     const revealT = Number.isFinite(res.elapsedRevealSec) ? res.elapsedRevealSec : 1.0;
     const starConfigs = [
-      { idx: 1, dx: -56, dy: -6, r: 24, rot: -0.18 },
-      { idx: 2, dx: 0, dy: -18, r: 29, rot: 0 },
-      { idx: 3, dx: 56, dy: -6, r: 24, rot: 0.18 }
+      { idx: 1, dx: -60, dy: -7, r: 26, rot: -0.18 },
+      { idx: 2, dx: 0, dy: -20, r: 32, rot: 0 },
+      { idx: 3, dx: 60, dy: -7, r: 26, rot: 0.18 }
     ];
     for (let i = 0; i < starConfigs.length; i++) {
       const sc = starConfigs[i];
@@ -862,6 +926,10 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
         drawSparkleStar(c, sx + sc.r * 0.72, sy - sc.r * 0.55, 5.5, 0.9);
       }
     }
+
+    // Decorative wooden corner paw-print stamps (Design 05)
+    UI.drawUiIcon(c, sprites, 'icon_paw_marker', f.cardX + 20, f.cardY + 18, 16, 0.38);
+    UI.drawUiIcon(c, sprites, 'icon_paw_marker', f.cardX + f.cardW - 20, f.cardY + 18, 16, 0.38);
 
     // 2. Festive Ribbon Banner across top ("营业大成功！" / "顺利过关！" / "继续加油！")
     const ribW = Math.min(f.cardW + 18, f.width - 14);
@@ -1134,6 +1202,8 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
     const nextX = f.sheetX + halfW + btnGap;
     UI.drawPillButton(c, nextX, barTop, halfW, primaryH, {
       variant: nextUnlocked ? 'primary' : 'wood',
+      textOutline: true,
+      glossDot: nextUnlocked,
       label: res.cleared && nextId ? `下一关 ${nextId}` : '返回大厅',
       fontSize: 13.6,
       radius: primaryH * 0.5,
@@ -1148,6 +1218,7 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
     const retryY = barTop + primaryH + 6;
     UI.drawPillButton(c, retryX, retryY, retryW, retryH, {
       variant: res.cleared ? 'dark' : 'primary',
+      textOutline: true,
       icon: 'icon_restart',
       sprites,
       iconSize: 13,
@@ -2642,6 +2713,7 @@ function renderPauseModal(ctx, metrics, app, hits) {
     const b2Y = b1Y + btnH + btnGap;
     UI.drawPillButton(c, btnX, b2Y, btnW, btnH, {
       variant: 'wood',
+      woodGrain: true,
       label: '重新开始',
       fontSize: 16.0,
       radius: btnH * 0.5,
@@ -2749,11 +2821,11 @@ function renderHelpModal(ctx, metrics, app, hits) {
 
   const f = beginModalFrame(c, metrics, app, {
     maxW: 438,
-    desiredH: 560,
+    desiredH: 546,
     dismissOnOutside: true,
     title: '玩法说明',
     sheetTopInset: 34,
-    sheetBottomPad: 58
+    sheetBottomPad: 32
   });
 
   try {
@@ -2815,15 +2887,17 @@ function renderHelpModal(ctx, metrics, app, hits) {
       );
     }
 
-    // Bottom Honey-Gold 3D "我知道了" Button (Design 11)
+    // Bottom Honey-Gold 3D "我知道了" Button overlapping bottom border (Design 11)
     const okW = Math.min(188, f.iw - 24);
-    const okH = 42;
+    const okH = 44;
     const okX = Math.round(f.cardX + (f.cardW - okW) * 0.5);
-    const okY = f.sheetY + f.sheetH + 8;
+    const okY = Math.min(f.botBound - okH - 2, f.cardY + f.cardH - Math.round(okH * 0.56));
     UI.drawPillButton(c, okX, okY, okW, okH, {
-      variant: 'primary',
+      variant: 'knead',
+      textOutline: true,
+      glossDot: true,
       label: '我知道了',
-      fontSize: 16.5,
+      fontSize: 17.0,
       radius: okH * 0.5,
       pressed: isPressed(app, 'help_ok_btn')
     });

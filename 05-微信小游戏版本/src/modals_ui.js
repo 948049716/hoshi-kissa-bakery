@@ -17,7 +17,9 @@ const {
   getCatcakePrice,
   SHOP_DEVICES,
   PATRONS,
+  CUSTOMERS,
   BOARD_THEME_LIST,
+  RESEARCH_ITEMS,
   SERVE_COMBO_MULTS,
   TUTORIAL_STEPS,
   ACHIEVEMENTS,
@@ -35,6 +37,11 @@ const {
 } = require('./levels_data');
 const UI = require('./ui_draw');
 const BoardRenderer = require('./board_renderer');
+const LevelGoals = require('./level_goals');
+const CustomerTraits = require('./customer_traits');
+const PerksData = require('./perks_data');
+const RunModifiers = require('./run_modifiers');
+const BalanceConfig = require('./balance_config');
 const {
   getSafeCtx,
   drawTopLeftStardustChip,
@@ -669,9 +676,20 @@ function renderLevelPreviewModal(ctx, metrics, app, hits, nowSec) {
       lineWidth: 1.6
     });
     drawSectionRibbonTag(c, f.ix + 8, featY - 11, '本关特色');
+    if (lvl && lvl.goal && lvl.goal.type && lvl.goal.type !== 'score') {
+      const preGoal = LevelGoals.createGoalState(lvl.goal, {
+        initialIce: (Array.isArray(lvl.matrix) ? lvl.matrix.join('') : '').split('I').length - 1
+      });
+      const gb = LevelGoals.formatGoalBadge(preGoal);
+      if (gb) {
+        UI.drawTagBadge(c, f.ix + f.iw - 96, featY - 10, 90, 21, gb.text, 'green', 10.0);
+      }
+    }
 
     const matJoined = Array.isArray(lvl.matrix) ? lvl.matrix.join('') : '';
     const featureItems = [];
+    if (matJoined.includes('O')) featureItems.push({ icon: 'icon_stardust', label: '星炉格' });
+    if (matJoined.includes('S')) featureItems.push({ icon: 'catcake_4', label: '蜜糖格' });
     if (matJoined.includes('X')) featureItems.push({ icon: 'tile_obstacle', label: '障碍格' });
     if (matJoined.includes('I')) featureItems.push({ icon: 'tile_ice', label: '冰封格' });
     if (matJoined.includes('M')) featureItems.push({ icon: 'flavor_matcha', label: '抹茶格' });
@@ -928,6 +946,7 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
     isNewBest: false,
     elapsedRevealSec: 1.0
   };
+  const resMode = res.mode === 'daily' || res.mode === 'endless' ? res.mode : 'campaign';
   const lvl = getLevelById(res.levelId || '1-1') || getLevelById('1-1');
   const chapName = getChapterName(lvl.chapter);
 
@@ -1005,7 +1024,9 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
     }
 
     const ribbonTitle =
-      (res.starsEarned || 0) >= 3
+      resMode === 'endless'
+        ? '无限营业结算'
+        : (res.starsEarned || 0) >= 3
         ? '营业大成功！'
         : res.cleared
         ? '顺利过关！'
@@ -1024,11 +1045,19 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
     // Subtle top-right close button (stays strictly below capsule & never overlaps ribbon center)
     drawCloseButton(c, f, hits, app, () => app.closeModal());
 
-    // 3. Level Subtitle ("第 1-5 关 · 街角星夜店")
+    // 3. Level Subtitle ("第 1-5 关 · 街角星夜店" / "每天特调 · YYYY-MM-DD" / "无限营业 · 过 X 班")
     const subY = f.sheetY + 34;
+    const dk = String(res.dateKey || '');
+    const fmtDate = dk.length === 8 ? `${dk.slice(0, 4)}-${dk.slice(4, 6)}-${dk.slice(6, 8)}` : '';
+    const subLabel =
+      resMode === 'daily'
+        ? `每天特调${fmtDate ? ` · ${fmtDate}` : ''}`
+        : resMode === 'endless'
+        ? `无限营业 · 过 ${Math.max(0, res.shiftsCleared || 0)} 班 · 累计 ${formatNum(res.endlessTotalScore || res.score || 0)} 分`
+        : `第 ${lvl.id} 关 · ${chapName}`;
     UI.drawFitText(
       c,
-      `第 ${lvl.id} 关 · ${chapName}`,
+      subLabel,
       f.ix + f.iw * 0.5,
       subY,
       f.iw - 12,
@@ -1052,11 +1081,13 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
       lineWidth: 1.8
     });
 
-    // Top-left overlapping badge ("· 新纪录 ·" or status)
-    if (res.isNewBest && (res.score || 0) > 0) {
+    // Top-left overlapping badge ("· 新纪录 ·" / "营业达标" / "目标未达标" / "未达1星线")
+    if (res.isNewBest && (res.score || 0) > 0 && !res.goalUnmet) {
       UI.drawTagBadge(c, f.ix + 8, heroY - 10, 76, 23, '· 新纪录 ·', 'urgent', 12.0);
     } else if (res.cleared) {
       UI.drawTagBadge(c, f.ix + 8, heroY - 10, 76, 23, '营业达标', 'green', 11.4);
+    } else if (res.goalUnmet) {
+      UI.drawTagBadge(c, f.ix + 8, heroY - 10, 84, 23, '目标未达标', 'urgent', 10.8);
     } else {
       UI.drawTagBadge(c, f.ix + 8, heroY - 10, 84, 23, '未达1星线', 'wood', 11.0);
     }
@@ -1087,7 +1118,7 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
       patronSz
     );
 
-    // 5. Inner Detailed Stats Sheet (Design 05 double warm-brown wooden frame around ivory card!)
+    // 5. Inner Detailed Stats Sheet (Design 05 double warm-brown wooden frame around ivory card, 3 rows + M2 diagnostics)
     const statsY = heroY + heroH + 10;
     const statsH = Math.max(112, f.sheetY + f.sheetH - 10 - statsY);
     UI.drawKissaCard(c, f.ix, statsY, f.iw, statsH, {
@@ -1112,8 +1143,9 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
     const comboIdx = Math.min(Math.max(0, maxCombo - 1), SERVE_COMBO_MULTS.length - 1);
     const comboMult = maxCombo >= 2 ? SERVE_COMBO_MULTS[comboIdx] : 1.0;
 
-    // Breakdown sub-note for stardust / soft-pity
+    // Breakdown sub-note for stardust / soft-pity / diagnostics
     const parts = [];
+    if (res.earlyCloseBonus > 0) parts.push(`提前打烊+${formatNum(res.earlyCloseBonus)}`);
     if (res.cleared) {
       if (res.firstStarDustAward > 0) parts.push(`首星+${res.firstStarDustAward}`);
       if (res.clearDustAward > 0) parts.push(`过关+${res.clearDustAward}`);
@@ -1133,12 +1165,19 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
       }
     }
 
-    const hasSubNote = statsH >= 134;
+    const diag = res.diagnostics && typeof res.diagnostics === 'object' ? res.diagnostics : null;
+    const hasDiagBlock = Boolean(diag && statsH >= 146);
+    const hasSubNote = statsH >= 122;
     const innerTop = statsY + stIn + 3;
-    const rowBlockH = hasSubNote ? statsH - stIn * 2 - 22 : statsH - stIn * 2 - 6;
+    const footerH = hasDiagBlock ? 40 : hasSubNote ? 22 : 6;
+    const rowBlockH = statsH - stIn * 2 - footerH;
     const rowH = rowBlockH / 3;
     const statRows = [
-      { label: '上菜总得分', val: formatNum(res.score || 0), type: 'score' },
+      {
+        label: res.earlyCloseBonus > 0 ? '总得分(含打烊)' : '上菜总得分',
+        val: formatNum(res.score || 0),
+        type: 'score'
+      },
       {
         label: '最高上菜连击',
         val: maxCombo > 0 ? `${maxCombo}连` : '0连',
@@ -1230,10 +1269,38 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
       }
     }
 
-    if (hasSubNote) {
+    if (hasDiagBlock) {
+      const hlText = Array.isArray(diag.highlights) ? diag.highlights.join(' · ') : parts.join(' · ');
       UI.drawFitText(
         c,
-        parts.join(' · '),
+        hlText,
+        f.ix + f.iw * 0.5,
+        statsY + statsH - 27,
+        f.iw - 20,
+        9.4,
+        7.6,
+        800,
+        '#7A4A24',
+        'center',
+        'middle'
+      );
+      UI.drawFitText(
+        c,
+        diag.tip || parts.join(' · '),
+        f.ix + f.iw * 0.5,
+        statsY + statsH - 11,
+        f.iw - 18,
+        9.2,
+        7.4,
+        700,
+        '#9A5C2E',
+        'center',
+        'middle'
+      );
+    } else if (hasSubNote) {
+      UI.drawFitText(
+        c,
+        diag && diag.tip ? diag.tip : parts.join(' · '),
         f.ix + f.iw * 0.5,
         statsY + statsH - stIn - 10,
         f.iw - 24,
@@ -1271,35 +1338,86 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
     hits.add('result_shop_btn', f.sheetX, barTop, halfW, primaryH, () => app.openShopFromResult());
 
     // Right: 下一关 X-Y / 返回大厅 (result_next_btn)
+    const isCampaignRes = resMode === 'campaign';
     const nextX = f.sheetX + halfW + btnGap;
     UI.drawPillButton(c, nextX, barTop, halfW, primaryH, {
-      variant: nextUnlocked ? 'primary' : 'wood',
+      variant: isCampaignRes && nextUnlocked ? 'primary' : 'wood',
       textOutline: true,
-      glossDot: nextUnlocked,
-      label: res.cleared && nextId ? `下一关 ${nextId}` : '返回大厅',
-      fontSize: 15.8,
+      glossDot: isCampaignRes && nextUnlocked,
+      label: isCampaignRes && res.cleared && nextId ? `下一关 ${nextId}` : '返回大厅',
+      fontSize: 15.0,
       radius: primaryH * 0.5,
       pressed: isPressed(app, 'result_next_btn')
     });
     hits.add('result_next_btn', nextX, barTop, halfW, primaryH, () => app.onResultNext());
 
-    // Bottom centered compact pill: 重玩本关 / 再试一次 (result_retry_btn) — stays safely inside modal wood frame!
-    const retryW = Math.min(148, f.sheetW - 24);
+    // Bottom compact row: 重玩/再试 + 激励视频复活/双倍星尘 (v0.13 M4)
     const retryH = 28;
-    const retryX = Math.round(f.cardX + (f.cardW - retryW) * 0.5);
     const retryY = barTop + primaryH + 6;
-    UI.drawPillButton(c, retryX, retryY, retryW, retryH, {
-      variant: res.cleared ? 'dark' : 'primary',
-      textOutline: true,
-      icon: 'icon_restart',
-      sprites,
-      iconSize: 14,
-      label: res.cleared ? '重玩本关' : '再试一次',
-      fontSize: 13.0,
-      radius: 14,
-      pressed: isPressed(app, 'result_retry_btn')
-    });
-    hits.add('result_retry_btn', retryX, retryY, retryW, retryH, () => app.startLevel(res.levelId));
+    const retryLabel =
+      resMode === 'daily'
+        ? '再玩特调'
+        : resMode === 'endless'
+        ? '再来一局'
+        : res.cleared
+        ? '重玩本关'
+        : '再试一次';
+    const canRevive = typeof app.canReviveWithAd === 'function' && app.canReviveWithAd();
+    const canDouble = typeof app.canDoubleDustWithAd === 'function' && app.canDoubleDustWithAd();
+    const adActive = canRevive || canDouble;
+
+    if (adActive) {
+      const rowGap = 8;
+      const leftW = Math.floor((f.sheetW - rowGap) * 0.44);
+      const rightW = f.sheetW - rowGap - leftW;
+      UI.drawPillButton(c, f.sheetX, retryY, leftW, retryH, {
+        variant: 'dark',
+        textOutline: true,
+        icon: 'icon_restart',
+        sprites,
+        iconSize: 13,
+        label: retryLabel,
+        fontSize: 12.2,
+        radius: 14,
+        pressed: isPressed(app, 'result_retry_btn')
+      });
+      hits.add('result_retry_btn', f.sheetX, retryY, leftW, retryH, () => app.startLevel(res.levelId));
+
+      const adHitId = canRevive ? 'result_revive_btn' : 'result_double_dust_btn';
+      const adLabel = canRevive
+        ? `视频加时 +${(BalanceConfig.ADS && BalanceConfig.ADS.reviveAddSec) || 15}秒`
+        : `视频双倍 +${res.totalDustAward}`;
+      UI.drawPillButton(c, f.sheetX + leftW + rowGap, retryY, rightW, retryH, {
+        variant: 'primary',
+        textOutline: true,
+        icon: canRevive ? 'icon_clock' : 'icon_star_coin',
+        sprites,
+        iconSize: 14,
+        label: adLabel,
+        fontSize: 12.2,
+        radius: 14,
+        pressed: isPressed(app, adHitId)
+      });
+      hits.add(adHitId, f.sheetX + leftW + rowGap, retryY, rightW, retryH, () => {
+        if (canRevive && typeof app.onReviveWithAd === 'function') app.onReviveWithAd();
+        else if (canDouble && typeof app.onDoubleDustWithAd === 'function') app.onDoubleDustWithAd();
+      });
+    } else {
+      const retryW = Math.min(148, f.sheetW - 24);
+      const retryX = Math.round(f.cardX + (f.cardW - retryW) * 0.5);
+      UI.drawPillButton(c, retryX, retryY, retryW, retryH, {
+        variant: res.cleared ? 'dark' : 'primary',
+        textOutline: true,
+        icon: 'icon_restart',
+        sprites,
+        iconSize: 14,
+        label: retryLabel,
+        fontSize: 13.0,
+        radius: 14,
+        pressed: isPressed(app, 'result_retry_btn')
+      });
+      hits.add('result_retry_btn', retryX, retryY, retryW, retryH, () => app.startLevel(res.levelId));
+    }
   } finally {
     endModalFrame(c);
   }
@@ -1346,7 +1464,7 @@ function renderShopModal(ctx, metrics, app, hits) {
     dismissOnOutside: true,
     showTopCurrency: true,
     awning: true,
-    title: activeTab === 'themes' ? '烤盘主题' : '星夜小铺',
+    title: activeTab === 'themes' ? '烤盘主题' : activeTab === 'research' ? '星夜茶研所' : '星夜小铺',
     sheetTopInset: 78,
     sheetBottomPad: 12
   });
@@ -1354,17 +1472,28 @@ function renderShopModal(ctx, metrics, app, hits) {
   try {
     drawCloseButton(c, f, hits, app);
 
-    // 4 Folder Tabs seamlessly docked to top edge of cream parchment with clean clearance under awning (Design 06)
+    // 5 Folder Tabs seamlessly docked to top edge of cream parchment with clean clearance under awning (Design 06 + M3 茶研所)
     const tabY = f.sheetY - 31;
     const tabH = 33;
     const tabs = [
-      { id: 'catcakes', hitId: 'shop_tab_catcakes', label: '猫饼升级', redDot: app.hasAffordableShopTab && app.hasAffordableShopTab('catcakes') },
-      { id: 'devices', hitId: 'shop_tab_devices', label: '店面设备', redDot: app.hasAffordableShopTab && app.hasAffordableShopTab('devices') },
-      { id: 'patrons', hitId: 'shop_tab_patrons', label: '看板店员', redDot: app.hasAffordableShopTab && app.hasAffordableShopTab('patrons') },
-      { id: 'themes', hitId: 'shop_tab_themes', label: '棋盘主题', redDot: app.hasAffordableShopTab && app.hasAffordableShopTab('themes') }
+      { id: 'catcakes', hitId: 'shop_tab_catcakes', label: '猫饼', redDot: app.hasAffordableShopTab && app.hasAffordableShopTab('catcakes') },
+      { id: 'devices', hitId: 'shop_tab_devices', label: '设备', redDot: app.hasAffordableShopTab && app.hasAffordableShopTab('devices') },
+      { id: 'patrons', hitId: 'shop_tab_patrons', label: '店员', redDot: app.hasAffordableShopTab && app.hasAffordableShopTab('patrons') },
+      { id: 'themes', hitId: 'shop_tab_themes', label: '主题', redDot: app.hasAffordableShopTab && app.hasAffordableShopTab('themes') },
+      { id: 'research', hitId: 'shop_tab_research', label: '茶研所', redDot: app.hasAffordableShopTab && app.hasAffordableShopTab('research') }
     ];
-    drawFolderTabs(c, f.sheetX + 6, tabY, f.sheetW - 12, tabH, tabs, activeTab, hits, app, (tabId) =>
-      app.setShopTab(tabId)
+    drawFolderTabs(
+      c,
+      f.sheetX + 6,
+      tabY,
+      f.sheetW - 12,
+      tabH,
+      tabs,
+      activeTab,
+      hits,
+      app,
+      (tabId) => app.setShopTab(tabId),
+      { gap: 3, fontSize: 11.4 }
     );
 
     const footerH = 22;
@@ -1804,6 +1933,119 @@ function renderShopModal(ctx, metrics, app, hits) {
       return;
     }
 
+    if (activeTab === 'research') {
+      const unlockedMap =
+        saveData.researchUnlocks && typeof saveData.researchUnlocks === 'object'
+          ? saveData.researchUnlocks
+          : {};
+      const cardGap = 8;
+      const cardH = 74;
+      const { scrollY, maxScroll, contentH } = setupListScroll(
+        app,
+        f.ix,
+        f.iw,
+        bodyY,
+        bodyH,
+        RESEARCH_ITEMS.length,
+        cardH,
+        cardGap
+      );
+      const listW = f.iw - (maxScroll > 0 ? 10 : 0);
+
+      c.save();
+      try {
+        c.beginPath();
+        c.rect(f.ix - 2, bodyY, f.iw + 4, bodyH);
+        c.clip();
+        c.globalAlpha *= anim.tabAlpha;
+        c.translate(0, -scrollY + anim.tabOffsetY);
+
+        for (let i = 0; i < RESEARCH_ITEMS.length; i++) {
+          const item = RESEARCH_ITEMS[i];
+          const cy = bodyY + i * (cardH + cardGap);
+          if (cy + cardH < bodyY + scrollY - 12 || cy > bodyY + scrollY + bodyH + 12) continue;
+
+          const owned = Boolean(unlockedMap[item.id]);
+          const canBuy = !owned && bank >= item.cost;
+          UI.drawKissaCard(c, f.ix, cy, listW, cardH, {
+            tone: owned ? 'selected' : 'cream',
+            radius: 12,
+            lineWidth: 2.0
+          });
+
+          const catTag =
+            item.category === 'perk'
+              ? '加成'
+              : item.category === 'secret'
+              ? '图鉴'
+              : '徽章';
+          const catTone =
+            item.category === 'perk' ? 'amber' : item.category === 'secret' ? 'matcha' : 'berry';
+          UI.drawTagBadge(c, f.ix + 8, cy + 10, 42, 20, catTag, catTone, 10.6);
+
+          const btnW = 76;
+          const btnH = 34;
+          const btnX = f.ix + listW - btnW - 8;
+          const btnY = Math.round(cy + (cardH - btnH) * 0.5);
+          const textX = f.ix + 56;
+          const textW = Math.max(80, btnX - 10 - textX);
+          const descX = f.ix + 10;
+          const descW = Math.max(120, btnX - 10 - descX);
+
+          UI.drawFitText(c, item.name, textX, cy + 20, textW, 14.2, 10.6, 900, '#4E2B18', 'left', 'middle');
+          UI.drawFitText(c, item.desc, descX, cy + 48, descW, 11.4, 8.8, 700, '#6A422B', 'left', 'middle');
+
+          const itemIdCopy = item.id;
+          const hitId = `shop_buy_research_${itemIdCopy}`;
+          if (owned) {
+            UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
+              variant: 'equipped',
+              label: '已解锁',
+              fontSize: 11.8,
+              radius: 12,
+              disabled: true
+            });
+          } else {
+            UI.drawPillButton(c, btnX, btnY, btnW, btnH, {
+              variant: canBuy ? 'primary' : 'wood',
+              disabled: !canBuy,
+              icon: 'icon_star_coin',
+              sprites,
+              iconSize: 14,
+              label: String(item.cost),
+              fontSize: 13.6,
+              radius: 12,
+              pressed: isPressed(app, hitId)
+            });
+            addScrollClippedHit(hits, hitId, btnX, btnY, btnW, btnH, scrollY, bodyY, bodyH, () =>
+              app.buyResearchItem(itemIdCopy)
+            );
+          }
+        }
+      } finally {
+        c.restore();
+      }
+
+      if (maxScroll > 0) {
+        UI.drawScrollBar(c, f.ix + f.iw - 6, bodyY + 2, 5, bodyH - 4, scrollY / maxScroll, bodyH / Math.max(bodyH, contentH));
+      }
+      const unlockedCnt = RESEARCH_ITEMS.filter((it) => Boolean(unlockedMap[it.id])).length;
+      UI.drawFitText(
+        c,
+        `已解锁 ${unlockedCnt}/${RESEARCH_ITEMS.length} · 解锁加成自动加入无限营业`,
+        f.ix + f.iw * 0.5,
+        footerY + footerH * 0.5,
+        f.iw - 8,
+        11.4,
+        8.8,
+        700,
+        '#6A422B',
+        'center',
+        'middle'
+      );
+      return;
+    }
+
     // --- Tab 4: 棋盘主题 (Design 09 BoardThemeModal with Golden Glow, Sparkles & Olive '使用中') ---
     const cardGap = 12;
     const cardH = clamp(Math.floor((bodyH - cardGap * (BOARD_THEME_LIST.length - 1)) / BOARD_THEME_LIST.length), 96, 118);
@@ -1949,10 +2191,10 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
       if (isLevelUnlocked(RECIPE_LIST[i].unlockLevel, saveData.levelStars).unlocked) unlockedRecipes++;
     }
 
-    // 2 Folder Tabs + Right-side "已收集 X/7" counter pill (Design 07)
+    // 3 Folder Tabs + Right-side "已收集 X/Y" counter pill (Design 07 + M3 顾客图鉴)
     const tabY = f.sheetY - 30;
     const tabH = 32;
-    const countW = 74;
+    const countW = 64;
     const tabsW = f.sheetW - 18 - countW;
     drawFolderTabs(
       c,
@@ -1962,12 +2204,14 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
       tabH,
       [
         { id: 'catcakes', hitId: 'compendium_tab_catcakes', label: '猫饼图鉴' },
-        { id: 'recipes', hitId: 'compendium_tab_recipes', label: '套餐配方' }
+        { id: 'recipes', hitId: 'compendium_tab_recipes', label: '套餐配方' },
+        { id: 'customers', hitId: 'compendium_tab_customers', label: '顾客图鉴' }
       ],
       activeTab,
       hits,
       app,
-      (tabId) => app.setCompendiumTab(tabId)
+      (tabId) => app.setCompendiumTab(tabId),
+      { gap: 3, fontSize: 10.6 }
     );
 
     const cntX = f.sheetX + f.sheetW - 6 - countW;
@@ -1987,9 +2231,15 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
       strokeWidth: 1.8,
       shadowOffsetY: 0
     });
+    const counterText =
+      activeTab === 'catcakes'
+        ? `${unlockedCakes}/${CATCAKES.length}`
+        : activeTab === 'customers'
+        ? `${CUSTOMERS.length}/${CUSTOMERS.length}`
+        : `${unlockedRecipes}/${RECIPE_LIST.length}`;
     UI.drawOutlinedText(
       c,
-      activeTab === 'catcakes' ? `${unlockedCakes}/${CATCAKES.length}` : `${unlockedRecipes}/${RECIPE_LIST.length}`,
+      counterText,
       cntX + countW * 0.5,
       tabY + 22,
       {
@@ -2169,6 +2419,131 @@ function renderCompendiumModal(ctx, metrics, app, hits) {
       return;
     }
 
+    if (activeTab === 'customers') {
+      const researchMap =
+        saveData.researchUnlocks && typeof saveData.researchUnlocks === 'object'
+          ? saveData.researchUnlocks
+          : {};
+      const cardGap = 8;
+      const cardH = 74;
+      const { scrollY, maxScroll, contentH } = setupListScroll(
+        app,
+        f.ix,
+        f.iw,
+        bodyY,
+        bodyH,
+        CUSTOMERS.length,
+        cardH,
+        cardGap
+      );
+      const listW = f.iw - (maxScroll > 0 ? 10 : 0);
+
+      c.save();
+      try {
+        c.beginPath();
+        c.rect(f.ix - 2, bodyY, f.iw + 4, bodyH);
+        c.clip();
+        c.globalAlpha *= anim.tabAlpha;
+        c.translate(0, -scrollY + anim.tabOffsetY);
+
+        for (let i = 0; i < CUSTOMERS.length; i++) {
+          const cust = CUSTOMERS[i];
+          const trait = CustomerTraits.getCustomerTrait(cust.id);
+          const cy = bodyY + i * (cardH + cardGap);
+          if (cy + cardH < bodyY + scrollY - 12 || cy > bodyY + scrollY + bodyH + 12) continue;
+
+          UI.drawKissaCard(c, f.ix, cy, listW, cardH, {
+            tone: cust.isVip ? 'goldRow' : 'cream',
+            radius: 12,
+            lineWidth: 2.0
+          });
+
+          const portCx = f.ix + 34;
+          const portCy = cy + cardH * 0.5;
+          UI.drawCustomerPortrait(c, sprites, cust.id, portCx, portCy, 52, {
+            circular: true,
+            isVip: Boolean(cust.isVip)
+          });
+
+          const textX = f.ix + 68;
+          const textW = Math.max(80, f.ix + listW - 10 - textX);
+          const roleTag = cust.isVip ? 'VIP' : '常客';
+          UI.drawFitText(
+            c,
+            `${cust.name}`,
+            textX,
+            cy + 20,
+            textW - 76,
+            13.2,
+            10.2,
+            900,
+            '#5A3928',
+            'left',
+            'middle'
+          );
+
+          if (trait) {
+            const bx = f.ix + listW - 18;
+            const by = cy + 20;
+            c.save();
+            try {
+              c.beginPath();
+              c.arc(bx, by, 10, 0, Math.PI * 2);
+              c.fillStyle = trait.badgeColor || '#E89B4A';
+              c.fill();
+              c.lineWidth = 1.6;
+              c.strokeStyle = '#4A2B1A';
+              c.stroke();
+              UI.drawFitText(c, trait.shortTag, bx, by + 0.5, 16, 10.2, 8.2, 900, '#FFFDF5', 'center', 'middle');
+            } finally {
+              c.restore();
+            }
+            UI.drawFitText(
+              c,
+              `${trait.name}`,
+              bx - 16,
+              by,
+              54,
+              10.6,
+              8.5,
+              800,
+              '#8A5220',
+              'right',
+              'middle'
+            );
+            const hasSecret = cust.isVip
+              ? Boolean(researchMap.secret_traits_vip)
+              : Boolean(researchMap.secret_traits_regular);
+            const descLine = hasSecret
+              ? `${trait.desc}（已录茶研手记）`
+              : trait.desc;
+            UI.drawFitText(
+              c,
+              descLine,
+              textX,
+              cy + 48,
+              textW,
+              10.2,
+              8.2,
+              700,
+              '#754C36',
+              'left',
+              'middle'
+            );
+          } else {
+            UI.drawFitText(c, roleTag, textX, cy + 48, textW, 10.0, 8.2, 700, '#754C36', 'left', 'middle');
+          }
+        }
+      } finally {
+        c.restore();
+      }
+
+      if (maxScroll > 0) {
+        UI.drawScrollBar(c, f.ix + f.iw - 6, bodyY + 2, 5, bodyH - 4, scrollY / maxScroll, bodyH / Math.max(bodyH, contentH));
+      }
+      return;
+    }
+
     // --- Tab 2: 24 道套餐配方 (3-col Scrollable Grid + Warm Scrollbar) ---
     const cols = 3;
     const rows = Math.max(1, Math.ceil(RECIPE_LIST.length / cols));
@@ -2268,6 +2643,10 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
   const boardType =
     app.leaderboardBoardType === 'score'
       ? 'score'
+      : app.leaderboardBoardType === 'daily'
+      ? 'daily'
+      : app.leaderboardBoardType === 'endless'
+      ? 'endless'
       : app.leaderboardBoardType === 'friends'
       ? 'friends'
       : 'stars';
@@ -2285,7 +2664,7 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
   try {
     drawCloseButton(c, f, hits, app);
 
-    // 3 Folder Tabs: 全服总星榜 (default) | 累计营业榜 | 微信好友榜 (正在开发中)
+    // 5 Folder Tabs: 总星榜 | 营业榜 | 特调榜 | 无限榜 | 好友榜
     const tabY = f.sheetY - 30;
     const tabH = 32;
     drawFolderTabs(
@@ -2295,15 +2674,17 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
       f.sheetW - 12,
       tabH,
       [
-        { id: 'stars', hitId: 'leaderboard_tab_stars', label: '全服总星榜' },
-        { id: 'score', hitId: 'leaderboard_tab_score', label: '累计营业榜' },
-        { id: 'friends', hitId: 'leaderboard_tab_friends', label: '微信好友榜' }
+        { id: 'stars', hitId: 'leaderboard_tab_stars', label: '总星榜' },
+        { id: 'score', hitId: 'leaderboard_tab_score', label: '营业榜' },
+        { id: 'daily', hitId: 'leaderboard_tab_daily', label: '特调榜' },
+        { id: 'endless', hitId: 'leaderboard_tab_endless', label: '无限榜' },
+        { id: 'friends', hitId: 'leaderboard_tab_friends', label: '好友榜' }
       ],
       boardType,
       hits,
       app,
       (tabId) => app.setLeaderboardBoardType(tabId),
-      { fontSize: 12.8 }
+      { gap: 3, fontSize: 11.2 }
     );
 
     // Compact Chef Identity & WeChat Auth Strip (preserves leaderboard_avatar_btn & leaderboard_auth_btn!)
@@ -2386,7 +2767,7 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
     const lb = app.leaderboardData || { list: [], myRank: null };
 
     if (boardType === 'friends') {
-      // User Decision #2: 微信好友榜 shows clean "正在开发中" placeholder card
+      // v0.13 M4: WeChat Open Data Context sharedCanvas blit + local preview fallback
       c.save();
       try {
         c.globalAlpha *= anim.tabAlpha;
@@ -2398,36 +2779,60 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
           radius: 13,
           lineWidth: 2.0
         });
-        const midX = f.ix + f.iw * 0.5;
-        const midY = listY + listH * 0.5;
-        UI.drawUiIcon(c, sprites, 'patron_mikan', midX - 24, midY - 34, 62);
-        UI.drawUiIcon(c, sprites, 'icon_cloud_sync', midX + 26, midY - 30, 38);
-        UI.drawTagBadge(c, midX - 48, midY + 4, 96, 24, '功能筹备中', 'amber', 12.0);
-        UI.drawFitText(
-          c,
-          '微信好友榜正在开发中',
-          midX,
-          midY + 40,
-          f.iw - 28,
-          17.2,
-          12.5,
-          900,
-          '#4E2B18',
-          'center',
-          'middle'
-        );
-        UI.drawWrappedText(
-          c,
-          '开放数据域好友榜单即将上线！当前可先在「全服总星榜」与「累计营业榜」中冲榜角逐星夜烘焙大师。',
-          midX,
-          midY + 60,
-          f.iw - 44,
-          18,
-          UI.fontStr(12.0, 700),
-          '#6A422B',
-          'center',
-          3
-        );
+        const sharedCanvas =
+          typeof app.renderFriendsOpenData === 'function'
+            ? app.renderFriendsOpenData(Math.floor(f.iw - 12), Math.floor(listH - 12), metrics.dpr || 2)
+            : null;
+        if (sharedCanvas && sharedCanvas.width > 0 && sharedCanvas.height > 0) {
+          c.drawImage(sharedCanvas, f.ix + 6, listY + 6, f.iw - 12, listH - 12);
+        } else {
+          const midX = f.ix + f.iw * 0.5;
+          const midY = listY + listH * 0.44;
+          UI.drawUiIcon(c, sprites, 'patron_mikan', midX - 24, midY - 32, 60);
+          UI.drawUiIcon(c, sprites, 'icon_cloud_sync', midX + 26, midY - 28, 38);
+          UI.drawTagBadge(c, midX - 58, midY + 4, 116, 24, '已接入开放域', 'matcha', 11.4);
+          UI.drawFitText(
+            c,
+            '微信好友排行已开启',
+            midX,
+            midY + 40,
+            f.iw - 28,
+            17.0,
+            12.2,
+            900,
+            '#4E2B18',
+            'center',
+            'middle'
+          );
+          UI.drawWrappedText(
+            c,
+            '微信端内自动同步好友总星与营业排行，点击下方按钮邀请好友加入星夜猫饼店。',
+            midX,
+            midY + 58,
+            f.iw - 40,
+            18,
+            UI.fontStr(11.6, 700),
+            '#6A422B',
+            'center',
+            3
+          );
+
+          const shareW = Math.min(188, f.iw - 40);
+          const shareH = 36;
+          const shareX = Math.round(midX - shareW * 0.5);
+          const shareY = Math.min(listY + listH - shareH - 12, midY + 102);
+          UI.drawPillButton(c, shareX, shareY, shareW, shareH, {
+            variant: 'primary',
+            textOutline: true,
+            label: '邀请好友一起玩',
+            fontSize: 13.4,
+            radius: 18,
+            pressed: isPressed(app, 'friends_share_btn')
+          });
+          hits.add('friends_share_btn', shareX, shareY, shareW, shareH, () => {
+            if (typeof app.shareToFriends === 'function') app.shareToFriends();
+          });
+        }
       } finally {
         c.restore();
       }
@@ -2519,6 +2924,9 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
 
           const rStars = Math.max(0, Math.floor(Number(r.totalStars) || 0));
           const rScore = Math.max(0, Math.floor(Number(r.totalCumulativeScore) || 0));
+          const rDaily = Math.max(0, Math.floor(Number(r.dailyBestScore) || 0));
+          const rShift = Math.max(0, Math.floor(Number(r.endlessBestShift) || 0));
+          const rEndless = Math.max(0, Math.floor(Number(r.endlessBestScore) || 0));
 
           const valColW = 90;
           const nameX = f.ix + 85;
@@ -2538,23 +2946,58 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
             'left',
             'middle'
           );
-          UI.drawStarIcon(c, nameX + 7, ry + rowH * 0.70, 7.0, true, { sprites });
-          UI.drawFitText(
-            c,
-            `${rStars}/90`,
-            nameX + 19,
-            ry + rowH * 0.71,
-            nameW - 20,
-            12.6,
-            9.4,
-            800,
-            '#6A422B',
-            'left',
-            'middle'
-          );
+          if (boardType === 'daily') {
+            UI.drawFitText(
+              c,
+              '今天特调最高分',
+              nameX,
+              ry + rowH * 0.71,
+              nameW,
+              11.8,
+              9.0,
+              800,
+              '#6A422B',
+              'left',
+              'middle'
+            );
+          } else if (boardType === 'endless') {
+            UI.drawFitText(
+              c,
+              `最高过 ${rShift} 班`,
+              nameX,
+              ry + rowH * 0.71,
+              nameW,
+              12.2,
+              9.2,
+              800,
+              '#8A5220',
+              'left',
+              'middle'
+            );
+          } else {
+            UI.drawStarIcon(c, nameX + 7, ry + rowH * 0.70, 7.0, true, { sprites });
+            UI.drawFitText(
+              c,
+              `${rStars}/90`,
+              nameX + 19,
+              ry + rowH * 0.71,
+              nameW - 20,
+              12.6,
+              9.4,
+              800,
+              '#6A422B',
+              'left',
+              'middle'
+            );
+          }
 
           // Right bold numeric value (emphasizing primary metric while keeping both clean)
-          const rightVal = boardType === 'score' ? formatNum(rScore) : formatNum(rScore);
+          const rightVal =
+            boardType === 'daily'
+              ? formatNum(rDaily)
+              : boardType === 'endless'
+              ? formatNum(rEndless)
+              : formatNum(rScore);
           UI.drawFitText(
             c,
             rightVal,
@@ -2581,6 +3024,10 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
     // Pinned Golden Self Row Footer (Design 08)
     const myStars = computeTotalStars(saveData.levelStars);
     const myScore = (saveData.lifetimeStats && saveData.lifetimeStats.totalCumulativeScore) || 0;
+    const ms = saveData.modeStats || {};
+    const myDaily = ms.daily ? Math.max(0, Math.floor(Number(ms.daily.bestScore) || 0)) : 0;
+    const myShift = ms.endless ? Math.max(0, Math.floor(Number(ms.endless.bestShift) || 0)) : 0;
+    const myEndless = ms.endless ? Math.max(0, Math.floor(Number(ms.endless.bestScore) || 0)) : 0;
     UI.drawKissaCard(c, f.ix, footerY, f.iw, footerH, {
       tone: 'myRankRow',
       radius: 12,
@@ -2609,12 +3056,24 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
     const myNameX = f.ix + 85;
     const myNameW = Math.max(60, f.iw - 178);
     UI.drawFitText(c, `我 (${dispName})`, myNameX, footerY + footerH * 0.33, myNameW, 14.6, 10.4, 900, '#4E2B18', 'left', 'middle');
-    UI.drawStarIcon(c, myNameX + 7, footerY + footerH * 0.70, 7.0, true, { sprites });
-    UI.drawFitText(c, `${myStars}/90`, myNameX + 19, footerY + footerH * 0.71, myNameW - 20, 12.6, 9.4, 900, '#4E2B18', 'left', 'middle');
+    if (boardType === 'daily') {
+      UI.drawFitText(c, '今天特调最高分', myNameX, footerY + footerH * 0.71, myNameW, 11.8, 9.0, 800, '#5A3928', 'left', 'middle');
+    } else if (boardType === 'endless') {
+      UI.drawFitText(c, `最高过 ${myShift} 班`, myNameX, footerY + footerH * 0.71, myNameW, 12.2, 9.2, 800, '#5A3928', 'left', 'middle');
+    } else {
+      UI.drawStarIcon(c, myNameX + 7, footerY + footerH * 0.70, 7.0, true, { sprites });
+      UI.drawFitText(c, `${myStars}/90`, myNameX + 19, footerY + footerH * 0.71, myNameW - 20, 12.6, 9.4, 900, '#4E2B18', 'left', 'middle');
+    }
 
+    const myFooterVal =
+      boardType === 'daily'
+        ? formatNum(myDaily)
+        : boardType === 'endless'
+        ? formatNum(myEndless)
+        : formatNum(myScore);
     UI.drawFitText(
       c,
-      formatNum(myScore),
+      myFooterVal,
       f.ix + f.iw - 10,
       footerY + footerH * 0.5 + 0.5,
       86,
@@ -2636,15 +3095,23 @@ function renderPauseModal(ctx, metrics, app, hits) {
   const c = getSafeCtx(ctx);
   const sprites = app.sprites || {};
   const orderState = app.orderState || {};
-  const lvl = getLevelById(app.currentLevelId || orderState.levelId || '1-1') || getLevelById('1-1');
+  const curId = String(app.currentLevelId || orderState.levelId || '1-1');
+  const isDaily = curId.indexOf('daily_') === 0;
+  const isEndless = curId.indexOf('endless_') === 0;
+  const lvl = getLevelById(curId) || getLevelById('1-1');
   const chapName = getChapterName(lvl.chapter);
+  const pauseSubtitle = isDaily
+    ? '每天特调 · 限时挑战'
+    : isEndless
+    ? `无限营业 · 第 ${curId.slice(8) || '1'} 班`
+    : `第 ${lvl.id} 关 · ${chapName}`;
 
   const f = beginModalFrame(c, metrics, app, {
     maxW: 398,
     desiredH: 486,
     dismissOnOutside: false,
     title: '营业暂停',
-    subtitle: `第 ${lvl.id} 关 · ${chapName}`,
+    subtitle: pauseSubtitle,
     sheetTopInset: 42,
     sheetBottomPad: 12
   });
@@ -2796,10 +3263,12 @@ function renderPauseModal(ctx, metrics, app, hits) {
     });
     hits.add('pause_lobby_btn', btnX, b3Y, btnW, btnH, () => app.onPauseReturnLobby());
 
-    // Compact secondary utility row preserving pause_help_btn & pause_compendium_btn
-    const secGap = 10;
-    const secW = Math.floor((btnW - secGap) / 2);
-    UI.drawPillButton(c, btnX, secY, secW, secH, {
+    // Compact secondary utility row preserving pause_help_btn, pause_compendium_btn & pause_settings_btn
+    const secGap = 6;
+    const secRowW = f.iw - 4;
+    const secRowX = f.ix + 2;
+    const secW = Math.floor((secRowW - secGap * 2) / 3);
+    UI.drawPillButton(c, secRowX, secY, secW, secH, {
       variant: 'card',
       icon: 'icon_help',
       sprites,
@@ -2809,9 +3278,9 @@ function renderPauseModal(ctx, metrics, app, hits) {
       radius: 12,
       pressed: isPressed(app, 'pause_help_btn')
     });
-    hits.add('pause_help_btn', btnX, secY, secW, secH, () => app.openModal('help'));
+    hits.add('pause_help_btn', secRowX, secY, secW, secH, () => app.openModal('help'));
 
-    UI.drawPillButton(c, btnX + secW + secGap, secY, secW, secH, {
+    UI.drawPillButton(c, secRowX + secW + secGap, secY, secW, secH, {
       variant: 'card',
       icon: 'icon_book',
       sprites,
@@ -2821,7 +3290,17 @@ function renderPauseModal(ctx, metrics, app, hits) {
       radius: 12,
       pressed: isPressed(app, 'pause_compendium_btn')
     });
-    hits.add('pause_compendium_btn', btnX + secW + secGap, secY, secW, secH, () => app.openCompendium('recipes'));
+    hits.add('pause_compendium_btn', secRowX + secW + secGap, secY, secW, secH, () => app.openCompendium('recipes'));
+
+    const setX = secRowX + (secW + secGap) * 2;
+    UI.drawPillButton(c, setX, secY, secRowW - (secW + secGap) * 2, secH, {
+      variant: 'card',
+      label: '星夜设置',
+      fontSize: 10.2,
+      radius: 11,
+      pressed: isPressed(app, 'pause_settings_btn')
+    });
+    hits.add('pause_settings_btn', setX, secY, secRowW - (secW + secGap) * 2, secH, () => app.openModal('settings'));
   } finally {
     endModalFrame(c);
   }
@@ -3047,6 +3526,428 @@ function renderConfirmModal(ctx, metrics, app, hits) {
   }
 }
 
+/* ======================== 13. 星夜挑战弹窗 (ChallengeModal: 每天特调 & 无限营业) ======================== */
+
+function renderChallengeModal(ctx, metrics, app, hits) {
+  const c = getSafeCtx(ctx);
+  const sprites = app.sprites || {};
+  const saveData = app.saveData || {};
+  const ms = saveData.modeStats || {};
+  const dStat = ms.daily || {};
+  const eStat = ms.endless || {};
+
+  const todayKey = RunModifiers.getDailyDateKeyUTC8();
+  const dailyCfg = RunModifiers.buildDailyChallengeConfig(todayKey);
+  const fmtDate = `${todayKey.slice(0, 4)}-${todayKey.slice(4, 6)}-${todayKey.slice(6, 8)}`;
+  const dailyUnlocked = typeof app.isDailyUnlocked === 'function' ? app.isDailyUnlocked() : false;
+  const endlessUnlocked = typeof app.isEndlessUnlocked === 'function' ? app.isEndlessUnlocked() : false;
+
+  const f = beginModalFrame(c, metrics, app, {
+    maxW: 436,
+    desiredH: 500,
+    dismissOnOutside: true,
+    title: '星夜挑战',
+    subtitle: '每天同盘拼分 · 无限搭配冲班',
+    sheetTopInset: 38,
+    sheetBottomPad: 12
+  });
+
+  try {
+    drawCloseButton(c, f, hits, app);
+
+    const cardGap = 12;
+    const cardH = Math.floor((f.ih - cardGap) / 2);
+
+    // Card 1: 每天特调
+    const c1Y = f.iy;
+    UI.drawKissaCard(c, f.ix, c1Y, f.iw, cardH, {
+      tone: dailyUnlocked ? 'cream' : 'recess',
+      radius: 14,
+      lineWidth: 2.2
+    });
+    UI.drawTagBadge(c, f.ix + 10, c1Y + 10, 68, 22, '每天特调', 'amber', 10.6);
+    UI.drawFitText(
+      c,
+      fmtDate,
+      f.ix + f.iw - 12,
+      c1Y + 21,
+      110,
+      11.0,
+      9.0,
+      800,
+      '#8A5A32',
+      'right',
+      'middle'
+    );
+    UI.drawFitText(
+      c,
+      dailyCfg.name,
+      f.ix + 12,
+      c1Y + 46,
+      f.iw - 24,
+      14.0,
+      10.8,
+      900,
+      '#5A3928',
+      'left',
+      'middle'
+    );
+    UI.drawFitText(
+      c,
+      dailyCfg.desc,
+      f.ix + 12,
+      c1Y + 68,
+      f.iw - 24,
+      11.0,
+      8.8,
+      800,
+      '#8A5220',
+      'left',
+      'middle'
+    );
+    const todayBest = dStat.lastDate === todayKey ? Math.max(0, Number(dStat.bestScore) || 0) : 0;
+    const claimedClear = dStat.claimedDate === todayKey;
+    const claimed3 = dStat.claimed3Date === todayKey;
+    const dailyMeta =
+      claimedClear && claimed3
+        ? `今天最高 ${formatNum(todayBest)} · 奖励已获`
+        : `今天最高 ${formatNum(todayBest)} · 首通+15 3星+15`;
+    UI.drawFitText(
+      c,
+      dailyMeta,
+      f.ix + 12,
+      c1Y + 90,
+      f.iw - 24,
+      10.4,
+      8.4,
+      700,
+      '#754C36',
+      'left',
+      'middle'
+    );
+
+    const btnH = 38;
+    const btnW = Math.min(200, f.iw - 24);
+    const btnX = Math.round(f.ix + (f.iw - btnW) * 0.5);
+    const c1BtnY = c1Y + cardH - btnH - 12;
+    UI.drawPillButton(c, btnX, c1BtnY, btnW, btnH, {
+      variant: dailyUnlocked ? 'primary' : 'wood',
+      disabled: !dailyUnlocked,
+      textOutline: dailyUnlocked,
+      glossDot: dailyUnlocked,
+      label: dailyUnlocked ? '开始每天特调' : `通关 ${BalanceConfig.DAILY.unlockLevel || '1-5'} 解锁`,
+      fontSize: 13.4,
+      radius: btnH * 0.5,
+      pressed: isPressed(app, 'challenge_start_daily')
+    });
+    hits.add('challenge_start_daily', btnX, c1BtnY, btnW, btnH, () => app.startDailySpecial());
+
+    // Card 2: 无限营业
+    const c2Y = c1Y + cardH + cardGap;
+    UI.drawKissaCard(c, f.ix, c2Y, f.iw, cardH, {
+      tone: endlessUnlocked ? 'cream' : 'recess',
+      radius: 14,
+      lineWidth: 2.2
+    });
+    UI.drawTagBadge(c, f.ix + 10, c2Y + 10, 68, 22, '无限营业', 'berry', 10.6);
+    const eDustToday = eStat.dailyDustDate === todayKey ? Math.max(0, Number(eStat.dailyDust) || 0) : 0;
+    const eDustCap = (BalanceConfig.ENDLESS && BalanceConfig.ENDLESS.dailyDustCap) || 60;
+    UI.drawFitText(
+      c,
+      `今天星尘 ${eDustToday}/${eDustCap}`,
+      f.ix + f.iw - 12,
+      c2Y + 21,
+      120,
+      10.6,
+      8.6,
+      800,
+      '#8A5A32',
+      'right',
+      'middle'
+    );
+    UI.drawFitText(
+      c,
+      '过班3选1加成 · 冲击最高班次',
+      f.ix + 12,
+      c2Y + 46,
+      f.iw - 24,
+      13.6,
+      10.4,
+      900,
+      '#5A3928',
+      'left',
+      'middle'
+    );
+    UI.drawFitText(
+      c,
+      '每班60秒，达标即挑1个加成并进入下一班，每3班迎VIP专场',
+      f.ix + 12,
+      c2Y + 68,
+      f.iw - 24,
+      10.6,
+      8.4,
+      700,
+      '#754C36',
+      'left',
+      'middle'
+    );
+    const bestShift = Math.max(0, Number(eStat.bestShift) || 0);
+    const bestEScore = Math.max(0, Number(eStat.bestScore) || 0);
+    UI.drawFitText(
+      c,
+      `历史最佳：过 ${bestShift} 班 · 累计 ${formatNum(bestEScore)} 分`,
+      f.ix + 12,
+      c2Y + 90,
+      f.iw - 24,
+      10.6,
+      8.4,
+      800,
+      '#8A5220',
+      'left',
+      'middle'
+    );
+
+    const c2BtnY = c2Y + cardH - btnH - 12;
+    UI.drawPillButton(c, btnX, c2BtnY, btnW, btnH, {
+      variant: endlessUnlocked ? 'primary' : 'wood',
+      disabled: !endlessUnlocked,
+      textOutline: endlessUnlocked,
+      glossDot: endlessUnlocked,
+      label: endlessUnlocked ? '开始无限营业' : `通关 ${BalanceConfig.ENDLESS.unlockLevel || '1-10'} 解锁`,
+      fontSize: 13.4,
+      radius: btnH * 0.5,
+      pressed: isPressed(app, 'challenge_start_endless')
+    });
+    hits.add('challenge_start_endless', btnX, c2BtnY, btnW, btnH, () => app.startEndlessMode());
+  } finally {
+    endModalFrame(c);
+  }
+}
+
+/* ======================== 14. 无限营业 3选1加成弹窗 (PerkPickModal) ======================== */
+
+function renderPerkPickModal(ctx, metrics, app, hits) {
+  const c = getSafeCtx(ctx);
+  const eRun = app.endlessRun || { shift: 1, totalScore: 0, perkIds: [], pendingChoices: [] };
+  const choices = Array.isArray(eRun.pendingChoices) ? eRun.pendingChoices : [];
+
+  const f = beginModalFrame(c, metrics, app, {
+    maxW: 432,
+    desiredH: 492,
+    dismissOnOutside: false,
+    title: '挑选本局加成',
+    subtitle: `第 ${eRun.shift} 班达成！选 1 个带入第 ${eRun.shift + 1} 班`,
+    sheetTopInset: 38,
+    sheetBottomPad: 12
+  });
+
+  try {
+    const ownedTxt = `已带加成 ${Array.isArray(eRun.perkIds) ? eRun.perkIds.length : 0} 个 · 累计 ${formatNum(eRun.totalScore || 0)} 分`;
+    UI.drawFitText(
+      c,
+      ownedTxt,
+      f.ix + f.iw * 0.5,
+      f.iy + 10,
+      f.iw - 12,
+      11.0,
+      8.8,
+      800,
+      '#8A5220',
+      'center',
+      'middle'
+    );
+
+    const listTop = f.iy + 26;
+    const rerollAreaH = 40;
+    const listH = Math.max(170, f.ih - 34 - rerollAreaH);
+    const gap = 8;
+    const count = Math.max(1, choices.length);
+    const cardH = clamp(Math.floor((listH - gap * (count - 1)) / count), 78, 108);
+
+    for (let i = 0; i < choices.length; i++) {
+      const p = choices[i];
+      const cy = listTop + i * (cardH + gap);
+      const hitId = `perk_choice_${i}`;
+      const pressed = isPressed(app, hitId);
+      const dy = pressed ? 2 : 0;
+
+      const rarTone = p.rarity === 'legendary' ? 'goldRow' : p.rarity === 'rare' ? 'selected' : 'cream';
+      const rarBadgeTone = p.rarity === 'legendary' ? 'amber' : p.rarity === 'rare' ? 'berry' : 'matcha';
+      const rarLabel = p.rarity === 'legendary' ? '传说' : p.rarity === 'rare' ? '精选' : '基础';
+
+      UI.drawKissaCard(c, f.ix, cy + dy, f.iw, cardH, {
+        tone: rarTone,
+        radius: 13,
+        lineWidth: 2.2
+      });
+
+      UI.drawTagBadge(c, f.ix + 10, cy + dy + 10, 44, 21, rarLabel, rarBadgeTone, 10.0);
+      UI.drawFitText(
+        c,
+        p.name,
+        f.ix + 62,
+        cy + dy + 21,
+        f.iw - 146,
+        14.5,
+        11.0,
+        900,
+        '#5A3928',
+        'left',
+        'middle'
+      );
+
+      UI.drawWrappedText(
+        c,
+        p.desc,
+        f.ix + 12,
+        cy + dy + 42,
+        f.iw - 96,
+        16,
+        UI.fontStr(10.8, 700),
+        '#754C36',
+        'left',
+        2
+      );
+
+      const pickW = 70;
+      const pickH = 34;
+      const pickX = f.ix + f.iw - pickW - 10;
+      const pickY = Math.round(cy + dy + (cardH - pickH) * 0.5);
+      UI.drawPillButton(c, pickX, pickY, pickW, pickH, {
+        variant: 'primary',
+        textOutline: true,
+        label: '选用',
+        fontSize: 12.6,
+        radius: 12,
+        pressed
+      });
+
+      const idxCopy = i;
+      hits.add(hitId, f.ix, cy, f.iw, cardH, () => app.pickEndlessPerk(idxCopy));
+    }
+
+    // Bottom rewarded-video reroll pill (once per shift, v0.13 M4)
+    const rerollUsed = Boolean(eRun.pendingRerollUsed);
+    const rerollW = Math.min(208, f.iw - 16);
+    const rerollH = 32;
+    const rerollX = Math.round(f.ix + (f.iw - rerollW) * 0.5);
+    const rerollY = f.iy + f.ih - rerollH - 2;
+    UI.drawPillButton(c, rerollX, rerollY, rerollW, rerollH, {
+      variant: rerollUsed ? 'wood' : 'primary',
+      disabled: rerollUsed,
+      textOutline: !rerollUsed,
+      label: rerollUsed ? '本班已刷新' : '观看视频刷新加成',
+      fontSize: 11.8,
+      radius: 16,
+      pressed: !rerollUsed && isPressed(app, 'perk_reroll_btn')
+    });
+    if (!rerollUsed) {
+      hits.add('perk_reroll_btn', rerollX, rerollY, rerollW, rerollH, () => {
+        if (typeof app.onRerollEndlessPerksWithAd === 'function') app.onRerollEndlessPerksWithAd();
+      });
+    }
+  } finally {
+    endModalFrame(c);
+  }
+}
+
+/* ======================== 13. 星夜设置弹窗 (SettingsModal · v0.13 M4) ======================== */
+
+function renderSettingsModal(ctx, metrics, app, hits) {
+  const c = getSafeCtx(ctx);
+  const saveData = app.saveData || {};
+  const settings = (saveData.settings && typeof saveData.settings === 'object') ? saveData.settings : {};
+
+  const f = beginModalFrame(c, metrics, app, {
+    maxW: 408,
+    desiredH: 456,
+    dismissOnOutside: true,
+    title: '星夜设置',
+    subtitle: '音频、震动与无障碍偏好',
+    sheetTopInset: 38,
+    sheetBottomPad: 12
+  });
+
+  try {
+    drawCloseButton(c, f, hits, app);
+
+    const trackInfo =
+      app.audio && typeof app.audio.getTrackInfo === 'function'
+        ? app.audio.getTrackInfo()
+        : { key: 'waltz', label: '圆舞曲' };
+    const bgmOn = trackInfo.key !== 'off';
+    const sfxOn = app.audio ? Boolean(app.audio.sfxEnabled) : true;
+    const vibOn = settings.vibrateEnabled !== false;
+    const lowPowOn = Boolean(settings.lowPowerMode);
+    const cbOn = Boolean(settings.colorblindMarks);
+
+    const rows = [
+      {
+        hitId: 'settings_bgm_btn',
+        title: bgmOn ? `背景音乐 (${trackInfo.label || '开'})` : '背景音乐 (静音)',
+        sub: '切换星夜圆舞曲 / 爵士乐 / 关闭',
+        on: bgmOn,
+        onToggle: () => app.cycleBgm()
+      },
+      {
+        hitId: 'settings_sfx_btn',
+        title: '操作音效',
+        sub: '滑动合成、上菜与热潮音效',
+        on: sfxOn,
+        onToggle: () => app.toggleSfx()
+      },
+      {
+        hitId: 'settings_vibrate_btn',
+        title: '震动开关',
+        sub: '暴击、过热与高阶合成柔和震动',
+        on: vibOn,
+        onToggle: () => app.toggleSetting('vibrateEnabled')
+      },
+      {
+        hitId: 'settings_lowpower_btn',
+        title: '节能轻量',
+        sub: '关闭背景星尘光点，降低发热',
+        on: lowPowOn,
+        onToggle: () => app.toggleSetting('lowPowerMode')
+      },
+      {
+        hitId: 'settings_colorblind_btn',
+        title: '色觉角标',
+        sub: '风味叠加 茶 / 莓 / 金 字标',
+        on: cbOn,
+        onToggle: () => app.toggleSetting('colorblindMarks')
+      }
+    ];
+
+    const gap = 8;
+    const availH = Math.max(240, f.ih - 8);
+    const rowH = clamp(Math.floor((availH - gap * (rows.length - 1)) / rows.length), 50, 64);
+    const swW = 68;
+    const swH = 28;
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const ry = f.iy + 4 + i * (rowH + gap);
+      UI.drawKissaCard(c, f.ix, ry, f.iw, rowH, {
+        tone: r.on ? 'selected' : 'cream',
+        radius: 12,
+        lineWidth: 1.8
+      });
+
+      const swX = f.ix + f.iw - swW - 12;
+      const swY = Math.round(ry + (rowH - swH) * 0.5);
+      const textW = Math.max(100, swX - (f.ix + 20));
+      UI.drawFitText(c, r.title, f.ix + 12, ry + rowH * 0.34, textW, 13.4, 10.2, 900, '#5A3928', 'left', 'middle');
+      UI.drawFitText(c, r.sub, f.ix + 12, ry + rowH * 0.70, textW, 9.8, 7.8, 700, '#754C36', 'left', 'middle');
+
+      UI.drawSwitchToggle(c, swX, swY, swW, swH, r.on, r.on ? 1 : 0);
+      hits.add(r.hitId, swX - 6, ry + 2, swW + 12, rowH - 4, r.onToggle);
+    }
+  } finally {
+    endModalFrame(c);
+  }
+}
+
 /* ======================== Modal Dispatcher ======================== */
 
 function renderActiveModal(ctx, metrics, app, hits, nowSec) {
@@ -3083,6 +3984,15 @@ function renderActiveModal(ctx, metrics, app, hits, nowSec) {
       break;
     case 'leaderboard':
       renderLeaderboardModal(ctx, metrics, app, hits);
+      break;
+    case 'challenge':
+      renderChallengeModal(ctx, metrics, app, hits);
+      break;
+    case 'perk_pick':
+      renderPerkPickModal(ctx, metrics, app, hits);
+      break;
+    case 'settings':
+      renderSettingsModal(ctx, metrics, app, hits);
       break;
     case 'pause':
       renderPauseModal(ctx, metrics, app, hits);

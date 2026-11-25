@@ -24,6 +24,28 @@ const FORBIDDEN_V1_RUNTIME_ASSETS = (() => {
 
 const FORBIDDEN_V1_SRC_FILES = ['physics.js', 'physics_shapes.js', 'jar_renderer.js'];
 
+// v0.10 乘区计分 oracle (docs/07 §1) — see e2e_tier1.mjs zoneScore for the full contract.
+function zoneScore(itemSum, { size = 1, tip = 1, combo = 1, cust = 1, scene = 0, skillExtra = 0 } = {}) {
+  const skill = Math.max(-0.4, Math.min(0.9, (size - 1) + (tip - 1) + (combo - 1) + skillExtra));
+  const sceneZ = Math.max(-0.5, Math.min(1.0, scene));
+  return Math.round(itemSum * (1 + skill) * cust * (1 + sceneZ));
+}
+const BASIC_RECIPE_ORACLE = {
+  R01: { items: 30, size: 1.0 },
+  R02: { items: 70, size: 1.0 },
+  R03: { items: 100, size: 1.12 }
+};
+// Exact base-formula / fever-energy tests opt out of M1+ bonuses (fresh / crit / fever V2 / dough temp).
+const LEGACY_FORMULA_FEATURES = Object.freeze({
+  bakeCrit: false,
+  freshBonus: false,
+  doughTemp: false,
+  feverV2: false,
+  goals: false,
+  events: false,
+  traits: false
+});
+
 const DEFAULT_TUTORIALS_SEEN = {
   intro_slide: true,
   tray_trash: true,
@@ -791,6 +813,8 @@ const TIER2_F01_TO_F08 = [
         G: 'gold',
         M: 'matcha',
         B: 'berry',
+        O: 'oven',
+        S: 'syrup',
         '.': 'normal',
         I: 'normal',
       };
@@ -802,7 +826,7 @@ const TIER2_F01_TO_F08 = [
         for (let r = 0; r < lv.matrix.length; r++) {
           const rowStr = lv.matrix[r];
           ctx.assertEq(rowStr.length, cols, `${lv.id}: row ${r} ragged length`);
-          ctx.assert(/^[.#XGMBI]+$/.test(rowStr), `${lv.id}: invalid char in "${rowStr}"`);
+          ctx.assert(/^[.#XGMBIOS]+$/.test(rowStr), `${lv.id}: invalid char in "${rowStr}"`);
         }
       }
 
@@ -887,12 +911,12 @@ const TIER2_F01_TO_F08 = [
         }
       }
 
-      // Cross-verify live frozenHp bijection on all Chapter 3 levels
+      // Cross-verify live frozenHp bijection on all levels containing I (including 1-8 and Ch.3)
       await ctx.setSaveData({ schemaVersion: 2, levelStars: getAllUnlockedStars(ctx, 3), seenTutorials: DEFAULT_TUTORIALS_SEEN });
-      const ch3Errors = await ctx.eval((ch3Levels) => {
+      const iceErrors = await ctx.eval((iceLevels) => {
         const dbg = globalThis.__HOSHI_DEBUG__;
         const errs = [];
-        for (const lv of ch3Levels) {
+        for (const lv of iceLevels) {
           dbg.startLevel(lv.id);
           const g = dbg.getState().grid;
           for (let r = 0; r < g.rows; r++) {
@@ -905,8 +929,8 @@ const TIER2_F01_TO_F08 = [
           }
         }
         return errs;
-      }, LEVELS.filter((l) => l.chapter === 3).map((l) => ({ id: l.id, matrix: l.matrix })));
-      ctx.assertEq(ch3Errors, [], `Live Ch.3 frozenHp bijection errors: ${ch3Errors.join('; ')}`);
+      }, LEVELS.filter((l) => l.matrix.join('').includes('I')).map((l) => ({ id: l.id, matrix: l.matrix })));
+      ctx.assertEq(iceErrors, [], `Live ice frozenHp bijection errors: ${iceErrors.join('; ')}`);
     },
   },
 
@@ -933,7 +957,7 @@ const TIER2_F01_TO_F08 = [
         for (let r = 0; r < rows; r++) {
           for (let c = 0; c < cols; c++) {
             const ch = lv.matrix[r][c];
-            if (ch === '.' || ch === 'G' || ch === 'M' || ch === 'B') unfrozenPlayable++;
+            if (ch === '.' || ch === 'G' || ch === 'M' || ch === 'B' || ch === 'O' || ch === 'S') unfrozenPlayable++;
             if (ch !== '#' && ch !== 'X') passable.push([r, c]);
           }
         }
@@ -975,12 +999,16 @@ const TIER2_F01_TO_F08 = [
     id: 'T2-F02-04',
     tier: 2,
     features: ['F02'],
-    title: 'L2 Invariant #5: Strict star monotonicity (0 < s1 < s2 < s3), progressive s1 curve (750..35000), and chapter mechanic gates',
+    title: 'L2 Invariant #5: Strict star monotonicity (0 < s1 < s2 < s3), progressive s1 curve, and v0.11 chapter mechanic gates',
     run: async (ctx) => {
       const { LEVELS } = await ctx.requireBundledModule('./src/levels_data.js');
       let prevS1 = 0;
-      let ch2SawSpecial = false;
-      let ch3SawBerry = false;
+      let ch1SawM = false;
+      let ch1SawG = false;
+      let ch1SawI = false;
+      let ch2SawB = false;
+      let ch2SawO = false;
+      let ch3SawS = false;
 
       for (const lv of LEVELS) {
         const [s1, s2, s3] = lv.stars || [];
@@ -993,20 +1021,25 @@ const TIER2_F01_TO_F08 = [
 
         const flat = lv.matrix.join('');
         if (lv.chapter === 1) {
-          ctx.assert(/^[.#X]+$/.test(flat), `${lv.id}: Ch.1 matrix must not contain G/M/B/I ("${flat}")`);
+          ctx.assert(/^[.#XGMI]+$/.test(flat), `${lv.id}: Ch.1 matrix must not contain B/O/S ("${flat}")`);
+          if (flat.includes('M')) ch1SawM = true;
+          if (flat.includes('G')) ch1SawG = true;
+          if (flat.includes('I')) ch1SawI = true;
         } else if (lv.chapter === 2) {
-          ctx.assert(/^[.#XGM]+$/.test(flat), `${lv.id}: Ch.2 matrix must not contain B/I ("${flat}")`);
-          if (/[GM]/.test(flat)) ch2SawSpecial = true;
+          ctx.assert(/^[.#XGMBO]+$/.test(flat), `${lv.id}: Ch.2 matrix must not contain I/S ("${flat}")`);
+          if (flat.includes('B')) ch2SawB = true;
+          if (flat.includes('O')) ch2SawO = true;
         } else if (lv.chapter === 3) {
           ctx.assert(flat.includes('I'), `${lv.id}: every Ch.3 level must contain at least 1 'I' cell`);
-          if (flat.includes('B')) ch3SawBerry = true;
+          if (flat.includes('S')) ch3SawS = true;
         }
       }
 
-      ctx.assertEq(LEVELS[0].stars, [850, 1250, 1750], '1-1 stars must equal v0.9.0 [850, 1250, 1750]');
-      ctx.assertEq(LEVELS[29].stars, [39200, 56800, 77500], '3-10 stars must equal v0.9.0 [39200, 56800, 77500]');
-      ctx.assert(ch2SawSpecial, 'Chapter 2 must introduce M and G special cells');
-      ctx.assert(ch3SawBerry, 'Chapter 3 must introduce B berry special cells');
+      ctx.assert(LEVELS[0].stars[0] >= 500 && LEVELS[0].stars[2] <= 6000, `1-1 stars out of range: [${LEVELS[0].stars}]`);
+      ctx.assert(LEVELS[29].stars[0] >= 10000 && LEVELS[29].stars[2] * 2.5 <= 220000, `3-10 stars out of anti-cheat headroom: [${LEVELS[29].stars}]`);
+      ctx.assert(ch1SawM && ch1SawG && ch1SawI, 'Chapter 1 must introduce M, G, and I mechanics');
+      ctx.assert(ch2SawB && ch2SawO, 'Chapter 2 must introduce B berry and O star oven cells');
+      ctx.assert(ch3SawS, 'Chapter 3 must introduce S honey syrup cells');
     },
   },
 
@@ -2326,7 +2359,9 @@ const TIER2_F01_TO_F08 = [
         const s1 = st.seats[1];
         const disjoint21 =
           (s0?.recipeId === 'R07' && (s1?.recipeId === 'R05' || s1?.recipeId === 'R15')) ||
-          (s1?.recipeId === 'R07' && (s0?.recipeId === 'R05' || s0?.recipeId === 'R15'));
+          (s1?.recipeId === 'R07' && (s0?.recipeId === 'R05' || s0?.recipeId === 'R15')) ||
+          (s0?.recipeId === 'R15' && s1?.recipeId === 'R16') ||
+          (s1?.recipeId === 'R15' && s0?.recipeId === 'R16');
         if (
           s0 &&
           s1 &&
@@ -2338,13 +2373,18 @@ const TIER2_F01_TO_F08 = [
           (s1.isVip || s1.isUrgent)
         ) {
           priorityTested = true;
-          await ctx.eval(() => {
+          const needC4Matcha = s0.recipeId === 'R16' || s1.recipeId === 'R16';
+          await ctx.eval((upgradeMatcha) => {
             const dbg = globalThis.__HOSHI_DEBUG__;
-            dbg.useToolOnCell('spoon', 2, 2); // (2,2):C3(matcha) -> C4(matcha)
+            if (upgradeMatcha) {
+              dbg.useToolOnCell('spoon', 1, 1); // (1,1):C3(matcha) -> C4(matcha)
+            } else {
+              dbg.useToolOnCell('spoon', 2, 2); // (2,2):C3(berry) -> C4(berry)
+            }
             dbg.tapBoardCell(0, 1);           // C2(plain)
-            dbg.tapBoardCell(1, 1);           // C3(matcha)
-            dbg.tapBoardCell(2, 2);           // C4(matcha)
-          });
+            dbg.tapBoardCell(1, 1);           // C3(matcha) or C4(matcha)
+            dbg.tapBoardCell(2, 2);           // C4(berry) or C3(berry)
+          }, needC4Matcha);
           const mid = await ctx.advanceTime(0.55);
           ctx.assertEq(mid.ordersServed, 0, 'Normal seat_0 must NOT auto-hijack VIP/Urgent ingredients');
           await ctx.clickHit('seat_1');
@@ -2403,7 +2443,7 @@ const TIER2_F01_TO_F08 = [
         selectedPatron: 'luna',
         deviceUpgrades: { dev_tray: 1, dev_flour: 1, dev_teapot: 3, dev_tools: 3 },
         seenTutorials: DEFAULT_TUTORIALS_SEEN,
-      });
+      }, { features: LEGACY_FORMULA_FEATURES });
 
       // Complete 5 consecutive fast serves
       for (let k = 1; k <= 5; k++) {
@@ -2423,8 +2463,8 @@ const TIER2_F01_TO_F08 = [
       const feverBefore6 = stBefore6.feverActive;
       const pRatio6 = seat6.patience / seat6.maxPatience;
       const tipMult6 = pRatio6 >= 0.60 ? 1.20 : pRatio6 >= 0.25 ? 1.00 : 0.80;
-      const baseMap = { R01: 30, R02: 70, R03: 112 };
-      const expected6 = Math.round(baseMap[seat6.recipeId] * tipMult6 * 1.28 * (feverBefore6 ? 1.25 : 1.00));
+      const orc6 = BASIC_RECIPE_ORACLE[seat6.recipeId];
+      const expected6 = zoneScore(orc6.items, { size: orc6.size, tip: tipMult6, combo: 1.28, scene: feverBefore6 ? 0.25 : 0 });
 
       const stAfter6 = await serveOneOrderOrganically(ctx, seatIdx6, { useHarness: false, allowSpoon: false });
       ctx.assertEq(stAfter6.comboCount, 6, 'comboCount reaches 6');
@@ -2456,7 +2496,7 @@ const TIER2_F01_TO_F08 = [
         selectedPatron: 'luna',
         deviceUpgrades: { dev_tray: 1, dev_flour: 1, dev_teapot: 2, dev_tools: 3 },
         seenTutorials: DEFAULT_TUTORIALS_SEEN,
-      });
+      }, { features: LEGACY_FORMULA_FEATURES });
 
       // Perform non-serve actions at t=0
       await ctx.slide('left');
@@ -2509,7 +2549,7 @@ const TIER2_F01_TO_F08 = [
         unlockedPatrons: ['mikan', 'luna'],
         selectedPatron: 'luna',
         seenTutorials: DEFAULT_TUTORIALS_SEEN,
-      });
+      }, { features: LEGACY_FORMULA_FEATURES });
       let st = await ctx.advanceTime(0.6);
       const maxP = st.seats[0].maxPatience;
       st = await ctx.advanceTime(maxP * 0.58); // pRatio ~ 0.40 (yellow band <= 0.55)
@@ -2534,7 +2574,7 @@ const TIER2_F01_TO_F08 = [
           selectedPatron: 'luna',
           deviceUpgrades: { dev_tray: 1, dev_flour: 2, dev_teapot: 0, dev_tools: 3 },
           seenTutorials: DEFAULT_TUTORIALS_SEEN,
-        });
+        }, { features: LEGACY_FORMULA_FEATURES });
         st = await ctx.advanceTime(3.2);
         // Step in 2.5s increments (0 fever gain!) so cust_critic is caught within <=2.5s of spawning (>85% patience)
         for (let step = 0; step < 44; step++) {
@@ -2573,7 +2613,7 @@ const TIER2_F01_TO_F08 = [
           catcakeLevels: { 1: 0, 2: 1, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 }, // C2 Lv.1 = 84, C3 Lv.0 = 150 -> C3[matcha] = 202.5
           deviceUpgrades: { dev_tray: 1, dev_flour: 0, dev_teapot: 3, dev_tools: 3 },
           seenTutorials: DEFAULT_TUTORIALS_SEEN,
-        });
+        }, { features: LEGACY_FORMULA_FEATURES });
         const st = await ctx.advanceTime(3.2);
         r15Idx = st.seats.findIndex((s) => s && s.recipeId === 'R15' && !s.isUrgent && !s.isVip);
         if (r15Idx < 0) r15Idx = st.seats.findIndex((s) => s && s.recipeId === 'R15');
@@ -2607,7 +2647,7 @@ const TIER2_F01_TO_F08 = [
       const seat2 = stAfter1.seats[r15Idx];
       ctx.assert(seat2.patience / seat2.maxPatience > 0.60, 'R15 seat must still be in green patience band');
       const custMult = seat2.isVip ? 1.50 : seat2.isUrgent ? 1.25 : 1.00;
-      const expectedExact = Math.round((81 + 187.5) * 1.12 * 1.20 * 1.06 * custMult);
+      const expectedExact = zoneScore(81 + 187.5, { size: 1.12, tip: 1.2, combo: 1.06, cust: custMult });
 
       // Now serve R15 using untouched presets (0,1):C2(plain) + (1,1):C3(matcha)
       await ctx.eval((sIdx) => {
@@ -2659,7 +2699,7 @@ const TIER2_F01_TO_F08 = [
         selectedPatron: 'luna',
         deviceUpgrades: { dev_tray: 1, dev_flour: 0, dev_teapot: 3, dev_tools: 3 },
         seenTutorials: DEFAULT_TUTORIALS_SEEN,
-      });
+      }, { features: LEGACY_FORMULA_FEATURES });
       for (let i = 0; i < 4; i++) {
         await serveOneOrderOrganically(ctx, null, { useHarness: false });
       }
@@ -2694,11 +2734,11 @@ const TIER2_F01_TO_F08 = [
       const pre1 = await ctx.getState();
       const idx1 = pre1.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
       const rec1 = pre1.seats[idx1].recipeId;
-      const baseMap = { R01: 30, R02: 70, R03: 100 * 1.12 };
+      const spec1 = BASIC_RECIPE_ORACLE[rec1];
       const post1 = await serveOneOrderOrganically(ctx, idx1, { useHarness: false, allowSpoon: false });
       ctx.assertEq(
         post1.score - pre1.score,
-        Math.round(baseMap[rec1] * 1.20 * 1.50),
+        zoneScore(spec1.items, { size: spec1.size, tip: 1.20, scene: 0.50 }),
         `1st post-Luna serve (${rec1}) must receive x1.50 burst`
       );
 
@@ -2711,10 +2751,11 @@ const TIER2_F01_TO_F08 = [
       }
       const idx2 = pre2.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
       const rec2 = pre2.seats[idx2].recipeId;
+      const spec2 = BASIC_RECIPE_ORACLE[rec2];
       const post2 = await serveOneOrderOrganically(ctx, idx2, { useHarness: false, allowSpoon: false });
       ctx.assertEq(
         post2.score - pre2.score,
-        Math.round(baseMap[rec2] * 1.20 * 1.00),
+        zoneScore(spec2.items, { size: spec2.size, tip: 1.20, scene: 0 }),
         `2nd post-Luna serve (${rec2}) must revert to x1.00`
       );
 
@@ -3399,7 +3440,11 @@ const TIER2_F09_TO_F16 = [
         findUnfrozen(preJump, (t) => t.tier === 6);
       ctx.assert(!!c6Cell, 'Expected unfrozen C6 tile dynamically located on 2-2 before serving R17');
 
-      const starsBeforeJump = [7800, 11200, 14500].filter((t) => preJump.score >= t).length;
+      const starThresholds = await ctx.eval(() => {
+        const sim = globalThis.__HOSHI_DEBUG__.getSimView();
+        return (sim && sim.levelCfg && Array.isArray(sim.levelCfg.stars) ? sim.levelCfg.stars.slice() : [8400, 13900, 17000]);
+      });
+      const starsBeforeJump = starThresholds.filter((t) => preJump.score >= t).length;
       await resetAudioCounters(ctx);
       await ctx.eval((idx, tr, tc) => {
         const dbg = globalThis.__HOSHI_DEBUG__;
@@ -3410,7 +3455,7 @@ const TIER2_F09_TO_F16 = [
         dbg.clickHit(`seat_${idx}`);
       }, r17Idx, c6Cell.r, c6Cell.c);
       let postJump = await ctx.advanceTime(0.65);
-      const starsAfterJump = [7800, 11200, 14500].filter((t) => postJump.score >= t).length;
+      const starsAfterJump = starThresholds.filter((t) => postJump.score >= t).length;
       ctx.assert(
         starsAfterJump - starsBeforeJump >= 1 || starsAfterJump >= 2,
         `Expected star unlock on 2-2 (before=${preJump.score} [${starsBeforeJump}★] -> after=${postJump.score} [${starsAfterJump}★])`
@@ -3418,8 +3463,9 @@ const TIER2_F09_TO_F16 = [
       const jumpAudio = await readAudioStats(ctx);
       ctx.assert(countSynthStarts(jumpAudio) >= 1, 'Star unlock serve must synthesize chimes cleanly');
 
-      // Ensure score >= 14500 (3★), then serve one more order and settle -> starsEarned stays clamped to 3!
-      while ((await ctx.getState()).score < 14500) {
+      // Ensure score >= star3, then serve one more order and settle -> starsEarned stays clamped to 3!
+      const star3Target = starThresholds[2] || 17000;
+      while ((await ctx.getState()).score < star3Target) {
         await serveOneOrderOrganically(ctx, null, { useHarness: false });
       }
       await serveOneOrderOrganically(ctx, null, { useHarness: false });
@@ -3480,7 +3526,7 @@ const TIER2_F09_TO_F16 = [
           }, raw);
           await ctx.navigate('?safeTop=47&safeBottom=34&capsule=1&cloud=0');
           const save = await ctx.getSaveData();
-          ctx.assertEq(save.schemaVersion, 2, `Corrupted payload ${raw} must initialize schemaVersion=2`);
+          ctx.assertEq(save.schemaVersion, 3, `Corrupted payload ${raw} must initialize schemaVersion=3`);
           ctx.assertEq(save.bankStardust, 15, `Corrupted payload ${raw} must initialize bankStardust=15`);
           ctx.assertEq(save.totalEarnedStardust, 15, `Corrupted payload ${raw} must initialize totalEarnedStardust=15`);
           ctx.assertEq(save.highestUnlockedLevel, '1-1');
@@ -3496,7 +3542,7 @@ const TIER2_F09_TO_F16 = [
     id: 'T2-F11-02',
     tier: 2,
     features: ['F11'],
-    title: 'Fresh zero-score v1 save (bestChef/Rush/Zen = 0) migrates to schemaVersion=2 WITHOUT granting +50 veteran gift',
+    title: 'Fresh zero-score v1 save (bestChef/Rush/Zen = 0) migrates to schemaVersion=3 WITHOUT granting +50 veteran gift',
     run: async (ctx) => {
       try {
         await ctx.eval(() => {
@@ -3515,7 +3561,7 @@ const TIER2_F09_TO_F16 = [
         });
         await ctx.navigate('?safeTop=47&safeBottom=34&capsule=1&cloud=0');
         const save = await ctx.getSaveData();
-        ctx.assertEq(save.schemaVersion, 2);
+        ctx.assertEq(save.schemaVersion, 3);
         ctx.assertEq(save.totalEarnedStardust, 30, 'Zero-score v1 save must NOT receive +50 veteran gift');
         ctx.assertEq(save.bankStardust, 30);
       } finally {
@@ -3528,7 +3574,7 @@ const TIER2_F09_TO_F16 = [
     id: 'T2-F11-03',
     tier: 2,
     features: ['F11'],
-    title: 'v1->v2 migration (UT-S01: 230 bank / 390 earned) is strictly idempotent across 3 consecutive reloads and setSaveData',
+    title: 'v1->v3 migration (UT-S01: 230 bank / 430 earned) is strictly idempotent across 3 consecutive reloads and setSaveData',
     run: async (ctx) => {
       try {
         await ctx.eval(() => {
@@ -3546,7 +3592,7 @@ const TIER2_F09_TO_F16 = [
         await ctx.navigate('?safeTop=47&safeBottom=34&capsule=1&cloud=0');
 
         let save = await ctx.getSaveData();
-        ctx.assertEq(save.schemaVersion, 2);
+        ctx.assertEq(save.schemaVersion, 3);
         ctx.assertEq(save.totalEarnedStardust, 430);
         ctx.assertEq(save.bankStardust, 230);
 
@@ -3782,7 +3828,7 @@ const TIER2_F09_TO_F16 = [
     id: 'T2-F12-03',
     tier: 2,
     features: ['F12', 'F11'],
-    title: 'Server-side v1 cloud document auto-migrates on pull (bank=230, schemaVersion=2) and strips legacy activeRun/savedRuns',
+    title: 'Server-side v1 cloud document auto-migrates on pull (bank=230, schemaVersion=3) and strips legacy activeRun/savedRuns',
     run: async (ctx) => {
       await ctx.resetGame({ clearCloud: true, clearLocal: true });
       await ctx.eval(() => localStorage.removeItem('wx_hoshi_kissa_bakery_save_v1'));
@@ -3807,7 +3853,7 @@ const TIER2_F09_TO_F16 = [
 
       const pullRes = await callKissaSync(ctx, { action: 'pull' });
       ctx.assertEq(pullRes.ok, true);
-      ctx.assertEq(pullRes.metaSave.schemaVersion, 2, 'Server pull must migrate legacy v1 cloud doc to schemaVersion=2');
+      ctx.assertEq(pullRes.metaSave.schemaVersion, 3, 'Server pull must migrate legacy v1 cloud doc to schemaVersion=3');
       ctx.assertEq(pullRes.metaSave.bankStardust, 230, 'Server migrateV1ToV2 must refund up_tools + luna/sakura diff + 50 gift -> 230');
       ctx.assertEq(pullRes.metaSave.totalEarnedStardust, 430);
       ctx.assertEq(pullRes.metaSave.activeRun, undefined, 'Legacy activeRun must be stripped');
@@ -4060,18 +4106,27 @@ const TIER2_F09_TO_F16 = [
         seenTutorials: DEFAULT_TUTORIALS_SEEN,
       });
 
-      // Reach >= 39,200 (v0.9.0 star1 on 3-10) using upgraded Lv.4 recipes + Mugi blast when charged
-      for (let guard = 0; guard < 28; guard++) {
+      const lv3_10s1 = (await ctx.requireBundledModule('./src/levels_data.js')).getLevelById('3-10').stars[0];
+      for (let guard = 0; guard < 36; guard++) {
         const cur = await ctx.getState();
-        if (cur.score >= 39200 || cur.timeLeft <= 8.5) break;
+        const goalOk = !cur.goal || cur.goal.done;
+        if (cur.score >= lv3_10s1 && goalOk) break;
+        if (cur.timeLeft <= 8.5) break;
         if (cur.skillEnergy >= 100) {
           await ctx.castPatronSkill();
         }
-        await serveOneOrderOrganically(ctx, null);
+        let targetSeat = null;
+        if (!goalOk && Array.isArray(cur.seats)) {
+          const cpIdx = cur.seats.findIndex(
+            (s) => s && (s.isVip || (Array.isArray(s.slots) && s.slots.some((sl) => sl.tier >= (cur.goal.target || 6))))
+          );
+          if (cpIdx >= 0) targetSeat = cpIdx;
+        }
+        await serveOneOrderOrganically(ctx, targetSeat);
       }
 
       let st = await ctx.getState();
-      ctx.assert(st.score >= 39200, `Expected 3-10 score >= 39200, got ${st.score}`);
+      ctx.assert(st.score >= lv3_10s1, `Expected 3-10 score >= ${lv3_10s1}, got ${st.score}`);
       st = await ctx.advanceTime(st.timeLeft + 0.6);
 
       ctx.assertEq(st.activeModal, 'level_result');
@@ -4103,33 +4158,34 @@ const TIER2_F09_TO_F16 = [
         bankStardust: 100,
         totalEarnedStardust: 165,
         levelStars: { '1-1': 3 },
-        levelBestScores: { '1-1': 1920 },
+        levelBestScores: { '1-1': 9999 },
         catcakeLevels: { 1: 2, 2: 2, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 },
         unlockedPatrons: ['mikan', 'luna'],
         selectedPatron: 'luna',
         seenTutorials: DEFAULT_TUTORIALS_SEEN,
       });
 
-      for (let i = 0; i < 18; i++) {
+      const [s1_1_1, , s3_1_1] = (await ctx.requireBundledModule('./src/levels_data.js')).getLevelById('1-1').stars;
+      for (let i = 0; i < 35; i++) {
         const s = await ctx.getState();
-        if (s.score >= 860) break;
+        if (s.score >= s1_1_1 + 10) break;
         await serveOneOrderOrganically(ctx, null, { useHarness: false });
       }
       let mid = await ctx.getState();
-      ctx.assert(mid.score >= 850 && mid.score < 1750, `Expected 1★/2★ replay score (<1920), got ${mid.score}`);
+      ctx.assert(mid.score >= s1_1_1 && mid.score < s3_1_1, `Expected 1★/2★ replay score in [${s1_1_1}, ${s3_1_1}), got ${mid.score}`);
       const resA = await ctx.advanceTime(mid.timeLeft + 0.6);
       ctx.assertEq(resA.lastResult?.firstStarDustAward, 0, 'Replay below historical 3★ must award 0 firstStarDust');
 
       let save = await ctx.getSaveData();
       ctx.assertEq(save.levelStars['1-1'], 3, 'Historical 3★ must never downgrade on lower-star replay');
-      ctx.assertEq(save.levelBestScores['1-1'], 1920, 'Historical best score 1920 must never downgrade');
+      ctx.assertEq(save.levelBestScores['1-1'], 9999, 'Historical best score 9999 must never downgrade');
 
       // Run B: 0-score replay
       await ctx.eval(() => globalThis.__HOSHI_DEBUG__.startLevel('1-1'));
       await ctx.advanceTime(91);
       save = await ctx.getSaveData();
       ctx.assertEq(save.levelStars['1-1'], 3, '0-score fail replay must preserve 3★');
-      ctx.assertEq(save.levelBestScores['1-1'], 1920, '0-score fail replay must preserve best score 1920');
+      ctx.assertEq(save.levelBestScores['1-1'], 9999, '0-score fail replay must preserve best score 9999');
     },
   },
 
@@ -4143,16 +4199,17 @@ const TIER2_F09_TO_F16 = [
       const levelsMod = await ctx.requireBundledModule('./src/levels_data.js');
       const orderMod = await ctx.requireBundledModule('./src/order_service.js');
       const lv1_1 = levelsMod.getLevelById('1-1');
+      const [s1, s2] = lv1_1.stars;
       if (orderMod && typeof orderMod.computeLevelSettlement === 'function') {
-        const s849 = orderMod.computeLevelSettlement(lv1_1, { score: 849, ordersServed: 6, vipServed: 0 }, 0);
-        const s850 = orderMod.computeLevelSettlement(lv1_1, { score: 850, ordersServed: 6, vipServed: 0 }, 0);
-        ctx.assertEq(s849.cleared, false, 'Exact 849 on 1-1 must have cleared=false');
-        ctx.assertEq(s849.starsEarned, 0, 'Exact 849 on 1-1 must earn 0 stars');
-        ctx.assertEq(s850.cleared, true, 'Exact 850 on 1-1 must have cleared=true');
-        ctx.assertEq(s850.starsEarned, 1, 'Exact 850 on 1-1 must earn 1 star');
+        const sBelow = orderMod.computeLevelSettlement(lv1_1, { score: s1 - 1, ordersServed: 6, vipServed: 0 }, 0);
+        const sAt = orderMod.computeLevelSettlement(lv1_1, { score: s1, ordersServed: 6, vipServed: 0 }, 0);
+        ctx.assertEq(sBelow.cleared, false, `Exact ${s1 - 1} on 1-1 must have cleared=false`);
+        ctx.assertEq(sBelow.starsEarned, 0, `Exact ${s1 - 1} on 1-1 must earn 0 stars`);
+        ctx.assertEq(sAt.cleared, true, `Exact ${s1} on 1-1 must have cleared=true`);
+        ctx.assertEq(sAt.starsEarned, 1, `Exact ${s1} on 1-1 must earn 1 star`);
       }
 
-      // 2) Live E2E Shift A: 0 < score < 850 -> fail, 1-2 stays locked
+      // 2) Live E2E Shift A: 0 < score < s1 -> fail, 1-2 stays locked
       await ctx.setupSaveAndStart('1-1', {
         bankStardust: 15,
         totalEarnedStardust: 15,
@@ -4166,14 +4223,14 @@ const TIER2_F09_TO_F16 = [
         await serveOneOrderOrganically(ctx, null, { useHarness: false });
       }
       let stFail = await ctx.getState();
-      ctx.assert(stFail.score > 0 && stFail.score < 850, `Expected 0 < score < 850, got ${stFail.score}`);
+      ctx.assert(stFail.score > 0 && stFail.score < s1, `Expected 0 < score < ${s1}, got ${stFail.score}`);
       stFail = await ctx.advanceTime(stFail.timeLeft + 0.6);
       ctx.assertEq(stFail.lastResult?.cleared, false);
       ctx.assertEq(stFail.lastResult?.starsEarned, 0);
       const saveFail = await ctx.getSaveData();
-      ctx.assertEq(levelsMod.isLevelUnlocked('1-2', saveFail.levelStars).unlocked, false, '1-2 must stay locked when score < 850');
+      ctx.assertEq(levelsMod.isLevelUnlocked('1-2', saveFail.levelStars).unlocked, false, `1-2 must stay locked when score < ${s1}`);
 
-      // 3) Live E2E Shift B: 850 <= score < 1250 -> 1★ clear, 1-2 unlocks!
+      // 3) Live E2E Shift B: s1 <= score < s2 -> 1★ clear, 1-2 unlocks!
       await ctx.setupSaveAndStart('1-1', {
         bankStardust: 15,
         totalEarnedStardust: 15,
@@ -4184,15 +4241,15 @@ const TIER2_F09_TO_F16 = [
         selectedPatron: 'luna',
         seenTutorials: DEFAULT_TUTORIALS_SEEN,
       });
-      while ((await ctx.getState()).score < 850) {
+      while ((await ctx.getState()).score < s1) {
         const cur = await ctx.getState();
-        if (cur.score >= 680 && (cur.comboCount >= 2 || cur.feverActive)) {
-          await ctx.advanceTime(8.5);
+        if (cur.score >= s1 - 180 && (cur.comboCount >= 2 || cur.feverActive)) {
+          await ctx.advanceTime(10.5);
         }
         await serveOneOrderOrganically(ctx, null, { useHarness: false });
       }
       let stPass = await ctx.getState();
-      ctx.assert(stPass.score >= 850 && stPass.score < 1250, `Expected 1★ band [850, 1249], got ${stPass.score}`);
+      ctx.assert(stPass.score >= s1 && stPass.score < s2, `Expected 1★ band [${s1}, ${s2 - 1}], got ${stPass.score}`);
       stPass = await ctx.advanceTime(stPass.timeLeft + 0.6);
       ctx.assertEq(stPass.lastResult?.cleared, true);
       ctx.assertEq(stPass.lastResult?.starsEarned, 1);

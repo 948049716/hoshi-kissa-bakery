@@ -23,6 +23,7 @@ const {
   RECIPES,
   getLevelById
 } = require('./levels_data');
+const BalanceConfig = require('./balance_config');
 
 const EPS = 1e-9;
 const CLOSING_GUARD_SEC = 8.0;
@@ -729,7 +730,24 @@ function createOrderState(levelCfgOrId, saveData, rng, modeOverrides) {
     }
   }
 
-  const trayCapacity = devTrayLv >= 1 ? 4 : 3;
+  const ovTrayDeltaRead = resolvedOverrides ? readOwnPropOnce(resolvedOverrides, 'trayCapDelta') : { exists: false };
+  const trayCapDelta = ovTrayDeltaRead.exists && !ovTrayDeltaRead.threw
+    ? safeInt(ovTrayDeltaRead.value, 0, 0, 2)
+    : 0;
+  const trayCapacity = clamp((devTrayLv >= 1 ? 4 : 3) + trayCapDelta, 3, 5);
+  const ovTrashMultRead = resolvedOverrides ? readOwnPropOnce(resolvedOverrides, 'trashCooldownMult') : { exists: false };
+  const rawTrashMult = ovTrashMultRead.exists && !ovTrashMultRead.threw ? toSafeNum(ovTrashMultRead.value) : 1.0;
+  const trashCooldownMult = Number.isFinite(rawTrashMult) && rawTrashMult > 0 ? clamp(rawTrashMult, 0.2, 2.0) : 1.0;
+  const ovComboWinRead = resolvedOverrides ? readOwnPropOnce(resolvedOverrides, 'comboWindowDelta') : { exists: false };
+  const rawComboDelta = ovComboWinRead.exists && !ovComboWinRead.threw ? toSafeNum(ovComboWinRead.value) : 0;
+  const comboWindowSec = clamp(SERVE_COMBO_WINDOW_SEC + (Number.isFinite(rawComboDelta) ? rawComboDelta : 0), 4.0, 20.0);
+  const ovPatExtraRead = resolvedOverrides ? readOwnPropOnce(resolvedOverrides, 'patienceMultExtra') : { exists: false };
+  const rawPatExtra = ovPatExtraRead.exists && !ovPatExtraRead.threw ? toSafeNum(ovPatExtraRead.value) : 1.0;
+  const patienceMultExtra = Number.isFinite(rawPatExtra) && rawPatExtra > 0 ? clamp(rawPatExtra, 0.5, 2.5) : 1.0;
+  const ovUrgBountyRead = resolvedOverrides ? readOwnPropOnce(resolvedOverrides, 'urgentBountyDelta') : { exists: false };
+  const rawUrgBounty = ovUrgBountyRead.exists && !ovUrgBountyRead.threw ? toSafeNum(ovUrgBountyRead.value) : 0;
+  const urgentBountyDelta = Number.isFinite(rawUrgBounty) ? clamp(rawUrgBounty, 0, 1.0) : 0;
+
   const tray = createNullArray(trayCapacity);
   const seats = createNullArray(SEAT_COUNT);
   const seatCooldowns = [];
@@ -758,7 +776,11 @@ function createOrderState(levelCfgOrId, saveData, rng, modeOverrides) {
     trayCapacity,
     tray,
     trashCooldown: 0,
+    trashCooldownMult,
     trashDiscards: 0,
+    comboWindowSec,
+    patienceMultExtra,
+    urgentBountyDelta,
     nextOrderUid: 1,
     nextTrayUid: 10001,
     comboCount: 0,
@@ -898,6 +920,9 @@ function snapshotSingleTileEntry(t, seenTiles) {
   const frozenHpRead = readOwnPropOnce(t, 'frozenHp');
   const frozenRead = readOwnPropOnce(t, 'frozen');
   const flavorRead = readOwnPropOnce(t, 'flavor');
+  const bakedRead = readOwnPropOnce(t, 'bakedAt');
+  const bakedNum = bakedRead.exists && !bakedRead.threw ? toSafeNum(bakedRead.value) : NaN;
+  const bakedAt = Number.isFinite(bakedNum) && bakedNum >= 0 ? bakedNum : null;
 
   const isFrozen =
     (frozenHpRead.exists && !frozenHpRead.threw && toSafeNum(frozenHpRead.value, 0) > 0) ||
@@ -912,7 +937,7 @@ function snapshotSingleTileEntry(t, seenTiles) {
 
   const matchEntry =
     !isFrozen && intTier !== null && intTier >= 1 && intTier <= 7
-      ? { rawTile: t, tier: intTier, flavor }
+      ? { rawTile: t, tier: intTier, flavor, bakedAt }
       : null;
 
   const info = {
@@ -922,7 +947,8 @@ function snapshotSingleTileEntry(t, seenTiles) {
     rawTierVal: tierRead.value,
     matchEntry,
     scoreTier: tierRead.exists ? scoreTier : null,
-    flavor
+    flavor,
+    bakedAt
   };
   if (seenTiles) {
     seenTiles.set(t, info);
@@ -1362,6 +1388,7 @@ function tryPlaceToTray(state, tile) {
   }
   const tier = tileSnap.matchEntry.tier;
   const flavor = tileSnap.matchEntry.flavor;
+  const bakedAt = tileSnap.matchEntry.bakedAt;
 
   const curTrayLen = safeArrayLen(tray, MAX_TRAY_SLOTS);
   const defaultCap = curTrayLen > 0 ? curTrayLen : 3;
@@ -1421,7 +1448,8 @@ function tryPlaceToTray(state, tile) {
     mutatedNextUid = true;
   }
 
-  const trayTile = { uid, tier, flavor };
+  // v0.10 fresh bonus: freshly-baked (merged) tiles carry their in-run bake timestamp into the tray
+  const trayTile = bakedAt !== null && bakedAt !== undefined ? { uid, tier, flavor, bakedAt } : { uid, tier, flavor };
   if (!verifiedWriteProp(tray, emptyIdx, trayTile)) {
     restorePropSnapshot(tray, emptyIdx, chosenSlotPrevRead);
     if (mutatedNextUid) {
@@ -1430,7 +1458,7 @@ function tryPlaceToTray(state, tile) {
     return { placed: false, slotIdx: -1, reason: 'invalid_tile' };
   }
 
-  safeSetIdx(traySnap, emptyIdx, { rawTile: trayTile, tier, flavor });
+  safeSetIdx(traySnap, emptyIdx, { rawTile: trayTile, tier, flavor, bakedAt: trayTile.bakedAt === undefined ? null : trayTile.bakedAt });
   const { seatRecords } = snapshotSeatsArrayOnce(
     seats,
     { withMeta: false, withRecipeId: false },
@@ -1493,9 +1521,12 @@ function discardTraySlot(state, slotIdx, opts) {
     return { discarded: false, tile: null };
   }
 
-  // Commit trashCooldown = 8.0s & trashDiscards += 1
+  // Commit trashCooldown = 8.0s * trashCooldownMult & trashDiscards += 1
+  const trashMultRead = readOwnPropOnce(state, 'trashCooldownMult');
+  const rawTrashMult = trashMultRead.exists && !trashMultRead.threw ? toSafeNum(trashMultRead.value) : 1.0;
+  const effTrashCd = TRASH_CONFIG.cooldownSec * (Number.isFinite(rawTrashMult) && rawTrashMult > 0 ? clamp(rawTrashMult, 0.2, 2.0) : 1.0);
   if (prevTrashCdRead.exists || safeIsExtensible(state)) {
-    if (!verifiedWriteProp(state, 'trashCooldown', TRASH_CONFIG.cooldownSec)) {
+    if (!verifiedWriteProp(state, 'trashCooldown', effTrashCd)) {
       restorePropSnapshot(state, 'trashCooldown', prevTrashCdRead);
     }
   }
@@ -1568,6 +1599,35 @@ function discardTraySlot(state, slotIdx, opts) {
 }
 
 /**
+ * v0.10 品质区 fresh bonus: a paired tray item is "hot" when it was baked (merged) within
+ * ctx.freshWindowSec (default FRESH.windowSec) of ctx.nowSec and its tier >= FRESH.minTier.
+ * Returns false whenever the feature flag is off or the ctx lacks a clock (legacy callers).
+ */
+function readFreshClock(ctx) {
+  if (!ctx || !BalanceConfig.isFeatureOn('freshBonus')) return null;
+  const nowRead = readOwnPropOnce(ctx, 'nowSec');
+  const now = nowRead.exists && !nowRead.threw ? toSafeNum(nowRead.value) : NaN;
+  if (!Number.isFinite(now)) return null;
+  let windowSec = BalanceConfig.FRESH.windowSec;
+  const wRead = readOwnPropOnce(ctx, 'freshWindowSec');
+  if (wRead.exists && !wRead.threw) {
+    const w = toSafeNum(wRead.value);
+    if (Number.isFinite(w) && w >= 0) windowSec = clamp(w, 0, 60);
+  }
+  return { now, windowSec };
+}
+
+function isHotPairedEntry(entry, clock) {
+  if (!clock || !entry) return false;
+  const b = entry.bakedAt;
+  const tier = entry.scoreTier !== null && entry.scoreTier !== undefined ? entry.scoreTier : entry.tier;
+  if (typeof b !== 'number' || !Number.isFinite(b)) return false;
+  if (!(tier >= BalanceConfig.FRESH.minTier)) return false;
+  const age = clock.now - b;
+  return age >= -0.05 && age <= clock.windowSec + 1e-9;
+}
+
+/**
  * Computes exact single-serve score from already-snapshotted orderMeta, slotSnap, and pairedTileSnaps
  * using unrounded itemSum floats and a single outer Math.round (zero live re-reads on order/tiles).
  */
@@ -1579,6 +1639,7 @@ function computeServeScoreFromSnapshots(orderMeta, slotSnap, pairedTileSnaps, sc
 
   const ctx = isPlainObj(scoreCtx) ? scoreCtx : null;
   const catcakeLevelsMap = extractCatcakeLevels(ctx ? getOwn(ctx, 'catcakeLevels', null) : null);
+  const freshClock = readFreshClock(ctx);
 
   let itemSum = 0;
   for (let i = 0; i < slotLen; i++) {
@@ -1604,7 +1665,8 @@ function computeServeScoreFromSnapshots(orderMeta, slotSnap, pairedTileSnaps, sc
       itemFlavorMult = FLAVORS[reqFlavor].mult;
     }
 
-    itemSum += basePrice * itemFlavorMult;
+    const freshMult = isHotPairedEntry(pSnap, freshClock) ? BalanceConfig.FRESH.itemMult : 1.0;
+    itemSum += basePrice * itemFlavorMult * freshMult;
   }
 
   if (!(itemSum > 0)) return 0;
@@ -1612,7 +1674,7 @@ function computeServeScoreFromSnapshots(orderMeta, slotSnap, pairedTileSnaps, sc
   const slotCount = clamp(slotLen, 1, 3);
   const comboSizeMult = COMBO_SIZE_MULTS[slotCount] || 1.00;
 
-  // Patience tip band (> 0.55 green 1.30; >= 0.25 yellow 1.00; < 0.25 red 0.85)
+  // Patience tip band (> 0.60 green 1.20; >= 0.25 yellow 1.00; < 0.25 red 0.80) — see PATIENCE_TIP_BANDS
   let pRatio = 0.40;
   if (orderMeta && orderMeta.scorePRatio !== null) {
     pRatio = orderMeta.scorePRatio;
@@ -1691,27 +1753,80 @@ function computeServeScoreFromSnapshots(orderMeta, slotSnap, pairedTileSnaps, sc
   }
   const deviceMult = devTrayLv >= 2 && slotCount === 3 ? 1.12 : 1.00;
 
-  // Starlight Fever multiplier (x1.35)
+  // Starlight Fever scene bonus
   const isFever = Boolean(
     ctx &&
       (getOwn(ctx, 'isFever', false) ||
         getOwn(ctx, 'feverActive', false) ||
         toSafeNum(getOwn(ctx, 'feverTimer', 0)) > 0)
   );
-  const feverMult = isFever ? FEVER_CONFIG.scoreMult : 1.00;
 
-  const rawTotal =
-    itemSum *
-    comboSizeMult *
-    patienceTipMult *
-    serveComboMult *
-    customerMult *
-    patronMult *
-    deviceMult *
-    feverMult;
+  if (!BalanceConfig.isFeatureOn('scoreZones')) {
+    // Legacy fully multiplicative formula (kept behind flag for A/B & regression comparison)
+    const legacyTotal =
+      itemSum *
+      comboSizeMult *
+      patienceTipMult *
+      serveComboMult *
+      customerMult *
+      (mikanMult * (lunaActive ? 1.50 : 1.00)) *
+      deviceMult *
+      (isFever ? FEVER_CONFIG.scoreMult : 1.00);
+    return Number.isFinite(legacyTotal) && legacyTotal > 0 ? Math.round(legacyTotal) : 0;
+  }
+
+  const Z = BalanceConfig.SCORE_ZONES;
+
+  // 技巧区 (additive): combo size + patience tip + serve combo (+ mugi passive)
+  const skillBonusRaw =
+    (comboSizeMult - 1) + (patienceTipMult - 1) + (baseComboMult - 1) + (mugiComboBonus > 0 ? Z.mugiComboSkillBonus : 0);
+  const skillZone = 1 + clamp(skillBonusRaw, Z.skillFloor, Z.skillCap);
+
+  // 顾客区 (multiplicative): bounty × trait (trait capped)
+  let traitMult = 1.00;
+  if (ctx) {
+    const tmRead = readOwnPropOnce(ctx, 'traitMult');
+    if (tmRead.exists && !tmRead.threw) {
+      const tm = toSafeNum(tmRead.value);
+      if (Number.isFinite(tm) && tm > 0) traitMult = clamp(tm, 0.5, Z.traitMultCap);
+    }
+  }
+  const customerZone = customerMult * traitMult;
+
+  // 场面区 (additive): fever + patron + device + extra (events / perks / rules)
+  let feverBonus = Z.feverSceneBonus;
+  let sceneExtra = 0;
+  let sceneCap = Z.sceneCap;
+  if (ctx) {
+    const fbRead = readOwnPropOnce(ctx, 'feverSceneBonus');
+    if (fbRead.exists && !fbRead.threw) {
+      const fb = toSafeNum(fbRead.value);
+      if (Number.isFinite(fb)) feverBonus = clamp(fb, 0, 2);
+    }
+    const seRead = readOwnPropOnce(ctx, 'sceneBonusExtra');
+    if (seRead.exists && !seRead.threw) {
+      const se = toSafeNum(seRead.value);
+      if (Number.isFinite(se)) sceneExtra = clamp(se, -0.5, 3);
+    }
+    const scRead = readOwnPropOnce(ctx, 'sceneCap');
+    if (scRead.exists && !scRead.threw) {
+      const sc = toSafeNum(scRead.value);
+      if (Number.isFinite(sc)) sceneCap = clamp(sc, 0, Z.sceneCapEndlessMax);
+    }
+  }
+  const sceneBonusRaw =
+    (isFever ? feverBonus : 0) +
+    (patronId === 'mikan' ? Z.mikanSceneBonus : 0) +
+    (lunaActive ? Z.lunaSceneBonus : 0) +
+    (deviceMult > 1 ? Z.devTraySceneBonus : 0) +
+    sceneExtra;
+  const sceneZone = 1 + clamp(sceneBonusRaw, -0.5, sceneCap);
+
+  const rawTotal = itemSum * skillZone * customerZone * sceneZone;
 
   return Number.isFinite(rawTotal) && rawTotal > 0 ? Math.round(rawTotal) : 0;
 }
+
 
 /**
  * Computes exact single-serve score using unrounded itemSum floats and a single outer Math.round.
@@ -1867,7 +1982,8 @@ function matchTrayToCustomer(state, arg2, arg3) {
       const entry = matchRes.matchedTrayEntries[m];
       safePush(pairedScoreEntries, {
         scoreTier: entry.tier,
-        flavor: entry.flavor
+        flavor: entry.flavor,
+        bakedAt: entry.bakedAt === undefined ? null : entry.bakedAt
       });
     }
 
@@ -2032,6 +2148,16 @@ function matchTrayToCustomer(state, arg2, arg3) {
           )
         : stateInFever
   };
+  // v0.10 zone / fresh inputs supplied by game_app (modes, fever V2, events, perks, traits)
+  if (distinctCtx) {
+    const ZONE_PASSTHROUGH_KEYS = ['feverSceneBonus', 'sceneBonusExtra', 'sceneCap', 'traitMult', 'nowSec', 'freshWindowSec'];
+    for (let zk = 0; zk < ZONE_PASSTHROUGH_KEYS.length; zk++) {
+      const zr = readOwnPropOnce(distinctCtx, ZONE_PASSTHROUGH_KEYS[zk]);
+      if (zr.exists && !zr.threw && typeof zr.value === 'number' && Number.isFinite(zr.value)) {
+        effectiveScoreCtx[ZONE_PASSTHROUGH_KEYS[zk]] = zr.value;
+      }
+    }
+  }
 
   const scoreGain = computeServeScoreFromSnapshots(
     winner.orderMeta,
@@ -2168,7 +2294,10 @@ function matchTrayToCustomer(state, arg2, arg3) {
   if (!verifiedWriteProp(state, 'comboCount', nextCombo)) {
     restorePropSnapshot(state, 'comboCount', prevComboRead);
   }
-  if (!verifiedWriteProp(state, 'comboTimer', SERVE_COMBO_WINDOW_SEC)) {
+  const cwRead = readOwnPropOnce(state, 'comboWindowSec');
+  const rawCw = cwRead.exists && !cwRead.threw ? toSafeNum(cwRead.value) : NaN;
+  const effComboWindow = Number.isFinite(rawCw) && rawCw > 0 ? clamp(rawCw, 4.0, 20.0) : SERVE_COMBO_WINDOW_SEC;
+  if (!verifiedWriteProp(state, 'comboTimer', effComboWindow)) {
     restorePropSnapshot(state, 'comboTimer', prevComboTimerRead);
   }
   const maxComboRead = readOwnPropOnce(state, 'maxCombo');
@@ -2217,14 +2346,27 @@ function matchTrayToCustomer(state, arg2, arg3) {
     }
   }
 
+  // 7b. Fresh (热乎) stats for this order (allHot requires every craftable >=minTier item to be hot)
+  const freshClockServe = readFreshClock(effectiveScoreCtx);
+  let hotCount = 0;
+  let eligibleHotCount = 0;
+  for (let h = 0; h < winner.pairedScoreEntries.length; h++) {
+    const pe = winner.pairedScoreEntries[h];
+    const tVal = pe && pe.scoreTier !== null && pe.scoreTier !== undefined ? pe.scoreTier : pe ? pe.tier : 0;
+    if (tVal >= BalanceConfig.FRESH.minTier) eligibleHotCount += 1;
+    if (isHotPairedEntry(pe, freshClockServe)) hotCount += 1;
+  }
+  const allHot = eligibleHotCount > 0 && hotCount >= eligibleHotCount;
+
   // 8. Charge Starlight Fever energy (when not currently in Fever)
   let triggeredFever = false;
   if (!stateInFever) {
-    const feverGain = winner.isVip
-      ? FEVER_CONFIG.gainVip
-      : winner.pRatio > PATIENCE_TIP_BANDS.greenThreshold
-        ? FEVER_CONFIG.gainGreen
-        : FEVER_CONFIG.gainNormal;
+    const feverGain =
+      (winner.isVip
+        ? FEVER_CONFIG.gainVip
+        : winner.pRatio > PATIENCE_TIP_BANDS.greenThreshold
+          ? FEVER_CONFIG.gainGreen
+          : FEVER_CONFIG.gainNormal) + (allHot ? BalanceConfig.FRESH.allHotFever : 0);
     const prevFeverEnergyRead = readOwnPropOnce(state, 'feverEnergy');
     const prevEnergy = prevFeverEnergyRead.exists && !prevFeverEnergyRead.threw
       ? safeInt(prevFeverEnergyRead.value, 0, 0, 100)
@@ -2287,8 +2429,65 @@ function matchTrayToCustomer(state, arg2, arg3) {
     scoreGain,
     dustBonus,
     triggeredFever,
-    skillChargeGain
+    skillChargeGain,
+    hotCount,
+    allHot,
+    wasInFever: stateInFever
   };
+}
+
+/**
+ * v0.10: adds Starlight Fever energy from non-serve sources (bake crits). Never touches score.
+ * Ignored while Fever is active. Returns { gained, triggered }.
+ */
+function addFeverEnergy(state, amount) {
+  const add = safeInt(amount, 0, 0, 100);
+  if (!isPlainObj(state) || safeIsFrozen(state) || add <= 0) return { gained: 0, triggered: false };
+  const timerRead = readOwnPropOnce(state, 'feverTimer');
+  const activeRead = readOwnPropOnce(state, 'feverActive');
+  const timer = timerRead.exists && !timerRead.threw ? toSafeNum(timerRead.value) : 0;
+  const inFever =
+    (Number.isFinite(timer) && timer > 1e-6) ||
+    Boolean(activeRead.exists && !activeRead.threw && activeRead.value === true);
+  if (inFever) return { gained: 0, triggered: false };
+  const energyRead = readOwnPropOnce(state, 'feverEnergy');
+  const prev = energyRead.exists && !energyRead.threw ? safeInt(energyRead.value, 0, 0, 100) : 0;
+  const next = Math.min(100, prev + add);
+  if (next >= 100) {
+    if (
+      verifiedWriteProp(state, 'feverEnergy', 0) &&
+      verifiedWriteProp(state, 'feverActive', true) &&
+      verifiedWriteProp(state, 'feverTimer', FEVER_CONFIG.durationSec)
+    ) {
+      return { gained: 100 - prev, triggered: true };
+    }
+    restorePropSnapshot(state, 'feverEnergy', energyRead);
+    restorePropSnapshot(state, 'feverActive', activeRead);
+    restorePropSnapshot(state, 'feverTimer', timerRead);
+    return { gained: 0, triggered: false };
+  }
+  if (!verifiedWriteProp(state, 'feverEnergy', next)) {
+    restorePropSnapshot(state, 'feverEnergy', energyRead);
+    return { gained: 0, triggered: false };
+  }
+  return { gained: next - prev, triggered: false };
+}
+
+/**
+ * v0.10 Fever V2: extends an active Fever by `sec` seconds. Returns the seconds actually added.
+ */
+function extendFever(state, sec) {
+  const add = toSafeNum(sec);
+  if (!isPlainObj(state) || safeIsFrozen(state) || !Number.isFinite(add) || add <= 0) return 0;
+  const timerRead = readOwnPropOnce(state, 'feverTimer');
+  const timer = timerRead.exists && !timerRead.threw ? toSafeNum(timerRead.value) : 0;
+  if (!Number.isFinite(timer) || timer <= 1e-6) return 0;
+  const capped = Math.min(add, 30);
+  if (!verifiedWriteProp(state, 'feverTimer', timer + capped)) {
+    restorePropSnapshot(state, 'feverTimer', timerRead);
+    return 0;
+  }
+  return capped;
 }
 
 /**
@@ -2354,7 +2553,7 @@ function pickWeightedItem(items, weights, rng) {
   return items[items.length - 1];
 }
 
-function computeOrderPatienceSec(recipe, customerDef, devTeapotLv) {
+function computeOrderPatienceSec(recipe, customerDef, devTeapotLv, patienceMultExtra) {
   const recSlots = isPlainObj(recipe) ? getOwn(recipe, 'slots', null) : null;
   const slotCount = clamp(safeArrayLen(recSlots, MAX_ORDER_SLOTS), 1, 3);
   const maxRecipeTier = getRecipeMaxTier(recipe);
@@ -2366,7 +2565,10 @@ function computeOrderPatienceSec(recipe, customerDef, devTeapotLv) {
     ? toSafeNum(getOwn(customerDef, 'patienceMult', 1.0), 1.0)
     : 1.0;
   const patMult = Number.isFinite(rawPatMult) && rawPatMult > 0 ? rawPatMult : 1.0;
-  const mult = patMult * (1 + teapotBonus);
+  const extra = Number.isFinite(Number(patienceMultExtra)) && Number(patienceMultExtra) > 0
+    ? clamp(Number(patienceMultExtra), 0.5, 2.5)
+    : 1.0;
+  const mult = patMult * (1 + teapotBonus) * extra;
   return Math.round(basePatienceSec * mult * 100) / 100;
 }
 
@@ -2452,10 +2654,26 @@ function buildSpawnContextOnce(state, boardFlavors) {
     ? safeInt(teapotRead.value, 0, 0, 3)
     : 0;
 
+  const patExtraRead = readOwnPropOnce(state, 'patienceMultExtra');
+  const rawPatExtra = patExtraRead.exists && !patExtraRead.threw ? toSafeNum(patExtraRead.value) : 1.0;
+  const patienceMultExtra = Number.isFinite(rawPatExtra) && rawPatExtra > 0 ? clamp(rawPatExtra, 0.5, 2.5) : 1.0;
+
+  const urgBountyRead = readOwnPropOnce(state, 'urgentBountyDelta');
+  const rawUrgBounty = urgBountyRead.exists && !urgBountyRead.threw ? toSafeNum(urgBountyRead.value) : 0;
+  const urgentBountyDelta = Number.isFinite(rawUrgBounty) ? clamp(rawUrgBounty, 0, 1.0) : 0;
+
   const nextUidRead = readOwnPropOnce(state, 'nextOrderUid');
   const nextOrderUid = nextUidRead.exists && !nextUidRead.threw
     ? safeInt(nextUidRead.value, 1, 1, 1000000000)
     : 1;
+
+  const levelIdRead = readOwnPropOnce(state, 'levelId');
+  const levelId = levelIdRead.exists && !levelIdRead.threw ? String(levelIdRead.value || '') : '';
+  const lvlDef = levelId ? getLevelById(levelId) : null;
+  const centerpieceTarget =
+    lvlDef && lvlDef.goal && lvlDef.goal.type === 'centerpiece'
+      ? safeInt(lvlDef.goal.target, 0, 0, 7)
+      : 0;
 
   return {
     pool,
@@ -2467,9 +2685,12 @@ function buildSpawnContextOnce(state, boardFlavors) {
     vipQuotaTarget,
     vipScheduleSnap,
     vipFixedId,
+    centerpieceTarget,
     baseUrgRate,
     chapter,
     devTeapotLv,
+    patienceMultExtra,
+    urgentBountyDelta,
     nextOrderUid,
     nextUidRead
   };
@@ -2562,14 +2783,23 @@ function planCustomerForSeatFromSnap(
       chosenRecipe = getOwn(RECIPES, vipFixedId, chosenRecipe);
     } else {
       let vipPool = [];
-      for (let i = 0; i < pool.length; i++) {
-        const r = pool[i];
-        if (
-          getRecipeMaxTier(r) >= 5 ||
-          recipeHasFlavor(r, 'matcha') ||
-          recipeHasFlavor(r, 'berry')
-        ) {
-          safePush(vipPool, r);
+      if (spawnCtx.centerpieceTarget > 0) {
+        for (let i = 0; i < pool.length; i++) {
+          if (getRecipeMaxTier(pool[i]) >= spawnCtx.centerpieceTarget) {
+            safePush(vipPool, pool[i]);
+          }
+        }
+      }
+      if (vipPool.length === 0) {
+        for (let i = 0; i < pool.length; i++) {
+          const r = pool[i];
+          if (
+            getRecipeMaxTier(r) >= 5 ||
+            recipeHasFlavor(r, 'matcha') ||
+            recipeHasFlavor(r, 'berry')
+          ) {
+            safePush(vipPool, r);
+          }
         }
       }
       if (vipPool.length === 0) vipPool = pool;
@@ -2720,7 +2950,12 @@ function planCustomerForSeatFromSnap(
     chosenRecipe = pickWeightedItem(candidates, recipeWeights, rng);
   }
 
-  const maxPatience = computeOrderPatienceSec(chosenRecipe, customerDef, spawnCtx.devTeapotLv);
+  const maxPatience = computeOrderPatienceSec(
+    chosenRecipe,
+    customerDef,
+    spawnCtx.devTeapotLv,
+    spawnCtx.patienceMultExtra
+  );
   const uid = spawnCtx.nextOrderUid;
 
   const chosenSlots = isPlainObj(chosenRecipe) ? getOwn(chosenRecipe, 'slots', null) : null;
@@ -2752,11 +2987,15 @@ function planCustomerForSeatFromSnap(
     ? getOwn(customerDef, 'id', 'cust_ragdoll')
     : 'cust_ragdoll';
   const customerName = isPlainObj(customerDef) ? getOwn(customerDef, 'name', '') : '';
-  const bountyMult = isPlainObj(customerDef)
-    ? toSafeNum(getOwn(customerDef, 'bountyMult', 1.0), 1.0)
-    : 1.0;
   const isVip = Boolean(isPlainObj(customerDef) && getOwn(customerDef, 'isVip', false));
   const isUrgent = Boolean(isPlainObj(customerDef) && getOwn(customerDef, 'isUrgent', false));
+  const baseBounty = isPlainObj(customerDef)
+    ? toSafeNum(getOwn(customerDef, 'bountyMult', 1.0), 1.0)
+    : 1.0;
+  const bountyMult =
+    isUrgent && Number(spawnCtx.urgentBountyDelta) > 0
+      ? Math.round((baseBounty + Number(spawnCtx.urgentBountyDelta)) * 100) / 100
+      : baseBounty;
   const rewardDustBonus = isPlainObj(customerDef)
     ? safeInt(getOwn(customerDef, 'rewardDustBonus', 0), 0, 0, 50)
     : 0;
@@ -2963,11 +3202,14 @@ function stepCustomers(state, dt, arg3, arg4) {
   const rawComboTimer = prevComboTimerRead.exists && !prevComboTimerRead.threw
     ? toSafeNum(prevComboTimerRead.value, 0)
     : 0;
+  const cwReadStep = readOwnPropOnce(state, 'comboWindowSec');
+  const rawCwStep = cwReadStep.exists && !cwReadStep.threw ? toSafeNum(cwReadStep.value) : NaN;
+  const effComboWindowStep = Number.isFinite(rawCwStep) && rawCwStep > 0 ? clamp(rawCwStep, 4.0, 20.0) : SERVE_COMBO_WINDOW_SEC;
   const effComboTimer =
     Number.isFinite(rawComboTimer) && rawComboTimer > 0
       ? rawComboTimer
       : hadCombo
-        ? SERVE_COMBO_WINDOW_SEC
+        ? effComboWindowStep
         : 0;
   if (effComboTimer > 0) {
     const nextComboTimer = effComboTimer > safeDt + EPS ? effComboTimer - safeDt : 0;
@@ -3262,13 +3504,52 @@ function applyMikanComfortTea(state) {
 }
 
 /**
+ * v0.12 M3: restores +ratio*maxPatience to seated customers (optionally excluding one seat).
+ * Never mutates score and clamps strictly to maxPatience.
+ */
+function boostSeatsPatience(state, ratio, excludeSeatIdx) {
+  const r = toSafeNum(ratio);
+  if (safeIsFrozen(state) || !Number.isFinite(r) || r <= 0) return { boostedSeats: 0 };
+  const arrs = readOrderStateArrays(state);
+  if (!arrs) return { boostedSeats: 0 };
+  const { seats } = arrs;
+  const ex = typeof excludeSeatIdx === 'number' && Number.isInteger(excludeSeatIdx) ? excludeSeatIdx : -1;
+  const clampedR = clamp(r, 0, 1.0);
+  let boostedSeats = 0;
+  const seatLimit = safeArrayLen(seats, SEAT_COUNT);
+  const seenSeats = new Set();
+  for (let i = 0; i < seatLimit; i++) {
+    if (i === ex) continue;
+    const seatRead = readOwnPropOnce(seats, i);
+    const seat = seatRead.exists && !seatRead.threw ? seatRead.value : null;
+    if (!isPlainObj(seat) || seenSeats.has(seat)) continue;
+    seenSeats.add(seat);
+    if (safeIsFrozen(seat) || !canMutateProp(seat, 'patience')) continue;
+    const mpRead = readOwnPropOnce(seat, 'maxPatience');
+    const pRead = readOwnPropOnce(seat, 'patience');
+    const mp = mpRead.exists && !mpRead.threw ? toSafeNum(mpRead.value, 0) : 0;
+    const p = pRead.exists && !pRead.threw ? toSafeNum(pRead.value, 0) : 0;
+    if (Number.isFinite(mp) && mp > 0 && Number.isFinite(p)) {
+      const nextPat = Math.min(mp, Math.max(0, p) + clampedR * mp);
+      if (verifiedWriteProp(seat, 'patience', nextPat)) {
+        boostedSeats += 1;
+      } else {
+        restorePropSnapshot(seat, 'patience', pRead);
+      }
+    }
+  }
+  return { boostedSeats };
+}
+
+/**
  * Computes end-of-level 0..3 star rating and stardust breakdown.
  * Enforces Pure Serve-Only Scoring Iron Law: 0 serves => 0 valid score and 0 consolation dust.
  */
-function computeLevelSettlement(levelCfgOrId, orderState, prevStarsOrSave) {
+function computeLevelSettlement(levelCfgOrId, orderState, prevStarsOrSave, settlementOpts) {
   let rawLvlArg = levelCfgOrId;
   let rawOsArg = orderState;
   let rawPrevArg = prevStarsOrSave;
+  let rawOptsArg = settlementOpts;
   if (
     prevStarsOrSave === undefined &&
     isPlainObj(levelCfgOrId) &&
@@ -3279,6 +3560,7 @@ function computeLevelSettlement(levelCfgOrId, orderState, prevStarsOrSave) {
     rawLvlArg = getOwn(levelCfgOrId, 'levelId', '1-1');
     rawOsArg = levelCfgOrId;
     rawPrevArg = orderState;
+    rawOptsArg = undefined;
   }
 
   const lvl = resolveLevelConfig(rawLvlArg);
@@ -3290,9 +3572,14 @@ function computeLevelSettlement(levelCfgOrId, orderState, prevStarsOrSave) {
   const baseClearDust = safeInt(lvl.baseClearDust, 6, 0, 200);
 
   const os = isPlainObj(rawOsArg) ? rawOsArg : null;
+  const opts = isPlainObj(rawOptsArg) ? rawOptsArg : null;
   const ordersServed = os ? safeInt(getOwn(os, 'ordersServed', 0), 0, 0, 100000) : 0;
   const rawScore = os ? safeInt(getOwn(os, 'score', 0), 0, 0, 100000000) : 0;
-  const score = ordersServed >= 1 ? rawScore : 0;
+  const earlyCloseBonus =
+    ordersServed >= 1 && opts
+      ? safeInt(getOwn(opts, 'earlyCloseBonus', 0), 0, 0, 20000)
+      : 0;
+  const score = ordersServed >= 1 ? rawScore + earlyCloseBonus : 0;
   const vipServed =
     ordersServed >= 1 && os ? safeInt(getOwn(os, 'vipServed', 0), 0, 0, 1000) : 0;
 
@@ -3311,8 +3598,11 @@ function computeLevelSettlement(levelCfgOrId, orderState, prevStarsOrSave) {
   const star2 = Math.max(star1 + 1, safeInt(getOwn(stars, 1, 1250), 1250, 1, 100000000));
   const star3 = Math.max(star2 + 1, safeInt(getOwn(stars, 2, 1750), 1750, 1, 100000000));
 
-  const starsEarned = score >= star3 ? 3 : score >= star2 ? 2 : score >= star1 ? 1 : 0;
-  const cleared = starsEarned >= 1;
+  const goalMet = !(opts && getOwn(opts, 'goalDone', true) === false);
+  const rawStars = score >= star3 ? 3 : score >= star2 ? 2 : score >= star1 ? 1 : 0;
+  const starsEarned = goalMet ? rawStars : 0;
+  const cleared = goalMet && starsEarned >= 1;
+  const goalUnmet = !goalMet;
   const newStarsDelta = Math.max(0, starsEarned - prevStars);
 
   let firstStarDustAward = 0;
@@ -3336,7 +3626,7 @@ function computeLevelSettlement(levelCfgOrId, orderState, prevStarsOrSave) {
     vipDustAward = vipServed * 3;
     threeStarBonusDust = starsEarned === 3 ? 2 : 0;
   } else if (ordersServed >= 1) {
-    consolationDust = Math.max(1, Math.floor((score / star1) * 4));
+    consolationDust = Math.max(1, Math.floor((Math.min(score, star1) / star1) * 4));
     vipDustAward = vipServed * 1;
   }
 
@@ -3349,6 +3639,9 @@ function computeLevelSettlement(levelCfgOrId, orderState, prevStarsOrSave) {
 
   return {
     cleared,
+    goalUnmet,
+    earlyCloseBonus,
+    finalScore: score,
     starsEarned,
     newStarsDelta,
     isReplayDecay,
@@ -3373,5 +3666,8 @@ module.exports = {
   serveCustomerSeat,
   computeServeScore,
   applyMikanComfortTea,
-  computeLevelSettlement
+  boostSeatsPatience,
+  computeLevelSettlement,
+  addFeverEnergy,
+  extendFever
 };

@@ -526,7 +526,9 @@ function renderBackdrop(ctx, w, h, dt, nowSec, gameState, theme, sprites, firefl
     c.restore();
   }
 
-  renderAmbientParticles(c, width, height, dt, nowSec, th, fireflies);
+  if (!(gameState && gameState.lowPowerMode)) {
+    renderAmbientParticles(c, width, height, dt, nowSec, th, fireflies);
+  }
 
   const feverOn = Boolean(gameState && gameState.feverActive);
   if (feverOn) {
@@ -742,6 +744,15 @@ function renderLobbyChrome(ctx, geom, stageInfo, app, hits) {
     pressed: isHitPressed(app, 'lobby_help_btn')
   });
   hits.add('lobby_help_btn', btnX, helpY, btnS, btnS, () => app.openModal('help'));
+
+  // Left-side matching Settings button (设) cleanly placed in open sky below stardust pill
+  const leftBtnX = isWide ? Math.max(14, Math.round(stageX - 46)) : 10;
+  const setY = startY;
+  drawCircularWoodButton(c, leftBtnX + btnR, setY + btnR, btnR, {
+    label: '设',
+    pressed: isHitPressed(app, 'lobby_settings_btn')
+  });
+  hits.add('lobby_settings_btn', leftBtnX, setY, btnS, btnS, () => app.openModal('settings'));
 
   return { utilLeftX: btnX, utilBottomY: helpY + btnS };
 }
@@ -1171,8 +1182,15 @@ function renderLobbyBottomDock(ctx, rect, app, hits) {
     c.restore();
   }
 
-  const gap = 4;
-  const colW = Math.floor((w - gap * 3) / 4);
+  const gap = 3;
+  const colW = Math.floor((w - gap * 4) / 5);
+  const saveData = app.saveData || {};
+  const dailyUnlocked = typeof app.isDailyUnlocked === 'function' ? app.isDailyUnlocked() : false;
+  const dailyClaimed =
+    saveData.modeStats &&
+    saveData.modeStats.daily &&
+    saveData.modeStats.daily.claimedDate &&
+    saveData.modeStats.daily.claimedDate.length === 8;
   const items = [
     {
       id: 'dock_shop',
@@ -1191,6 +1209,13 @@ function renderLobbyBottomDock(ctx, rect, app, hits) {
       offsetY: 0,
       redDot: false,
       onClick: () => app.openCompendium('catcakes')
+    },
+    {
+      id: 'dock_challenge',
+      label: '挑战',
+      icon: 'icon_trophy',
+      redDot: Boolean(dailyUnlocked && !dailyClaimed),
+      onClick: () => app.openChallenge()
     },
     {
       id: 'dock_leaderboard',
@@ -1778,8 +1803,16 @@ function renderPlayTopBar(ctx, barRect, app, hits, nowSec) {
   const { x: bx, y: by, w: bw, h: bh } = barRect;
   const sprites = app.sprites || {};
   const orderState = app.orderState || {};
-  const lvl = getLevelById(app.currentLevelId || orderState.levelId || '1-1') || getLevelById('1-1');
-  const stars = lvl && Array.isArray(lvl.stars) ? lvl.stars : [850, 1250, 1750];
+  const curId = String(app.currentLevelId || orderState.levelId || '1-1');
+  const isDaily = curId.indexOf('daily_') === 0;
+  const isEndless = curId.indexOf('endless_') === 0;
+  const lvl = getLevelById(curId) || getLevelById('1-1');
+  const stars =
+    Array.isArray(orderState.starsOverride) && orderState.starsOverride.length >= 3
+      ? orderState.starsOverride
+      : lvl && Array.isArray(lvl.stars)
+      ? lvl.stars
+      : [850, 1250, 1750];
   const score = Math.max(0, Math.floor(Number(orderState.score) || 0));
   const timeLeft = Math.max(0, Number(orderState.timeLeft) || 0);
 
@@ -1819,11 +1852,16 @@ function renderPlayTopBar(ctx, barRect, app, hits, nowSec) {
     }
   };
 
-  // 2. Dark wood '关卡 X-Y' pill (always shows full `关卡 X-Y`, Design 03)
+  // 2. Dark wood '关卡 X-Y' / '每天特调' / '无限 N班' pill (Design 03)
   const lvlX = bx + btnS + gap;
   const lvlW = clamp(Math.round(bw * 0.22), 70, 88);
   drawHudWoodPill(lvlX, pillY, lvlW, pillH);
-  UI.drawOutlinedText(c, `关卡 ${lvl ? lvl.id : '1-1'}`, lvlX + lvlW * 0.5, pillY + pillH * 0.5 + 0.5, {
+  const pillLabel = isDaily
+    ? '每天特调'
+    : isEndless
+    ? `无限 ${curId.slice(8) || '1'}班`
+    : `关卡 ${lvl ? lvl.id : '1-1'}`;
+  UI.drawOutlinedText(c, pillLabel, lvlX + lvlW * 0.5, pillY + pillH * 0.5 + 0.5, {
     size: 13.6,
     minSize: 10.2,
     weight: 900,
@@ -1944,6 +1982,46 @@ function renderPlayTopBar(ctx, barRect, app, hits, nowSec) {
     const scaleBoost = popTimer > 0 ? 1 + 0.45 * Math.sin((popTimer / 0.3) * Math.PI) : 1;
     UI.drawStarIcon(c, sx, barY + barH * 0.5, 8.8 * scaleBoost, unlocked, { sprites });
   }
+}
+
+/**
+ * v0.10 dough temperature bar inside the knead pill: cold (blue) → warm band (gold) → overheat (red).
+ * Locked state shows a draining grey bar. Purely visual; never registers hits.
+ */
+function drawDoughTempBar(ctx, x, y, w, h, dough, nowSec) {
+  if (!dough || !(w > 8)) return;
+  const c = getSafeCtx(ctx);
+  c.save();
+  UI.roundRectPath(c, x, y, w, h, h / 2);
+  c.fillStyle = 'rgba(60, 34, 20, 0.35)';
+  c.fill();
+  // Warm band marker (warmMin..overheat ≈ 40%..100%)
+  c.fillStyle = 'rgba(255, 214, 120, 0.22)';
+  UI.roundRectPath(c, x + w * 0.4, y, w * 0.6, h, h / 2);
+  c.fill();
+  let ratio = Math.max(0, Math.min(1, Number(dough.ratio) || 0));
+  let color = '#7EC8FF';
+  if (dough.locked) {
+    const total = Math.max(0.1, Number(dough.lockDuration) || 1.2);
+    ratio = Math.max(0.05, Math.min(1, (Number(dough.lockTimer) || 0) / total));
+    color = '#FF6B6B';
+  } else if (dough.zone === 'warm') {
+    color = ratio > 0.85 ? '#FF9A5C' : '#FFD45E';
+  }
+  if (ratio > 0.01) {
+    UI.roundRectPath(c, x, y, Math.max(h, w * ratio), h, h / 2);
+    c.fillStyle = color;
+    c.fill();
+  }
+  if (!dough.locked && dough.zone === 'warm') {
+    const pulse = 0.35 + 0.25 * Math.sin((Number(nowSec) || 0) * 9);
+    c.globalAlpha = pulse;
+    UI.roundRectPath(c, x - 1, y - 1, Math.max(h, w * ratio) + 2, h + 2, (h + 2) / 2);
+    c.strokeStyle = '#FFF4C8';
+    c.lineWidth = 1;
+    c.stroke();
+  }
+  c.restore();
 }
 
 /**
@@ -2223,6 +2301,12 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
   );
 
   // 4. Full-Width Dark Espresso Serving Tray Rail + Plates + Warm-Wood Trash + Flame-Crest Combo & Fever Bar
+  const effFreshSec =
+    app.isFeatureOn && app.isFeatureOn('freshBonus')
+      ? typeof app.getEffectiveFreshWindowSec === 'function'
+        ? app.getEffectiveFreshWindowSec()
+        : app.freshWindowSec || 6
+      : 0;
   BoardRenderer.renderTrayStrip(
     c,
     { x: innerX, y: trayY, w: innerW, h: trayH },
@@ -2240,6 +2324,8 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
       animState,
       guideTargets,
       boardFullHint: app.boardFullHintTimer > 0,
+      freshWindowSec: effFreshSec,
+      feverScenePct: app.isFeatureOn && app.isFeatureOn('feverV2') ? 20 : 25,
       forkTrashReady: Boolean(app.activeTool === 'fork' && app.forkSourceCell),
       onTapTraySlot: (idx) => app.handleTraySlotTap(idx),
       onTapTrash: () => app.handleTrashBtnTap()
@@ -2261,13 +2347,33 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
   drawUtensilButton(c, forkX, dockY + 2, forkW, dockH - 4, 'fork', app, hits);
 
   const kneadPressed = app.kneadPressTimer > 0 || isHitPressed(app, 'knead_btn');
+  const dough = typeof app.getDoughView === 'function' ? app.getDoughView() : null;
+  const doughOn = Boolean(dough && app.isFeatureOn && app.isFeatureOn('doughTemp'));
+  const kneadInFever = Boolean(orderState.feverActive && app.isFeatureOn && app.isFeatureOn('feverV2'));
+  const kneadLocked = Boolean(doughOn && dough.locked && !kneadInFever);
+  const goalView = typeof app.getGoalView === 'function' ? app.getGoalView() : null;
+  const kneadLimited = Boolean(goalView && goalView.type === 'limited_knead' && goalView.target > 0);
+  const kneadsLeft = kneadLimited ? Math.max(0, goalView.target - (goalView.kneadsUsed || 0)) : Infinity;
+  const kneadOut = kneadLimited && kneadsLeft <= 0;
   UI.drawPillButton(c, kneadX, dockY + 4, kneadW, dockH - 8, {
-    style: 'knead',
-    label: '揉面补料',
+    style: kneadInFever ? 'active' : 'knead',
+    label: kneadOut
+      ? '次数已用完'
+      : kneadInFever
+      ? '热潮揉面'
+      : kneadLocked
+      ? '过热中'
+      : kneadLimited
+      ? `揉面(${kneadsLeft})`
+      : '揉面补料',
     fontSize: compact ? 20.5 : 23.0,
     radius: Math.round((dockH - 8) * 0.48),
-    pressed: kneadPressed
+    pressed: kneadPressed,
+    disabled: kneadLocked || kneadOut
   });
+  if (doughOn && !kneadInFever && !kneadOut) {
+    drawDoughTempBar(c, kneadX + 14, dockY + dockH - 13, kneadW - 28, 4, dough, nowSec);
+  }
   hits.add('knead_btn', kneadX, dockY + 2, kneadW, dockH - 4, () => app.onTapKneadButton());
   guideTargets.kneadBtn = { x: kneadX, y: dockY + 2, w: kneadW, h: dockH - 4 };
 
@@ -2289,9 +2395,101 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
       activeTool: app.activeTool,
       forkSourceCell: app.forkSourceCell,
       guideTargets,
-      neededTiers: app.neededTiers
+      neededTiers: app.neededTiers,
+      freshWindowSec: effFreshSec,
+      feverV2: Boolean(app.isFeatureOn && app.isFeatureOn('feverV2')),
+      lowPowerMode: Boolean(app.lowPowerMode)
     }
   );
+
+  // v0.11 M2: Compact Goal Progress Pill in open top-left starry header (left of '一起做猫饼', zero overlap!)
+  if (goalView && goalView.badge && app.isFeatureOn && app.isFeatureOn('goals')) {
+    const gb = goalView.badge;
+    const pillH = 22;
+    const pillW = Math.min(118, Math.max(88, Math.round(innerW * 0.30)));
+    const pillX = innerX + 1;
+    const pillY = Math.max(4, Math.round(geom.topY + geom.headerH * 0.5 - pillH * 0.5));
+    c.save();
+    try {
+      UI.roundRectPath(c, pillX, pillY, pillW, pillH, pillH * 0.5);
+      c.fillStyle = gb.done ? 'rgba(54, 134, 72, 0.88)' : 'rgba(28, 36, 68, 0.86)';
+      c.fill();
+      c.lineWidth = 1.6;
+      c.strokeStyle = gb.done ? '#9AF0A6' : '#FFD45E';
+      c.stroke();
+      UI.drawStarIcon(c, pillX + 11, pillY + pillH * 0.5, 5.2, true, sprites);
+      UI.drawOutlinedText(c, gb.text, pillX + 21, pillY + pillH * 0.5 + 0.4, {
+        size: 10.6,
+        minSize: 8.6,
+        weight: 800,
+        fill: gb.done ? '#E6FFE6' : '#FFE89B',
+        stroke: '#24140A',
+        strokeWidth: 2.0,
+        shadowOffsetY: 0,
+        align: 'left',
+        maxWidth: pillW - 26
+      });
+    } finally {
+      c.restore();
+    }
+  }
+
+  // v0.11 M2: Sleek Mid-Shift Active Event Banner (zero board-bezel overlap on 375x667 & 390x844)
+  const activeEv = typeof app.getActiveEventView === 'function' ? app.getActiveEventView() : null;
+  if (activeEv && app.isFeatureOn && app.isFeatureOn('events')) {
+    const bw = Math.min(innerW - 24, 248);
+    const gapTop = trayY + trayH;
+    const gapBot = layout && Number.isFinite(layout.gridY) ? layout.gridY - (layout.bezelPad || 10) : stageY;
+    const availGap = gapBot - gapTop;
+    const bh = availGap >= 26 ? 24 : 20;
+    const bx = Math.round(innerX + (innerW - bw) * 0.5);
+    const by =
+      availGap >= bh + 2
+        ? Math.round(gapTop + (availGap - bh) * 0.5)
+        : Math.round(trayY + trayH - statusH + (statusH - bh) * 0.5);
+    const frac = activeEv.duration > 0 ? clamp(activeEv.timer / activeEv.duration, 0, 1) : 0;
+    const isIce = activeEv.tone === 'ice';
+    c.save();
+    try {
+      UI.roundRectPath(c, bx, by, bw, bh, bh * 0.5);
+      c.fillStyle = isIce ? 'rgba(28, 68, 114, 0.99)' : 'rgba(104, 52, 20, 0.99)';
+      c.fill();
+      c.lineWidth = 1.8;
+      c.strokeStyle = isIce ? '#9EE6FF' : '#FFD45E';
+      c.stroke();
+
+      const rCx = bx + 13;
+      const rCy = by + bh * 0.5;
+      const rRad = 7.2;
+      c.beginPath();
+      c.arc(rCx, rCy, rRad, 0, Math.PI * 2);
+      c.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+      c.lineWidth = 2.2;
+      c.stroke();
+      if (frac > 0) {
+        c.beginPath();
+        c.arc(rCx, rCy, rRad, -Math.PI * 0.5, -Math.PI * 0.5 + Math.PI * 2 * frac);
+        c.strokeStyle = isIce ? '#A8EEFF' : '#FFE478';
+        c.lineWidth = 2.4;
+        c.stroke();
+      }
+
+      const suffix = activeEv.chargesLeft > 0 ? `余${activeEv.chargesLeft}次` : `${Math.ceil(activeEv.timer)}秒`;
+      UI.drawOutlinedText(c, `${activeEv.name} · ${suffix}`, bx + 26, by + bh * 0.5 + 0.5, {
+        size: 11.4,
+        minSize: 9.0,
+        weight: 800,
+        fill: '#FFF6DC',
+        stroke: '#2C160A',
+        strokeWidth: 2.2,
+        shadowOffsetY: 0,
+        align: 'left',
+        maxWidth: bw - 34
+      });
+    } finally {
+      c.restore();
+    }
+  }
 
   if (orderState.rushHourActive && !app.activeTool) {
     UI.drawTagBadge(

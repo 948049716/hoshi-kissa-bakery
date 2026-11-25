@@ -55,6 +55,9 @@ jobs:
       - name: Run v2 L1 core unit & L2 30-level static tests
         run: node scripts/test_v2_core.mjs
 
+      - name: Balance simulator gate (30 levels × 3 bot profiles × 6 seeds)
+        run: node scripts/sim_balance.mjs --check --seeds 6
+
       - name: Validate WeChat Mini Game uploader dry-run
         run: node scripts/upload_minigame.mjs --dry-run
 

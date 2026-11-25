@@ -14,6 +14,8 @@ const {
   BOARD_THEMES
 } = require('./constants');
 const UI = require('./ui_draw');
+const CustomerTraits = require('./customer_traits');
+const BalanceConfig = require('./balance_config');
 
 const OWN = Object.prototype.hasOwnProperty;
 
@@ -417,6 +419,8 @@ function normalizeMatrixChar(ch) {
   if (ch === 'G') return 'gold';
   if (ch === 'M') return 'matcha';
   if (ch === 'B') return 'berry';
+  if (ch === 'O') return 'oven';
+  if (ch === 'S') return 'syrup';
   return 'normal';
 }
 
@@ -428,6 +432,8 @@ function normalizeCellType(raw) {
   if (s === 'gold' || s === 'G') return 'gold';
   if (s === 'matcha' || s === 'M') return 'matcha';
   if (s === 'berry' || s === 'B') return 'berry';
+  if (s === 'oven' || s === 'O') return 'oven';
+  if (s === 'syrup' || s === 'S') return 'syrup';
   return 'normal';
 }
 
@@ -1202,6 +1208,29 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
         }
       }
 
+      // v0.12 M3: Circular customer trait tag badge at top-left of speech bubble
+      if (BalanceConfig.isFeatureOn('traits')) {
+        const trait = CustomerTraits.getCustomerTrait(custId);
+        if (trait && trait.shortTag) {
+          const bx = bubbleX + 8;
+          const by = bubbleY + 2;
+          const br = 8.5;
+          ctx.save();
+          try {
+            ctx.beginPath();
+            ctx.arc(bx, by, br, 0, Math.PI * 2);
+            ctx.fillStyle = trait.badgeColor || '#E89B4A';
+            ctx.fill();
+            ctx.lineWidth = 1.6;
+            ctx.strokeStyle = '#4A2B1A';
+            ctx.stroke();
+            UI.drawFitText(ctx, trait.shortTag, bx, by + 0.4, br * 1.6, 9.6, 8.0, 900, '#FFFDF5', 'center', 'middle');
+          } finally {
+            try { ctx.restore(); } catch (_) {}
+          }
+        }
+      }
+
       // 2. Standalone Customer Portrait standing cleanly behind the wooden counter ledge (Design 03)
       const portTop = bubbleY + bubbleH + 1;
       const portBot = counterY + 2;
@@ -1736,6 +1765,42 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
             showFlavorBadge: true
           }
         );
+
+        // v0.10 M1: hot tray items (inside opts.freshWindowSec) puff a steam wisp + warm dot.
+        const trayFreshWin = toSafeNum(getOwn(opts, 'freshWindowSec', 0), 0);
+        const trayBakedAt = getOwn(tile, 'bakedAt', null);
+        if (trayFreshWin > 0 && typeof trayBakedAt === 'number' && Number.isFinite(trayBakedAt)) {
+          const trayAge = toSafeNum(getOwn(orderState, 'elapsedSec', 0), 0) - trayBakedAt;
+          if (trayAge >= 0 && trayAge <= trayFreshWin) {
+            const trayHeat = 1 - trayAge / trayFreshWin;
+            const steamX = plateCx + cakeSz * 0.34;
+            const steamY = ry + trayRowH * 0.33 - cakeSz * 0.42 + bounceDy;
+            ctx.save();
+            try {
+              ctx.globalAlpha = clamp(0.55 + trayHeat * 0.45, 0, 1);
+              ctx.fillStyle = '#FF8A3D';
+              ctx.strokeStyle = '#FFF1D6';
+              ctx.lineWidth = 1.4;
+              ctx.beginPath();
+              ctx.arc(steamX, steamY, Math.max(3, cakeSz * 0.09), 0, Math.PI * 2);
+              ctx.fill();
+              ctx.stroke();
+              ctx.strokeStyle = '#FFFFFF';
+              ctx.lineCap = 'round';
+              ctx.lineWidth = Math.max(1.1, cakeSz * 0.04);
+              const ph = (nowSec * 1.4 + i * 0.37) % 1;
+              ctx.globalAlpha = clamp(trayHeat * (1 - ph) * 0.8, 0, 0.8);
+              const wy = steamY - cakeSz * 0.12 - ph * cakeSz * 0.22;
+              ctx.beginPath();
+              ctx.moveTo(steamX, wy + cakeSz * 0.1);
+              ctx.quadraticCurveTo(steamX + cakeSz * 0.06, wy + cakeSz * 0.05, steamX, wy);
+              ctx.quadraticCurveTo(steamX - cakeSz * 0.06, wy - cakeSz * 0.05, steamX, wy - cakeSz * 0.1);
+              ctx.stroke();
+            } finally {
+              try { ctx.restore(); } catch (_) {}
+            }
+          }
+        }
       }
     }
 
@@ -2139,9 +2204,14 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
       });
 
       if (feverActive) {
+        const feverPctOpt = toSafeNum(getOwn(opts, 'feverScenePct', 0), 0);
+        const feverBadgeTxt =
+          feverPctOpt > 0
+            ? `+${Math.round(feverPctOpt)}% ${Math.ceil(feverTimer)}s`
+            : `×${(FEVER_CONFIG.scoreMult || 1.25).toFixed(2)} ${Math.ceil(feverTimer)}s`;
         UI.drawOutlinedText(
           ctx,
-          `×${(FEVER_CONFIG.scoreMult || 1.25).toFixed(2)} ${Math.ceil(feverTimer)}s`,
+          feverBadgeTxt,
           feverX + feverW - 11,
           fTxtCy,
           {
@@ -2305,6 +2375,18 @@ function resolveSlideState(animState) {
 
 function resolveBlockedShakeOffset(animState) {
   if (!isPlainObj(animState)) return { dx: 0, dy: 0 };
+  // v0.10 bake crit: short omni-directional jolt that scales with crit level
+  const rawCs = getOwn(animState, 'critShake', null);
+  if (isPlainObj(rawCs)) {
+    const cRem = toSafeNum(getOwn(rawCs, 'timer', 0), 0);
+    const cDur = Math.max(0.02, toSafeNum(getOwn(rawCs, 'duration', 0.2), 0.2));
+    if (cRem > 0) {
+      const cp = clamp(1 - cRem / cDur, 0, 1);
+      const lv = clamp(toSafeNum(getOwn(rawCs, 'level', 2), 2), 2, 4);
+      const amp = Math.sin(cp * Math.PI * 3) * (1 - cp) * (1.6 + lv);
+      return { dx: amp * 0.6, dy: amp };
+    }
+  }
   const rawBs = getOwn(animState, 'blockedShake', null);
   const bs = isPlainObj(rawBs) ? rawBs : null;
   const dir = bs ? getOwn(bs, 'dir', null) : getOwn(animState, 'shakeDir', null);
@@ -2402,6 +2484,123 @@ function collectCellFXMaps(animState) {
   }
 
   return { mergeMap, spawnMap, iceList };
+}
+
+/**
+ * v0.10 M1 board overlays (pure display):
+ *  - steam wisps over tiles baked within opts.freshWindowSec of orderState.elapsedSec
+ *  - expanding gold rings for cellFX kind 'crit'
+ *  - soft starry tint across the bed while Starlight Fever is active
+ */
+function renderV010BoardOverlays(ctx, layout, cellsMatrix, orderState, animState, nowSec, opts) {
+  const cellSize = layout.cellSize;
+  const rows = layout.rows;
+  const cols = layout.cols;
+  const freshWindow = toSafeNum(getOwn(opts, 'freshWindowSec', 0), 0);
+  const gameSec = toSafeNum(getOwn(orderState, 'elapsedSec', 0), 0);
+  const feverTimer = toSafeNum(getOwn(orderState, 'feverTimer', 0), 0);
+  const feverOn = Boolean(getOwn(orderState, 'feverActive', false) || feverTimer > 0);
+
+  if (feverOn && Boolean(getOwn(opts, 'feverV2', false))) {
+    ctx.save();
+    try {
+      ctx.globalAlpha *= 0.16 + 0.06 * Math.sin(nowSec * 3.1);
+      ctx.fillStyle = '#B98CFF';
+      UI.roundRectPath(ctx, layout.gridX - 2, layout.gridY - 2, layout.gridW + 4, layout.gridH + 4, Math.round(cellSize * 0.2));
+      ctx.fill();
+      ctx.globalAlpha = 0.75;
+      ctx.fillStyle = '#FFF6C8';
+      for (let k = 0; k < 7; k++) {
+        const ang = nowSec * 0.9 + k * 0.9;
+        const sx = layout.gridX + layout.gridW * ((k * 0.29 + 0.07 + Math.sin(ang) * 0.04 + 1) % 1);
+        const sy = layout.gridY + layout.gridH * ((k * 0.41 + 0.11 + nowSec * 0.05) % 1);
+        UI.drawStar(ctx, sx, sy, 2.6 + (k % 3), ang);
+      }
+    } finally {
+      try {
+        ctx.restore();
+      } catch (_) {}
+    }
+  }
+
+  if (freshWindow > 0) {
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const cell = cellsMatrix[r][c];
+        if (!cell || !cell.tile) continue;
+        const bakedAt = getOwn(cell.tile, 'bakedAt', null);
+        if (typeof bakedAt !== 'number' || !Number.isFinite(bakedAt)) continue;
+        if (toSafeNum(getOwn(cell.tile, 'frozenHp', 0), 0) > 0) continue;
+        const age = gameSec - bakedAt;
+        if (!(age >= 0) || age > freshWindow) continue;
+        const heat = 1 - age / freshWindow;
+        const cx = layout.gridX + (c + 0.5) * cellSize;
+        const topY = layout.gridY + r * cellSize + cellSize * 0.2;
+        ctx.save();
+        try {
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.lineCap = 'round';
+          ctx.lineWidth = Math.max(1.2, cellSize * 0.035);
+          for (let k = 0; k < 2; k++) {
+            const ph = (nowSec * 1.3 + k * 0.5 + (r * 7 + c * 3) * 0.13) % 1;
+            ctx.globalAlpha = clamp(heat * (1 - ph) * 0.75, 0, 0.75);
+            const wx = cx + (k === 0 ? -1 : 1) * cellSize * 0.12;
+            const wy = topY - ph * cellSize * 0.28;
+            ctx.beginPath();
+            ctx.moveTo(wx, wy + cellSize * 0.1);
+            ctx.quadraticCurveTo(wx + cellSize * 0.06, wy + cellSize * 0.05, wx, wy);
+            ctx.quadraticCurveTo(wx - cellSize * 0.06, wy - cellSize * 0.05, wx, wy - cellSize * 0.1);
+            ctx.stroke();
+          }
+        } finally {
+          try {
+            ctx.restore();
+          } catch (_) {}
+        }
+      }
+    }
+  }
+
+  const cellFX = getOwn(animState, 'cellFX', null);
+  const fxLen = safeArrayLen(cellFX, 256);
+  for (let i = 0; i < fxLen; i++) {
+    const fx = getOwn(cellFX, i, null);
+    if (!isPlainObj(fx) || getOwn(fx, 'kind', '') !== 'crit') continue;
+    const dur = Math.max(0.05, toSafeNum(getOwn(fx, 'duration', 0.42), 0.42));
+    const rem = toSafeNum(getOwn(fx, 'timer', 0), 0);
+    if (!(rem > 0)) continue;
+    const p = clamp(1 - rem / dur, 0, 1);
+    const r = toSafeNum(getOwn(fx, 'r', -1), -1);
+    const c = toSafeNum(getOwn(fx, 'c', -1), -1);
+    if (r < 0 || c < 0) continue;
+    const lv = clamp(toSafeNum(getOwn(fx, 'level', 2), 2), 2, 4);
+    const cx = layout.gridX + (c + 0.5) * cellSize;
+    const cy = layout.gridY + (r + 0.5) * cellSize;
+    ctx.save();
+    try {
+      for (let ring = 0; ring < lv - 1; ring++) {
+        const rp = clamp(p - ring * 0.12, 0, 1);
+        if (rp <= 0) continue;
+        ctx.globalAlpha = clamp(1 - rp, 0, 1);
+        ctx.strokeStyle = ring === 0 ? '#FFD45E' : '#FFF2A8';
+        ctx.lineWidth = Math.max(1.5, cellSize * 0.07 * (1 - rp));
+        ctx.beginPath();
+        ctx.arc(cx, cy, cellSize * (0.3 + rp * 0.6), 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = clamp(1 - p, 0, 1);
+      ctx.fillStyle = '#FFF6C8';
+      for (let k = 0; k < 4 + lv * 2; k++) {
+        const ang = (k / (4 + lv * 2)) * Math.PI * 2 + p;
+        const dist = cellSize * (0.25 + p * 0.65);
+        UI.drawStar(ctx, cx + Math.cos(ang) * dist, cy + Math.sin(ang) * dist, 2.2 + lv * 0.5, ang);
+      }
+    } finally {
+      try {
+        ctx.restore();
+      } catch (_) {}
+    }
+  }
 }
 
 /**
@@ -2666,16 +2865,18 @@ function renderBoardStage(
       for (let c = 0; c < cols; c++) {
         let cType = 'normal';
         let tile = null;
+        let ovenSec = 0;
         const srcCell = hasGsRow ? getOwn(gsRow, c, null) : null;
         if (isPlainObj(srcCell)) {
           cType = normalizeCellType(getOwn(srcCell, 'type', 'normal'));
           const rawTile = getOwn(srcCell, 'tile', null);
           tile = isPlainObj(rawTile) ? rawTile : null;
+          ovenSec = toSafeNum(getOwn(srcCell, 'ovenSec', 0), 0);
         } else if (hasLtRow) {
           const rawLt = getOwn(ltRow, c, 'normal');
           cType = typeof rawLt === 'string' ? rawLt : 'normal';
         }
-        safePush(rowArr, { r, c, type: cType, tile });
+        safePush(rowArr, { r, c, type: cType, tile, ovenSec });
       }
       safePush(cellsMatrix, rowArr);
     }
@@ -2712,7 +2913,7 @@ function renderBoardStage(
     const isThumb = Boolean(getOwn(opts, 'thumbnail', false));
 
     // Subtle ambient theme motes ONLY in outer margin around the board (never inside void cutouts)
-    if (!isThumb && layout.w >= 200 && layout.h >= 200) {
+    if (!isThumb && !getOwn(opts, 'lowPowerMode', false) && layout.w >= 200 && layout.h >= 200) {
       ctx.save();
       try {
         ctx.fillStyle = safeColor(themeObj.moteColor, 'rgba(255, 236, 178, 0.28)');
@@ -3054,6 +3255,86 @@ function renderBoardStage(
             { alpha: 1.0 }
           );
           if (guideTargets) safePush(guideCellTypes.gold, cellRect);
+        } else if (cell.type === 'oven') {
+          // v0.11 M2 Star Oven ('O'): warm copper-ember hearth with subtle glowing grate + bake arc
+          const ovenPulse = 0.5 + 0.5 * Math.sin(nowSec * 3.6 + r + c);
+          ctx.save();
+          try {
+            const og = safeLinearGradient(ctx, cx0, cy0, cx0, cy0 + cw, '#C86A28');
+            safeAddColorStop(og, 0, 'rgba(255, 166, 76, 0.34)', '#FFA64C');
+            safeAddColorStop(og, 1, 'rgba(208, 86, 36, 0.42)', '#D05624');
+            ctx.fillStyle = og;
+            UI.roundRectPath(ctx, cx0 + 1, cy0 + 1, cw - 2, cw - 2, cushionRad);
+            ctx.fill();
+            // Warm glowing grate bars
+            ctx.strokeStyle = `rgba(255, 214, 128, ${(0.34 + 0.18 * ovenPulse).toFixed(3)})`;
+            ctx.lineWidth = 1.6;
+            for (let b = 1; b <= 3; b++) {
+              const by = cy0 + (cw * b) / 4;
+              ctx.beginPath();
+              ctx.moveTo(cx0 + cw * 0.16, by);
+              ctx.lineTo(cx0 + cw * 0.84, by);
+              ctx.stroke();
+            }
+            ctx.strokeStyle = `rgba(255, 186, 86, ${(0.72 + 0.2 * ovenPulse).toFixed(3)})`;
+            ctx.lineWidth = 2.0;
+            UI.roundRectPath(ctx, cx0 + 1.5, cy0 + 1.5, cw - 3, cw - 3, Math.max(4, cushionRad - 1));
+            ctx.stroke();
+            // Star ember emblem in top-left corner
+            ctx.fillStyle = '#FFE48E';
+            UI.drawStar(ctx, cx0 + 9, cy0 + 9, Math.max(3.2, cw * 0.085), nowSec * 1.4);
+            // Baking progress ring around cell center when an eligible tile is resting on it
+            const rawOvenSec = toSafeNum(getOwn(cell, 'ovenSec', 0), 0);
+            const ovenNeed = toSafeNum(getOwn(opts, 'ovenSec', 6.0), 6.0) || 6.0;
+            if (rawOvenSec > 0.05 && cell.tile) {
+              const frac = clamp(rawOvenSec / ovenNeed, 0, 1);
+              const arcR = cw * 0.41;
+              const acx = cx0 + cw * 0.5;
+              const acy = cy0 + cw * 0.5;
+              ctx.beginPath();
+              ctx.arc(acx, acy, arcR, -Math.PI * 0.5, -Math.PI * 0.5 + Math.PI * 2 * frac);
+              ctx.strokeStyle = '#FFF2A6';
+              ctx.lineWidth = 2.8;
+              ctx.lineCap = 'round';
+              ctx.stroke();
+            }
+          } finally {
+            try {
+              ctx.restore();
+            } catch (_) {}
+          }
+        } else if (cell.type === 'syrup') {
+          // v0.11 M2 Honey Syrup ('S'): glossy amber-caramel sticky stopper pad
+          ctx.save();
+          try {
+            const sg = safeLinearGradient(ctx, cx0, cy0, cx0, cy0 + cw, '#D8962A');
+            safeAddColorStop(sg, 0, 'rgba(255, 206, 92, 0.44)', '#FFCE5C');
+            safeAddColorStop(sg, 1, 'rgba(196, 122, 24, 0.52)', '#C47A18');
+            ctx.fillStyle = sg;
+            UI.roundRectPath(ctx, cx0 + 2, cy0 + 2, cw - 4, cw - 4, cushionRad);
+            ctx.fill();
+            // Honey swirl ring + sticky gloss droplet
+            const scx = cx0 + cw * 0.5;
+            const scy = cy0 + cw * 0.5;
+            ctx.strokeStyle = 'rgba(255, 244, 194, 0.62)';
+            ctx.lineWidth = 2.0;
+            ctx.beginPath();
+            ctx.arc(scx, scy, cw * 0.27, 0.2, Math.PI * 1.65);
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(255, 250, 224, 0.72)';
+            ctx.beginPath();
+            ctx.ellipse(cx0 + cw * 0.28, cy0 + cw * 0.26, cw * 0.11, cw * 0.06, -0.45, 0, Math.PI * 2);
+            ctx.fill();
+            // Corner anchor brackets signaling stopper behavior
+            ctx.strokeStyle = 'rgba(128, 66, 16, 0.72)';
+            ctx.lineWidth = 2.0;
+            UI.roundRectPath(ctx, cx0 + 2, cy0 + 2, cw - 4, cw - 4, Math.max(4, cushionRad - 1));
+            ctx.stroke();
+          } finally {
+            try {
+              ctx.restore();
+            } catch (_) {}
+          }
         }
 
         // Breathing servable warm-gold rings (single ring for any customer, double ring for preferred customer)
@@ -3397,6 +3678,38 @@ function renderBoardStage(
           );
         }
 
+        // v0.11 M2: Star Oven ('O') baking progress gauge drawn OVER the tile (top-right corner)
+        if (!isThumb && cell.type === 'oven' && !(tileFrozenHp > 0) && tileTier < 5) {
+          const rawOvenSec = toSafeNum(getOwn(cell, 'ovenSec', 0), 0);
+          const ovenNeed = toSafeNum(getOwn(opts, 'ovenSec', 6.0), 6.0) || 6.0;
+          if (rawOvenSec > 0.05) {
+            const frac = clamp(rawOvenSec / ovenNeed, 0, 1);
+            const gR = Math.max(6.2, Math.min(8.5, cellSize * 0.135));
+            const gCx = slotX + cellSize - gR - 4;
+            const gCy = slotY + gR + 4;
+            ctx.save();
+            try {
+              ctx.beginPath();
+              ctx.arc(gCx, gCy, gR + 1.5, 0, Math.PI * 2);
+              ctx.fillStyle = 'rgba(54, 24, 10, 0.86)';
+              ctx.fill();
+              ctx.beginPath();
+              ctx.arc(gCx, gCy, gR - 1, 0, Math.PI * 2);
+              ctx.strokeStyle = 'rgba(255, 224, 150, 0.25)';
+              ctx.lineWidth = 2.2;
+              ctx.stroke();
+              ctx.beginPath();
+              ctx.arc(gCx, gCy, gR - 1, -Math.PI * 0.5, -Math.PI * 0.5 + Math.PI * 2 * frac);
+              ctx.strokeStyle = '#FFF2A6';
+              ctx.lineWidth = 2.4;
+              ctx.lineCap = 'round';
+              ctx.stroke();
+            } finally {
+              try { ctx.restore(); } catch (_) {}
+            }
+          }
+        }
+
         // Frosted rounded-square crystal casing + mandatory M1 tile_ice overlay at globalAlpha = 0.58 (Design 03)
         if (tileFrozenHp > 0) {
           const iceX = slotX + cellInset;
@@ -3562,6 +3875,11 @@ function renderBoardStage(
           } catch (_) {}
         }
       }
+    }
+
+    // Pass 4B (v0.10): fresh steam wisps, bake-crit gold rings, Fever starry tint
+    if (!isThumb) {
+      renderV010BoardOverlays(ctx, layout, cellsMatrix, orderState, animState, nowSec, opts);
     }
 
     // Pass 5: Active Utensil Aiming Notice Banner at Top of Board Stage

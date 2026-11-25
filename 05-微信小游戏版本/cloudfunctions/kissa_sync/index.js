@@ -19,11 +19,11 @@ cloud.init({
 const db = cloud.database();
 const _ = db.command;
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const DEFAULT_INITIAL_STARDUST = 15;
 const PLAYERS_COL = 'players';
 
-// v0.9.0 吃茶小铺永久升级表：3920 + 1250 + 240 + 240 = 5,650 星尘
+// v0.9.0 吃茶小铺永久升级表：3920 + 1250 + 240 + 240 = 5,650 星尘（严禁改动原价）
 const CATCAKE_UPGRADE_COSTS = Object.freeze({
   1: Object.freeze([25, 50, 80, 120]),
   2: Object.freeze([30, 60, 95, 145]),
@@ -53,6 +53,21 @@ const THEME_COSTS = Object.freeze({
   moonlight: 140
 });
 
+// v0.12 M3 茶研所解锁表（11 项合计 2,000 星尘，独立于 5,650 基础小铺总价）
+const RESEARCH_COSTS = Object.freeze({
+  perk_berry_jam_pot: 120,
+  perk_crit_spark: 140,
+  perk_fever_feast: 160,
+  perk_neko_blessing: 180,
+  perk_golden_touch: 220,
+  perk_starlight_crown: 260,
+  secret_traits_regular: 140,
+  secret_traits_vip: 180,
+  badge_star_bell: 160,
+  badge_matcha_whisk: 200,
+  badge_cat_crown: 240
+});
+
 function computeCloudShopTotalCap() {
   let sum = 0;
   const cakeKeys = Object.keys(CATCAKE_UPGRADE_COSTS);
@@ -76,7 +91,17 @@ function computeCloudShopTotalCap() {
   return sum;
 }
 
+function computeCloudResearchTotalCap() {
+  let sum = 0;
+  const keys = Object.keys(RESEARCH_COSTS);
+  for (let i = 0; i < keys.length; i++) {
+    sum += RESEARCH_COSTS[keys[i]] || 0;
+  }
+  return sum;
+}
+
 const SHOP_TOTAL_CAP = computeCloudShopTotalCap();
+const RESEARCH_TOTAL_CAP = computeCloudResearchTotalCap();
 
 // v1 历史成本表（仅用于老存档 v1 -> v2 总星尘无损还原）
 const V1_PATRON_COSTS = Object.freeze({
@@ -124,10 +149,15 @@ const CHAPTER_SCORE_CAPS = Object.freeze({
 const MAX_CAMPAIGN_STARS = VALID_LEVEL_IDS.length * 3;
 const MAX_TOTAL_STARS = MAX_CAMPAIGN_STARS;
 const MAX_TOTAL_CUMULATIVE_SCORE = 3450000;
+const MAX_DAILY_SCORE = 150000;
+const MAX_ENDLESS_SHIFT = 99;
+const MAX_ENDLESS_SCORE = 6000000;
+const MAX_ENDLESS_SCORE_PER_SHIFT = 60000;
+const MAX_ENDLESS_DAILY_DUST = 60;
 const MAX_OFFLINE_STARDUST_DELTA = 1500;
 const MAX_INITIAL_UNSYNCED_STARDUST = 6000;
 const MAX_SAFE_EARNED_STARDUST = 9999999;
-const MAX_CONSUMABLE_SPENT_STARDUST = MAX_SAFE_EARNED_STARDUST - SHOP_TOTAL_CAP;
+const MAX_CONSUMABLE_SPENT_STARDUST = MAX_SAFE_EARNED_STARDUST - SHOP_TOTAL_CAP - RESEARCH_TOTAL_CAP;
 const MAX_TIMESTAMP_MS = 9999999999999;
 
 const LEGACY_ROOT_FIELDS = Object.freeze([
@@ -405,11 +435,165 @@ function computeSpentStardust(meta) {
     }
   }
 
+  const rawResearch = getOwn(meta, 'researchUnlocks');
+  if (isPlainRecord(rawResearch)) {
+    const rKeys = Object.keys(RESEARCH_COSTS);
+    for (let i = 0; i < rKeys.length; i++) {
+      const rk = rKeys[i];
+      if (hasOwn(rawResearch, rk) && Boolean(getOwn(rawResearch, rk))) {
+        spent += RESEARCH_COSTS[rk] || 0;
+      }
+    }
+  }
+
   if (hasOwn(meta, 'consumableSpentStardust')) {
     spent += clampInt(getOwn(meta, 'consumableSpentStardust'), 0, MAX_CONSUMABLE_SPENT_STARDUST, 0);
   }
 
   return spent;
+}
+
+function sanitizeDateKey(val) {
+  if (typeof val !== 'string') return '';
+  const cleaned = val.trim().replace(/-/g, '');
+  return /^\d{8}$/.test(cleaned) ? cleaned : '';
+}
+
+function maxDateKey(a, b) {
+  const ka = sanitizeDateKey(a);
+  const kb = sanitizeDateKey(b);
+  if (!ka) return kb;
+  if (!kb) return ka;
+  return ka >= kb ? ka : kb;
+}
+
+function createDefaultModeStats() {
+  return {
+    daily: {
+      lastDate: '',
+      bestScore: 0,
+      claimedDate: '',
+      claimed3Date: ''
+    },
+    endless: {
+      bestShift: 0,
+      bestScore: 0,
+      runs: 0,
+      dailyDustDate: '',
+      dailyDust: 0
+    }
+  };
+}
+
+function sanitizeModeStats(raw) {
+  const out = createDefaultModeStats();
+  if (!isPlainRecord(raw)) return out;
+  const rawDaily = getOwn(raw, 'daily');
+  if (isPlainRecord(rawDaily)) {
+    out.daily.lastDate = sanitizeDateKey(getOwn(rawDaily, 'lastDate'));
+    out.daily.bestScore = clampInt(getOwn(rawDaily, 'bestScore'), 0, MAX_DAILY_SCORE, 0);
+    out.daily.claimedDate = sanitizeDateKey(getOwn(rawDaily, 'claimedDate'));
+    out.daily.claimed3Date = sanitizeDateKey(getOwn(rawDaily, 'claimed3Date'));
+  }
+  const rawEndless = getOwn(raw, 'endless');
+  if (isPlainRecord(rawEndless)) {
+    out.endless.bestShift = clampInt(getOwn(rawEndless, 'bestShift'), 0, MAX_ENDLESS_SHIFT, 0);
+    out.endless.bestScore = clampInt(getOwn(rawEndless, 'bestScore'), 0, MAX_ENDLESS_SCORE, 0);
+    out.endless.runs = clampInt(getOwn(rawEndless, 'runs'), 0, 999999, 0);
+    out.endless.dailyDustDate = sanitizeDateKey(getOwn(rawEndless, 'dailyDustDate'));
+    out.endless.dailyDust = clampInt(getOwn(rawEndless, 'dailyDust'), 0, MAX_ENDLESS_DAILY_DUST, 0);
+  }
+  return out;
+}
+
+function mergeModeStats(aRaw, bRaw) {
+  const a = sanitizeModeStats(aRaw);
+  const b = sanitizeModeStats(bRaw);
+  const dLast = maxDateKey(a.daily.lastDate, b.daily.lastDate);
+  let dBest = 0;
+  if (a.daily.lastDate === b.daily.lastDate) {
+    dBest = Math.max(a.daily.bestScore, b.daily.bestScore);
+  } else if (a.daily.lastDate === dLast) {
+    dBest = a.daily.bestScore;
+  } else {
+    dBest = b.daily.bestScore;
+  }
+  const eDustDate = maxDateKey(a.endless.dailyDustDate, b.endless.dailyDustDate);
+  let eDust = 0;
+  if (a.endless.dailyDustDate === b.endless.dailyDustDate) {
+    eDust = Math.max(a.endless.dailyDust, b.endless.dailyDust);
+  } else if (a.endless.dailyDustDate === eDustDate) {
+    eDust = a.endless.dailyDust;
+  } else {
+    eDust = b.endless.dailyDust;
+  }
+  return {
+    daily: {
+      lastDate: dLast,
+      bestScore: dBest,
+      claimedDate: maxDateKey(a.daily.claimedDate, b.daily.claimedDate),
+      claimed3Date: maxDateKey(a.daily.claimed3Date, b.daily.claimed3Date)
+    },
+    endless: {
+      bestShift: Math.max(a.endless.bestShift, b.endless.bestShift),
+      bestScore: Math.max(a.endless.bestScore, b.endless.bestScore),
+      runs: Math.max(a.endless.runs, b.endless.runs),
+      dailyDustDate: eDustDate,
+      dailyDust: eDust
+    }
+  };
+}
+
+function sanitizeResearchUnlocks(raw) {
+  const out = {};
+  if (!isPlainRecord(raw)) return out;
+  const keys = Object.keys(RESEARCH_COSTS);
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i];
+    if (hasOwn(raw, k) && Boolean(getOwn(raw, k))) {
+      out[k] = true;
+    }
+  }
+  return out;
+}
+
+function sanitizeLevelGoalsDone(raw) {
+  const out = {};
+  if (!isPlainRecord(raw)) return out;
+  for (let i = 0; i < VALID_LEVEL_IDS.length; i++) {
+    const id = VALID_LEVEL_IDS[i];
+    if (hasOwn(raw, id) && Boolean(getOwn(raw, id))) {
+      out[id] = true;
+    }
+  }
+  return out;
+}
+
+function sanitizeSeenTips(raw) {
+  const out = {};
+  if (!isPlainRecord(raw)) return out;
+  const keys = Object.keys(raw);
+  let kept = 0;
+  for (let i = 0; i < keys.length && kept < 32; i++) {
+    const k = keys[i];
+    if (/^[a-z0-9_]{1,32}$/.test(k) && Boolean(getOwn(raw, k))) {
+      out[k] = true;
+      kept += 1;
+    }
+  }
+  return out;
+}
+
+function sanitizeSettings(raw) {
+  const src = isPlainRecord(raw) ? raw : {};
+  const rawVib = getOwn(src, 'vibrateEnabled');
+  const rawLow = getOwn(src, 'lowPowerMode');
+  const rawCb = getOwn(src, 'colorblindMarks');
+  return {
+    vibrateEnabled: typeof rawVib === 'boolean' ? rawVib : true,
+    lowPowerMode: typeof rawLow === 'boolean' ? rawLow : false,
+    colorblindMarks: typeof rawCb === 'boolean' ? rawCb : false
+  };
 }
 
 function normalizeMetaProfile(raw, fallbackPatron) {
@@ -476,6 +660,7 @@ function createDefaultMetaSave() {
     levelStars: {},
     levelBestScores: {},
     levelFailStreaks: {},
+    levelGoalsDone: {},
     highestUnlockedLevel: '1-1',
     catcakeLevels: {
       '1': 0,
@@ -496,12 +681,16 @@ function createDefaultMetaSave() {
     unlockedPatrons: ['mikan'],
     equippedTheme: 'amber',
     unlockedThemes: ['amber'],
+    researchUnlocks: {},
+    modeStats: createDefaultModeStats(),
     seenTutorials: {
       intro_slide: false,
       tray_trash: false,
       flavor_tile: false,
       ice_tile: false
     },
+    seenTips: {},
+    settings: sanitizeSettings(null),
     playerProfile: {
       nickName: '',
       avatarUrl: '',
@@ -536,7 +725,7 @@ function migrateV1ToV2(raw, wrapperDoc) {
   const wrap = isPlainRecord(wrapperDoc) ? wrapperDoc : null;
 
   const sv = hasOwn(src, 'schemaVersion') ? toSafeNum(getOwn(src, 'schemaVersion')) : 0;
-  if (Number.isFinite(sv) && sv >= SCHEMA_VERSION) {
+  if (Number.isFinite(sv) && sv >= 2) {
     return sanitizeMetaSave(src);
   }
 
@@ -673,6 +862,7 @@ function migrateV1ToV2(raw, wrapperDoc) {
     levelStars: {},
     levelBestScores: {},
     levelFailStreaks: {},
+    levelGoalsDone: {},
     highestUnlockedLevel: '1-1',
     catcakeLevels: {
       '1': 0,
@@ -693,12 +883,16 @@ function migrateV1ToV2(raw, wrapperDoc) {
     unlockedPatrons,
     equippedTheme,
     unlockedThemes,
+    researchUnlocks: {},
+    modeStats: createDefaultModeStats(),
     seenTutorials: {
       intro_slide: false,
       tray_trash: false,
       flavor_tile: false,
       ice_tile: false
     },
+    seenTips: {},
+    settings: sanitizeSettings(null),
     playerProfile: normalizeMetaProfile(rawProf, selectedPatron),
     lifetimeStats: {
       runsPlayed,
@@ -728,7 +922,7 @@ function sanitizeMetaSave(raw, warnings, wrapperDoc) {
   }
 
   const sv = hasOwn(raw, 'schemaVersion') ? toSafeNum(getOwn(raw, 'schemaVersion')) : 0;
-  if (!Number.isFinite(sv) || sv < SCHEMA_VERSION) {
+  if (!Number.isFinite(sv) || sv < 2) {
     return migrateV1ToV2(raw, wrapperDoc);
   }
 
@@ -795,6 +989,7 @@ function sanitizeMetaSave(raw, warnings, wrapperDoc) {
   }
 
   const levelFailStreaks = sanitizeLevelFailStreaks(getOwn(raw, 'levelFailStreaks'));
+  const levelGoalsDone = sanitizeLevelGoalsDone(getOwn(raw, 'levelGoalsDone'));
 
   const rawClObj = getOwn(raw, 'catcakeLevels');
   const clRaw = isPlainRecord(rawClObj) ? rawClObj : {};
@@ -829,6 +1024,9 @@ function sanitizeMetaSave(raw, warnings, wrapperDoc) {
   const candTheme = typeof rawEqTheme === 'string' ? rawEqTheme.trim() : '';
   const equippedTheme = candTheme && unlockedThemes.indexOf(candTheme) !== -1 ? candTheme : 'amber';
 
+  const researchUnlocks = sanitizeResearchUnlocks(getOwn(raw, 'researchUnlocks'));
+  const modeStats = sanitizeModeStats(getOwn(raw, 'modeStats'));
+
   const rawTutObj = getOwn(raw, 'seenTutorials');
   const tutRaw = isPlainRecord(rawTutObj) ? rawTutObj : {};
   const seenTutorials = {
@@ -837,6 +1035,8 @@ function sanitizeMetaSave(raw, warnings, wrapperDoc) {
     flavor_tile: hasOwn(tutRaw, 'flavor_tile') ? Boolean(getOwn(tutRaw, 'flavor_tile')) : false,
     ice_tile: hasOwn(tutRaw, 'ice_tile') ? Boolean(getOwn(tutRaw, 'ice_tile')) : false
   };
+  const seenTips = sanitizeSeenTips(getOwn(raw, 'seenTips'));
+  const settings = sanitizeSettings(getOwn(raw, 'settings'));
 
   const rawProfObj = getOwn(raw, 'playerProfile');
   const profRaw = isPlainRecord(rawProfObj) ? rawProfObj : null;
@@ -880,6 +1080,7 @@ function sanitizeMetaSave(raw, warnings, wrapperDoc) {
     levelStars,
     levelBestScores,
     levelFailStreaks,
+    levelGoalsDone,
     highestUnlockedLevel,
     catcakeLevels,
     deviceUpgrades,
@@ -887,7 +1088,11 @@ function sanitizeMetaSave(raw, warnings, wrapperDoc) {
     unlockedPatrons,
     equippedTheme,
     unlockedThemes,
+    researchUnlocks,
+    modeStats,
     seenTutorials,
+    seenTips,
+    settings,
     playerProfile,
     lifetimeStats,
     updatedAt
@@ -970,8 +1175,22 @@ function rollbackLevelProgress(clientMeta, serverMeta, levelId) {
   clientMeta.lifetimeStats.totalCumulativeScore = computeTotalCumulativeScore(clientMeta.levelBestScores);
 }
 
+function rollbackModeStats(clientMeta, serverMeta, mode) {
+  const fallback = serverMeta && isPlainRecord(serverMeta.modeStats)
+    ? sanitizeModeStats(serverMeta.modeStats)
+    : createDefaultModeStats();
+  if (!isPlainRecord(clientMeta.modeStats)) {
+    clientMeta.modeStats = createDefaultModeStats();
+  }
+  if (mode === 'daily') {
+    clientMeta.modeStats.daily = fallback.daily;
+  } else if (mode === 'endless') {
+    clientMeta.modeStats.endless = fallback.endless;
+  }
+}
+
 /**
- * 服务端反作弊校验（纯上菜唯一得分铁律、最短时长与分章得分上限）。
+ * 服务端反作弊校验（纯上菜唯一得分铁律、最短时长、分章得分上限，以及每天特调/无限营业模式校验）。
  */
 function validateAndClampClientMeta(serverRaw, clientRaw, runReport, serverWrapperDoc) {
   const warnings = [];
@@ -1004,7 +1223,69 @@ function validateAndClampClientMeta(serverRaw, clientRaw, runReport, serverWrapp
     const rawLid = getOwn(runReport, 'levelId');
     const lid = typeof rawLid === 'string' ? rawLid.trim() : '';
 
-    if (rrScore > 0) {
+    const rawModeVal = getOwn(runReport, 'mode');
+    const explicitMode = typeof rawModeVal === 'string' ? rawModeVal.trim() : '';
+    const rrMode =
+      explicitMode === 'daily' || explicitMode === 'endless'
+        ? explicitMode
+        : lid.indexOf('daily_') === 0
+        ? 'daily'
+        : lid.indexOf('endless_') === 0
+        ? 'endless'
+        : 'campaign';
+
+    if (rrMode === 'daily') {
+      if (rrScore > 0) {
+        let rolledBack = false;
+        if (rrServes < 1) {
+          pushUniqueWarning(warnings, 'zero_serve_score_rejected');
+          rollbackModeStats(client, server, 'daily');
+          rolledBack = true;
+        }
+        if (hasDur && (!Number.isFinite(rrDuration) || rrDuration < 3)) {
+          pushUniqueWarning(warnings, 'implausible_run_duration');
+          if (!rolledBack) {
+            rollbackModeStats(client, server, 'daily');
+            rolledBack = true;
+          }
+        }
+        if (!rolledBack && rrScore > MAX_DAILY_SCORE) {
+          pushUniqueWarning(warnings, 'run_score_cap_clamped');
+          if (client.modeStats && client.modeStats.daily && client.modeStats.daily.bestScore > MAX_DAILY_SCORE) {
+            client.modeStats.daily.bestScore = MAX_DAILY_SCORE;
+          }
+        }
+      }
+    } else if (rrMode === 'endless') {
+      const rrShift = clampInt(
+        hasOwn(runReport, 'shift') ? getOwn(runReport, 'shift') : 1,
+        1,
+        MAX_ENDLESS_SHIFT,
+        1
+      );
+      if (rrScore > 0) {
+        let rolledBack = false;
+        if (rrServes < 1) {
+          pushUniqueWarning(warnings, 'zero_serve_score_rejected');
+          rollbackModeStats(client, server, 'endless');
+          rolledBack = true;
+        }
+        if (hasDur && (!Number.isFinite(rrDuration) || rrDuration < 3)) {
+          pushUniqueWarning(warnings, 'implausible_run_duration');
+          if (!rolledBack) {
+            rollbackModeStats(client, server, 'endless');
+            rolledBack = true;
+          }
+        }
+        const shiftCap = Math.min(MAX_ENDLESS_SCORE, Math.max(1, rrShift) * MAX_ENDLESS_SCORE_PER_SHIFT);
+        if (!rolledBack && rrScore > shiftCap) {
+          pushUniqueWarning(warnings, 'run_score_cap_clamped');
+          if (client.modeStats && client.modeStats.endless && client.modeStats.endless.bestScore > shiftCap) {
+            client.modeStats.endless.bestScore = shiftCap;
+          }
+        }
+      }
+    } else if (rrScore > 0) {
       let rolledBack = false;
       if (rrServes < 1) {
         pushUniqueWarning(warnings, 'zero_serve_score_rejected');
@@ -1025,6 +1306,10 @@ function validateAndClampClientMeta(serverRaw, clientRaw, runReport, serverWrapp
       }
       if (!rolledBack && VALID_LEVEL_SET.has(lid)) {
         const cap = getChapterScoreCapForLevel(lid);
+        const rawEarly = hasOwn(runReport, 'earlyCloseBonus') ? toSafeNum(getOwn(runReport, 'earlyCloseBonus')) : 0;
+        if (Number.isFinite(rawEarly) && rawEarly > 20000) {
+          pushUniqueWarning(warnings, 'early_close_bonus_clamped');
+        }
         if (rrScore > cap) {
           pushUniqueWarning(warnings, 'run_score_cap_clamped');
           pushUniqueWarning(warnings, 'level_score_cap_clamped');
@@ -1062,6 +1347,28 @@ function isPlaceholderCloudProfile(prof, defaultName) {
   return isPlaceholderNickName(getOwn(prof, 'nickName'), defaultName);
 }
 
+function isUntouchedModeStats(ms) {
+  if (!isPlainRecord(ms)) return true;
+  const d = isPlainRecord(ms.daily) ? ms.daily : {};
+  const e = isPlainRecord(ms.endless) ? ms.endless : {};
+  return Boolean(
+    !d.lastDate &&
+      !(d.bestScore > 0) &&
+      !d.claimedDate &&
+      !d.claimed3Date &&
+      !(e.bestShift > 0) &&
+      !(e.bestScore > 0) &&
+      !(e.runs > 0) &&
+      !e.dailyDustDate &&
+      !(e.dailyDust > 0)
+  );
+}
+
+function isUntouchedSettings(st) {
+  if (!isPlainRecord(st)) return true;
+  return Boolean(st.vibrateEnabled === true && !st.lowPowerMode && !st.colorblindMarks);
+}
+
 function isUntouchedDefaultMeta(s) {
   return Boolean(
     isPlainRecord(s) &&
@@ -1074,6 +1381,10 @@ function isUntouchedDefaultMeta(s) {
       s.lifetimeStats.totalStars === 0 &&
       s.lifetimeStats.totalCumulativeScore === 0 &&
       (!isPlainRecord(s.levelFailStreaks) || Object.keys(s.levelFailStreaks).length === 0) &&
+      (!isPlainRecord(s.levelGoalsDone) || Object.keys(s.levelGoalsDone).length === 0) &&
+      (!isPlainRecord(s.researchUnlocks) || Object.keys(s.researchUnlocks).length === 0) &&
+      isUntouchedModeStats(s.modeStats) &&
+      isUntouchedSettings(s.settings) &&
       !s.migratedFromV1GiftPending &&
       s.selectedPatron === 'mikan' &&
       s.equippedTheme === 'amber' &&
@@ -1101,6 +1412,9 @@ function isUntouchedInitialServerMeta(s, prevRevision) {
       s.lifetimeStats.totalStars === 0 &&
       s.lifetimeStats.totalCumulativeScore === 0 &&
       (!isPlainRecord(s.levelFailStreaks) || Object.keys(s.levelFailStreaks).length === 0) &&
+      (!isPlainRecord(s.levelGoalsDone) || Object.keys(s.levelGoalsDone).length === 0) &&
+      (!isPlainRecord(s.researchUnlocks) || Object.keys(s.researchUnlocks).length === 0) &&
+      isUntouchedModeStats(s.modeStats) &&
       !s.migratedFromV1GiftPending
   );
 }
@@ -1152,6 +1466,7 @@ function mergeMetaSaves(serverRaw, clientRaw, warnings, serverWrapperDoc) {
   const levelBestScores = {};
   const levelStars = {};
   const levelFailStreaks = {};
+  const levelGoalsDone = {};
   for (let i = 0; i < VALID_LEVEL_IDS.length; i++) {
     const id = VALID_LEVEL_IDS[i];
     const scA = hasOwn(a.levelBestScores, id) ? a.levelBestScores[id] : 0;
@@ -1178,6 +1493,13 @@ function mergeMetaSaves(serverRaw, clientRaw, warnings, serverWrapperDoc) {
         levelFailStreaks[id] = fs;
       }
     }
+
+    if (
+      (isPlainRecord(a.levelGoalsDone) && Boolean(getOwn(a.levelGoalsDone, id))) ||
+      (isPlainRecord(b.levelGoalsDone) && Boolean(getOwn(b.levelGoalsDone, id)))
+    ) {
+      levelGoalsDone[id] = true;
+    }
   }
 
   const catcakeLevels = {};
@@ -1200,6 +1522,27 @@ function mergeMetaSaves(serverRaw, clientRaw, warnings, serverWrapperDoc) {
   const unlockedThemes = sanitizeUnlockedThemes(a.unlockedThemes.concat(b.unlockedThemes));
   const equippedTheme =
     unlockedThemes.indexOf(latest.equippedTheme) !== -1 ? latest.equippedTheme : 'amber';
+
+  const researchUnlocks = {};
+  const resKeys = Object.keys(RESEARCH_COSTS);
+  for (let i = 0; i < resKeys.length; i++) {
+    const k = resKeys[i];
+    if (
+      (isPlainRecord(a.researchUnlocks) && Boolean(getOwn(a.researchUnlocks, k))) ||
+      (isPlainRecord(b.researchUnlocks) && Boolean(getOwn(b.researchUnlocks, k)))
+    ) {
+      researchUnlocks[k] = true;
+    }
+  }
+
+  const modeStats = mergeModeStats(a.modeStats, b.modeStats);
+  const seenTipsRaw = Object.assign(
+    {},
+    isPlainRecord(a.seenTips) ? a.seenTips : {},
+    isPlainRecord(b.seenTips) ? b.seenTips : {}
+  );
+  const seenTips = sanitizeSeenTips(seenTipsRaw);
+  const settings = sanitizeSettings(latest.settings);
 
   const consumableSpentStardust = clampInt(
     Math.max(a.consumableSpentStardust || 0, b.consumableSpentStardust || 0),
@@ -1227,6 +1570,7 @@ function mergeMetaSaves(serverRaw, clientRaw, warnings, serverWrapperDoc) {
     levelStars,
     levelBestScores,
     levelFailStreaks,
+    levelGoalsDone,
     highestUnlockedLevel,
     catcakeLevels,
     deviceUpgrades,
@@ -1234,12 +1578,16 @@ function mergeMetaSaves(serverRaw, clientRaw, warnings, serverWrapperDoc) {
     unlockedPatrons,
     equippedTheme,
     unlockedThemes,
+    researchUnlocks,
+    modeStats,
     seenTutorials: {
       intro_slide: Boolean(a.seenTutorials.intro_slide || b.seenTutorials.intro_slide),
       tray_trash: Boolean(a.seenTutorials.tray_trash || b.seenTutorials.tray_trash),
       flavor_tile: Boolean(a.seenTutorials.flavor_tile || b.seenTutorials.flavor_tile),
       ice_tile: Boolean(a.seenTutorials.ice_tile || b.seenTutorials.ice_tile)
     },
+    seenTips,
+    settings,
     playerProfile: latest.playerProfile,
     lifetimeStats: {
       runsPlayed: Math.max(a.lifetimeStats.runsPlayed || 0, b.lifetimeStats.runsPlayed || 0),
@@ -1649,6 +1997,27 @@ exports.main = async (rawEvent = {}, rawContext = {}) => {
 
   const docRef = db.collection(PLAYERS_COL).doc(openid);
 
+  function getUtc8DateKey(nowMs) {
+    const ms = Number.isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
+    const shifted = new Date(ms + 8 * 3600 * 1000);
+    const y = shifted.getUTCFullYear();
+    const m = String(shifted.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(shifted.getUTCDate()).padStart(2, '0');
+    return String(y) + m + d;
+  }
+
+  function extractModeRankFields(meta) {
+    const ms = isPlainRecord(meta) && isPlainRecord(meta.modeStats) ? meta.modeStats : createDefaultModeStats();
+    const daily = isPlainRecord(ms.daily) ? ms.daily : {};
+    const endless = isPlainRecord(ms.endless) ? ms.endless : {};
+    return {
+      dailyDateKey: sanitizeDateKey(getOwn(daily, 'lastDate')),
+      dailyBestScore: clampInt(getOwn(daily, 'bestScore'), 0, MAX_DAILY_SCORE, 0),
+      endlessBestShift: clampInt(getOwn(endless, 'bestShift'), 0, MAX_ENDLESS_SHIFT, 0),
+      endlessBestScore: clampInt(getOwn(endless, 'bestScore'), 0, MAX_ENDLESS_SCORE, 0)
+    };
+  }
+
   async function readExisting() {
     try {
       const got = await docRef.get();
@@ -1657,6 +2026,55 @@ exports.main = async (rawEvent = {}, rawContext = {}) => {
     } catch (_err) {
       return null;
     }
+  }
+
+  if (action === 'config') {
+    let configVersion = 'default';
+    const safeOverrides = {};
+    try {
+      const cfgGot = await db.collection('config').doc('balance').get();
+      const cfgData = isPlainRecord(cfgGot) && isPlainRecord(getOwn(cfgGot, 'data'))
+        ? getOwn(cfgGot, 'data')
+        : null;
+      if (cfgData) {
+        const rawVer = getOwn(cfgData, 'configVersion');
+        if (typeof rawVer === 'string' && rawVer.trim()) {
+          configVersion = rawVer.trim().slice(0, 32);
+        }
+        const rawOv = getOwn(cfgData, 'overrides');
+        if (isPlainRecord(rawOv)) {
+          const ovKeys = Object.keys(rawOv);
+          for (let i = 0; i < ovKeys.length; i++) {
+            const k = ovKeys[i];
+            if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+            if (k === 'features') {
+              const rf = getOwn(rawOv, 'features');
+              if (isPlainRecord(rf)) {
+                const sf = {};
+                const fk = Object.keys(rf);
+                for (let j = 0; j < fk.length; j++) {
+                  const fName = fk[j];
+                  if (fName === '__proto__' || fName === 'constructor' || fName === 'prototype') continue;
+                  const fv = getOwn(rf, fName);
+                  if (typeof fv === 'boolean') sf[fName] = fv;
+                }
+                safeOverrides.features = sf;
+              }
+            } else {
+              const v = Number(getOwn(rawOv, k));
+              if (Number.isFinite(v)) safeOverrides[k] = v;
+            }
+          }
+        }
+      }
+    } catch (_err) {
+      // Collection `config` may not exist yet in CloudBase; cleanly fall back to empty overrides.
+    }
+    return {
+      ok: true,
+      configVersion,
+      overrides: safeOverrides
+    };
   }
 
   let existing = await readExisting();
@@ -1676,16 +2094,19 @@ exports.main = async (rawEvent = {}, rawContext = {}) => {
       };
       initMeta.updatedAt = now;
 
-      const newDoc = {
-        openidSuffix,
-        profile: initProfile,
-        totalStars: 0,
-        totalCumulativeScore: 0,
-        metaSave: initMeta,
-        revision: 1,
-        createdAt: now,
-        updatedAt: now
-      };
+      const newDoc = Object.assign(
+        {
+          openidSuffix,
+          profile: initProfile,
+          totalStars: 0,
+          totalCumulativeScore: 0,
+          metaSave: initMeta,
+          revision: 1,
+          createdAt: now,
+          updatedAt: now
+        },
+        extractModeRankFields(initMeta)
+      );
       await docRef.set({ data: newDoc });
 
       return {
@@ -1739,15 +2160,12 @@ exports.main = async (rawEvent = {}, rawContext = {}) => {
     const existingSv = existingMetaObj && hasOwn(existingMetaObj, 'schemaVersion')
       ? toSafeNum(getOwn(existingMetaObj, 'schemaVersion'))
       : 0;
-    const isExistingV2 = Number.isFinite(existingSv) && existingSv >= SCHEMA_VERSION;
+    const isExistingV1 = !(Number.isFinite(existingSv) && existingSv >= 2);
+    const needsV2ToV3Upgrade = Number.isFinite(existingSv) && existingSv >= 2 && existingSv < SCHEMA_VERSION;
 
-    if (!isExistingV2) {
+    if (isExistingV1) {
       const now = Date.now();
       const migratedSource = existingMetaObj || existing;
-      const migratedSourceSv = hasOwn(migratedSource, 'schemaVersion')
-        ? toSafeNum(getOwn(migratedSource, 'schemaVersion'))
-        : 0;
-      const wasV1Migration = !(Number.isFinite(migratedSourceSv) && migratedSourceSv >= SCHEMA_VERSION);
       const migratedMeta = migrateV1ToV2(migratedSource, existing);
       migratedMeta.lastSyncedEarnedStardust = migratedMeta.totalEarnedStardust;
       const nextProfile = resolveStoredDocProfile(
@@ -1782,6 +2200,7 @@ exports.main = async (rawEvent = {}, rawContext = {}) => {
             revision: nextRev,
             updatedAt: now
           },
+          extractModeRankFields(migratedMeta),
           buildLegacyRemovalPatch()
         )
       });
@@ -1789,7 +2208,7 @@ exports.main = async (rawEvent = {}, rawContext = {}) => {
       return {
         ok: true,
         isNewUser: false,
-        migratedFromV1: wasV1Migration,
+        migratedFromV1: true,
         openidSuffix: docSuffix,
         profile: nextProfile,
         totalStars,
@@ -1830,7 +2249,7 @@ exports.main = async (rawEvent = {}, rawContext = {}) => {
     const totalStars = cleanMeta.lifetimeStats.totalStars;
     const totalCumulativeScore = cleanMeta.lifetimeStats.totalCumulativeScore;
 
-    if (hasLegacyRootFields(existing) || hasCorruptedPullRev) {
+    if (needsV2ToV3Upgrade || hasLegacyRootFields(existing) || hasCorruptedPullRev) {
       await docRef.update({
         data: Object.assign(
           {
@@ -1842,6 +2261,7 @@ exports.main = async (rawEvent = {}, rawContext = {}) => {
             revision: rev,
             updatedAt: Date.now()
           },
+          extractModeRankFields(cleanMeta),
           buildLegacyRemovalPatch()
         )
       });
@@ -1980,16 +2400,19 @@ exports.main = async (rawEvent = {}, rawContext = {}) => {
       const nextRev = prevRev + 1;
 
       if (!existing) {
-        const setPayload = {
-          openidSuffix: docSuffix,
-          profile: mergedProfile,
-          totalStars,
-          totalCumulativeScore,
-          metaSave: mergedMeta,
-          revision: nextRev,
-          createdAt: now,
-          updatedAt: now
-        };
+        const setPayload = Object.assign(
+          {
+            openidSuffix: docSuffix,
+            profile: mergedProfile,
+            totalStars,
+            totalCumulativeScore,
+            metaSave: mergedMeta,
+            revision: nextRev,
+            createdAt: now,
+            updatedAt: now
+          },
+          extractModeRankFields(mergedMeta)
+        );
         await docRef.set({ data: setPayload });
         return {
           ok: true,
@@ -2014,6 +2437,7 @@ exports.main = async (rawEvent = {}, rawContext = {}) => {
           revision: nextRev,
           updatedAt: now
         },
+        extractModeRankFields(mergedMeta),
         buildLegacyRemovalPatch()
       );
 
@@ -2085,16 +2509,19 @@ exports.main = async (rawEvent = {}, rawContext = {}) => {
       initMeta.updatedAt = now;
 
       await docRef.set({
-        data: {
-          openidSuffix,
-          profile: nextProfile,
-          totalStars: 0,
-          totalCumulativeScore: 0,
-          metaSave: initMeta,
-          revision: 1,
-          createdAt: now,
-          updatedAt: now
-        }
+        data: Object.assign(
+          {
+            openidSuffix,
+            profile: nextProfile,
+            totalStars: 0,
+            totalCumulativeScore: 0,
+            metaSave: initMeta,
+            revision: 1,
+            createdAt: now,
+            updatedAt: now
+          },
+          extractModeRankFields(initMeta)
+        )
       });
 
       return {
@@ -2152,6 +2579,7 @@ exports.main = async (rawEvent = {}, rawContext = {}) => {
           revision: nextRev,
           updatedAt: now
         },
+        extractModeRankFields(nextMeta),
         buildLegacyRemovalPatch()
       )
     });
@@ -2167,13 +2595,175 @@ exports.main = async (rawEvent = {}, rawContext = {}) => {
   if (action === 'leaderboard') {
     const evBoardType = getOwn(event, 'boardType');
     const evMode = getOwn(event, 'mode');
+    const evDateKey = getOwn(event, 'dateKey');
     const rawBoard =
       typeof evBoardType === 'string' && evBoardType.trim()
         ? evBoardType.trim()
         : typeof evMode === 'string' && evMode.trim()
         ? evMode.trim()
         : 'stars';
-    const boardType = rawBoard === 'score' || rawBoard === 'totalScore' ? 'score' : 'stars';
+
+    let boardType = 'stars';
+    let dailyDateKey = '';
+    if (rawBoard === 'score' || rawBoard === 'totalScore') {
+      boardType = 'score';
+    } else if (rawBoard === 'endless') {
+      boardType = 'endless';
+    } else if (rawBoard === 'daily' || /^daily_\d{8}$/.test(rawBoard)) {
+      boardType = 'daily';
+      const suffixDate = /^daily_(\d{8})$/.test(rawBoard) ? rawBoard.slice(6) : '';
+      dailyDateKey = sanitizeDateKey(suffixDate) || sanitizeDateKey(evDateKey) || getUtc8DateKey(Date.now());
+    }
+
+    if (boardType === 'daily' || boardType === 'endless') {
+      const modeFilter =
+        boardType === 'daily'
+          ? {
+              dailyDateKey,
+              dailyBestScore: _.gte(1).and(_.lte(MAX_DAILY_SCORE))
+            }
+          : {
+              endlessBestShift: _.gte(1).and(_.lte(MAX_ENDLESS_SHIFT)),
+              endlessBestScore: _.gte(1).and(_.lte(MAX_ENDLESS_SCORE))
+            };
+      let mQuery = db.collection(PLAYERS_COL).where(modeFilter);
+      if (boardType === 'daily') {
+        mQuery = mQuery.orderBy('dailyBestScore', 'desc').orderBy('_id', 'asc');
+      } else {
+        mQuery = mQuery
+          .orderBy('endlessBestShift', 'desc')
+          .orderBy('endlessBestScore', 'desc')
+          .orderBy('_id', 'asc');
+      }
+      const mTopRes = await mQuery.limit(50).get();
+      const mRawRows = mTopRes && safeIsArray(mTopRes.data) ? mTopRes.data : [];
+      const mList = [];
+      const mRowLen = safeArrayLength(mRawRows);
+      for (let idx = 0; idx < mRowLen; idx++) {
+        if (!hasOwn(mRawRows, idx)) continue;
+        const row = safeArrayAt(mRawRows, idx);
+        const safeRow = isPlainRecord(row) ? row : {};
+        const rawRowId = getOwn(safeRow, '_id');
+        const rowId =
+          typeof rawRowId === 'string' || typeof rawRowId === 'number' ? String(rawRowId) : '';
+        const isMe = rowId === openid;
+        const rawRowSuffix = getOwn(safeRow, 'openidSuffix');
+        const suffix =
+          typeof rawRowSuffix === 'string' && rawRowSuffix.trim()
+            ? rawRowSuffix.trim()
+            : rowId.slice(-4).toUpperCase() || '0000';
+        const rawRowMetaObj = getOwn(safeRow, 'metaSave');
+        const rowMetaObj = isPlainRecord(rawRowMetaObj) ? rawRowMetaObj : null;
+        const rowSelectedPatron = resolveDocSelectedPatron(safeRow, rowMetaObj);
+        const resolvedProf = resolveStoredDocProfile(safeRow, rowMetaObj, suffix, rowSelectedPatron);
+        const stars = hasOwn(safeRow, 'totalStars')
+          ? clampInt(getOwn(safeRow, 'totalStars'), 0, MAX_TOTAL_STARS, 0)
+          : 0;
+        const cumScore = hasOwn(safeRow, 'totalCumulativeScore')
+          ? clampInt(getOwn(safeRow, 'totalCumulativeScore'), 0, MAX_TOTAL_CUMULATIVE_SCORE, 0)
+          : 0;
+        const dScore = hasOwn(safeRow, 'dailyBestScore')
+          ? clampInt(getOwn(safeRow, 'dailyBestScore'), 0, MAX_DAILY_SCORE, 0)
+          : 0;
+        const eShift = hasOwn(safeRow, 'endlessBestShift')
+          ? clampInt(getOwn(safeRow, 'endlessBestShift'), 0, MAX_ENDLESS_SHIFT, 0)
+          : 0;
+        const eScore = hasOwn(safeRow, 'endlessBestScore')
+          ? clampInt(getOwn(safeRow, 'endlessBestScore'), 0, MAX_ENDLESS_SCORE, 0)
+          : 0;
+
+        mList.push({
+          rank: mList.length + 1,
+          id: rowId,
+          openidSuffix: suffix,
+          isMe,
+          isSelf: isMe,
+          isNpc: Boolean(hasOwn(safeRow, 'isNpc') && getOwn(safeRow, 'isNpc')),
+          nickName: resolvedProf.nickName,
+          avatarUrl: resolvedProf.avatarUrl,
+          avatarPreset: resolvedProf.avatarPreset,
+          totalStars: stars,
+          totalCumulativeScore: cumScore,
+          totalScore: cumScore,
+          dailyBestScore: dScore,
+          endlessBestShift: eShift,
+          endlessBestScore: eScore,
+          score: boardType === 'daily' ? dScore : eScore
+        });
+      }
+
+      let mTotalPlayers = mList.length;
+      if (mList.length >= 50) {
+        const mCntRes = await db.collection(PLAYERS_COL).where(modeFilter).count();
+        if (mCntRes && typeof mCntRes.total === 'number' && mCntRes.total >= mList.length) {
+          mTotalPlayers = mCntRes.total;
+        }
+      }
+
+      const existingRankFields = existing
+        ? {
+            dailyDateKey: sanitizeDateKey(getOwn(existing, 'dailyDateKey')),
+            dailyBestScore: clampInt(getOwn(existing, 'dailyBestScore'), 0, MAX_DAILY_SCORE, 0),
+            endlessBestShift: clampInt(getOwn(existing, 'endlessBestShift'), 0, MAX_ENDLESS_SHIFT, 0),
+            endlessBestScore: clampInt(getOwn(existing, 'endlessBestScore'), 0, MAX_ENDLESS_SCORE, 0)
+          }
+        : { dailyDateKey: '', dailyBestScore: 0, endlessBestShift: 0, endlessBestScore: 0 };
+
+      let mMyRank = null;
+      for (let i = 0; i < mList.length; i++) {
+        if (mList[i].isMe) {
+          mMyRank = mList[i].rank;
+          break;
+        }
+      }
+
+      const myDailyScore =
+        existingRankFields.dailyDateKey === dailyDateKey ? existingRankFields.dailyBestScore : 0;
+      const myEndlessShift = existingRankFields.endlessBestShift;
+      const myEndlessScore = existingRankFields.endlessBestScore;
+
+      if (mMyRank === null) {
+        if (boardType === 'daily' && myDailyScore >= 1) {
+          const higherCnt = await db
+            .collection(PLAYERS_COL)
+            .where({
+              dailyDateKey,
+              dailyBestScore: _.gt(myDailyScore).and(_.lte(MAX_DAILY_SCORE))
+            })
+            .count();
+          mMyRank = ((higherCnt && typeof higherCnt.total === 'number' ? higherCnt.total : 0) || 0) + 1;
+        } else if (boardType === 'endless' && myEndlessShift >= 1 && myEndlessScore >= 1) {
+          const higherCnt = await db
+            .collection(PLAYERS_COL)
+            .where(
+              _.or([
+                {
+                  endlessBestShift: _.gt(myEndlessShift).and(_.lte(MAX_ENDLESS_SHIFT)),
+                  endlessBestScore: _.gte(1).and(_.lte(MAX_ENDLESS_SCORE))
+                },
+                {
+                  endlessBestShift: myEndlessShift,
+                  endlessBestScore: _.gt(myEndlessScore).and(_.lte(MAX_ENDLESS_SCORE))
+                }
+              ])
+            )
+            .count();
+          mMyRank = ((higherCnt && typeof higherCnt.total === 'number' ? higherCnt.total : 0) || 0) + 1;
+        }
+      }
+
+      return {
+        ok: true,
+        boardType,
+        dateKey: boardType === 'daily' ? dailyDateKey : '',
+        list: mList,
+        myRank: mMyRank,
+        totalPlayers: mTotalPlayers,
+        myStars: existing ? clampInt(getOwn(existing, 'totalStars'), 0, MAX_TOTAL_STARS, 0) : 0,
+        myScore: boardType === 'daily' ? myDailyScore : myEndlessScore,
+        myShift: boardType === 'endless' ? myEndlessShift : 0
+      };
+    }
 
     const boardFilter =
       boardType === 'stars'
@@ -2452,6 +3042,10 @@ exports._internal = Object.freeze({
   MAX_CAMPAIGN_STARS,
   MAX_TOTAL_STARS,
   MAX_TOTAL_CUMULATIVE_SCORE,
+  MAX_DAILY_SCORE,
+  MAX_ENDLESS_SHIFT,
+  MAX_ENDLESS_SCORE,
+  MAX_ENDLESS_SCORE_PER_SHIFT,
   MAX_OFFLINE_STARDUST_DELTA,
   MAX_INITIAL_UNSYNCED_STARDUST,
   MAX_CONSUMABLE_SPENT_STARDUST,
@@ -2461,6 +3055,8 @@ exports._internal = Object.freeze({
   PATRON_COSTS,
   THEME_COSTS,
   SHOP_TOTAL_CAP,
+  RESEARCH_COSTS,
+  RESEARCH_TOTAL_CAP,
   V1_PATRON_COSTS,
   V1_THEME_COSTS,
   V1_UPGRADE_COSTS,
@@ -2473,6 +3069,13 @@ exports._internal = Object.freeze({
   computeTotalStars,
   computeTotalCumulativeScore,
   computeHighestUnlockedLevel,
+  createDefaultModeStats,
+  sanitizeModeStats,
+  mergeModeStats,
+  sanitizeResearchUnlocks,
+  sanitizeLevelGoalsDone,
+  sanitizeSeenTips,
+  sanitizeSettings,
   createDefaultMetaSave,
   migrateV1ToV2,
   sanitizeMetaSave,

@@ -431,7 +431,7 @@ async function bakeAndServeSeat(ctx, seatIdx, opts = {}) {
     const coords = matchBoardCoordsForOrder(st.grid, reqSlots);
     if (coords) {
       const servedBefore = st.ordersServed;
-      // Lock target seat and place all required tiles synchronously so no bystander steals a subset
+      // Place all required tiles into tray and click the ready customer seat to serve (Plan A)
       await ctx.eval(
         (sIdx, picks, skipLock) => {
           const dbg = window.__HOSHI_DEBUG__;
@@ -440,6 +440,10 @@ async function bakeAndServeSeat(ctx, seatIdx, opts = {}) {
           }
           for (const p of picks) {
             dbg.tapBoardCell(p.r, p.c);
+          }
+          const curSeat = dbg.getState().seats[sIdx];
+          if (curSeat && curSeat.readyToServe) {
+            dbg.clickHit(`seat_${sIdx}`);
           }
         },
         seatIdx,
@@ -2208,7 +2212,7 @@ const F07_TESTS = [
     id: 'T1-F07-01',
     tier: 1,
     features: ['F07', 'F08'],
-    title: 'Single-item order auto-serves after 0.10s visual settle and enters turnover cooldown on 1-1',
+    title: 'Single-item order highlights readyToServe without auto-serving and serves immediately on customer click (Plan A)',
     run: async (ctx) => {
       let targetSeat = -1;
       let targetTier = 1;
@@ -2227,17 +2231,20 @@ const F07_TESTS = [
       // Presets on 1-1: (0,0):C1, (1,1):C2
       const [r, c] = targetTier === 1 ? [0, 0] : [1, 1];
       await ctx.eval(
-        (sIdx, tr, tc) => {
-          window.__HOSHI_DEBUG__.clickHit(`seat_${sIdx}`);
+        (tr, tc) => {
           window.__HOSHI_DEBUG__.tapBoardCell(tr, tc);
         },
-        targetSeat,
         r,
         c
       );
-      let st = await ctx.advanceTime(0.6);
-      ctx.assertEq(st.ordersServed, 1, 'Expected single-item order auto-served');
-      ctx.assert(st.score > 0, 'Expected positive score after auto-serve');
+      let st = await ctx.advanceTime(0.35);
+      ctx.assertEq(st.ordersServed, 0, 'Plan A: single-item order must NOT auto-serve before customer click');
+      ctx.assertEq(st.seats[targetSeat]?.readyToServe, true, 'Target seat must highlight readyToServe');
+
+      await ctx.clickHit(`seat_${targetSeat}`);
+      st = await ctx.advanceTime(0.35);
+      ctx.assertEq(st.ordersServed, 1, 'Expected single-item order served on customer click');
+      ctx.assert(st.score > 0, 'Expected positive score after manual serve');
       ctx.assert(st.tray.every((t) => t === null), 'Matched tray slot must be consumed');
       ctx.assertEq(st.seats[targetSeat], null, 'Served seat enters turnover cooldown');
 
@@ -2250,7 +2257,7 @@ const F07_TESTS = [
     id: 'T1-F07-02',
     tier: 1,
     features: ['F07'],
-    title: 'Multi-item subset auto-serve consumes matched slots and leaves unrelated tray tile intact',
+    title: 'Multi-item subset manual serve consumes matched slots and leaves unrelated tray tile intact',
     run: async (ctx) => {
       let r03Idx = -1;
       for (let attempt = 0; attempt < 15; attempt++) {
@@ -2273,16 +2280,16 @@ const F07_TESTS = [
       }
       ctx.assert(r03Idx >= 0, 'Expected R03 (C1+C2) customer on 1-1');
 
-      // Synchronously lock R03 seat and place (0,0):C1 + (0,1):C2 into tray[1..2]
+      // Place (0,0):C1 + (0,1):C2 into tray[1..2] and click R03 seat (Plan A)
       await ctx.eval((idx) => {
         const dbg = window.__HOSHI_DEBUG__;
-        dbg.clickHit(`seat_${idx}`);
         dbg.tapBoardCell(0, 0);
         dbg.tapBoardCell(0, 1);
+        dbg.clickHit(`seat_${idx}`);
       }, r03Idx);
 
-      const stAfter = await ctx.advanceTime(0.6);
-      ctx.assertEq(stAfter.ordersServed, 1, 'R03 subset order must auto-serve');
+      const stAfter = await ctx.advanceTime(0.35);
+      ctx.assertEq(stAfter.ordersServed, 1, 'R03 subset order must serve on customer click');
       ctx.assert(stAfter.score > 0, 'Score > 0 after R03 serve');
       ctx.assert(stAfter.tray[0]?.tier === 3 && stAfter.tray[0]?.flavor === 'plain', 'Unrelated C3 in tray[0] must remain intact');
       ctx.assert(stAfter.tray[1] === null && stAfter.tray[2] === null && stAfter.tray[3] === null, 'Matched slots tray[1..2] must be cleared');
@@ -2293,7 +2300,7 @@ const F07_TESTS = [
     id: 'T1-F07-03',
     tier: 1,
     features: ['F07', 'F04'],
-    title: 'Constrained flavor recipe (R15: C2 + C3[matcha]) exact flavor auto-serve and score on 2-1',
+    title: 'Constrained flavor recipe (R15: C2 + C3[matcha]) exact flavor manual serve and score on 2-1',
     run: async (ctx) => {
       let r15Idx = -1;
       let seatSnap = null;
@@ -2319,13 +2326,13 @@ const F07_TESTS = [
       // 2-1 presets: (0,1):C2(plain), (1,1):C3(matcha)
       await ctx.eval((idx) => {
         const dbg = window.__HOSHI_DEBUG__;
-        dbg.clickHit(`seat_${idx}`);
         dbg.tapBoardCell(0, 1);
         dbg.tapBoardCell(1, 1);
+        dbg.clickHit(`seat_${idx}`);
       }, r15Idx);
 
-      const stAfter = await ctx.advanceTime(0.6);
-      ctx.assertEq(stAfter.ordersServed, 1, 'R15 must auto-serve');
+      const stAfter = await ctx.advanceTime(0.35);
+      ctx.assertEq(stAfter.ordersServed, 1, 'R15 must serve on customer click');
       ctx.assert(stAfter.tray.every((t) => t === null), 'Tray emptied after R15 serve');
       ctx.assertEq(stAfter.score, expectedScore, `Expected exact R15 score ${expectedScore}, got ${stAfter.score}`);
     }
@@ -2335,7 +2342,7 @@ const F07_TESTS = [
     id: 'T1-F07-04',
     tier: 1,
     features: ['F07', 'F04', 'F08'],
-    title: 'gold wildcard satisfies constrained matcha slot and applies x1.50 item multiplier (UT-O03 on 2-2)',
+    title: 'gold wildcard satisfies constrained matcha slot and applies x1.35 item multiplier (UT-O03 on 2-2)',
     run: async (ctx) => {
       let r16Idx = -1;
       let seatSnap = null;
@@ -2362,12 +2369,12 @@ const F07_TESTS = [
       // 2-2 presets: (1,1):C4(gold), (0,1):C3(plain)
       await ctx.eval((idx) => {
         const dbg = window.__HOSHI_DEBUG__;
-        dbg.clickHit(`seat_${idx}`);
         dbg.tapBoardCell(1, 1);
         dbg.tapBoardCell(0, 1);
+        dbg.clickHit(`seat_${idx}`);
       }, r16Idx);
 
-      const stAfter = await ctx.advanceTime(0.6);
+      const stAfter = await ctx.advanceTime(0.35);
       ctx.assertEq(stAfter.ordersServed, 1, 'C4(gold) wildcard must satisfy C4[matcha] in R16');
       ctx.assertEq(stAfter.score, expectedGoldScore, `Expected gold x1.35 score ${expectedGoldScore}, got ${stAfter.score}`);
     }
@@ -2377,7 +2384,7 @@ const F07_TESTS = [
     id: 'T1-F07-05',
     tier: 1,
     features: ['F07'],
-    title: 'Default multi-customer rescue priority serves lowest patience/maxPatience ratio (UT-O05)',
+    title: 'Simultaneous ready customers wait without auto-serving and player explicitly chooses lower-patience seat to rescue (Plan A)',
     run: async (ctx) => {
       const isDisjointPair = (recA, recB) =>
         (recA === 'R01' && recB === 'R02') || (recA === 'R02' && recB === 'R01');
@@ -2501,11 +2508,17 @@ const F07_TESTS = [
         { r: c2Tile.r, c: c2Tile.c }
       );
 
-      const stAfter = await ctx.advanceTime(0.55);
+      const stWait = await ctx.advanceTime(0.35);
+      ctx.assertEq(stWait.ordersServed, servedBefore, 'Plan A: simultaneous ready seats must NOT auto-serve');
+      ctx.assertEq(stWait.seats[lowIdx]?.readyToServe, true, 'Lower-patience seat highlights readyToServe');
+      ctx.assertEq(stWait.seats[highIdx]?.readyToServe, true, 'Higher-patience seat highlights readyToServe');
+
+      await ctx.clickHit(`seat_${lowIdx}`);
+      const stAfter = await ctx.advanceTime(0.35);
       ctx.assertEq(stAfter.preferredSeatIdx, null, 'preferredSeatIdx must be null');
       ctx.assertEq(stAfter.ordersServed, servedBefore + 1, 'Exactly 1 customer served');
-      ctx.assertEq(stAfter.seats[lowIdx], null, 'Lower-patience customer must be rescued first');
-      ctx.assert(stAfter.seats[highIdx] !== null, 'Higher-patience customer remains seated');
+      ctx.assertEq(stAfter.seats[lowIdx], null, 'Clicked lower-patience customer must be served');
+      ctx.assert(stAfter.seats[highIdx] !== null, 'Unclicked higher-patience customer remains seated');
     }
   },
 
@@ -2513,7 +2526,7 @@ const F07_TESTS = [
     id: 'T1-F07-06',
     tier: 1,
     features: ['F07'],
-    title: 'Manual target lock clickHit(seat_highIdx) overrides patience rescue priority and resets post-serve (UT-O05)',
+    title: 'Manual target lock clickHit(seat_highIdx) highlights target before ready and clicking ready seat serves strictly highIdx & resets lock',
     run: async (ctx) => {
       const isDisjointPair = (recA, recB) =>
         (recA === 'R01' && recB === 'R02') || (recA === 'R02' && recB === 'R01');
@@ -2611,7 +2624,7 @@ const F07_TESTS = [
       }
       ctx.assert(lowIdx >= 0 && highIdx >= 0, 'Expected two overlapping seated customers on 1-1 with >15% patience gap');
 
-      // Manually lock the HIGHER-patience customer
+      // Manually lock the HIGHER-patience customer while unready
       await ctx.clickHit(`seat_${highIdx}`);
       let st = await ctx.getState();
       ctx.assertEq(st.preferredSeatIdx, highIdx, `preferredSeatIdx must lock onto ${highIdx}`);
@@ -2640,10 +2653,12 @@ const F07_TESTS = [
         { r: c2Tile.r, c: c2Tile.c }
       );
 
-      st = await ctx.advanceTime(0.55);
+      // Clicking locked ready seat_highIdx serves ONLY highIdx and resets preferredSeatIdx to null
+      await ctx.clickHit(`seat_${highIdx}`);
+      st = await ctx.advanceTime(0.35);
       ctx.assertEq(st.ordersServed, servedBefore + 1, 'Exactly 1 customer served');
-      ctx.assertEq(st.seats[highIdx], null, 'Manually locked higher-patience customer must be served first');
-      ctx.assert(st.seats[lowIdx] !== null, 'Unlocked lower-patience customer remains seated');
+      ctx.assertEq(st.seats[highIdx], null, 'Manually clicked higher-patience customer must be served');
+      ctx.assert(st.seats[lowIdx] !== null, 'Unclicked lower-patience customer remains seated');
       ctx.assertEq(st.preferredSeatIdx, null, 'preferredSeatIdx must auto-reset to null once locked customer is served');
     }
   }
@@ -2808,12 +2823,12 @@ const F08_TESTS = [
       // 1-3 presets already contain (2,0):C1, (0,0):C2, (3,2):C3
       await ctx.eval((sIdx) => {
         const dbg = window.__HOSHI_DEBUG__;
-        dbg.clickHit(`seat_${sIdx}`);
         dbg.tapBoardCell(2, 0);
         dbg.tapBoardCell(0, 0);
         dbg.tapBoardCell(3, 2);
+        dbg.clickHit(`seat_${sIdx}`);
       }, r08Idx);
-      const afterR08 = await ctx.advanceTime(0.6);
+      const afterR08 = await ctx.advanceTime(0.35);
       ctx.assertEq(afterR08.score, expectedR08, `Expected R08 with dev_tray Lv.2 score ${expectedR08}, got ${afterR08.score}`);
     }
   },
@@ -3078,8 +3093,8 @@ const F09_TESTS = [
         const r21Idx = st.seats.findIndex((s) => s && s.recipeId === 'R21');
         if (r21Idx >= 0) {
           await ctx.eval((idx) => {
-            window.__HOSHI_DEBUG__.clickHit(`seat_${idx}`);
             window.__HOSHI_DEBUG__.tapBoardCell(2, 2);
+            window.__HOSHI_DEBUG__.clickHit(`seat_${idx}`);
           }, r21Idx);
           for (let i = 0; i < 14; i++) {
             st = await ctx.advanceTime(0.05);

@@ -1815,6 +1815,10 @@ function matchTrayToCustomer(state, arg2, arg3) {
   }
 
   const distinctCtx = rawScoreCtx && rawScoreCtx !== state ? rawScoreCtx : null;
+  const strictSeatOnly = Boolean(distinctCtx && getOwn(distinctCtx, 'strictSeatOnly', false));
+  if (strictSeatOnly && preferredSeatIdx === null) {
+    return { served: false };
+  }
 
   const { snap: traySnap, slotReads: traySlotReads } = snapshotTrayTilesWithReads(
     tray,
@@ -1835,6 +1839,7 @@ function matchTrayToCustomer(state, arg2, arg3) {
   const candidates = [];
 
   for (let s = 0; s < seatLimit; s++) {
+    if (strictSeatOnly && s !== preferredSeatIdx) continue;
     const rec = seatRecords[s];
     if (!rec || !canMutateProp(seats, s)) continue;
     if (rec.slotSnap.length === 0) continue;
@@ -2284,6 +2289,28 @@ function matchTrayToCustomer(state, arg2, arg3) {
     triggeredFever,
     skillChargeGain
   };
+}
+
+/**
+ * Manually serves ONLY the specified customer seat (0..2) if the tray currently satisfies
+ * their complete order. Delegates directly to matchTrayToCustomer with strictSeatOnly=true
+ * to preserve the global pure serve-only scoring invariant.
+ */
+function serveCustomerSeat(state, seatIdx, scoreCtx) {
+  const idx = toSafeInt(seatIdx);
+  if (idx !== 0 && idx !== 1 && idx !== 2) {
+    return { served: false };
+  }
+  const ctx = {};
+  if (isPlainObj(scoreCtx)) {
+    const keys = Object.keys(scoreCtx);
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i];
+      ctx[k] = getOwn(scoreCtx, k, undefined);
+    }
+  }
+  ctx.strictSeatOnly = true;
+  return matchTrayToCustomer(state, idx, ctx);
 }
 
 function getRecipeMaxTier(recipe) {
@@ -3343,6 +3370,7 @@ module.exports = {
   refreshAllOrderMarks,
   getNeededBoardTiers,
   matchTrayToCustomer,
+  serveCustomerSeat,
   computeServeScore,
   applyMikanComfortTea,
   computeLevelSettlement

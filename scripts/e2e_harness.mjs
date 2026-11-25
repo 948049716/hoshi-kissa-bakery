@@ -4725,17 +4725,19 @@ export function createTestContext({
       for (let step = 0; step < maxSteps; step++) {
         const { matchedTiles, missingReqs } = partitionBoardOrderMatch(st.grid.cells, reqSlots);
         if (missingReqs.length === 0) {
-          // Synchronously load all required tiles into tray at dt = 0
-          await ctx.eval((coords) => {
+          // Synchronously load all required tiles into tray at dt = 0, then click ready customer seat (Plan A)
+          await ctx.eval((coords, sIdx) => {
+            const dbg = globalThis.__HOSHI_DEBUG__;
             for (const pt of coords) {
-              globalThis.__HOSHI_DEBUG__.tapBoardCell(pt.r, pt.c);
+              dbg.tapBoardCell(pt.r, pt.c);
             }
-          }, matchedTiles);
-          // Step simulation clock for auto-serve settle + flight
-          for (let k = 0; k < 5; k++) {
-            st = await ctx.advanceTime(0.16);
-            if (st.ordersServed > beforeServed) break;
-          }
+            const curSeat = dbg.getState().seats[sIdx];
+            if (curSeat && curSeat.readyToServe) {
+              dbg.clickHit(`seat_${sIdx}`);
+            }
+          }, matchedTiles, targetIdx);
+          // Step simulation clock for flight animation settle
+          st = await ctx.advanceTime(0.32);
           return {
             served: st.ordersServed > beforeServed,
             seatIdx: targetIdx,

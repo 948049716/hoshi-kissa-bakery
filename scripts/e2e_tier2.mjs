@@ -351,8 +351,12 @@ async function serveOneOrderOrganically(ctx, preferredSeat = null, opts = {}) {
         for (const [r, c] of coords) {
           dbg.tapBoardCell(r, c);
         }
+        const curSeat = dbg.getState().seats[seatIdx];
+        if (curSeat && curSeat.readyToServe) {
+          dbg.clickHit(`seat_${seatIdx}`);
+        }
       }, chosenCoords, targetIdx);
-      const post = await ctx.advanceTime(0.65);
+      const post = await ctx.advanceTime(0.35);
       if (post.ordersServed > beforeServed) return post;
     }
 
@@ -2102,10 +2106,14 @@ const TIER2_F01_TO_F08 = [
         ctx.assertEq(matchedCount, 1, 'Single C2 must mark exact 1 of 2 R06 slots');
       }
 
-      // Place 2nd C2 into tray[1] -> completes R06!
-      await ctx.eval(() => globalThis.__HOSHI_DEBUG__.tapBoardCell(2, 1));
-      const stAfter2 = await ctx.advanceTime(0.65);
-      ctx.assertEq(stAfter2.ordersServed, 1, '2nd C2 completes R06');
+      // Place 2nd C2 into tray[1] -> completes R06 readiness, then click glowing customer seat to serve (Plan A)
+      await ctx.eval((idx) => {
+        const dbg = globalThis.__HOSHI_DEBUG__;
+        dbg.tapBoardCell(2, 1);
+        dbg.clickHit(`seat_${idx}`);
+      }, r06Idx);
+      const stAfter2 = await ctx.advanceTime(0.35);
+      ctx.assertEq(stAfter2.ordersServed, 1, '2nd C2 + customer click completes R06');
       ctx.assert(stAfter2.score > 0, 'Completed R06 awards positive score');
       ctx.assertEq(stAfter2.tray[0], null);
       ctx.assertEq(stAfter2.tray[1], null);
@@ -2129,10 +2137,11 @@ const TIER2_F01_TO_F08 = [
         r15Idx = (st.seats || []).findIndex((s) => s && s.recipeId === 'R15');
       }
       ctx.assert(r15Idx >= 0, 'Expected R15 to spawn on 2-2');
-      await ctx.eval(() => {
+      await ctx.eval((idx) => {
         globalThis.__HOSHI_DEBUG__.tapBoardCell(2, 1); // C2(plain)
         globalThis.__HOSHI_DEBUG__.tapBoardCell(0, 1); // C3(plain)
-      });
+        globalThis.__HOSHI_DEBUG__.clickHit(`seat_${idx}`); // Must NOT serve mismatched flavor
+      }, r15Idx);
       const stA = await ctx.advanceTime(0.65);
       ctx.assertEq(stA.ordersServed, 0, '[C2(plain), C3(plain)] must NOT fulfill R15 (C2 + C3[matcha])');
       ctx.assertEq(stA.score, 0);
@@ -2183,12 +2192,12 @@ const TIER2_F01_TO_F08 = [
       }
       ctx.assert(!!c2Coord, 'Must obtain a C2 tile on 3-2');
 
-      await ctx.clickHit(`seat_${r20Idx}`);
-      await ctx.eval((c2) => {
+      await ctx.eval((c2, idx) => {
         const dbg = globalThis.__HOSHI_DEBUG__;
         dbg.tapBoardCell(c2[0], c2[1]); // C2
         dbg.tapBoardCell(1, 1);         // C4(matcha) — WRONG flavor for C4[berry]!
-      }, c2Coord);
+        dbg.clickHit(`seat_${idx}`);    // Must NOT serve mismatched flavor
+      }, c2Coord, r20Idx);
       const stB = await ctx.advanceTime(0.65);
       ctx.assertEq(stB.ordersServed, 0, '[C2, C4(matcha)] must NOT cross-substitute for R20 (C2 + C4[berry])');
       ctx.assertEq(stB.score, 0);
@@ -2213,16 +2222,16 @@ const TIER2_F01_TO_F08 = [
       }
       ctx.assert(r07Idx >= 0, 'Expected R07 (C4[any]) to spawn on 2-2');
 
-      // Synchronously at dt=0: lock R07 seat, upgrade (0,1):C3(plain)->C4(plain), place C4(gold) in tray[0] FIRST and C4(plain) in tray[1] SECOND!
+      // Synchronously at dt=0: upgrade (0,1):C3(plain)->C4(plain), place C4(gold) in tray[0] FIRST and C4(plain) in tray[1] SECOND, then click R07 seat!
       await ctx.eval((seatIdx) => {
         const dbg = globalThis.__HOSHI_DEBUG__;
-        dbg.clickHit(`seat_${seatIdx}`);
         dbg.useToolOnCell('spoon', 0, 1); // (0,1) -> C4(plain)
         dbg.tapBoardCell(1, 1);           // tray[0] = C4(gold)
         dbg.tapBoardCell(0, 1);           // tray[1] = C4(plain)
+        dbg.clickHit(`seat_${seatIdx}`);  // Manual click serve (Plan A)
       }, r07Idx);
 
-      const st = await ctx.advanceTime(0.65);
+      const st = await ctx.advanceTime(0.35);
       ctx.assertEq(st.ordersServed, 1, 'R07 must be served');
       ctx.assertEq(st.tray[1], null, 'tray[1] C4(plain) must be consumed first');
       ctx.assertEq(st.tray[0]?.tier, 4, 'tray[0] C4(gold) must be preserved for later');
@@ -2251,13 +2260,13 @@ const TIER2_F01_TO_F08 = [
       // 2-10 presets at frame 0: (1,1):C4(gold), (3,3):C4(matcha), (4,0):C3(plain)!
       await ctx.eval((seatIdx) => {
         const dbg = globalThis.__HOSHI_DEBUG__;
-        dbg.clickHit(`seat_${seatIdx}`);
         dbg.tapBoardCell(1, 1); // tray[0] = C4(gold)
         dbg.tapBoardCell(3, 3); // tray[1] = C4(matcha)
         dbg.tapBoardCell(4, 0); // tray[2] = C3(plain)
+        dbg.clickHit(`seat_${seatIdx}`); // Manual click serve (Plan A)
       }, r16Idx);
 
-      const st = await ctx.advanceTime(0.65);
+      const st = await ctx.advanceTime(0.35);
       ctx.assertEq(st.ordersServed, 1, 'R16 must be served');
       ctx.assertEq(st.tray[1], null, 'Exact C4(matcha) in tray[1] must be consumed');
       ctx.assertEq(st.tray[2], null, 'C3(plain) in tray[2] must be consumed');
@@ -2270,9 +2279,9 @@ const TIER2_F01_TO_F08 = [
     id: 'T2-F07-05',
     tier: 2,
     features: ['F07'],
-    title: 'Within-10% patience tie-break chain serves isVip/isUrgent over normal seat_0 and lowest seatIdx when flags tie',
+    title: 'Plan A manual serve: simultaneous ready seats never auto-hijack and clicking chosen seat serves strictly that customer',
     run: async (ctx) => {
-      // Part A: Lowest seatIdx (0 < 1) when both normal and |dpRatio| < 0.10 on 1-1
+      // Part A: Two overlapping normal seats on 1-1 -> both become readyToServe without auto-serving; clicking seat_1 serves ONLY seat_1
       let matchedPair = false;
       for (let attempt = 0; attempt < 25 && !matchedPair; attempt++) {
         await ctx.setupSaveAndStart('1-1', { seenTutorials: DEFAULT_TUTORIALS_SEEN });
@@ -2289,16 +2298,21 @@ const TIER2_F01_TO_F08 = [
             dbg.tapBoardCell(0, 0);
             dbg.tapBoardCell(1, 1);
           });
-          const after = await ctx.advanceTime(0.55);
+          const mid = await ctx.advanceTime(0.55);
+          ctx.assertEq(mid.ordersServed, 0, 'Plan A: simultaneous ready seats must NOT auto-serve');
+          ctx.assertEq(mid.seats[0]?.readyToServe, true, 'seat_0 readyToServe highlighted');
+          ctx.assertEq(mid.seats[1]?.readyToServe, true, 'seat_1 readyToServe highlighted');
+
+          await ctx.clickHit('seat_1');
+          const after = await ctx.advanceTime(0.35);
           ctx.assertEq(after.ordersServed, 1);
-          ctx.assertEq(after.seats[0], null, 'seat_0 must win tie-break over seat_1 when patience gap <10% and flags equal');
-          ctx.assert(after.seats[1] !== null, 'seat_1 must remain seated');
+          ctx.assertEq(after.seats[1], null, 'Clicked seat_1 must be served');
+          ctx.assert(after.seats[0] !== null, 'Unclicked seat_0 must remain seated');
         }
       }
       ctx.assert(matchedPair, 'Expected two overlapping seats on 1-1 within 25 fast resets');
 
-      // Part B: isVip / isUrgent in seat_1 or seat_2 beats normal seat_0 when |dpRatio| < 0.10 on 2-1
-      // Note: On 2-1, [C2(plain), C3(matcha), C4(matcha)] satisfies R05, R07, R09, R15, and R16 simultaneously!
+      // Part B: Urgent/VIP in seat_1 alongside normal seat_0 on 2-1 -> tray stays intact until player explicitly clicks VIP/Urgent seat_1
       const servable21 = new Set(['R05', 'R07', 'R09', 'R15', 'R16']);
       let priorityTested = false;
       for (let attempt = 0; attempt < 90 && !priorityTested; attempt++) {
@@ -2307,7 +2321,7 @@ const TIER2_F01_TO_F08 = [
           deviceUpgrades: { dev_tray: 1, dev_flour: 0, dev_teapot: 2, dev_tools: 3 },
           seenTutorials: DEFAULT_TUTORIALS_SEEN,
         });
-        const st = await ctx.advanceTime(0.6); // seat_0 (0.3s) & seat_1 (0.5s) both at pRatio ~0.99 (gap < 0.02 < 0.10!)
+        const st = await ctx.advanceTime(0.6);
         const s0 = st.seats[0];
         const s1 = st.seats[1];
         const disjoint21 =
@@ -2331,10 +2345,13 @@ const TIER2_F01_TO_F08 = [
             dbg.tapBoardCell(1, 1);           // C3(matcha)
             dbg.tapBoardCell(2, 2);           // C4(matcha)
           });
-          const after = await ctx.advanceTime(0.55);
+          const mid = await ctx.advanceTime(0.55);
+          ctx.assertEq(mid.ordersServed, 0, 'Normal seat_0 must NOT auto-hijack VIP/Urgent ingredients');
+          await ctx.clickHit('seat_1');
+          const after = await ctx.advanceTime(0.35);
           ctx.assertEq(after.ordersServed, 1);
-          ctx.assertEq(after.seats[1], null, 'Urgent/VIP seat_1 must beat normal seat_0 when |dpRatio| < 0.10');
-          ctx.assert(after.seats[0] !== null, 'Normal seat_0 must remain seated');
+          ctx.assertEq(after.seats[1], null, 'Clicking VIP/Urgent seat_1 serves seat_1 directly');
+          ctx.assert(after.seats[0] !== null, 'Normal seat_0 remains seated');
         }
       }
       ctx.assert(priorityTested, 'Expected overlapping urgent/VIP seat_1 alongside normal seat_0 on 2-1 within 90 fast resets');
@@ -2572,7 +2589,6 @@ const TIER2_F01_TO_F08 = [
       const firstRec = st0.seats[firstIdx].recipeId;
       await ctx.eval((fIdx, recId) => {
         const dbg = globalThis.__HOSHI_DEBUG__;
-        dbg.clickHit(`seat_${fIdx}`);
         if (recId === 'R07') {
           dbg.useToolOnCell('spoon', 2, 2); // (2,2) -> C4(matcha)
           dbg.tapBoardCell(2, 2);
@@ -2581,9 +2597,10 @@ const TIER2_F01_TO_F08 = [
           dbg.tapBoardCell(3, 2);
           dbg.tapBoardCell(2, 2);
         }
+        dbg.clickHit(`seat_${fIdx}`);
       }, firstIdx, firstRec);
 
-      const stAfter1 = await ctx.advanceTime(0.65);
+      const stAfter1 = await ctx.advanceTime(0.35);
       ctx.assertEq(stAfter1.comboCount, 1);
       ctx.assertEq(stAfter1.feverActive, false);
 
@@ -2595,12 +2612,12 @@ const TIER2_F01_TO_F08 = [
       // Now serve R15 using untouched presets (0,1):C2(plain) + (1,1):C3(matcha)
       await ctx.eval((sIdx) => {
         const dbg = globalThis.__HOSHI_DEBUG__;
-        dbg.clickHit(`seat_${sIdx}`);
         dbg.tapBoardCell(0, 1);
         dbg.tapBoardCell(1, 1);
+        dbg.clickHit(`seat_${sIdx}`);
       }, r15Idx);
 
-      const stAfter2 = await ctx.advanceTime(0.65);
+      const stAfter2 = await ctx.advanceTime(0.35);
       const delta = stAfter2.score - stAfter1.score;
       ctx.assertEq(delta, expectedExact, `Single outer Math.round expected ${expectedExact} (202.5 unrounded), got ${delta}`);
     },
@@ -3054,11 +3071,11 @@ const TIER2_F09_TO_F16 = [
         const seatIdx = s.seats.findIndex((seat) => seat && (seat.recipeId === 'R01' || seat.recipeId === 'R02'));
         if (seatIdx >= 0) {
           const wantTier = s.seats[seatIdx].recipeId === 'R01' ? 1 : 2;
-          dbg.clickHit(`seat_${seatIdx}`);
           for (let r = 0; r < s.grid.rows; r++) {
             for (let c = 0; c < s.grid.cols; c++) {
               if (s.grid.cells[r][c]?.tile?.tier === wantTier) {
                 dbg.tapBoardCell(r, c);
+                dbg.clickHit(`seat_${seatIdx}`);
                 return dbg.getState();
               }
             }
@@ -3389,8 +3406,8 @@ const TIER2_F09_TO_F16 = [
         for (let i = 0; i < (dbg.getState().tray || []).length; i++) {
           if (dbg.getState().tray[i]) dbg.doubleTapTray(i, { ignoreCooldown: true });
         }
-        dbg.clickHit(`seat_${idx}`);
         dbg.tapBoardCell(tr, tc);
+        dbg.clickHit(`seat_${idx}`);
       }, r17Idx, c6Cell.r, c6Cell.c);
       let postJump = await ctx.advanceTime(0.65);
       const starsAfterJump = [7800, 11200, 14500].filter((t) => postJump.score >= t).length;

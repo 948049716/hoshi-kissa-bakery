@@ -1855,6 +1855,76 @@ async function runSectionB() {
     assert.equal(osCustom.disableTutorial, true);
     assert.equal(osCustom.customModeTag, 'daily_challenge');
   });
+
+  await runTest('UT-O10', '方案A 指定顾客手动上菜 (serveCustomerSeat 严格单席防截胡与锁定保留)', () => {
+    const os = OrderService.createOrderState('1-3', SaveSync.createDefaultSave(), fixedRng);
+    os.seats[0] = {
+      uid: 1,
+      customerId: 'cust_ragdoll',
+      recipeId: 'R02',
+      slots: [{ tier: 2, flavor: 'any' }],
+      patience: 15,
+      maxPatience: 30,
+      bountyMult: 1.0,
+      isVip: false,
+      isUrgent: false
+    }; // wants C2
+    os.seats[1] = {
+      uid: 2,
+      customerId: 'cust_critic',
+      recipeId: 'R05',
+      slots: [
+        { tier: 2, flavor: 'any' },
+        { tier: 3, flavor: 'any' }
+      ],
+      patience: 28,
+      maxPatience: 30,
+      bountyMult: 1.5,
+      isVip: true,
+      isUrgent: false
+    }; // wants C2 + C3
+    os.seats[2] = null;
+    os.preferredSeatIdx = 1; // Player locked Seat 1 (multi-item)
+
+    // Place C2 -> Seat 0 is readyToServe, Seat 1 is NOT ready yet
+    OrderService.tryPlaceToTray(os, { uid: 201, tier: 2, flavor: 'plain' });
+    OrderService.refreshAllOrderMarks(os);
+    assert.equal(os.seats[0].readyToServe, true);
+    assert.equal(os.seats[1].readyToServe, false);
+
+    // Calling serveCustomerSeat(os, 1) MUST NOT fall back to serving Seat 0!
+    const failRes = OrderService.serveCustomerSeat(os, 1, { rng: fixedRng });
+    assert.equal(failRes.served, false);
+    assert.equal(os.score, 0);
+    assert.equal(os.ordersServed, 0);
+    assert.notEqual(os.seats[0], null);
+    assert.notEqual(os.tray[0], null);
+
+    // Place C3 -> NOW both Seat 0 and Seat 1 are readyToServe
+    OrderService.tryPlaceToTray(os, { uid: 202, tier: 3, flavor: 'plain' });
+    OrderService.refreshAllOrderMarks(os);
+    assert.equal(os.seats[0].readyToServe, true);
+    assert.equal(os.seats[1].readyToServe, true);
+
+    // Player explicitly serves Seat 0 while Seat 1 is locked -> Seat 0 served, Seat 1 lock preserved, C3 stays in tray!
+    const serve0 = OrderService.serveCustomerSeat(os, 0, { rng: fixedRng });
+    assert.equal(serve0.served, true);
+    assert.equal(serve0.seatIdx, 0);
+    assert.equal(os.seats[0], null);
+    assert.notEqual(os.seats[1], null);
+    assert.equal(os.preferredSeatIdx, 1);
+    assert.equal(os.tray[0], null);
+    assert.equal(os.tray[1].tier, 3);
+
+    // Place another C2 and explicitly serve locked Seat 1 -> clears preferredSeatIdx to null
+    OrderService.tryPlaceToTray(os, { uid: 203, tier: 2, flavor: 'plain' });
+    const serve1 = OrderService.serveCustomerSeat(os, 1, { rng: fixedRng });
+    assert.equal(serve1.served, true);
+    assert.equal(serve1.seatIdx, 1);
+    assert.equal(os.seats[1], null);
+    assert.equal(os.preferredSeatIdx, null);
+    assert.equal(os.ordersServed, 2);
+  });
 }
 
 // ============================================================================
@@ -2590,8 +2660,22 @@ function serveOneCustomerOnLevel1(dbg) {
   }
 
   const prevServed = dbg.getState().ordersServed;
+  assert.equal(
+    dbg.getState().seats[seatIdx] && dbg.getState().seats[seatIdx].readyToServe,
+    true,
+    'Expected target seat to become readyToServe once tray matches order'
+  );
   dbg.advanceTime(0.25);
-  assert.ok(dbg.getState().ordersServed > prevServed, 'Expected order to auto-serve after 0.10s');
+  assert.equal(
+    dbg.getState().ordersServed,
+    prevServed,
+    'Plan A: ready order must NOT auto-serve without clicking customer'
+  );
+  assert.equal(dbg.clickHit(`seat_${seatIdx}`), true);
+  assert.ok(
+    dbg.getState().ordersServed > prevServed,
+    'Expected order to serve immediately upon clicking ready customer seat'
+  );
 }
 
 async function runSectionE() {
@@ -3621,6 +3705,124 @@ async function runSectionE() {
     } finally {
       if (origWxOuter === undefined) delete globalThis.wx;
       else globalThis.wx = origWxOuter;
+    }
+  });
+
+  await runTest('UT-M08', '方案A 控制器手动点客上菜闭环：禁止自动上菜、防小单截胡、未齐锁客与打烊不自动上菜', () => {
+    const env = bootMockApp();
+    try {
+      const { dbg } = env;
+      dbg.setSaveData(SaveSync.createDefaultSave());
+
+      // 1) Start 1-1 with deterministic RNG and wait for 2+ customers to seat
+      dbg.startLevel('1-1', { skipTutorial: true, rng: mulberry32(808) });
+      dbg.advanceTime(3.2);
+      let st = dbg.getState();
+      assert.ok(st.seats[0] && st.seats[1], 'Expected seats 0 and 1 occupied');
+
+      // Find any seat with 1 slot and any seat with >=1 slot; test clicking unready seat toggles lock
+      const unreadyIdx = st.seats.findIndex((s) => s && !s.readyToServe);
+      assert.ok(unreadyIdx >= 0);
+      assert.equal(dbg.clickHit(`seat_${unreadyIdx}`), true);
+      assert.equal(dbg.getState().preferredSeatIdx, unreadyIdx);
+      // Clicking unready locked seat again unlocks it
+      assert.equal(dbg.clickHit(`seat_${unreadyIdx}`), true);
+      assert.equal(dbg.getState().preferredSeatIdx, null);
+
+      // 2) Load tiles matching Seat 0 AND verify NO auto-serve even after 1.0s
+      const targetIdx = st.seats.findIndex(Boolean);
+      const targetOrder = st.seats[targetIdx];
+      for (const reqSlot of targetOrder.slots) {
+        for (let guard = 0; guard < 24; guard++) {
+          st = dbg.getState();
+          let found = null;
+          for (let r = 0; r < st.grid.rows && !found; r++) {
+            for (let c = 0; c < st.grid.cols && !found; c++) {
+              const t = st.grid.cells[r][c].tile;
+              if (t && t.frozenHp === 0 && t.tier === reqSlot.tier) found = { r, c };
+            }
+          }
+          if (found) {
+            assert.equal(dbg.tapBoardCell(found.r, found.c).placed, true);
+            break;
+          }
+          dbg.knead();
+          if (reqSlot.tier >= 2) {
+            for (const d of ['left', 'up', 'right', 'down']) {
+              const sr = dbg.slide(d);
+              if (sr && sr.moved) break;
+            }
+          }
+        }
+      }
+      st = dbg.getState();
+      assert.equal(st.seats[targetIdx].readyToServe, true, 'Target seat must be readyToServe');
+      assert.equal(st.ordersServed, 0);
+      assert.equal(st.score, 0);
+
+      // Wait 1.0s -> MUST NOT auto-serve!
+      dbg.advanceTime(1.0);
+      st = dbg.getState();
+      assert.equal(st.ordersServed, 0, 'Plan A: waiting 1.0s must NOT auto-serve');
+      assert.equal(st.score, 0);
+      assert.equal(st.seats[targetIdx].readyToServe, true);
+
+      // Clicking a DIFFERENT unready seat MUST NOT serve targetIdx, and sets preferredSeatIdx instead
+      const otherUnready = st.seats.findIndex((s, i) => i !== targetIdx && s && !s.readyToServe);
+      if (otherUnready >= 0) {
+        assert.equal(dbg.clickHit(`seat_${otherUnready}`), true);
+        st = dbg.getState();
+        assert.equal(st.ordersServed, 0);
+        assert.equal(st.preferredSeatIdx, otherUnready);
+      }
+
+      // Now click targetIdx -> serves ONLY targetIdx immediately! (And preserves otherUnready lock if set)
+      assert.equal(dbg.clickHit(`seat_${targetIdx}`), true);
+      st = dbg.getState();
+      assert.equal(st.ordersServed, 1);
+      assert.ok(st.score > 0);
+      assert.equal(st.seats[targetIdx], null);
+      if (otherUnready >= 0) {
+        assert.equal(st.preferredSeatIdx, otherUnready, 'Serving another seat must preserve preferredSeatIdx lock');
+      }
+
+      // 3) Buzzer check: load a ready order and let timer expire WITHOUT clicking customer -> does NOT auto-serve at buzzer
+      dbg.startLevel('1-1', { skipTutorial: true, rng: mulberry32(909) });
+      dbg.advanceTime(0.6);
+      st = dbg.getState();
+      const s0Idx = st.seats.findIndex(Boolean);
+      const s0Order = st.seats[s0Idx];
+      for (const reqSlot of s0Order.slots) {
+        for (let guard = 0; guard < 24; guard++) {
+          st = dbg.getState();
+          let found = null;
+          for (let r = 0; r < st.grid.rows && !found; r++) {
+            for (let c = 0; c < st.grid.cols && !found; c++) {
+              const t = st.grid.cells[r][c].tile;
+              if (t && t.frozenHp === 0 && t.tier === reqSlot.tier) found = { r, c };
+            }
+          }
+          if (found) {
+            dbg.tapBoardCell(found.r, found.c);
+            break;
+          }
+          dbg.knead();
+          if (reqSlot.tier >= 2) {
+            for (const d of ['left', 'up', 'right', 'down']) {
+              const sr = dbg.slide(d);
+              if (sr && sr.moved) break;
+            }
+          }
+        }
+      }
+      assert.equal(dbg.getState().seats[s0Idx].readyToServe, true);
+      dbg.advanceTime(95);
+      const finalSt = dbg.getState();
+      assert.equal(finalSt.activeModal, 'level_result');
+      assert.equal(finalSt.lastResult.ordersServed, 0, 'Buzzer must NOT auto-serve an unclicked ready order');
+      assert.equal(finalSt.lastResult.score, 0);
+    } finally {
+      env.dispose();
     }
   });
 }

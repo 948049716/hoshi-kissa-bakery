@@ -681,16 +681,16 @@ async function serveCustomerOrganic(ctx, preferredSeat = null, opts = {}) {
   await ctx.eval(
     (sIdx, coords) => {
       const dbg = globalThis.__HOSHI_DEBUG__;
-      dbg.clickHit(`seat_${sIdx}`);
       for (const pt of coords) {
         dbg.tapBoardCell(pt.r, pt.c);
       }
+      dbg.clickHit(`seat_${sIdx}`);
     },
     seatIdx,
     matchedTiles.map((t) => ({ r: t.r, c: t.c }))
   );
 
-  const stAfter = await ctx.advanceTime(0.65);
+  const stAfter = await ctx.advanceTime(0.35);
   ctx.assert(
     stAfter.ordersServed > ordersBefore,
     `Expected ordersServed to increment (${ordersBefore} -> ${stAfter.ordersServed})`
@@ -992,9 +992,10 @@ export const TIER3_TESTS = [
       ctx.assert(c3Matcha, 'C3(matcha) ready on board');
       await ctx.tapBoardCell(c3Matcha.r, c3Matcha.c);
 
-      // Advance 0.60s for auto-serve of R15
-      st = await ctx.advanceTime(0.6);
-      ctx.assertEq(st.ordersServed, 1, 'R15 should auto-serve once C2 + C3[matcha] are in tray');
+      // Verify ready without auto-serve, then click R15 customer seat to serve (Plan A)
+      await ctx.clickHit(`seat_${targetSeatIdx}`);
+      st = await ctx.advanceTime(0.35);
+      ctx.assertEq(st.ordersServed, 1, 'R15 should serve once C2 + C3[matcha] are in tray and customer clicked');
       ctx.assert(st.score > 0, 'Serving R15 must award positive score');
 
       const remainingTray = (st.tray || []).filter(Boolean);
@@ -1034,11 +1035,9 @@ export const TIER3_TESTS = [
       const cust1 = stPreServe1.seats[r07SeatIdx];
       const cMult1 = cust1 ? (cust1.isVip ? 1.5 : cust1.isUrgent || cust1.customerId === 'cust_fox' ? 1.25 : 1.0) : 1.0;
 
-      // Synchronously at dt=0: lock seat_${r07SeatIdx}, spoon (0,1):C3(plain)->C4(plain),
-      // and load [C4(gold), C4(plain)] into tray[0], tray[1] so gold precedes plain!
+      // Synchronously at dt=0: spoon (0,1):C3(plain)->C4(plain), load [C4(gold), C4(plain)] into tray[0], tray[1], then click R07 seat!
       const trayPrep = await ctx.eval((sIdx) => {
         const dbg = globalThis.__HOSHI_DEBUG__;
-        dbg.clickHit(`seat_${sIdx}`);
         dbg.useToolOnCell('spoon', 0, 1);
         const mid = dbg.getState();
         const goldFlavor = mid.grid.cells[1][1]?.tile?.flavor;
@@ -1046,14 +1045,15 @@ export const TIER3_TESTS = [
         const plainFlavor = mid.grid.cells[0][1]?.tile?.flavor;
         dbg.tapBoardCell(1, 1); // tray[0] = C4(gold)
         dbg.tapBoardCell(0, 1); // tray[1] = C4(plain)
+        dbg.clickHit(`seat_${sIdx}`); // Manual click serve (Plan A)
         return { goldFlavor, plainTier, plainFlavor };
       }, r07SeatIdx);
       ctx.assertEq(trayPrep.goldFlavor, 'gold', '(1,1) preset is C4(gold)');
       ctx.assertEq(trayPrep.plainTier, 4, '(0,1) upgraded to C4(plain)');
       ctx.assertEq(trayPrep.plainFlavor, 'plain', '(0,1) flavor is plain');
 
-      const stAfter1 = await ctx.advanceTime(0.65);
-      ctx.assertEq(stAfter1.ordersServed, 1, 'First R07 order auto-served');
+      const stAfter1 = await ctx.advanceTime(0.35);
+      ctx.assertEq(stAfter1.ordersServed, 1, 'First R07 order served');
 
       // Greedy matcher MUST consume tray[1] C4(plain) and preserve tray[0] C4(gold)!
       const rem1 = (stAfter1.tray || []).filter(Boolean);
@@ -1068,7 +1068,7 @@ export const TIER3_TESTS = [
         `Plain C4 serve score (${stAfter1.score}) must match 1.00x item formula (${expectedPlainScore})`
       );
 
-      // Part 2: Measure exact 1.50x Gold wildcard price multiplier on an identical 1-combo green R07 serve
+      // Part 2: Measure exact 1.35x Gold wildcard price multiplier on an identical 1-combo green R07 serve
       // on fresh 2-2 (where (1,1) preset is C4(gold)) so comboCount === 0 and customerMult is observed pre-serve!
       let r07GoldIdx = -1;
       for (let attempt = 0; attempt < 30; attempt++) {
@@ -1085,15 +1085,15 @@ export const TIER3_TESTS = [
         r07GoldIdx = (stWave.seats || []).findIndex((s) => s && s.recipeId === 'R07');
         if (r07GoldIdx >= 0) break;
       }
-      ctx.assert(r07GoldIdx >= 0, 'Found R07 customer for Gold 1.50x pricing check');
+      ctx.assert(r07GoldIdx >= 0, 'Found R07 customer for Gold 1.35x pricing check');
 
-      await ctx.clickHit(`seat_${r07GoldIdx}`);
       const stPre2 = await ctx.getState();
       const cust2 = stPre2.seats[r07GoldIdx];
       const cMult2 = cust2.isVip ? 1.5 : cust2.isUrgent || cust2.customerId === 'cust_fox' ? 1.25 : 1.0;
 
       await ctx.tapBoardCell(1, 1); // (1,1):C4(gold) -> tray[0]
-      const stAfter2 = await ctx.advanceTime(0.65);
+      await ctx.clickHit(`seat_${r07GoldIdx}`);
+      const stAfter2 = await ctx.advanceTime(0.35);
       ctx.assertEq(stAfter2.ordersServed, 1, 'R07 served using C4(gold)');
       ctx.assertEq((stAfter2.tray || []).filter(Boolean).length, 0, 'C4(gold) consumed by R07');
 
@@ -2123,18 +2123,16 @@ export const TIER3_TESTS = [
         const custR08 = stBeforeR08.seats[r08SeatIdx];
         const cMultR08 = custR08.isUrgent || custR08.customerId === 'cust_fox' ? 1.25 : 1.0;
 
-        // Place presets (2,0):C1, (0,0):C2, (3,2):C3 atomically so bystander R02/R03 cannot steal C1/C2 mid-roundtrip
+        // Place presets (2,0):C1, (0,0):C2, (3,2):C3 and click R08 customer seat (Plan A)
         await ctx.eval((sIdx) => {
           const dbg = globalThis.__HOSHI_DEBUG__;
-          if (dbg.getState().preferredSeatIdx !== sIdx) {
-            dbg.clickHit(`seat_${sIdx}`);
-          }
           dbg.tapBoardCell(2, 0);
           dbg.tapBoardCell(0, 0);
           dbg.tapBoardCell(3, 2);
+          dbg.clickHit(`seat_${sIdx}`);
         }, r08SeatIdx);
-        const st = await ctx.advanceTime(0.65);
-        ctx.assertEq(st.ordersServed, 1, 'R08 auto-served');
+        const st = await ctx.advanceTime(0.35);
+        ctx.assertEq(st.ordersServed, 1, 'R08 served');
         const normR08 = st.score / cMultR08;
 
         // Also check 1-item R02 (C2) on 1-1 (0 urgent/VIP!) to confirm <3-item orders get 1.00x
@@ -2144,9 +2142,9 @@ export const TIER3_TESTS = [
           const st1 = await ctx.advanceTime(3.2);
           const idx = (st1.seats || []).findIndex((s) => s && s.recipeId === 'R02');
           if (idx >= 0) {
-            await ctx.clickHit(`seat_${idx}`);
             await ctx.tapBoardCell(1, 1); // preset (1,1):C2
-            const stServed = await ctx.advanceTime(0.65);
+            await ctx.clickHit(`seat_${idx}`);
+            const stServed = await ctx.advanceTime(0.35);
             r02Score = stServed.score;
             break;
           }
@@ -2193,11 +2191,11 @@ export const TIER3_TESTS = [
           const st = await ctx.advanceTime(3.2);
           const idx = (st.seats || []).findIndex((s) => s && s.recipeId === 'R04');
           if (idx >= 0) {
-            await ctx.clickHit(`seat_${idx}`);
             const c3 = await bakeTileOrganically(ctx, 3, 'plain');
             ctx.assert(c3, 'Merged C3 on 1-2');
             await ctx.tapBoardCell(c3.r, c3.c);
-            const after = await ctx.advanceTime(0.65);
+            await ctx.clickHit(`seat_${idx}`);
+            const after = await ctx.advanceTime(0.35);
             ctx.assertEq(after.ordersServed, 1, 'Served R04 (C3)');
             return after.score;
           }
@@ -2735,9 +2733,21 @@ export const TIER3_TESTS = [
         await ctx.tapCanvas(px.x, px.y, { holdMs: 35 });
       }
 
-      st = await ctx.advanceTime(0.65);
+      // Plan A: verify ready customer does NOT auto-serve, then tap glowing seat via raw CDP touch
+      st = await ctx.advanceTime(0.25);
+      ctx.assertEq(st.ordersServed, 0, 'Plan A: ready order must NOT auto-serve before customer tap on 375x667');
+      ctx.assertEq(st.seats[targetIdx]?.readyToServe, true, 'Target seat highlights readyToServe on 375x667');
+      const readySeatHit = (st.hits || []).find((h) => h.id === `seat_${targetIdx}`);
+      ctx.assert(readySeatHit, `Expected HitRegistry entry seat_${targetIdx}`);
+      await ctx.tapCanvas(
+        Math.round(readySeatHit.x + readySeatHit.w / 2),
+        Math.round(readySeatHit.y + readySeatHit.h / 2),
+        { holdMs: 35 }
+      );
+
+      st = await ctx.advanceTime(0.35);
       ctx.assert(st.ordersServed >= 1, 'Raw CDP touch chain completed customer order on 375x667');
-      ctx.assert(st.score > 0, 'Auto-serve awarded positive score on 375x667');
+      ctx.assert(st.score > 0, 'Manual seat tap serve awarded positive score on 375x667');
     }
   },
 

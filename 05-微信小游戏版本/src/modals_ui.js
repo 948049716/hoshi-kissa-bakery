@@ -2769,8 +2769,8 @@ function renderHelpModal(ctx, metrics, app, hits) {
         body: '点击揉面补料随时往烤盘补充新猫饼；移位叉可跨障挪移破冰，升阶勺直升一阶。'
       },
       {
-        title: '3. 单击配餐上菜',
-        body: '单击发光猫饼装盘，凑齐套餐上菜得分！双击托盘可丢入8秒冷却厨余篮（0扣分）。'
+        title: '3. 装盘点客上菜',
+        body: '单击发光猫饼装盘，凑齐后点发光顾客上菜！双击托盘可丢入8秒冷却厨余篮（0扣分）。'
       },
       {
         title: '4. 连击与星光热潮',
@@ -2954,6 +2954,26 @@ function collectTutorialSpotlights(step, app, hits) {
   const rects = [];
   const gt = (app && app.guideTargets) || {};
 
+  if (step.id === 'intro_slide_3' && app && app.orderState && Array.isArray(app.orderState.seats)) {
+    const readySeatIds = [];
+    for (let i = 0; i < app.orderState.seats.length; i++) {
+      const s = app.orderState.seats[i];
+      if (s && s.readyToServe) readySeatIds.push(`seat_${i}`);
+    }
+    if (readySeatIds.length > 0 && hits && Array.isArray(hits.items)) {
+      for (let i = 0; i < readySeatIds.length; i++) {
+        const targetId = readySeatIds[i];
+        for (let k = 0; k < hits.items.length; k++) {
+          const hItem = hits.items[k];
+          if (hItem && hItem.id === targetId) {
+            rects.push({ x: hItem.x, y: hItem.y, w: hItem.w, h: hItem.h });
+          }
+        }
+      }
+      if (rects.length > 0) return rects;
+    }
+  }
+
   if (Array.isArray(step.spotlightCells) && gt.cells) {
     for (let i = 0; i < step.spotlightCells.length; i++) {
       const pos = step.spotlightCells[i];
@@ -3050,6 +3070,16 @@ function renderTutorialOverlay(ctx, metrics, app, hits, nowSec) {
   const topBound = mr ? Math.max(Math.round(mr.bottom) + 6, safeTop + 8) : Math.max(12, safeTop + 8);
   const botBound = height - Math.max(10, safeBottom + 8);
 
+  const hasReadySeat =
+    step.id === 'intro_slide_3' &&
+    app.orderState &&
+    Array.isArray(app.orderState.seats) &&
+    app.orderState.seats.some((s) => s && s.readyToServe);
+  const displayTitle = hasReadySeat ? '点击发光顾客上菜' : step.title || '';
+  const displayText = hasReadySeat
+    ? '订单已凑齐！点击上方发光顾客，即可端上猫饼得分！'
+    : step.text || '';
+
   const spotlights = collectTutorialSpotlights(step, app, hits);
   const pulse = 0.5 + 0.5 * Math.sin(nowSec * 5.2);
 
@@ -3108,7 +3138,7 @@ function renderTutorialOverlay(ctx, metrics, app, hits, nowSec) {
   UI.drawTagBadge(c, cardX + 12, cardY + 11, 82, 19, step.tag || '新手引导', 'amber', 9.0);
   UI.drawFitText(
     c,
-    step.title || '',
+    displayTitle,
     cardX + 100,
     cardY + 20.5,
     cardW - 166,
@@ -3134,7 +3164,7 @@ function renderTutorialOverlay(ctx, metrics, app, hits, nowSec) {
 
   UI.drawWrappedText(
     c,
-    step.text || '',
+    displayText,
     cardX + 14,
     cardY + 37,
     cardW - 28,

@@ -320,7 +320,6 @@ function createApp() {
 
   let levelRng = Math.random;
   let kneadCooldown = 0;
-  let autoServeTimer = 0;
   let tutorialAutoFadeTimer = 0;
   let levelSkipTutorial = false;
   let lastCountdownTickInt = 6;
@@ -1275,7 +1274,6 @@ function createApp() {
     app.activeTutorialStep = null;
     app.tutorialSkipRect = null;
     levelSkipTutorial = false;
-    autoServeTimer = 0;
     syncGameStateMirror();
     syncAudioMood();
   }
@@ -1493,17 +1491,6 @@ function createApp() {
     app.neededTiers = OrderService.getNeededBoardTiers(app.orderState);
   }
 
-  function checkAndArmAutoServe() {
-    if (!app.orderState) return;
-    refreshNeededAndOrderMarks();
-    const hasReady = app.orderState.seats.some((s) => s && s.readyToServe);
-    if (hasReady && autoServeTimer <= 0) {
-      autoServeTimer = 0.10;
-    } else if (!hasReady) {
-      autoServeTimer = 0;
-    }
-  }
-
   function startLevelInternal(levelId, opts = {}) {
     const lvl = getLevelById(levelId);
     if (!lvl) return false;
@@ -1544,7 +1531,6 @@ function createApp() {
     app.boardFullHintTimer = 0;
 
     kneadCooldown = 0;
-    autoServeTimer = 0;
     lastCountdownTickInt = 6;
     unlockedStarsMask = 0;
     lastTrayTapSlot = -1;
@@ -1822,7 +1808,14 @@ function createApp() {
     if (!trayRes.placed) {
       audio.playGridBlocked();
       app.animState.trashWobbleTimer = 0.65;
-      if ((app.orderState.trashCooldown || 0) > 1e-6) {
+      refreshNeededAndOrderMarks();
+      const anyReady = app.orderState.seats.some((s) => s && s.readyToServe);
+      if (anyReady) {
+        showToast('配餐托盘已满！请点击上方发光顾客上菜，或双击托盘丢弃', {
+          icon: 'icon_check',
+          tone: 'warn'
+        });
+      } else if ((app.orderState.trashCooldown || 0) > 1e-6) {
         showToast('配餐托盘已满且厨余篮冷却中，可用移位叉腾挪盘格！', {
           icon: 'tool_fork',
           tone: 'warn'
@@ -1833,7 +1826,9 @@ function createApp() {
           tone: 'warn'
         });
       }
-      maybeArmTrayTrashTutorial(true);
+      if (!anyReady) {
+        maybeArmTrayTrashTutorial(true);
+      }
       return { placed: false, slotIdx: -1, tile: null, reason: trayRes.reason || 'tray_full' };
     }
 
@@ -1855,7 +1850,7 @@ function createApp() {
 
     audio.playTrayPlace();
     platform.vibrateShort('light');
-    checkAndArmAutoServe();
+    refreshNeededAndOrderMarks();
     maybeArmTrayTrashTutorial(false);
     syncGameStateMirror();
 
@@ -1912,7 +1907,7 @@ function createApp() {
     if (app.activeTutorialStep === 'tray_trash') {
       completeTutorialSaveKey('tray_trash');
     }
-    checkAndArmAutoServe();
+    refreshNeededAndOrderMarks();
     syncGameStateMirror();
     return res;
   }
@@ -1969,10 +1964,16 @@ function createApp() {
     if (app.screen !== 'playing' || app.activeModal !== null || !app.orderState) return false;
     const seat = app.orderState.seats[seatIdx];
     if (!seat) return false;
+    refreshNeededAndOrderMarks();
+    if (seat.readyToServe) {
+      const serveRes = executeServeSeat(seatIdx);
+      return Boolean(serveRes && serveRes.served);
+    }
     app.orderState.preferredSeatIdx =
       app.orderState.preferredSeatIdx === seatIdx ? null : seatIdx;
     audio.playPatronSelect();
-    checkAndArmAutoServe();
+    refreshNeededAndOrderMarks();
+    syncGameStateMirror();
     return true;
   };
 
@@ -2561,15 +2562,20 @@ function createApp() {
     executeCastPatronSkill({});
   };
 
-  // ==================== Auto-Serve, Simulation & Settlement ====================
+  // ==================== Manual Customer Serving, Simulation & Settlement ====================
 
-  function performAutoServe() {
-    if (!app.orderState || !app.gridState) return false;
+  function executeServeSeat(targetSeatIdx) {
+    if (app.screen !== 'playing' || app.activeModal !== null || !app.orderState || !app.gridState) {
+      return { served: false, reason: 'not_playing' };
+    }
     const traySnap = app.orderState.tray.slice();
-    const serveRes = OrderService.matchTrayToCustomer(app.orderState, buildServeScoreCtx());
+    const serveRes = OrderService.serveCustomerSeat(
+      app.orderState,
+      targetSeatIdx,
+      buildServeScoreCtx()
+    );
     if (!serveRes || !serveRes.served) {
-      autoServeTimer = 0;
-      return false;
+      return { served: false, reason: 'not_ready' };
     }
 
     const seatIdx = serveRes.seatIdx || 0;
@@ -2610,6 +2616,7 @@ function createApp() {
 
     audio.playServeBell();
     audio.playOrderComplete();
+    platform.vibrateShort('medium');
 
     if (serveRes.triggeredFever) {
       audio.setFeverMode(true);
@@ -2641,9 +2648,15 @@ function createApp() {
       completeTutorialSaveKey('intro_slide');
     }
 
+    refreshNeededAndOrderMarks();
     syncGameStateMirror();
-    checkAndArmAutoServe();
-    return true;
+    return {
+      served: true,
+      seatIdx,
+      scoreGain: serveRes.scoreGain || 0,
+      usedTrayIndices: usedIndices,
+      triggeredFever: Boolean(serveRes.triggeredFever)
+    };
   }
 
   function settleCurrentLevel() {
@@ -2713,7 +2726,6 @@ function createApp() {
     app.tutorialSkipRect = null;
     app.activeModal = 'level_result';
     app.uiAnim.modalOpenTimer = 0;
-    autoServeTimer = 0;
 
     if (settlement.cleared) {
       audio.playShiftClear();
@@ -2825,13 +2837,6 @@ function createApp() {
       }
     }
 
-    if (autoServeTimer > 0) {
-      autoServeTimer = Math.max(0, autoServeTimer - dt);
-      if (autoServeTimer <= 0) {
-        performAutoServe();
-      }
-    }
-
     // Pre-snapshot seated customer IDs for walkout micro-animation
     const prevSeatIds = [
       app.orderState.seats[0] ? app.orderState.seats[0].customerId : null,
@@ -2867,7 +2872,7 @@ function createApp() {
     }
 
     if (tickRes.spawnedSeats && tickRes.spawnedSeats.length > 0) {
-      checkAndArmAutoServe();
+      refreshNeededAndOrderMarks();
     } else {
       app.neededTiers = OrderService.getNeededBoardTiers(app.orderState);
     }
@@ -2885,16 +2890,6 @@ function createApp() {
     syncAudioMood();
 
     if (tl <= 0) {
-      // Flush any ready auto-serve right at buzzer
-      let guard = 0;
-      while (
-        app.orderState &&
-        app.orderState.seats.some((s) => s && s.readyToServe) &&
-        guard < 4
-      ) {
-        guard++;
-        if (!performAutoServe()) break;
-      }
       settleCurrentLevel();
     }
   }
@@ -3758,6 +3753,12 @@ function createApp() {
 
     doubleTapTray(slotIdx, opts = undefined) {
       const res = executeDiscardTraySlot(slotIdx, opts);
+      renderFrame(0);
+      return res;
+    },
+
+    serveSeat(seatIdx) {
+      const res = executeServeSeat(seatIdx);
       renderFrame(0);
       return res;
     },

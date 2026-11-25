@@ -681,16 +681,16 @@ async function serveCustomerOrganic(ctx, preferredSeat = null, opts = {}) {
   await ctx.eval(
     (sIdx, coords) => {
       const dbg = globalThis.__HOSHI_DEBUG__;
-      dbg.clickHit(`seat_${sIdx}`);
       for (const pt of coords) {
         dbg.tapBoardCell(pt.r, pt.c);
       }
+      dbg.clickHit(`seat_${sIdx}`);
     },
     seatIdx,
     matchedTiles.map((t) => ({ r: t.r, c: t.c }))
   );
 
-  const stAfter = await ctx.advanceTime(0.65);
+  const stAfter = await ctx.advanceTime(0.35);
   ctx.assert(
     stAfter.ordersServed > ordersBefore,
     `Expected ordersServed to increment (${ordersBefore} -> ${stAfter.ordersServed})`
@@ -965,10 +965,22 @@ export const TIER4_TESTS = [
         }
       }
 
-      // Advance simulation clock past 0.10s settle + 0.28s flyingServe animation
-      st = await ctx.advanceTime(0.65);
-      ctx.assert(st.ordersServed >= 1, `Expected ordersServed >= 1 after auto-serve, got ${st.ordersServed}`);
-      ctx.assert(st.score > 0, `L3-3: gameState.score (${st.score}) > 0 strictly after customer order auto-served`);
+      // Plan A: verify ready customer does NOT auto-serve, then tap glowing customer seat via raw CDP touch!
+      st = await ctx.advanceTime(0.25);
+      ctx.assertEq(st.ordersServed, 0, 'Plan A: ready order must NOT auto-serve before customer tap');
+      ctx.assertEq(st.seats[seatIdx]?.readyToServe, true, 'Target seat must highlight readyToServe');
+      const readySeatHit = (st.hits || []).find((h) => h.id === `seat_${seatIdx}`);
+      ctx.assert(readySeatHit, `Expected HitRegistry entry seat_${seatIdx}`);
+      await ctx.tapCanvas(
+        Math.round(readySeatHit.x + readySeatHit.w / 2),
+        Math.round(readySeatHit.y + readySeatHit.h / 2),
+        { holdMs: 40 }
+      );
+
+      // Advance simulation clock past 0.28s flyingServe animation
+      st = await ctx.advanceTime(0.35);
+      ctx.assert(st.ordersServed >= 1, `Expected ordersServed >= 1 after tapping ready customer, got ${st.ordersServed}`);
+      ctx.assert(st.score > 0, `L3-3: gameState.score (${st.score}) > 0 strictly after customer order served`);
 
       const shot = await ctx.captureScreenshot('03_l3_tray_autoserve_scored_390.png');
       ctx.assert(shot && shot.bytes > 1024, 'Saved 03_l3_tray_autoserve_scored_390.png');

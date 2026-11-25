@@ -1085,8 +1085,10 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
           break;
         }
       }
+      const isReady = allMatched || Boolean(getOwn(seat, 'readyToServe', false));
+      const readyPulse = isReady ? 0.5 + 0.5 * Math.sin(nowSec * 6.5 + i * 0.8) : 0;
 
-      const mood = allMatched
+      const mood = isReady
         ? 'happy'
         : ratio < PATIENCE_TIP_BANDS.yellowThreshold
         ? 'anxious'
@@ -1101,29 +1103,44 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
 
       ctx.save();
       try {
-        const bg = safeLinearGradient(ctx, bubbleX, bubbleY, bubbleX, bubbleY + bubbleH, '#FFFDF7');
-        safeAddColorStop(bg, 0, '#FFFDF7', '#FFFDF7');
-        safeAddColorStop(bg, 1, '#F8EDD9', '#F8EDD9');
+        const bg = safeLinearGradient(
+          ctx,
+          bubbleX,
+          bubbleY,
+          bubbleX,
+          bubbleY + bubbleH,
+          isReady ? '#FFF7D6' : '#FFFDF7'
+        );
+        if (isReady) {
+          safeAddColorStop(bg, 0, '#FFFDF0', '#FFFDF0');
+          safeAddColorStop(bg, 1, '#FFE79E', '#FFE79E');
+          ctx.shadowColor = 'rgba(255, 200, 56, 0.85)';
+          ctx.shadowBlur = 8 + 4 * readyPulse;
+        } else {
+          safeAddColorStop(bg, 0, '#FFFDF7', '#FFFDF7');
+          safeAddColorStop(bg, 1, '#F8EDD9', '#F8EDD9');
+        }
         ctx.fillStyle = bg;
         UI.roundRectPath(ctx, bubbleX, bubbleY, bubbleW, bubbleH, 10);
         ctx.fill();
-        ctx.lineWidth = 2.0;
-        ctx.strokeStyle = '#5A3928';
+        ctx.lineWidth = isReady ? 2.5 : 2.0;
+        ctx.strokeStyle = isReady ? '#E8961E' : '#5A3928';
         ctx.stroke();
 
         // Downward speech tail
+        ctx.shadowBlur = 0;
         ctx.beginPath();
         ctx.moveTo(tailX - 5, bubbleY + bubbleH - 1.5);
         ctx.lineTo(tailX - 1, bubbleY + bubbleH + 7);
         ctx.lineTo(tailX + 5, bubbleY + bubbleH - 1.5);
         ctx.closePath();
-        ctx.fillStyle = '#F9EFE0';
+        ctx.fillStyle = isReady ? '#FFE9A6' : '#F9EFE0';
         ctx.fill();
         ctx.beginPath();
         ctx.moveTo(tailX - 5, bubbleY + bubbleH - 1);
         ctx.lineTo(tailX - 1, bubbleY + bubbleH + 7);
         ctx.lineTo(tailX + 5, bubbleY + bubbleH - 1);
-        ctx.strokeStyle = '#5A3928';
+        ctx.strokeStyle = isReady ? '#E8961E' : '#5A3928';
         ctx.lineWidth = 1.9;
         ctx.lineJoin = 'round';
         ctx.stroke();
@@ -1175,12 +1192,29 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
       const portBot = counterY + 2;
       const portH = Math.max(36, portBot - portTop);
       const portS = Math.min(cardW * 0.78, portH * 1.10);
-      const bob = Math.sin(nowSec * 2.6 + i * 1.4) * 1.2;
+      const bob = isReady
+        ? -Math.abs(Math.sin(nowSec * 5.8 + i * 0.9)) * 3.0
+        : Math.sin(nowSec * 2.6 + i * 1.4) * 1.2;
       const portCx = cardX + cardW * 0.5;
       const portCy = portBot - portS * 0.44 + bob;
 
-      // Cyan priority target halo behind preferred customer portrait (Design 03 left fox)
-      if (isPreferred && typeof UI.drawPriorityTargetBadge === 'function') {
+      // Golden ready-to-serve aura behind portrait (takes lead over cyan target halo when ready)
+      if (isReady) {
+        ctx.save();
+        try {
+          const haloR = portS * (0.48 + 0.05 * readyPulse);
+          ctx.beginPath();
+          ctx.arc(portCx, portCy, haloR, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255, 224, 102, ${(0.28 + 0.18 * readyPulse).toFixed(3)})`;
+          ctx.fill();
+          ctx.lineWidth = 2.0;
+          ctx.strokeStyle = `rgba(255, 214, 76, ${(0.65 + 0.30 * readyPulse).toFixed(3)})`;
+          ctx.stroke();
+        } finally {
+          try { ctx.restore(); } catch (_) {}
+        }
+      } else if (isPreferred && typeof UI.drawPriorityTargetBadge === 'function') {
+        // Cyan priority target halo behind preferred customer portrait (Design 03 left fox)
         UI.drawPriorityTargetBadge(ctx, portCx, portCy, portS * 0.52, nowSec);
       }
 
@@ -1295,8 +1329,50 @@ function renderCustomersBar(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7
         try { ctx.restore(); } catch (_) {}
       }
 
-      // 5. Cyan Breathing 4-Corner Priority Lock Frame (`UI.drawPriorityLockFrame`) on preferred seat
-      if (isPreferred && typeof UI.drawPriorityLockFrame === 'function') {
+      // 5. Ready-to-Serve Golden Pulse Frame & Bouncing '点此上菜' Pill (Plan A), or Cyan Priority Lock
+      if (isReady) {
+        ctx.save();
+        try {
+          ctx.strokeStyle = '#FFD95C';
+          ctx.globalAlpha = 0.72 + 0.28 * readyPulse;
+          ctx.lineWidth = 2.6;
+          ctx.shadowColor = '#F5A623';
+          ctx.shadowBlur = 9;
+          UI.roundRectPath(ctx, cardX + 1, cardY + 1, cardW - 2, cardH - 2, 11);
+          ctx.stroke();
+        } finally {
+          try { ctx.restore(); } catch (_) {}
+        }
+
+        const pillW = clamp(Math.round(cardW * 0.58), 52, 68);
+        const pillH = 18;
+        const pillX = Math.round(portCx - pillW * 0.5);
+        const pillY = Math.round(bubbleY + bubbleH - 4 - readyPulse * 2.0);
+        ctx.save();
+        try {
+          const pillG = safeLinearGradient(ctx, pillX, pillY, pillX, pillY + pillH, '#F5A623');
+          safeAddColorStop(pillG, 0, '#FFE880', '#FFE880');
+          safeAddColorStop(pillG, 1, '#F29C1F', '#F29C1F');
+          ctx.fillStyle = pillG;
+          UI.roundRectPath(ctx, pillX, pillY, pillW, pillH, pillH * 0.5);
+          ctx.fill();
+          ctx.lineWidth = 1.8;
+          ctx.strokeStyle = '#5A3928';
+          ctx.stroke();
+        } finally {
+          try { ctx.restore(); } catch (_) {}
+        }
+        UI.drawOutlinedText(ctx, '点此上菜', portCx, pillY + pillH * 0.5 + 0.5, {
+          size: 9.8,
+          minSize: 8.2,
+          weight: 900,
+          fill: '#FFF8EC',
+          stroke: '#5A3928',
+          strokeWidth: 2.2,
+          shadowOffsetY: 0,
+          maxWidth: pillW - 8
+        });
+      } else if (isPreferred && typeof UI.drawPriorityLockFrame === 'function') {
         UI.drawPriorityLockFrame(ctx, cardX + 1, cardY + 1, cardW - 2, cardH - 2, nowSec);
       }
     }

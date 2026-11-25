@@ -345,11 +345,11 @@ function drawCircularWoodButton(ctx, cx, cy, radius, opts = {}) {
 
     if (opts.label) {
       UI.drawOutlinedText(c, opts.label, cx, cy + dy + 0.5, {
-        size: Math.round(r * 0.98),
+        size: Math.round(r * 1.08),
         weight: 900,
-        fill: muted ? '#DFD3C5' : '#FFF8EC',
-        stroke: '#5A3928',
-        strokeWidth: 2.6,
+        fill: muted ? '#D8C8B8' : '#FFE892',
+        stroke: '#4A2814',
+        strokeWidth: 2.8,
         shadowOffsetY: 0.8
       });
     } else if (opts.icon && opts.sprites) {
@@ -634,19 +634,24 @@ function renderLobbyChapterBg(ctx, width, height, chapNum, app, sprites) {
 }
 
 /**
- * Lobby top-left player avatar + stardust pill & top-right stacked circular wood buttons (Design 02a/02b/02c)
- * Strictly satisfies WeChat capsule clearance (`y >= menuRect.bottom + 8` for right-side buttons!)
+ * Reusable Top-Left Player Avatar + Snug Stardust Currency Pill (Design 02a/04/06/07/09).
+ * Also drawn bright above modal backdrops on Lobby modals (strictly non-interactive).
  */
-function renderLobbyChrome(ctx, geom, stageInfo, app, hits) {
+function drawTopLeftStardustChip(ctx, metricsOrGeom, app, opts = {}) {
   const c = getSafeCtx(ctx);
-  const { width, topY, headerH, headerBottom, maxRight } = geom;
-  const { stageX, stageW, isWide } = stageInfo;
-  const saveData = app.saveData || {};
-  const sprites = app.sprites || {};
+  const geom =
+    metricsOrGeom && Number.isFinite(metricsOrGeom.topY) && Number.isFinite(metricsOrGeom.headerH)
+      ? metricsOrGeom
+      : computeTopHeaderGeometry(metricsOrGeom);
+  const { width, height, topY, headerH, maxRight } = geom;
+  const isWide = opts.isWide !== undefined ? Boolean(opts.isWide) : width > height * 0.95;
+  const stageW = Number.isFinite(opts.stageW) ? opts.stageW : isWide ? Math.min(440, Math.round(height * 0.57)) : width;
+  const stageX = Number.isFinite(opts.stageX) ? opts.stageX : isWide ? Math.round((width - stageW) * 0.5) : 0;
+  const saveData = (app && app.saveData) || {};
+  const sprites = (app && app.sprites) || {};
 
-  // 1. Top-left Player Avatar + Snug Stardust Currency Pill (clears plaque rope & WeChat capsule)
   const leftMargin = isWide ? stageX + 12 : 12;
-  const chipH = Math.min(28, Math.max(24, headerH - 2));
+  const chipH = Math.min(30, Math.max(26, headerH - 2));
   const chipY = topY + Math.floor((headerH - chipH) * 0.5);
   const avatarS = chipH + 8;
   const avatarCx = leftMargin + avatarS * 0.5;
@@ -655,12 +660,12 @@ function renderLobbyChrome(ctx, geom, stageInfo, app, hits) {
   const dustText = String(saveData.bankStardust || 0);
   const dustX = leftMargin + Math.round(avatarS * 0.48);
   const dustLeftPad = Math.round(avatarS * 0.56);
-  const dustIconSz = Math.min(chipH - 3, Math.round(chipH * 0.72));
-  const dustFontSz = 13;
+  const dustIconSz = Math.min(chipH - 2, Math.round(chipH * 0.78));
+  const dustFontSz = 14.5;
   c.font = UI.fontStr(dustFontSz, 800);
   const dustNumW = Math.ceil(c.measureText(dustText).width);
-  const maxDustW = Math.max(66, Math.min(110, maxRight - dustX - 6));
-  const dustW = clamp(dustLeftPad + dustIconSz + 5 + dustNumW + 13, 74, maxDustW);
+  const maxDustW = Math.max(76, Math.min(126, maxRight - dustX - 6));
+  const dustW = clamp(dustLeftPad + dustIconSz + 6 + dustNumW + 14, 84, maxDustW);
 
   UI.drawCurrencyChip(
     c,
@@ -671,7 +676,7 @@ function renderLobbyChrome(ctx, geom, stageInfo, app, hits) {
     sprites,
     'icon_star_coin',
     dustText,
-    { fontSize: dustFontSz, leftPad: dustLeftPad, rightPad: 10, iconGap: 5, align: 'left' }
+    { fontSize: dustFontSz, leftPad: dustLeftPad, rightPad: 11, iconGap: 5, align: 'left' }
   );
 
   // Default manager avatar icon overlapping left end of stardust pill (Design 02a)
@@ -690,9 +695,22 @@ function renderLobbyChrome(ctx, geom, stageInfo, app, hits) {
       c.restore();
     }
   }
+}
+
+/**
+ * Lobby top-left player avatar + stardust pill & top-right stacked circular wood buttons (Design 02a/02b/02c)
+ * Strictly satisfies WeChat capsule clearance (`y >= menuRect.bottom + 8` for right-side buttons!)
+ */
+function renderLobbyChrome(ctx, geom, stageInfo, app, hits) {
+  const c = getSafeCtx(ctx);
+  const { width, topY, headerH, headerBottom } = geom;
+  const { stageX, stageW, isWide } = stageInfo;
+
+  // 1. Top-left Player Avatar + Snug Stardust Currency Pill (clears plaque rope & WeChat capsule)
+  drawTopLeftStardustChip(c, geom, app, { stageX, stageW, isWide });
 
   // 2. Right-side vertically stacked circular wood buttons: 乐 / 音 / ? (strictly below WeChat capsule!)
-  const btnS = width <= 380 ? 33 : 35;
+  const btnS = width <= 380 ? 34 : 36;
   const btnR = btnS * 0.5;
   const btnGap = 7;
   const rightEdge = isWide ? Math.min(width - 14, stageX + stageW + 46) : width - 10;
@@ -761,26 +779,26 @@ function renderLobbyPlaqueHeader(ctx, geom, stageInfo, chromeInfo, app, hits) {
   // Outlined Title & Chapter Subtitle inside wooden plaque (Design 02a/02b/02c)
   const plaqueCx = plaqueX + plaqueW * 0.5;
   UI.drawOutlinedText(c, GAME_TITLE, plaqueCx, plaqueY + plaqueH * plaqueSpec.titleYInPlaque, {
-    size: clamp(Math.round(plaqueW * 0.155), 24, 34),
+    size: clamp(Math.round(plaqueW * 0.168), 26, 36),
     weight: 900,
     fill: '#FFE788',
     stroke: '#5A3928',
     strokeWidth: 4.8,
     shadowOffsetY: 2.0,
-    maxWidth: plaqueW * 0.85
+    maxWidth: plaqueW * 0.86
   });
 
   const subText = chapStatus.unlocked
     ? `第${chap.chapter}章 · ${chap.name}`
     : `第${chap.chapter}章 · ${chap.name} (未解锁)`;
   UI.drawOutlinedText(c, subText, plaqueCx, plaqueY + plaqueH * plaqueSpec.subtitleYInPlaque, {
-    size: clamp(Math.round(plaqueW * 0.068), 11.5, 15.5),
+    size: clamp(Math.round(plaqueW * 0.075), 13.0, 16.5),
     weight: 800,
     fill: chapStatus.unlocked ? '#FFF8EC' : '#FFD1B8',
     stroke: '#5A3928',
-    strokeWidth: 2.6,
+    strokeWidth: 2.8,
     shadowOffsetY: 1.0,
-    maxWidth: plaqueW * 0.86
+    maxWidth: plaqueW * 0.88
   });
 
   // Left '<' and Right '>' Chapter Switch Chevrons (vertically centered on wooden board, strictly below capsule!)
@@ -816,11 +834,11 @@ function renderLobbyPlaqueHeader(ctx, geom, stageInfo, chromeInfo, app, hits) {
 
   // Total Stars Wood Pill directly under plaque (`总星 24/90`) with snug centered grouping
   const starText = `总星 ${totalStars}/${MAX_CAMPAIGN_STARS}`;
-  const starFontSz = 12;
+  const starFontSz = 13.8;
   c.font = UI.fontStr(starFontSz, 800);
   const starTextW = Math.ceil(c.measureText(starText).width);
-  const starPillH = 26;
-  const starPillW = clamp(starTextW + 46, 108, Math.min(134, Math.round(plaqueW * 0.62)));
+  const starPillH = 29;
+  const starPillW = clamp(starTextW + 52, 118, Math.min(150, Math.round(plaqueW * 0.70)));
   const starPillX = Math.round(plaqueCx - starPillW * 0.5);
   const starPillY = plaqueY + plaqueH + 4;
   UI.drawCurrencyChip(
@@ -914,22 +932,22 @@ function renderLobbyLevelNodes(ctx, stageInfo, bounds, app, hits, nowSec) {
 
       // 3D perspective pedestal lip (cool dark slate for locked, warm caramel/tan for unlocked)
       const strokeColor = !unlockInfo.unlocked
-        ? '#3A3F48'
+        ? '#2C313A'
         : isBoss
           ? '#B86A16'
           : '#5A3928';
       drawPerspectiveOvalPath(c, vCx, vCy + lipH, rx, ry);
-      c.fillStyle = !unlockInfo.unlocked ? '#4D535E' : isFrontier ? '#BD6E14' : '#C49B72';
+      c.fillStyle = !unlockInfo.unlocked ? '#3E4550' : isFrontier ? '#BD6E14' : '#C49B72';
       c.fill();
-      c.lineWidth = 2.1;
+      c.lineWidth = 2.2;
       c.strokeStyle = strokeColor;
       c.stroke();
 
       // Main 3D perspective disc top surface
       const grad = c.createLinearGradient(vCx, vCy - ry, vCx, vCy + ry);
       if (!unlockInfo.unlocked) {
-        grad.addColorStop(0, '#8F96A1');
-        grad.addColorStop(1, '#6C737E');
+        grad.addColorStop(0, '#7F8794');
+        grad.addColorStop(1, '#5D6572');
       } else if (isFrontier) {
         grad.addColorStop(0, '#FFEB88');
         grad.addColorStop(1, '#F3A020');
@@ -940,7 +958,7 @@ function renderLobbyLevelNodes(ctx, stageInfo, bounds, app, hits, nowSec) {
       drawPerspectiveOvalPath(c, vCx, vCy, rx, ry);
       c.fillStyle = grad;
       c.fill();
-      c.lineWidth = isFrontier ? 2.5 : 2.2;
+      c.lineWidth = isFrontier ? 2.6 : 2.3;
       c.strokeStyle = strokeColor;
       c.stroke();
 
@@ -958,23 +976,23 @@ function renderLobbyLevelNodes(ctx, stageInfo, bounds, app, hits, nowSec) {
         } else {
           c.arc(vCx, vCy, Math.max(4, nodeR - 2.6), -Math.PI * 0.82, -Math.PI * 0.18);
         }
-        c.strokeStyle = !unlockInfo.unlocked ? 'rgba(255, 255, 255, 0.22)' : 'rgba(255, 255, 255, 0.65)';
+        c.strokeStyle = !unlockInfo.unlocked ? 'rgba(255, 255, 255, 0.24)' : 'rgba(255, 255, 255, 0.65)';
         c.lineWidth = 1.4;
         c.stroke();
       }
 
       if (!unlockInfo.unlocked) {
-        // Engraved cool slate padlock matching 02a/02b/02c locked stone medallions
-        drawLockIcon(c, vCx, vCy + 0.5, Math.round(nodeR * 0.82), {
-          forceVector: true,
-          bodyColor: '#7A818D',
+        // Crisp illustrated silver-pearl padlock sprite matching Design 02a/02b/02c locked stone medallions
+        drawLockIcon(c, vCx, vCy - 0.5, Math.round(nodeR * 1.04), {
+          sprites,
+          bodyColor: '#C4C9D2',
           shackleColor: '#3A3F48',
-          borderColor: '#3A3F48'
+          borderColor: '#2E333B'
         });
       } else {
         // Level label e.g. '1-6'
         UI.drawOutlinedText(c, levelId, vCx, vCy + 0.5, {
-          size: Math.max(11.5, Math.round(nodeR * 0.64)),
+          size: Math.max(13.5, Math.round(nodeR * 0.72)),
           weight: 900,
           fill: '#5A3928',
           stroke: '',
@@ -984,17 +1002,17 @@ function renderLobbyLevelNodes(ctx, stageInfo, bounds, app, hits, nowSec) {
         });
 
         // 3 mini stars tucked tightly beneath the disc in a subtle smile arc (matching 02a/02b/02c)
-        const starBaseY = vCy + ry + 6.5;
-        const starStep = Math.min(12.2, Math.round(rx * 0.56));
+        const starBaseY = vCy + ry + 7.5;
+        const starStep = Math.min(13.4, Math.round(rx * 0.60));
         for (let s = 1; s <= 3; s++) {
-          const arcDip = s === 2 ? 1.8 : 0;
-          UI.drawStarIcon(c, vCx + (s - 2) * starStep, starBaseY + arcDip, 5.2, s <= stars, { sprites });
+          const arcDip = s === 2 ? 2.0 : 0;
+          UI.drawStarIcon(c, vCx + (s - 2) * starStep, starBaseY + arcDip, 6.2, s <= stars, { sprites });
         }
 
         // Bouncing cat-paw marker floating above current frontier node!
         if (isFrontier) {
           const pawBounce = Math.abs(Math.sin(nowSec * 3.8)) * 5.2;
-          const pawS = Math.round(nodeR * 1.54);
+          const pawS = Math.round(nodeR * 1.58);
           UI.drawUiIcon(c, sprites, 'icon_paw_marker', vCx + 4, vCy - ry - pawS * 0.45 - pawBounce, pawS);
         }
       }
@@ -1053,22 +1071,22 @@ function renderPatronBar(ctx, rect, app, hits, nowSec) {
   }
 
   // Larger patron portrait popping cleanly above the top card border (NO flat beige circle behind it)
-  const avatarS = Math.min(h + 16, 76);
+  const avatarS = Math.min(h + 16, 78);
   const avatarCx = x + 6 + avatarS * 0.52;
   const bounce = app.patronPokeTimer > 0 ? Math.sin(app.patronPokeTimer * 26) * 3.8 : Math.sin(nowSec * 2.4) * 1.2;
   const avatarCy = y + h * 0.34 + bounce;
   UI.drawUiIcon(c, sprites, patron.id, avatarCx, avatarCy, avatarS);
 
   // Warm butter-gold name pill overlapping bottom border under patron portrait (`小蜜柑`)
-  const namePillW = Math.min(72, Math.max(60, avatarS - 4));
-  const namePillH = 19;
+  const namePillW = Math.min(76, Math.max(64, avatarS - 2));
+  const namePillH = 21;
   const namePillX = Math.round(avatarCx - namePillW * 0.5);
-  const namePillY = Math.round(y + h - namePillH * 0.72);
-  UI.drawTagBadge(c, namePillX, namePillY, namePillW, namePillH, patron.name, 'butter', 10.5);
+  const namePillY = Math.round(y + h - namePillH * 0.68);
+  UI.drawTagBadge(c, namePillX, namePillY, namePillW, namePillH, patron.name, 'butter', 12.2);
 
   // Right-side warm caramel '切换搭档' button with crisp vector caret
-  const btnW = Math.min(92, Math.max(78, Math.round(w * 0.25)));
-  const btnH = Math.min(34, h - 18);
+  const btnW = Math.min(98, Math.max(84, Math.round(w * 0.27)));
+  const btnH = Math.min(36, h - 16);
   const btnX = x + w - 9 - btnW;
   const btnY = Math.round(y + (h - btnH) * 0.5);
 
@@ -1076,7 +1094,7 @@ function renderPatronBar(ctx, rect, app, hits, nowSec) {
     style: 'caramel',
     text: '切换搭档',
     trailingCaret: true,
-    fontSize: 11.2,
+    fontSize: 13.0,
     borderWidth: 2.0,
     radius: 10,
     pressed: isHitPressed(app, 'lobby_patron_switch')
@@ -1086,28 +1104,28 @@ function renderPatronBar(ctx, rect, app, hits, nowSec) {
   // Seamless speech balloon in center with vertically centered wrapped text
   const balloonX = x + 12 + avatarS;
   const balloonW = Math.max(70, btnX - 8 - balloonX);
-  const balloonY = y + 8;
-  const balloonH = h - 16;
+  const balloonY = y + 7;
+  const balloonH = h - 14;
   drawSpeechBalloon(c, balloonX, balloonY, balloonW, balloonH, balloonX - 7, balloonY + balloonH * 0.54);
 
   const speechLine = app.currentPatronLine || patron.greet;
-  const speechFontSz = balloonH >= 48 ? 11.8 : 11.0;
+  const speechFontSz = balloonH >= 48 ? 13.0 : 12.0;
   const speechFont = UI.fontStr(speechFontSz, 800);
-  const maxTextW = Math.max(36, balloonW - 18);
+  const maxTextW = Math.max(36, balloonW - 16);
   const rawLines = typeof UI.wrapText === 'function' ? UI.wrapText(c, speechLine, maxTextW, speechFont) : [speechLine];
   const lines = Array.isArray(rawLines) && rawLines.length > 0 ? rawLines.slice(0, 2) : [speechLine];
-  const lineH = Math.round(speechFontSz * 1.32);
+  const lineH = Math.round(speechFontSz * 1.34);
   const totalTextH = lines.length * lineH;
   const firstLineCy = balloonY + (balloonH - totalTextH) * 0.5 + lineH * 0.5 + 0.5;
 
   c.save();
   try {
     c.font = speechFont;
-    c.fillStyle = '#5A3928';
+    c.fillStyle = '#4E2B17';
     c.textAlign = 'left';
     c.textBaseline = 'middle';
     for (let li = 0; li < lines.length; li++) {
-      c.fillText(lines[li], balloonX + 9, firstLineCy + li * lineH, maxTextW);
+      c.fillText(lines[li], balloonX + 8, firstLineCy + li * lineH, maxTextW);
     }
   } finally {
     c.restore();
@@ -1118,7 +1136,7 @@ function renderPatronBar(ctx, rect, app, hits, nowSec) {
 }
 
 /**
- * Full-width dark walnut bottom dock bar with 4 elevated illustrated PNG icons (`02a/02b/02c`)
+ * Full-width dark walnut bottom dock bar with 4 large elevated optically-balanced PNG icons (`02a/02b/02c`)
  */
 function renderLobbyBottomDock(ctx, rect, app, hits) {
   const c = getSafeCtx(ctx);
@@ -1160,6 +1178,8 @@ function renderLobbyBottomDock(ctx, rect, app, hits) {
       id: 'dock_shop',
       label: '小铺',
       icon: 'dock_shop',
+      scaleMult: 1.06,
+      offsetY: 0,
       redDot: typeof app.hasAffordableShopItem === 'function' ? app.hasAffordableShopItem() : false,
       onClick: () => app.openShop('catcakes')
     },
@@ -1167,6 +1187,8 @@ function renderLobbyBottomDock(ctx, rect, app, hits) {
       id: 'dock_compendium',
       label: '图鉴',
       icon: 'dock_compendium',
+      scaleMult: 0.94,
+      offsetY: 0,
       redDot: false,
       onClick: () => app.openCompendium('catcakes')
     },
@@ -1174,6 +1196,8 @@ function renderLobbyBottomDock(ctx, rect, app, hits) {
       id: 'dock_leaderboard',
       label: '排行',
       icon: 'dock_rank',
+      scaleMult: 1.14,
+      offsetY: 1,
       redDot: false,
       onClick: () => app.openLeaderboard('stars')
     },
@@ -1181,33 +1205,36 @@ function renderLobbyBottomDock(ctx, rect, app, hits) {
       id: 'dock_themes',
       label: '主题',
       icon: 'dock_theme',
-      redDot: typeof app.hasAffordableShopTab === 'function' ? app.hasAffordableShopTab('themes') : false,
+      scaleMult: 1.02,
+      offsetY: 0,
+      redDot: false,
       onClick: () => app.openShop('themes')
     }
   ];
 
-  // Larger icons slightly elevated so their tops gently pop above the walnut rim (exact 02a/02b/02c look)
-  const iconS = Math.min(44, Math.max(36, Math.round(h * 0.72)));
-  const iconCyBase = y + Math.round(h * 0.27);
+  // Generous elevated icons protruding ~12-14px above the walnut dock rim, normalized by alpha tight bounds (Design 02a/02b/02c)
+  const baseIconS = Math.min(54, Math.max(44, Math.round(h * 0.88)));
+  const iconCyBase = y + Math.round(h * 0.19);
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
     const bx = x + i * (colW + gap);
     const cx = bx + colW * 0.5;
     const pressed = isHitPressed(app, it.id);
     const dy = pressed ? 2 : 0;
+    const drawS = Math.round(baseIconS * it.scaleMult);
 
-    UI.drawUiIcon(c, sprites, it.icon, cx, iconCyBase + dy, iconS);
-    UI.drawOutlinedText(c, it.label, cx, y + h * 0.80 + dy, {
-      size: h >= 58 ? 12.5 : 11.5,
-      weight: 800,
+    UI.drawUiIcon(c, sprites, it.icon, cx, iconCyBase + it.offsetY + dy, drawS);
+    UI.drawOutlinedText(c, it.label, cx, y + h * 0.82 + dy, {
+      size: h >= 58 ? 14.0 : 12.8,
+      weight: 900,
       fill: '#FFF8EC',
       stroke: '#351C0F',
-      strokeWidth: 2.5,
-      shadowOffsetY: 0.7,
+      strokeWidth: 2.8,
+      shadowOffsetY: 0.8,
       maxWidth: colW - 6
     });
     if (it.redDot) {
-      drawRedDot(c, cx + iconS * 0.35, iconCyBase - iconS * 0.33 + dy, 4.5);
+      drawRedDot(c, cx + baseIconS * 0.37, iconCyBase - baseIconS * 0.35 + dy, 5.0);
     }
     hits.add(it.id, bx, y, colW, h, it.onClick);
   }
@@ -1246,7 +1273,7 @@ function renderLobbyScreen(ctx, metrics, app, hits, nowSec) {
   const innerX = stageX + padX;
   const innerW = stageW - padX * 2;
 
-  const dockH = compact ? 54 : 60;
+  const dockH = compact ? 56 : 62;
   const dockY = bottomLimit - dockH;
   renderLobbyBottomDock(
     c,
@@ -1255,10 +1282,10 @@ function renderLobbyScreen(ctx, metrics, app, hits, nowSec) {
     hits
   );
 
-  const ctaH = compact ? 48 : 54;
-  const ctaW = Math.min(innerW - 20, Math.round(stageW * 0.66));
+  const ctaH = compact ? 50 : 56;
+  const ctaW = Math.min(innerW - 14, Math.round(stageW * 0.72));
   const ctaX = Math.round(stageX + (stageW - ctaW) * 0.5);
-  const ctaY = dockY - (compact ? 12 : 14) - ctaH;
+  const ctaY = dockY - (compact ? 15 : 19) - ctaH;
 
   UI.drawPillButton(c, ctaX, ctaY, ctaW, ctaH, {
     style: 'cta',
@@ -1267,14 +1294,14 @@ function renderLobbyScreen(ctx, metrics, app, hits, nowSec) {
     subIcon: 'icon_star_coin',
     subSuffix: ctaStar1Str,
     sprites,
-    fontSize: compact ? 16 : 17.5,
+    fontSize: compact ? 18.0 : 20.0,
     radius: Math.round(ctaH * 0.5),
     pressed: isHitPressed(app, 'lobby_start_cta')
   });
   hits.add('lobby_start_cta', ctaX, ctaY, ctaW, ctaH, () => app.startLevel(ctaLevelId));
 
-  const patronH = compact ? 60 : 68;
-  const patronY = ctaY - (compact ? 10 : 12) - patronH;
+  const patronH = compact ? 62 : 70;
+  const patronY = ctaY - (compact ? 11 : 13) - patronH;
   renderPatronBar(c, { x: innerX, y: patronY, w: innerW, h: patronH }, app, hits, nowSec);
 
   // 5. 10 Winding-Road Level Nodes strictly within safe corridor between plaque & patron bar
@@ -1309,7 +1336,7 @@ function renderTitleScreen(ctx, metrics, app, hits) {
   }
 
   // Top-left circular wood sound & help buttons
-  const btnS = 34;
+  const btnS = 36;
   const btnR = btnS * 0.5;
   const btnY = topY + Math.floor((headerH - btnS) * 0.5);
   const sfxOn = app && app.audio ? Boolean(app.audio.sfxEnabled) : true;
@@ -1320,57 +1347,60 @@ function renderTitleScreen(ctx, metrics, app, hits) {
     hits.add('title_help_btn', 20 + btnS, btnY, btnS, btnS, () => app.openModal('help'));
   }
 
-  // Cat-ear wooden plaque banner
-  const plaqueW = Math.min(310, Math.round(width * 0.78));
-  const plaqueH = Math.round(plaqueW * 0.62);
+  // Cat-ear wooden plaque banner (title_plaque_banner.png already contains baked hand-lettered title!)
+  const plaqueW = Math.min(340, Math.round(width * 0.86));
+  const plaqueH = Math.round(plaqueW * 0.65);
   const plaqueX = Math.round((width - plaqueW) * 0.5);
-  const plaqueY = Math.max(topY + headerH + 6, Math.round(height * 0.06));
+  const plaqueY = Math.max(topY + headerH + 2, Math.round(height * 0.05));
   const plaqueImg = getSprite(sprites, 'title_plaque_banner');
   if (plaqueImg) {
     UI.drawContainImage(c, plaqueImg, width * 0.5, plaqueY + plaqueH * 0.5, plaqueW, plaqueH);
   } else {
     UI.drawWoodBoard(c, plaqueX, plaqueY, plaqueW, plaqueH * 0.72, 16, true);
+    UI.drawOutlinedText(c, GAME_TITLE, width * 0.5, plaqueY + plaqueH * 0.44, {
+      size: 32,
+      weight: 900,
+      fill: '#FFE58F',
+      stroke: '#5A3928',
+      strokeWidth: 4.8
+    });
+    UI.drawOutlinedText(c, '星夜吃茶 · 烘焙小铺', width * 0.5, plaqueY + plaqueH * 0.80, {
+      size: 14.5,
+      weight: 800,
+      fill: '#FFF8EC',
+      stroke: '#5A3928',
+      strokeWidth: 2.8
+    });
   }
-  UI.drawOutlinedText(c, GAME_TITLE, width * 0.5, plaqueY + plaqueH * 0.44, {
-    size: 30,
-    weight: 900,
-    fill: '#FFE58F',
-    stroke: '#5A3928',
-    strokeWidth: 4.8
-  });
-  UI.drawOutlinedText(c, '星夜吃茶 · 烘焙小铺', width * 0.5, plaqueY + plaqueH * 0.80, {
-    size: 13.5,
-    weight: 800,
-    fill: '#FFF8EC',
-    stroke: '#5A3928',
-    strokeWidth: 2.6
-  });
 
   // Bottom rank pill + Start CTA + Version footer
-  const ctaW = Math.min(260, Math.round(width * 0.68));
-  const ctaH = 54;
+  const ctaW = Math.min(266, Math.round(width * 0.70));
+  const ctaH = 58;
   const ctaX = Math.round((width - ctaW) * 0.5);
   const ctaY = bottomLimit - 34 - ctaH;
 
-  const rankW = Math.min(250, Math.round(width * 0.66));
-  const rankH = 30;
+  const rankW = Math.min(258, Math.round(width * 0.68));
+  const rankH = 33;
   UI.drawCurrencyChip(
     c,
     Math.round((width - rankW) * 0.5),
-    ctaY - 12 - rankH,
+    ctaY - 14 - rankH,
     rankW,
     rankH,
     sprites,
     'icon_star_coin',
     `${rankTitle} · 总星 ${totalStars}/${MAX_CAMPAIGN_STARS}`,
-    { fontSize: 11.5 }
+    { fontSize: 13.6, groupCenter: true }
   );
 
   UI.drawPillButton(c, ctaX, ctaY, ctaW, ctaH, {
-    style: 'cta',
+    style: 'knead',
     label: '开始营业',
-    fontSize: 22,
-    radius: 26
+    textColor: '#FFF3BA',
+    strokeColor: '#4A230D',
+    glossDot: true,
+    fontSize: 27,
+    radius: 29
   });
   if (hits && app) {
     hits.add('title_start_btn', ctaX, ctaY, ctaW, ctaH, () => {
@@ -1379,7 +1409,7 @@ function renderTitleScreen(ctx, metrics, app, hits) {
   }
 
   UI.drawOutlinedText(c, `v${GAME_VERSION}`, width * 0.5, bottomLimit - 12, {
-    size: 12,
+    size: 13,
     weight: 700,
     fill: '#D8DFEF',
     stroke: '#1A213D',
@@ -1405,83 +1435,200 @@ function renderPlayInteriorBands(ctx, geom, playBarBottom, trayY, theme, nowSec)
 
   c.save();
   try {
-    // 1. Warm blurred sunlit bakery cafe interior wall behind customers (Design 03)
+    // 1. Dreamy soft-focus sunlit bakery cafe interior wall behind customers (Design 03 — zero harsh box borders!)
     const wallTop = Math.max(0, playBarBottom - 10);
     const wallBot = Math.max(wallTop + 20, trayY + 2);
+    const wallH = wallBot - wallTop;
     const wallG = c.createLinearGradient(0, wallTop, 0, wallBot);
     if (isSakura) {
-      wallG.addColorStop(0, '#B88496');
-      wallG.addColorStop(0.55, '#DFB3BC');
-      wallG.addColorStop(1, '#CCA0AB');
+      wallG.addColorStop(0, '#9E6E80');
+      wallG.addColorStop(0.45, '#DFB5BE');
+      wallG.addColorStop(1, '#C592A0');
     } else if (isMoon) {
-      wallG.addColorStop(0, '#364774');
-      wallG.addColorStop(0.55, '#546897');
-      wallG.addColorStop(1, '#445886');
+      wallG.addColorStop(0, '#273864');
+      wallG.addColorStop(0.48, '#465B8E');
+      wallG.addColorStop(1, '#344775');
     } else {
-      wallG.addColorStop(0, '#D4A879');
-      wallG.addColorStop(0.45, '#ECD4AD');
-      wallG.addColorStop(1, '#D6AA78');
+      wallG.addColorStop(0, '#A5754A');
+      wallG.addColorStop(0.45, '#DFB684');
+      wallG.addColorStop(1, '#C7925C');
     }
     c.fillStyle = wallG;
-    c.fillRect(0, wallTop, width, wallBot - wallTop);
+    c.fillRect(0, wallTop, width, wallH);
 
-    // Soft-focus cafe window / wall frame panels behind customers for warm cozy depth
-    const panelY = wallTop + 14;
-    const panelH = Math.max(24, wallBot - panelY - 24);
-    const panelCol = isSakura
-      ? 'rgba(255, 240, 246, 0.34)'
-      : isMoon
-      ? 'rgba(186, 214, 255, 0.16)'
-      : 'rgba(255, 249, 232, 0.42)';
-    const trimCol = isSakura
-      ? 'rgba(128, 72, 92, 0.22)'
-      : isMoon
-      ? 'rgba(28, 42, 78, 0.34)'
-      : 'rgba(138, 86, 46, 0.22)';
-    const panelGap = 14;
-    const panelW = Math.max(56, Math.round((width - 40 - panelGap * 2) / 3));
-    const panelStartX = Math.round((width - (panelW * 3 + panelGap * 2)) * 0.5);
-    for (let i = 0; i < 3; i++) {
-      const px = panelStartX + i * (panelW + panelGap);
-      UI.roundRectPath(c, px, panelY, panelW, panelH, 8);
-      c.fillStyle = panelCol;
-      c.fill();
-      c.lineWidth = 4;
-      c.strokeStyle = trimCol;
-      c.stroke();
+    // Soft-focus sunlit cafe window & warm doorway bokeh pools (all diffused radial gradients, zero crisp strokes)
+    c.save();
+    try {
+      c.beginPath();
+      c.rect(0, wallTop, width, wallH);
+      if (typeof c.clip === 'function') c.clip();
+
+      // Warm central sunlit window haze
+      const centerGlow = c.createRadialGradient(
+        width * 0.50,
+        wallTop + wallH * 0.44,
+        12,
+        width * 0.50,
+        wallTop + wallH * 0.44,
+        width * 0.52
+      );
+      if (isSakura) {
+        centerGlow.addColorStop(0, 'rgba(255, 245, 248, 0.52)');
+        centerGlow.addColorStop(0.55, 'rgba(255, 224, 232, 0.24)');
+        centerGlow.addColorStop(1, 'rgba(255, 224, 232, 0)');
+      } else if (isMoon) {
+        centerGlow.addColorStop(0, 'rgba(182, 214, 255, 0.30)');
+        centerGlow.addColorStop(0.55, 'rgba(120, 162, 230, 0.14)');
+        centerGlow.addColorStop(1, 'rgba(120, 162, 230, 0)');
+      } else {
+        centerGlow.addColorStop(0, 'rgba(255, 246, 222, 0.56)');
+        centerGlow.addColorStop(0.55, 'rgba(255, 230, 180, 0.24)');
+        centerGlow.addColorStop(1, 'rgba(255, 230, 180, 0)');
+      }
+      c.fillStyle = centerGlow;
+      c.fillRect(0, wallTop, width, wallH);
+
+      // Soft out-of-focus warm amber cafe side window & wood-pillar shadows
+      const pillarCols = [0.0, 0.32, 0.68, 1.0];
+      for (let i = 0; i < pillarCols.length; i++) {
+        const px = width * pillarCols[i];
+        const pw = i === 0 || i === 3 ? width * 0.14 : width * 0.085;
+        const pg = c.createLinearGradient(px - pw, wallTop, px + pw, wallTop);
+        const darkRgb = isMoon ? '16, 26, 56' : isSakura ? '98, 52, 70' : '96, 54, 26';
+        pg.addColorStop(0, `rgba(${darkRgb}, 0)`);
+        pg.addColorStop(0.5, `rgba(${darkRgb}, ${i === 0 || i === 3 ? 0.34 : 0.19})`);
+        pg.addColorStop(1, `rgba(${darkRgb}, 0)`);
+        c.fillStyle = pg;
+        c.fillRect(px - pw, wallTop, pw * 2, wallH);
+      }
+
+      // Soft blurred cafe shelf / transom shadow band across upper-mid wall
+      const shelfG = c.createLinearGradient(0, wallTop + wallH * 0.10, 0, wallTop + wallH * 0.34);
+      const shelfRgb = isMoon ? '20, 32, 66' : isSakura ? '112, 60, 78' : '116, 68, 34';
+      shelfG.addColorStop(0, `rgba(${shelfRgb}, 0.26)`);
+      shelfG.addColorStop(0.45, `rgba(${shelfRgb}, 0.10)`);
+      shelfG.addColorStop(1, `rgba(${shelfRgb}, 0)`);
+      c.fillStyle = shelfG;
+      c.fillRect(0, wallTop + wallH * 0.10, width, wallH * 0.24);
+
+      // Warm floating cafe pendant-lamp bokeh orbs behind customers (Design 03 atmosphere!)
+      const bokehList = [
+        [0.16, 0.36, 24, 0.28],
+        [0.44, 0.28, 30, 0.24],
+        [0.82, 0.34, 26, 0.28],
+        [0.28, 0.64, 18, 0.20],
+        [0.64, 0.60, 22, 0.22]
+      ];
+      const bokehRgb = isSakura ? '255, 232, 242' : isMoon ? '196, 224, 255' : '255, 242, 198';
+      for (let i = 0; i < bokehList.length; i++) {
+        const bx = width * bokehList[i][0];
+        const by = wallTop + wallH * bokehList[i][1];
+        const br = bokehList[i][2];
+        const ba = bokehList[i][3];
+        const bg = c.createRadialGradient(bx, by, 1, bx, by, br);
+        bg.addColorStop(0, `rgba(${bokehRgb}, ${ba})`);
+        bg.addColorStop(0.6, `rgba(${bokehRgb}, ${(ba * 0.45).toFixed(3)})`);
+        bg.addColorStop(1, `rgba(${bokehRgb}, 0)`);
+        c.fillStyle = bg;
+        c.beginPath();
+        c.arc(bx, by, br, 0, Math.PI * 2);
+        c.fill();
+      }
+    } finally {
+      c.restore();
     }
 
     // Soft warm counter ambient vignette along lower wall
-    const wallShade = c.createLinearGradient(0, wallBot - 36, 0, wallBot);
+    const wallShade = c.createLinearGradient(0, wallBot - 32, 0, wallBot);
     wallShade.addColorStop(0, 'rgba(90, 52, 26, 0)');
-    wallShade.addColorStop(1, isMoon ? 'rgba(18, 28, 56, 0.28)' : 'rgba(116, 66, 30, 0.24)');
+    wallShade.addColorStop(1, isMoon ? 'rgba(18, 28, 56, 0.30)' : 'rgba(104, 58, 26, 0.24)');
     c.fillStyle = wallShade;
-    c.fillRect(0, wallBot - 36, width, 36);
+    c.fillRect(0, wallBot - 32, width, 32);
 
-    // 2. Deep espresso-walnut bakery tabletop below serving tray (`trayY .. height`)
+    // 2. Warm roasted chestnut-walnut bakery tabletop below serving tray (`trayY .. height`, Design 03)
+    const tableH = Math.max(0, height - trayY);
     const tableG = c.createLinearGradient(0, trayY, 0, height);
     if (isSakura) {
-      tableG.addColorStop(0, '#5E3645');
-      tableG.addColorStop(1, '#40212D');
+      tableG.addColorStop(0, '#663B4B');
+      tableG.addColorStop(0.52, '#532E3C');
+      tableG.addColorStop(1, '#3D202B');
     } else if (isMoon) {
-      tableG.addColorStop(0, '#223154');
-      tableG.addColorStop(1, '#151F38');
+      tableG.addColorStop(0, '#27375D');
+      tableG.addColorStop(0.52, '#1D2A48');
+      tableG.addColorStop(1, '#141E36');
     } else {
-      tableG.addColorStop(0, '#4E3220');
-      tableG.addColorStop(0.55, '#472D1C');
-      tableG.addColorStop(1, '#3A2315');
+      tableG.addColorStop(0, '#5F3C26');
+      tableG.addColorStop(0.48, '#4F311E');
+      tableG.addColorStop(1, '#3B2314');
     }
     c.fillStyle = tableG;
-    c.fillRect(0, trayY, width, Math.max(0, height - trayY));
+    c.fillRect(0, trayY, width, tableH);
 
-    // Subtle horizontal tabletop wood plank grooves
-    c.strokeStyle = isMoon ? 'rgba(10, 16, 34, 0.34)' : 'rgba(26, 12, 5, 0.26)';
-    c.lineWidth = 1.5;
-    for (let py = trayY + 56; py < height; py += 62) {
+    // Warm overhead lamp radial spotlight glowing softly behind the baking board (Design 03 table warmth!)
+    const lampCx = width * 0.5;
+    const lampCy = trayY + tableH * 0.48;
+    const lampR = Math.max(width, tableH) * 0.64;
+    const lampG = c.createRadialGradient(lampCx, lampCy, 24, lampCx, lampCy, lampR);
+    if (isSakura) {
+      lampG.addColorStop(0, 'rgba(218, 146, 166, 0.24)');
+      lampG.addColorStop(0.55, 'rgba(164, 96, 118, 0.10)');
+      lampG.addColorStop(1, 'rgba(42, 16, 26, 0.22)');
+    } else if (isMoon) {
+      lampG.addColorStop(0, 'rgba(106, 148, 224, 0.22)');
+      lampG.addColorStop(0.55, 'rgba(62, 92, 160, 0.08)');
+      lampG.addColorStop(1, 'rgba(10, 16, 36, 0.26)');
+    } else {
+      lampG.addColorStop(0, 'rgba(188, 122, 68, 0.28)');
+      lampG.addColorStop(0.52, 'rgba(136, 80, 40, 0.10)');
+      lampG.addColorStop(1, 'rgba(28, 13, 5, 0.24)');
+    }
+    c.fillStyle = lampG;
+    c.fillRect(0, trayY, width, tableH);
+
+    // Organic walnut wood plank seams (paired dark groove + subtle warm bevel sheen) & soft woodgrain fibers
+    c.save();
+    try {
       c.beginPath();
-      c.moveTo(0, py);
-      c.lineTo(width, py);
-      c.stroke();
+      c.rect(0, trayY, width, tableH);
+      if (typeof c.clip === 'function') c.clip();
+
+      const plankStep = 64;
+      let plankIdx = 0;
+      for (let py = trayY + 58; py < height; py += plankStep) {
+        plankIdx++;
+        // Subtle alternating plank tint
+        if (plankIdx % 2 === 0) {
+          c.fillStyle = isMoon ? 'rgba(14, 22, 46, 0.12)' : 'rgba(30, 14, 5, 0.10)';
+          c.fillRect(0, py, width, plankStep);
+        }
+        // Dark seam groove
+        c.strokeStyle = isMoon ? 'rgba(8, 14, 30, 0.42)' : 'rgba(26, 11, 4, 0.34)';
+        c.lineWidth = 1.6;
+        c.beginPath();
+        c.moveTo(0, py);
+        c.lineTo(width, py);
+        c.stroke();
+
+        // Delicate warm top catch-light along plank edge
+        c.strokeStyle = isMoon ? 'rgba(160, 196, 255, 0.08)' : 'rgba(255, 212, 162, 0.09)';
+        c.lineWidth = 1.0;
+        c.beginPath();
+        c.moveTo(0, py + 1.5);
+        c.lineTo(width, py + 1.5);
+        c.stroke();
+
+        // Gentle sweeping woodgrain fiber inside plank
+        c.strokeStyle = isMoon ? 'rgba(12, 20, 44, 0.22)' : 'rgba(38, 18, 7, 0.18)';
+        c.lineWidth = 1.2;
+        const gy = py + 24 + (plankIdx % 3) * 7;
+        c.beginPath();
+        c.moveTo(0, gy);
+        c.quadraticCurveTo(width * 0.35, gy + (plankIdx % 2 === 0 ? 5 : -4), width * 0.70, gy - 2);
+        c.quadraticCurveTo(width * 0.88, gy + 3, width, gy);
+        c.stroke();
+      }
+    } finally {
+      c.restore();
     }
 
     // 3. Starry Night Sky + Rounded-Bottom Dark-Navy Header Shelf (`0 .. playBarBottom`)
@@ -1548,12 +1695,12 @@ function renderPlayInteriorBands(ctx, geom, playBarBottom, trayY, theme, nowSec)
     const maxTitleRight = geom.maxRight - 6;
     if (titleCx + 42 < maxTitleRight) {
       UI.drawOutlinedText(c, GAME_TITLE, titleCx, titleCy, {
-        size: 16.5,
-        weight: 800,
+        size: 18.0,
+        weight: 900,
         fill: '#FFFDF8',
         stroke: '#162040',
-        strokeWidth: 2.6,
-        shadowOffsetY: 0.6
+        strokeWidth: 2.8,
+        shadowOffsetY: 0.7
       });
     }
   } finally {
@@ -1638,13 +1785,13 @@ function renderPlayTopBar(ctx, barRect, app, hits, nowSec) {
 
   const btnS = Math.min(29, Math.max(27, bh - 2));
   const btnY = Math.round(by + (bh - btnS) * 0.5);
-  const gap = bw >= 360 ? 7 : 5;
+  const gap = bw >= 360 ? 6 : 5;
 
   // 1. Warm-wood rounded-square Pause button (Design 03 top-left)
   drawPlayPauseButton(c, bx, btnY, btnS, isHitPressed(app, 'pause_btn'));
   hits.add('pause_btn', bx, btnY, btnS, btnS, () => app.togglePause());
 
-  const pillH = Math.min(28, Math.max(24, bh - 5));
+  const pillH = Math.min(28, Math.max(24, bh - 4));
   const pillY = Math.round(by + (bh - pillH) * 0.5);
 
   // Helper: dark espresso-wood HUD pill with warm inner bevel rim (Design 03)
@@ -1677,12 +1824,12 @@ function renderPlayTopBar(ctx, barRect, app, hits, nowSec) {
   const lvlW = clamp(Math.round(bw * 0.22), 70, 88);
   drawHudWoodPill(lvlX, pillY, lvlW, pillH);
   UI.drawOutlinedText(c, `关卡 ${lvl ? lvl.id : '1-1'}`, lvlX + lvlW * 0.5, pillY + pillH * 0.5 + 0.5, {
-    size: 12.6,
-    minSize: 9.8,
+    size: 13.6,
+    minSize: 10.2,
     weight: 900,
     fill: '#FFF6E2',
     stroke: '#361C0E',
-    strokeWidth: 2.4,
+    strokeWidth: 2.5,
     shadowOffsetY: 0.5,
     maxWidth: lvlW - 10
   });
@@ -1693,80 +1840,97 @@ function renderPlayTopBar(ctx, barRect, app, hits, nowSec) {
   const isUrgentClock = timeLeft <= 15 && timeLeft > 0;
   const pulse = isUrgentClock ? 0.5 + 0.5 * Math.sin(nowSec * 9.0) : 0;
   drawHudWoodPill(timerX, pillY, timerW, pillH, isUrgentClock ? '#E85C5C' : '');
-  const clkSz = Math.min(18, Math.round(pillH * 0.68)) + pulse * 1.4;
+  const clkSz = Math.min(19, Math.round(pillH * 0.72)) + pulse * 1.4;
   UI.drawUiIcon(c, sprites, 'icon_clock', timerX + 14, pillY + pillH * 0.5, clkSz);
   UI.drawOutlinedText(c, formatClockMMSS(timeLeft), timerX + 25, pillY + pillH * 0.5 + 0.6, {
-    size: 12.8,
-    minSize: 10.0,
+    size: 13.8,
+    minSize: 10.4,
     weight: 900,
     fill: isUrgentClock ? '#FFB4A2' : '#FFF6E2',
     stroke: '#361C0E',
-    strokeWidth: 2.4,
+    strokeWidth: 2.5,
     shadowOffsetY: 0.5,
     align: 'left',
-    maxWidth: timerW - 30
+    maxWidth: timerW - 29
   });
 
-  // 4. Right Score + 3-Star Progress Group (generous full-width layout matching Design 03!)
+  // 4. Right Score + Evenly-Spaced 3-Star Achievement Progress Bar (Design 03!)
   const progX = timerX + timerW + gap + 2;
-  const progW = Math.max(96, bx + bw - progX);
+  const progW = Math.max(98, bx + bw - progX);
 
   // Subtle recessed dark-navy capsule behind score number
-  const capH = Math.max(16, Math.round(bh * 0.54));
-  const capY = by;
+  const capH = Math.max(17, Math.round(bh * 0.56));
+  const capY = by - 1;
   c.save();
   try {
-    UI.roundRectPath(c, progX + 2, capY, progW - 4, capH, capH * 0.5);
-    c.fillStyle = 'rgba(18, 26, 52, 0.68)';
+    UI.roundRectPath(c, progX + 1, capY, progW - 2, capH, capH * 0.5);
+    c.fillStyle = 'rgba(18, 26, 52, 0.70)';
     c.fill();
     c.lineWidth = 1.2;
-    c.strokeStyle = 'rgba(130, 162, 222, 0.26)';
+    c.strokeStyle = 'rgba(130, 162, 222, 0.28)';
     c.stroke();
   } finally {
     c.restore();
   }
 
   UI.drawOutlinedText(c, String(score), progX + progW * 0.5, capY + capH * 0.52, {
-    size: 14.0,
-    minSize: 10.5,
+    size: 15.6,
+    minSize: 11.2,
     weight: 900,
-    fill: '#FFE584',
+    fill: '#FFE888',
     stroke: '#2C170C',
-    strokeWidth: 2.6,
+    strokeWidth: 2.8,
     shadowOffsetY: 0.6,
     maxWidth: progW - 10
   });
 
-  const barX = progX + 4;
-  const barW = Math.max(76, progW - 14);
-  const barH = 8.0;
-  const barY = by + bh - barH - 1.5;
-  const star3 = Math.max(1, stars[2]);
-  const fillRatio = clamp(score / star3, 0, 1);
+  const barX = progX + 3;
+  const barW = Math.max(80, progW - 14);
+  const barH = 9.2;
+  const barY = by + bh - barH - 0.5;
+
+  // Piecewise-linear fill mapped across 3 evenly-spaced visual star milestones (Design 03!)
+  const starPositions = [0.31, 0.63, 0.95];
+  const s1 = Math.max(1, Number(stars[0]) || 1);
+  const s2 = Math.max(s1 + 1, Number(stars[1]) || s1 + 1);
+  const s3 = Math.max(s2 + 1, Number(stars[2]) || s2 + 1);
+  let fillRatio = 0;
+  if (score <= 0) {
+    fillRatio = 0;
+  } else if (score < s1) {
+    fillRatio = (score / s1) * starPositions[0];
+  } else if (score < s2) {
+    fillRatio = starPositions[0] + ((score - s1) / (s2 - s1)) * (starPositions[1] - starPositions[0]);
+  } else if (score < s3) {
+    fillRatio = starPositions[1] + ((score - s2) / (s3 - s2)) * (starPositions[2] - starPositions[1]);
+  } else {
+    fillRatio = 1.0;
+  }
+  fillRatio = clamp(fillRatio, 0, 1);
 
   c.save();
   try {
     // Dark recessed brown track with warm rim
-    c.fillStyle = '#4B3022';
+    c.fillStyle = '#492E20';
     UI.roundRectPath(c, barX, barY, barW, barH, barH * 0.5);
     c.fill();
-    c.lineWidth = 1.8;
-    c.strokeStyle = '#2A180D';
+    c.lineWidth = 2.0;
+    c.strokeStyle = '#28150B';
     c.stroke();
 
     if (fillRatio > 0) {
-      const fillW = Math.max(6, (barW - 2) * fillRatio);
+      const fillW = Math.max(7, (barW - 2) * fillRatio);
       const fg = c.createLinearGradient(barX, barY, barX, barY + barH);
-      fg.addColorStop(0, '#FFE87A');
-      fg.addColorStop(0.55, '#F8B82E');
-      fg.addColorStop(1, '#E28A14');
+      fg.addColorStop(0, '#FFEB80');
+      fg.addColorStop(0.55, '#F9BA2E');
+      fg.addColorStop(1, '#E08812');
       c.fillStyle = fg;
       UI.roundRectPath(c, barX + 1, barY + 1, fillW, barH - 2, (barH - 2) * 0.5);
       c.fill();
 
       // Glossy top shine strip inside score progress bar
-      c.fillStyle = 'rgba(255, 255, 232, 0.42)';
-      UI.roundRectPath(c, barX + 2.5, barY + 1.5, Math.max(3, fillW - 3), (barH - 2) * 0.36, 2);
+      c.fillStyle = 'rgba(255, 255, 232, 0.46)';
+      UI.roundRectPath(c, barX + 2.5, barY + 1.6, Math.max(3, fillW - 3), (barH - 2) * 0.36, 2);
       c.fill();
     }
   } finally {
@@ -1774,12 +1938,11 @@ function renderPlayTopBar(ctx, barRect, app, hits, nowSec) {
   }
 
   for (let i = 0; i < 3; i++) {
-    const ratio = clamp(stars[i] / star3, 0.22, 1.0);
-    const sx = barX + barW * ratio;
+    const sx = barX + barW * starPositions[i];
     const unlocked = score >= stars[i];
     const popTimer = app.starPopTimers && app.starPopTimers[i] > 0 ? app.starPopTimers[i] : 0;
     const scaleBoost = popTimer > 0 ? 1 + 0.45 * Math.sin((popTimer / 0.3) * Math.PI) : 1;
-    UI.drawStarIcon(c, sx, barY + barH * 0.5, 7.2 * scaleBoost, unlocked, { sprites });
+    UI.drawStarIcon(c, sx, barY + barH * 0.5, 8.8 * scaleBoost, unlocked, { sprites });
   }
 }
 
@@ -1806,24 +1969,24 @@ function drawUtensilButton(ctx, x, y, w, h, kind, app, hits) {
   });
 
   const iconKey = kind === 'fork' ? 'tool_swap_fork' : 'tool_upgrade_spoon';
-  UI.drawUiIcon(c, sprites, iconKey, x + w * 0.5, y + h * 0.37, Math.min(31, h * 0.54));
+  UI.drawUiIcon(c, sprites, iconKey, x + w * 0.5, y + h * 0.35, Math.min(37, h * 0.60));
 
   // Bottom bold white outlined label: 移位叉 / 升阶勺 / 取消 (Design 03)
   const bottomLabel = armed ? '取消' : def.shortName;
-  UI.drawOutlinedText(c, bottomLabel, x + w * 0.5, y + h * 0.77, {
-    size: 11.8,
-    minSize: 9.0,
+  UI.drawOutlinedText(c, bottomLabel, x + w * 0.5, y + h * 0.78, {
+    size: 13.2,
+    minSize: 9.8,
     weight: 900,
     fill: armed ? '#5A3928' : '#FFFDF8',
     stroke: armed ? '' : '#3E1F0E',
-    strokeWidth: armed ? 0 : 2.8,
+    strokeWidth: armed ? 0 : 3.0,
     shadowOffsetY: armed ? 0 : 0.7,
     maxWidth: w - 6
   });
 
   // Top-right glossy crimson-red circular count badge (or emergency buy star tag, Design 03)
   const badgeText = count > 0 ? String(count) : canEmergencyBuy ? `${def.cost}` : '0';
-  const badgeR = count > 0 ? 9.8 : 10.5;
+  const badgeR = count > 0 ? 10.6 : 11.2;
   const bcx = x + w - 4;
   const bcy = y + 4;
   c.save();
@@ -1856,12 +2019,12 @@ function drawUtensilButton(ctx, x, y, w, h, kind, app, hits) {
     c.restore();
   }
   UI.drawOutlinedText(c, badgeText, bcx, bcy + 0.5, {
-    size: badgeText.length > 1 ? 8.8 : 11.2,
-    minSize: 7.5,
+    size: badgeText.length > 1 ? 9.6 : 12.6,
+    minSize: 8.0,
     weight: 900,
     fill: '#FFFDF8',
     stroke: '#4A1F0E',
-    strokeWidth: 2.0,
+    strokeWidth: 2.2,
     shadowOffsetY: 0
   });
 
@@ -1971,12 +2134,12 @@ function drawPatronSkillMedallion(ctx, x, y, w, h, app, hits, nowSec) {
 
   // Bottom bold white outlined label ('释放' or 'XX%', Design 03)
   UI.drawOutlinedText(c, ready ? '释放' : `${Math.floor(charge)}%`, cx, cy + rad * 0.60, {
-    size: ready ? 13.4 : 11.2,
-    minSize: 8.8,
+    size: ready ? 15.0 : 12.2,
+    minSize: 9.2,
     weight: 900,
     fill: '#FFFDF8',
     stroke: '#46200E',
-    strokeWidth: 3.0,
+    strokeWidth: 3.2,
     shadowOffsetY: 0.8
   });
 
@@ -2101,7 +2264,7 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
   UI.drawPillButton(c, kneadX, dockY + 4, kneadW, dockH - 8, {
     style: 'knead',
     label: '揉面补料',
-    fontSize: compact ? 18.5 : 21.0,
+    fontSize: compact ? 20.5 : 23.0,
     radius: Math.round((dockH - 8) * 0.48),
     pressed: kneadPressed
   });
@@ -2139,7 +2302,7 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
       19,
       '高峰客流',
       'urgent',
-      9.0,
+      9.6,
       'icon_urgent_flame',
       sprites
     );
@@ -2179,7 +2342,7 @@ function renderToast(ctx, width, headerBottom, app) {
   c.save();
   try {
     c.globalAlpha = clamp(primary.timer * 3.4, 0, 1);
-    const fontSz = isMajor ? 11.4 : 10.6;
+    const fontSz = isMajor ? 12.6 : 11.6;
     c.font = UI.fontStr(fontSz, 800);
     const hasIcon = Boolean(primary.icon);
     const maxW = Math.min(isMajor ? 356 : 310, width - 24);
@@ -2188,7 +2351,7 @@ function renderToast(ctx, width, headerBottom, app) {
       isMajor ? 132 : 104,
       maxW
     );
-    const th = isMajor ? 30 : 25;
+    const th = isMajor ? 31 : 26;
     const tx = Math.round((width - tw) * 0.5);
     const ty = Math.round(clamp(baseY + slideOffset, headerBottom + 6, botLimit - th - 4));
 
@@ -2214,6 +2377,7 @@ module.exports = {
   renderPlayScreen,
   renderToast,
   computeTopHeaderGeometry,
+  drawTopLeftStardustChip,
   drawRedDot,
   drawLockIcon,
   drawChevronIcon,

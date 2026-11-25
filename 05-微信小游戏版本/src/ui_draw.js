@@ -2535,6 +2535,31 @@ function drawProceduralCatcakeBody(ctx, tier, size, happy, silhouette) {
   const r = safeSize * 0.36;
 
   // Pointed cat ears
+  if (silhouette) {
+    // Plump rounded-ear cat-head silhouette matching Design 07 C7 (no sharp triangle ears, no double '?')
+    ctx.fillStyle = '#4A3623';
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.78, -r * 0.16);
+    // Left rounded cat ear
+    ctx.quadraticCurveTo(-r * 0.96, -r * 0.96, -r * 0.62, -r * 0.94);
+    ctx.quadraticCurveTo(-r * 0.36, -r * 0.90, -r * 0.24, -r * 0.66);
+    // Top forehead bridge
+    ctx.quadraticCurveTo(0, -r * 0.72, r * 0.24, -r * 0.66);
+    // Right rounded cat ear
+    ctx.quadraticCurveTo(r * 0.36, -r * 0.90, r * 0.62, -r * 0.94);
+    ctx.quadraticCurveTo(r * 0.96, -r * 0.96, r * 0.78, -r * 0.16);
+    // Plump lower cheeks & chin
+    ctx.quadraticCurveTo(r * 1.02, r * 0.26, r * 0.76, r * 0.66);
+    ctx.quadraticCurveTo(r * 0.42, r * 0.94, 0, r * 0.94);
+    ctx.quadraticCurveTo(-r * 0.42, r * 0.94, -r * 0.76, r * 0.66);
+    ctx.quadraticCurveTo(-r * 1.02, r * 0.26, -r * 0.78, -r * 0.16);
+    ctx.closePath();
+    ctx.fill();
+
+    drawFitText(ctx, '?', 0, r * 0.14, r * 1.1, Math.max(16, safeSize * 0.48), 11, 900, '#B5A189', 'center', 'middle');
+    return;
+  }
+
   for (const dir of [-1, 1]) {
     ctx.fillStyle = baseCol;
     ctx.strokeStyle = '#5A3928';
@@ -2547,15 +2572,13 @@ function drawProceduralCatcakeBody(ctx, tier, size, happy, silhouette) {
     ctx.fill();
     ctx.stroke();
 
-    if (!silhouette) {
-      ctx.fillStyle = '#F7A8B8';
-      ctx.beginPath();
-      ctx.moveTo(dir * r * 0.44, -r * 0.60);
-      ctx.lineTo(dir * r * 0.76, -r * 0.94);
-      ctx.lineTo(dir * r * 0.80, -r * 0.44);
-      ctx.closePath();
-      ctx.fill();
-    }
+    ctx.fillStyle = '#F7A8B8';
+    ctx.beginPath();
+    ctx.moveTo(dir * r * 0.44, -r * 0.60);
+    ctx.lineTo(dir * r * 0.76, -r * 0.94);
+    ctx.lineTo(dir * r * 0.80, -r * 0.44);
+    ctx.closePath();
+    ctx.fill();
   }
 
   // Plump cat-bun body
@@ -2568,11 +2591,6 @@ function drawProceduralCatcakeBody(ctx, tier, size, happy, silhouette) {
   fillEllipse(ctx, 0, r * 0.08, r * 1.02, r * 0.88);
   ctx.fill();
   ctx.stroke();
-
-  if (silhouette) {
-    drawFitText(ctx, '?', 0, r * 0.10, r * 1.2, Math.max(10, safeSize * 0.38), 8, 900, '#DFD6C7', 'center', 'middle');
-    return;
-  }
 
   // Tier signature topping
   if (tier === 4) {
@@ -2990,7 +3008,9 @@ function drawStarIcon(ctx, cx, cy, outerR, filled = true, opts = {}) {
   const safeOpts = opts && typeof opts === 'object' ? opts : {};
   const alpha = Math.max(0, Math.min(1, toSafeNum(getOwnProp(safeOpts, 'alpha', 1), 1)));
   const rot = toSafeNum(getOwnProp(safeOpts, 'rot', 0), 0);
-  const sp = getOwnProp(safeOpts, 'sprites', null);
+  const sp =
+    getOwnProp(safeOpts, 'sprites', null) ||
+    (getOwnProp(safeOpts, 'byId', null) || getOwnProp(safeOpts, 'icon_star_coin', null) ? safeOpts : null);
   const starImg = sp ? resolveByIdSprite(sp, filled ? 'icon_star_coin' : 'icon_star_dim') : null;
 
   if (starImg && safeSave(ctx)) {
@@ -2998,7 +3018,7 @@ function drawStarIcon(ctx, cx, cy, outerR, filled = true, opts = {}) {
       if (alpha < 1) ctx.globalAlpha *= alpha;
       ctx.translate(scx, scy);
       if (rot) ctx.rotate(rot);
-      drawContainImage(ctx, starImg, 0, 0, sor * 2.25, sor * 2.25);
+      drawContainImage(ctx, starImg, 0, 0, sor * 2.38, sor * 2.38);
       return;
     } catch (_) {} finally {
       safeRestore(ctx);

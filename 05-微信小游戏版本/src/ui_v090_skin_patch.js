@@ -537,7 +537,10 @@ function drawKissaCard(ctx, x, y, w, h, opts = {}) {
 
     _roundRect(ctx, sx, sy, sw, sh, radius);
     if (locked) {
-      ctx.fillStyle = V090_EXT_COLORS.lockedCardBg;
+      const lg = _linearGrad(ctx, sx, sy, sx, sy + sh, '#A2988A');
+      _addStop(lg, 0, o.topCol || '#A49B8E');
+      _addStop(lg, 1, o.botCol || '#897F72');
+      ctx.fillStyle = lg;
     } else if (customFill) {
       ctx.fillStyle = customFill;
     } else {
@@ -548,24 +551,68 @@ function drawKissaCard(ctx, x, y, w, h, opts = {}) {
     }
     ctx.fill();
 
-    if (!locked && sw > 16 && sh > 16 && tone !== 'wood') {
+    // Design 04 double-framed recessed square tile (ivory outer border ring + warm beige inner square)
+    if (o.doubleRecess && !locked && sw > 22 && sh > 22) {
+      const inset = Math.max(4, Math.min(6, Math.round(Math.min(sw, sh) * 0.085)));
+      const ig = _linearGrad(ctx, sx + inset, sy + inset, sx + inset, sy + sh - inset, '#F0E1C4');
+      _addStop(ig, 0, '#E8D5B2');
+      _addStop(ig, 0.25, '#F2E4C8');
+      _addStop(ig, 1, '#EDE0C4');
+      _roundRect(ctx, sx + inset, sy + inset, sw - inset * 2, sh - inset * 2, Math.max(4, radius - inset * 0.7));
+      ctx.fillStyle = ig;
+      ctx.fill();
+      ctx.lineWidth = 1.1;
+      ctx.strokeStyle = 'rgba(138, 86, 52, 0.22)';
+      ctx.stroke();
+    } else if (!locked && sw > 16 && sh > 16 && tone !== 'wood') {
       _roundRect(ctx, sx + 1.5, sy + 1.5, sw - 3, sh - 3, Math.max(3, radius - 1.5));
       ctx.lineWidth = 1.0;
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.52)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.56)';
       ctx.stroke();
     }
 
     _roundRect(ctx, sx, sy, sw, sh, radius);
     if (isHi && !locked) {
-      ctx.shadowColor = 'rgba(245, 184, 65, 0.72)';
-      ctx.shadowBlur = 10;
+      ctx.shadowColor = o.goldenGlow ? 'rgba(255, 212, 74, 0.88)' : 'rgba(245, 184, 65, 0.72)';
+      ctx.shadowBlur = o.goldenGlow ? 14 : 10;
       ctx.lineWidth = customLineW !== null ? customLineW : 3.0;
-      ctx.strokeStyle = borderOverride || V090_EXT_COLORS.vipGold;
+      ctx.strokeStyle = borderOverride || (o.goldenGlow ? '#FFE46E' : V090_EXT_COLORS.vipGold);
     } else {
       ctx.lineWidth = customLineW !== null ? customLineW : 2.2;
-      ctx.strokeStyle = borderOverride || (locked ? V090_EXT_COLORS.lockedBorder : pal.border);
+      ctx.strokeStyle = borderOverride || (locked ? '#4E3829' : pal.border);
     }
     if (ctx.lineWidth > 0) ctx.stroke();
+
+    if (o.goldenGlow && !locked) {
+      ctx.shadowColor = 'rgba(0, 0, 0, 0)';
+      ctx.shadowBlur = 0;
+      _roundRect(ctx, sx + 1.8, sy + 1.8, sw - 3.6, sh - 3.6, Math.max(3, radius - 1.8));
+      ctx.lineWidth = 1.6;
+      ctx.strokeStyle = '#FFF7B8';
+      ctx.stroke();
+
+      // Delicate 4-point sparkles along golden rim (Design 09)
+      const spPts = [
+        [sx + sw * 0.22, sy + 1, 5.0],
+        [sx + sw - 2, sy + sh * 0.24, 5.5],
+        [sx + 2, sy + sh * 0.65, 4.5],
+        [sx + sw * 0.78, sy + sh - 1, 4.8]
+      ];
+      ctx.fillStyle = '#FFFDF0';
+      for (let i = 0; i < spPts.length; i++) {
+        const px = spPts[i][0];
+        const py = spPts[i][1];
+        const sz = spPts[i][2];
+        ctx.beginPath();
+        ctx.moveTo(px, py - sz);
+        ctx.quadraticCurveTo(px + sz * 0.22, py - sz * 0.22, px + sz, py);
+        ctx.quadraticCurveTo(px + sz * 0.22, py + sz * 0.22, px, py + sz);
+        ctx.quadraticCurveTo(px - sz * 0.22, py + sz * 0.22, px - sz, py);
+        ctx.quadraticCurveTo(px - sz * 0.22, py - sz * 0.22, px, py - sz);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
   } catch (_) {} finally {
     ctx.restore();
   }
@@ -600,7 +647,7 @@ function drawPillButton(ctx, x, y, w, h, opts = {}) {
     active: { top: '#FFE27D', bot: '#F5B538', bevel: '#C87A1E', text: '#5A3928', stroke: '', outline: false },
     orange: { top: '#FFA45E', bot: '#F27C38', bevel: '#B84B14', text: '#FFF8EC', stroke: '#5A3928', outline: true },
     green: { top: '#94C954', bot: '#72A639', bevel: '#4B7122', text: '#FFF8EC', stroke: '#3D591D', outline: true },
-    equipped: { top: '#8FB347', bot: '#6E9132', bevel: '#4B6620', text: '#FFF8EC', stroke: '#3D521B', outline: true },
+    equipped: { top: '#939652', bot: '#73763B', bevel: '#4B4E23', text: '#FFF9E8', stroke: '#3C3D18', outline: true },
     secondary: { top: '#BE8150', bot: '#8A5634', bevel: '#5E361D', text: '#FFF8EC', stroke: '#5A3928', outline: true },
     wood: { top: '#BA7E4B', bot: '#7F4D2B', bevel: '#522E17', text: '#FFF8EC', stroke: '#4A2511', outline: true },
     walnut: { top: '#C48A55', bot: '#986036', bevel: '#663B1E', text: '#FFF8EC', stroke: '#5A3928', outline: true },
@@ -1215,10 +1262,13 @@ function drawSegmentedBar(ctx, x, y, w, h, current, max = 4) {
       if (typeof ctx.clip === 'function') ctx.clip();
       for (let i = 0; i < cur; i++) {
         const grad = _linearGrad(ctx, sx, sy, sx, sy + sh, '#F5A623');
-        _addStop(grad, 0, '#FFE07D');
-        _addStop(grad, 1, '#F5A623');
+        _addStop(grad, 0, '#FFE680');
+        _addStop(grad, 0.55, '#F8B62E');
+        _addStop(grad, 1, '#E58E16');
         ctx.fillStyle = grad;
         ctx.fillRect(sx + i * segW, sy, segW, sh);
+        ctx.fillStyle = 'rgba(255, 252, 224, 0.42)';
+        ctx.fillRect(sx + i * segW + 1, sy + 1, Math.max(2, segW - 2), Math.max(2, sh * 0.34));
       }
       ctx.strokeStyle = V090_KISSA_THEME.ink;
       ctx.lineWidth = 1.8;

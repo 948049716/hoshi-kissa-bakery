@@ -526,7 +526,9 @@ function renderBackdrop(ctx, w, h, dt, nowSec, gameState, theme, sprites, firefl
     c.restore();
   }
 
-  renderAmbientParticles(c, width, height, dt, nowSec, th, fireflies);
+  if (!(gameState && gameState.lowPowerMode)) {
+    renderAmbientParticles(c, width, height, dt, nowSec, th, fireflies);
+  }
 
   const feverOn = Boolean(gameState && gameState.feverActive);
   if (feverOn) {
@@ -724,6 +726,15 @@ function renderLobbyChrome(ctx, geom, stageInfo, app, hits) {
     pressed: isHitPressed(app, 'lobby_help_btn')
   });
   hits.add('lobby_help_btn', btnX, helpY, btnS, btnS, () => app.openModal('help'));
+
+  // Left-side matching Settings button (设) cleanly placed in open sky below stardust pill
+  const leftBtnX = isWide ? Math.max(14, Math.round(stageX - 46)) : 10;
+  const setY = startY;
+  drawCircularWoodButton(c, leftBtnX + btnR, setY + btnR, btnR, {
+    label: '设',
+    pressed: isHitPressed(app, 'lobby_settings_btn')
+  });
+  hits.add('lobby_settings_btn', leftBtnX, setY, btnS, btnS, () => app.openModal('settings'));
 
   return { utilLeftX: btnX, utilBottomY: helpY + btnS };
 }
@@ -2223,7 +2234,8 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
       guideTargets,
       neededTiers: app.neededTiers,
       freshWindowSec: effFreshSec,
-      feverV2: Boolean(app.isFeatureOn && app.isFeatureOn('feverV2'))
+      feverV2: Boolean(app.isFeatureOn && app.isFeatureOn('feverV2')),
+      lowPowerMode: Boolean(app.lowPowerMode)
     }
   );
 

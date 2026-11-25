@@ -2028,6 +2028,55 @@ exports.main = async (rawEvent = {}, rawContext = {}) => {
     }
   }
 
+  if (action === 'config') {
+    let configVersion = 'default';
+    const safeOverrides = {};
+    try {
+      const cfgGot = await db.collection('config').doc('balance').get();
+      const cfgData = isPlainRecord(cfgGot) && isPlainRecord(getOwn(cfgGot, 'data'))
+        ? getOwn(cfgGot, 'data')
+        : null;
+      if (cfgData) {
+        const rawVer = getOwn(cfgData, 'configVersion');
+        if (typeof rawVer === 'string' && rawVer.trim()) {
+          configVersion = rawVer.trim().slice(0, 32);
+        }
+        const rawOv = getOwn(cfgData, 'overrides');
+        if (isPlainRecord(rawOv)) {
+          const ovKeys = Object.keys(rawOv);
+          for (let i = 0; i < ovKeys.length; i++) {
+            const k = ovKeys[i];
+            if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+            if (k === 'features') {
+              const rf = getOwn(rawOv, 'features');
+              if (isPlainRecord(rf)) {
+                const sf = {};
+                const fk = Object.keys(rf);
+                for (let j = 0; j < fk.length; j++) {
+                  const fName = fk[j];
+                  if (fName === '__proto__' || fName === 'constructor' || fName === 'prototype') continue;
+                  const fv = getOwn(rf, fName);
+                  if (typeof fv === 'boolean') sf[fName] = fv;
+                }
+                safeOverrides.features = sf;
+              }
+            } else {
+              const v = Number(getOwn(rawOv, k));
+              if (Number.isFinite(v)) safeOverrides[k] = v;
+            }
+          }
+        }
+      }
+    } catch (_err) {
+      // Collection `config` may not exist yet in CloudBase; cleanly fall back to empty overrides.
+    }
+    return {
+      ok: true,
+      configVersion,
+      overrides: safeOverrides
+    };
+  }
+
   let existing = await readExisting();
 
   if (action === 'pull') {

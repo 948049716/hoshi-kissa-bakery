@@ -1279,10 +1279,8 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
     });
     hits.add('result_next_btn', nextX, barTop, halfW, primaryH, () => app.onResultNext());
 
-    // Bottom centered compact pill: 重玩本关 / 再试一次 (result_retry_btn) — stays safely inside modal wood frame!
-    const retryW = Math.min(138, f.sheetW - 24);
+    // Bottom compact row: 重玩/再试 + 激励视频复活/双倍星尘 (v0.13 M4)
     const retryH = 26;
-    const retryX = Math.round(f.cardX + (f.cardW - retryW) * 0.5);
     const retryY = barTop + primaryH + 6;
     const retryLabel =
       resMode === 'daily'
@@ -1292,18 +1290,62 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
         : res.cleared
         ? '重玩本关'
         : '再试一次';
-    UI.drawPillButton(c, retryX, retryY, retryW, retryH, {
-      variant: res.cleared ? 'dark' : 'primary',
-      textOutline: true,
-      icon: 'icon_restart',
-      sprites,
-      iconSize: 13,
-      label: retryLabel,
-      fontSize: 11.4,
-      radius: 13,
-      pressed: isPressed(app, 'result_retry_btn')
-    });
-    hits.add('result_retry_btn', retryX, retryY, retryW, retryH, () => app.startLevel(res.levelId));
+    const canRevive = typeof app.canReviveWithAd === 'function' && app.canReviveWithAd();
+    const canDouble = typeof app.canDoubleDustWithAd === 'function' && app.canDoubleDustWithAd();
+    const adActive = canRevive || canDouble;
+
+    if (adActive) {
+      const rowGap = 8;
+      const leftW = Math.floor((f.sheetW - rowGap) * 0.44);
+      const rightW = f.sheetW - rowGap - leftW;
+      UI.drawPillButton(c, f.sheetX, retryY, leftW, retryH, {
+        variant: 'dark',
+        textOutline: true,
+        icon: 'icon_restart',
+        sprites,
+        iconSize: 12,
+        label: retryLabel,
+        fontSize: 10.8,
+        radius: 13,
+        pressed: isPressed(app, 'result_retry_btn')
+      });
+      hits.add('result_retry_btn', f.sheetX, retryY, leftW, retryH, () => app.startLevel(res.levelId));
+
+      const adHitId = canRevive ? 'result_revive_btn' : 'result_double_dust_btn';
+      const adLabel = canRevive
+        ? `视频加时 +${(BalanceConfig.ADS && BalanceConfig.ADS.reviveAddSec) || 15}秒`
+        : `视频双倍 +${res.totalDustAward}`;
+      UI.drawPillButton(c, f.sheetX + leftW + rowGap, retryY, rightW, retryH, {
+        variant: 'primary',
+        textOutline: true,
+        icon: canRevive ? 'icon_clock' : 'icon_star_coin',
+        sprites,
+        iconSize: 13,
+        label: adLabel,
+        fontSize: 10.8,
+        radius: 13,
+        pressed: isPressed(app, adHitId)
+      });
+      hits.add(adHitId, f.sheetX + leftW + rowGap, retryY, rightW, retryH, () => {
+        if (canRevive && typeof app.onReviveWithAd === 'function') app.onReviveWithAd();
+        else if (canDouble && typeof app.onDoubleDustWithAd === 'function') app.onDoubleDustWithAd();
+      });
+    } else {
+      const retryW = Math.min(138, f.sheetW - 24);
+      const retryX = Math.round(f.cardX + (f.cardW - retryW) * 0.5);
+      UI.drawPillButton(c, retryX, retryY, retryW, retryH, {
+        variant: res.cleared ? 'dark' : 'primary',
+        textOutline: true,
+        icon: 'icon_restart',
+        sprites,
+        iconSize: 13,
+        label: retryLabel,
+        fontSize: 11.4,
+        radius: 13,
+        pressed: isPressed(app, 'result_retry_btn')
+      });
+      hits.add('result_retry_btn', retryX, retryY, retryW, retryH, () => app.startLevel(res.levelId));
+    }
   } finally {
     endModalFrame(c);
   }
@@ -2671,7 +2713,7 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
     const lb = app.leaderboardData || { list: [], myRank: null };
 
     if (boardType === 'friends') {
-      // User Decision #2: 微信好友榜 shows clean "正在开发中" placeholder card
+      // v0.13 M4: WeChat Open Data Context sharedCanvas blit + local preview fallback
       c.save();
       try {
         c.globalAlpha *= anim.tabAlpha;
@@ -2683,36 +2725,61 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
           radius: 13,
           lineWidth: 2.0
         });
-        const midX = f.ix + f.iw * 0.5;
-        const midY = listY + listH * 0.5;
-        UI.drawUiIcon(c, sprites, 'patron_mikan', midX - 24, midY - 34, 58);
-        UI.drawUiIcon(c, sprites, 'icon_cloud_sync', midX + 26, midY - 30, 36);
-        UI.drawTagBadge(c, midX - 44, midY + 4, 88, 22, '功能筹备中', 'amber', 10.6);
-        UI.drawFitText(
-          c,
-          '微信好友榜正在开发中',
-          midX,
-          midY + 38,
-          f.iw - 28,
-          15.5,
-          12.0,
-          900,
-          '#5A3928',
-          'center',
-          'middle'
-        );
-        UI.drawWrappedText(
-          c,
-          '开放数据域好友榜单即将上线！当前可先在「全服总星榜」与「累计营业榜」中冲榜角逐星夜烘焙大师。',
-          midX,
-          midY + 56,
-          f.iw - 44,
-          16,
-          UI.fontStr(10.6, 700),
-          '#754C36',
-          'center',
-          3
-        );
+
+        const sharedCanvas =
+          typeof app.renderFriendsOpenData === 'function'
+            ? app.renderFriendsOpenData(Math.floor(f.iw - 12), Math.floor(listH - 12), metrics.dpr || 2)
+            : null;
+        if (sharedCanvas && sharedCanvas.width > 0 && sharedCanvas.height > 0) {
+          c.drawImage(sharedCanvas, f.ix + 6, listY + 6, f.iw - 12, listH - 12);
+        } else {
+          const midX = f.ix + f.iw * 0.5;
+          const midY = listY + listH * 0.44;
+          UI.drawUiIcon(c, sprites, 'patron_mikan', midX - 24, midY - 30, 54);
+          UI.drawUiIcon(c, sprites, 'icon_cloud_sync', midX + 26, midY - 26, 34);
+          UI.drawTagBadge(c, midX - 58, midY + 4, 116, 22, '已接入开放域', 'matcha', 10.2);
+          UI.drawFitText(
+            c,
+            '微信好友排行已开启',
+            midX,
+            midY + 38,
+            f.iw - 28,
+            15.0,
+            11.5,
+            900,
+            '#5A3928',
+            'center',
+            'middle'
+          );
+          UI.drawWrappedText(
+            c,
+            '微信端内自动同步好友总星与营业排行，点击下方按钮邀请好友加入星夜猫饼店。',
+            midX,
+            midY + 56,
+            f.iw - 40,
+            16,
+            UI.fontStr(10.4, 700),
+            '#754C36',
+            'center',
+            3
+          );
+
+          const shareW = Math.min(180, f.iw - 44);
+          const shareH = 34;
+          const shareX = Math.round(midX - shareW * 0.5);
+          const shareY = Math.min(listY + listH - shareH - 12, midY + 98);
+          UI.drawPillButton(c, shareX, shareY, shareW, shareH, {
+            variant: 'primary',
+            textOutline: true,
+            label: '邀请好友一起玩',
+            fontSize: 12.2,
+            radius: 17,
+            pressed: isPressed(app, 'friends_share_btn')
+          });
+          hits.add('friends_share_btn', shareX, shareY, shareW, shareH, () => {
+            if (typeof app.shareToFriends === 'function') app.shareToFriends();
+          });
+        }
       } finally {
         c.restore();
       }
@@ -3134,32 +3201,44 @@ function renderPauseModal(ctx, metrics, app, hits) {
     });
     hits.add('pause_lobby_btn', btnX, b3Y, btnW, btnH, () => app.onPauseReturnLobby());
 
-    // Compact secondary utility row preserving pause_help_btn & pause_compendium_btn
-    const secGap = 10;
-    const secW = Math.floor((btnW - secGap) / 2);
-    UI.drawPillButton(c, btnX, secY, secW, secH, {
+    // Compact secondary utility row preserving pause_help_btn, pause_compendium_btn & pause_settings_btn
+    const secGap = 6;
+    const secRowW = f.iw - 4;
+    const secRowX = f.ix + 2;
+    const secW = Math.floor((secRowW - secGap * 2) / 3);
+    UI.drawPillButton(c, secRowX, secY, secW, secH, {
       variant: 'card',
       icon: 'icon_help',
       sprites,
-      iconSize: 14,
+      iconSize: 13,
       label: '玩法说明',
-      fontSize: 11.0,
-      radius: 12,
+      fontSize: 10.2,
+      radius: 11,
       pressed: isPressed(app, 'pause_help_btn')
     });
-    hits.add('pause_help_btn', btnX, secY, secW, secH, () => app.openModal('help'));
+    hits.add('pause_help_btn', secRowX, secY, secW, secH, () => app.openModal('help'));
 
-    UI.drawPillButton(c, btnX + secW + secGap, secY, secW, secH, {
+    UI.drawPillButton(c, secRowX + secW + secGap, secY, secW, secH, {
       variant: 'card',
       icon: 'icon_book',
       sprites,
-      iconSize: 14,
+      iconSize: 13,
       label: '星夜图鉴',
-      fontSize: 11.0,
-      radius: 12,
+      fontSize: 10.2,
+      radius: 11,
       pressed: isPressed(app, 'pause_compendium_btn')
     });
-    hits.add('pause_compendium_btn', btnX + secW + secGap, secY, secW, secH, () => app.openCompendium('recipes'));
+    hits.add('pause_compendium_btn', secRowX + secW + secGap, secY, secW, secH, () => app.openCompendium('recipes'));
+
+    const setX = secRowX + (secW + secGap) * 2;
+    UI.drawPillButton(c, setX, secY, secRowW - (secW + secGap) * 2, secH, {
+      variant: 'card',
+      label: '星夜设置',
+      fontSize: 10.2,
+      radius: 11,
+      pressed: isPressed(app, 'pause_settings_btn')
+    });
+    hits.add('pause_settings_btn', setX, secY, secRowW - (secW + secGap) * 2, secH, () => app.openModal('settings'));
   } finally {
     endModalFrame(c);
   }
@@ -3605,10 +3684,11 @@ function renderPerkPickModal(ctx, metrics, app, hits) {
     );
 
     const listTop = f.iy + 26;
-    const listH = Math.max(180, f.ih - 34);
-    const gap = 10;
+    const rerollAreaH = 40;
+    const listH = Math.max(170, f.ih - 34 - rerollAreaH);
+    const gap = 8;
     const count = Math.max(1, choices.length);
-    const cardH = clamp(Math.floor((listH - gap * (count - 1)) / count), 86, 118);
+    const cardH = clamp(Math.floor((listH - gap * (count - 1)) / count), 78, 108);
 
     for (let i = 0; i < choices.length; i++) {
       const p = choices[i];
@@ -3646,10 +3726,10 @@ function renderPerkPickModal(ctx, metrics, app, hits) {
         c,
         p.desc,
         f.ix + 12,
-        cy + dy + 44,
+        cy + dy + 42,
         f.iw - 96,
-        17,
-        UI.fontStr(11.0, 700),
+        16,
+        UI.fontStr(10.8, 700),
         '#754C36',
         'left',
         2
@@ -3670,6 +3750,124 @@ function renderPerkPickModal(ctx, metrics, app, hits) {
 
       const idxCopy = i;
       hits.add(hitId, f.ix, cy, f.iw, cardH, () => app.pickEndlessPerk(idxCopy));
+    }
+
+    // Bottom rewarded-video reroll pill (once per shift, v0.13 M4)
+    const rerollUsed = Boolean(eRun.pendingRerollUsed);
+    const rerollW = Math.min(208, f.iw - 16);
+    const rerollH = 32;
+    const rerollX = Math.round(f.ix + (f.iw - rerollW) * 0.5);
+    const rerollY = f.iy + f.ih - rerollH - 2;
+    UI.drawPillButton(c, rerollX, rerollY, rerollW, rerollH, {
+      variant: rerollUsed ? 'wood' : 'primary',
+      disabled: rerollUsed,
+      textOutline: !rerollUsed,
+      label: rerollUsed ? '本班已刷新' : '观看视频刷新加成',
+      fontSize: 11.8,
+      radius: 16,
+      pressed: !rerollUsed && isPressed(app, 'perk_reroll_btn')
+    });
+    if (!rerollUsed) {
+      hits.add('perk_reroll_btn', rerollX, rerollY, rerollW, rerollH, () => {
+        if (typeof app.onRerollEndlessPerksWithAd === 'function') app.onRerollEndlessPerksWithAd();
+      });
+    }
+  } finally {
+    endModalFrame(c);
+  }
+}
+
+/* ======================== 13. 星夜设置弹窗 (SettingsModal · v0.13 M4) ======================== */
+
+function renderSettingsModal(ctx, metrics, app, hits) {
+  const c = getSafeCtx(ctx);
+  const saveData = app.saveData || {};
+  const settings = (saveData.settings && typeof saveData.settings === 'object') ? saveData.settings : {};
+
+  const f = beginModalFrame(c, metrics, app, {
+    maxW: 408,
+    desiredH: 456,
+    dismissOnOutside: true,
+    title: '星夜设置',
+    subtitle: '音频、震动与无障碍偏好',
+    sheetTopInset: 38,
+    sheetBottomPad: 12
+  });
+
+  try {
+    drawCloseButton(c, f, hits, app);
+
+    const trackInfo =
+      app.audio && typeof app.audio.getTrackInfo === 'function'
+        ? app.audio.getTrackInfo()
+        : { key: 'waltz', label: '圆舞曲' };
+    const bgmOn = trackInfo.key !== 'off';
+    const sfxOn = app.audio ? Boolean(app.audio.sfxEnabled) : true;
+    const vibOn = settings.vibrateEnabled !== false;
+    const lowPowOn = Boolean(settings.lowPowerMode);
+    const cbOn = Boolean(settings.colorblindMarks);
+
+    const rows = [
+      {
+        hitId: 'settings_bgm_btn',
+        title: bgmOn ? `背景音乐 (${trackInfo.label || '开'})` : '背景音乐 (静音)',
+        sub: '切换星夜圆舞曲 / 爵士乐 / 关闭',
+        on: bgmOn,
+        onToggle: () => app.cycleBgm()
+      },
+      {
+        hitId: 'settings_sfx_btn',
+        title: '操作音效',
+        sub: '滑动合成、上菜与热潮音效',
+        on: sfxOn,
+        onToggle: () => app.toggleSfx()
+      },
+      {
+        hitId: 'settings_vibrate_btn',
+        title: '震动开关',
+        sub: '暴击、过热与高阶合成柔和震动',
+        on: vibOn,
+        onToggle: () => app.toggleSetting('vibrateEnabled')
+      },
+      {
+        hitId: 'settings_lowpower_btn',
+        title: '节能轻量',
+        sub: '关闭背景星尘光点，降低发热',
+        on: lowPowOn,
+        onToggle: () => app.toggleSetting('lowPowerMode')
+      },
+      {
+        hitId: 'settings_colorblind_btn',
+        title: '色觉角标',
+        sub: '风味叠加 茶 / 莓 / 金 字标',
+        on: cbOn,
+        onToggle: () => app.toggleSetting('colorblindMarks')
+      }
+    ];
+
+    const gap = 8;
+    const availH = Math.max(240, f.ih - 8);
+    const rowH = clamp(Math.floor((availH - gap * (rows.length - 1)) / rows.length), 50, 64);
+    const swW = 68;
+    const swH = 28;
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const ry = f.iy + 4 + i * (rowH + gap);
+      UI.drawKissaCard(c, f.ix, ry, f.iw, rowH, {
+        tone: r.on ? 'selected' : 'cream',
+        radius: 12,
+        lineWidth: 1.8
+      });
+
+      const swX = f.ix + f.iw - swW - 12;
+      const swY = Math.round(ry + (rowH - swH) * 0.5);
+      const textW = Math.max(100, swX - (f.ix + 20));
+      UI.drawFitText(c, r.title, f.ix + 12, ry + rowH * 0.34, textW, 13.4, 10.2, 900, '#5A3928', 'left', 'middle');
+      UI.drawFitText(c, r.sub, f.ix + 12, ry + rowH * 0.70, textW, 9.8, 7.8, 700, '#754C36', 'left', 'middle');
+
+      UI.drawSwitchToggle(c, swX, swY, swW, swH, r.on, r.on ? 1 : 0);
+      hits.add(r.hitId, swX - 6, ry + 2, swW + 12, rowH - 4, r.onToggle);
     }
   } finally {
     endModalFrame(c);
@@ -3718,6 +3916,9 @@ function renderActiveModal(ctx, metrics, app, hits, nowSec) {
       break;
     case 'perk_pick':
       renderPerkPickModal(ctx, metrics, app, hits);
+      break;
+    case 'settings':
+      renderSettingsModal(ctx, metrics, app, hits);
       break;
     case 'pause':
       renderPauseModal(ctx, metrics, app, hits);

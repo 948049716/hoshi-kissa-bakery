@@ -187,6 +187,8 @@ function createApp() {
     createAudioContext: () => platform.createAudioContext()
   });
 
+  let appInitialized = false;
+
   function syncAudioPrefsFromSave() {
     const nextTrack =
       saveData.bgmTrack === 'bossa' || saveData.bgmTrack === 'off'
@@ -198,6 +200,28 @@ function createApp() {
     } else {
       audio.bgmTrack = nextTrack;
       audio.bgmEnabled = nextTrack !== 'off';
+    }
+    const stg = saveData.settings && typeof saveData.settings === 'object' ? saveData.settings : {};
+    const vibOn = stg.vibrateEnabled !== false;
+    const lowPow = Boolean(stg.lowPowerMode);
+    const cbOn = Boolean(stg.colorblindMarks);
+    if (typeof platform.setVibrateEnabled === 'function') {
+      platform.setVibrateEnabled(vibOn);
+    }
+    if (typeof UI.setColorblindMarks === 'function') {
+      UI.setColorblindMarks(cbOn);
+    }
+    if (appInitialized) {
+      app.lowPowerMode = lowPow;
+      gameState.lowPowerMode = lowPow;
+    }
+  }
+
+  // Apply cached remote balance config overrides synchronously on boot (v0.13 M4)
+  if (typeof platform.getCachedRemoteConfig === 'function') {
+    const cachedCfg = platform.getCachedRemoteConfig();
+    if (cachedCfg && cachedCfg.overrides) {
+      BalanceConfig.applyRemoteOverrides(cachedCfg.overrides);
     }
   }
 
@@ -452,10 +476,16 @@ function createApp() {
   // Pure Serve-Only gameState mirror for backdrop & audio hooks (NO addScore helper!)
   const gameState = {
     score: 0,
-    feverActive: false
+    feverActive: false,
+    lowPowerMode: Boolean(saveData && saveData.settings && saveData.settings.lowPowerMode)
   };
+  app.lowPowerMode = gameState.lowPowerMode;
+  appInitialized = true;
 
   function syncGameStateMirror() {
+    const lowPow = Boolean(saveData && saveData.settings && saveData.settings.lowPowerMode);
+    gameState.lowPowerMode = lowPow;
+    app.lowPowerMode = lowPow;
     if (app.orderState) {
       gameState.score = Math.max(0, Math.floor(Number(app.orderState.score) || 0));
       gameState.feverActive = Boolean(app.orderState.feverActive);
@@ -1050,6 +1080,17 @@ function createApp() {
     }
   };
 
+  function emitShopBuyEvent(category, itemId, cost, level) {
+    if (BalanceConfig.TELEMETRY.enabled && typeof platform.reportEvent === 'function') {
+      platform.reportEvent(BalanceConfig.TELEMETRY.eventNames.shopBuy, {
+        category: String(category || 'shop'),
+        item_id: String(itemId || ''),
+        cost: Math.max(0, Math.floor(Number(cost) || 0)),
+        level: Math.max(0, Math.floor(Number(level) || 0))
+      });
+    }
+  }
+
   app.buyCatcakeUpgrade = function buyCatcakeUpgrade(tier) {
     const cake = CATCAKES.find((c) => c.tier === Number(tier));
     if (!cake) return false;
@@ -1078,6 +1119,7 @@ function createApp() {
     }
     persistSave(true);
     audio.playShopBuy();
+    emitShopBuyEvent('catcake', cake.id, cost, curLv + 1);
     showToast(`${cake.name} 升至 Lv.${curLv + 1}！`, { icon: cake.id, tone: 'success' });
     return true;
   };
@@ -1106,6 +1148,7 @@ function createApp() {
     }
     persistSave(true);
     audio.playShopBuy();
+    emitShopBuyEvent('device', dev.id, cost, curLv + 1);
     showToast(`${dev.name} 升至 Lv.${curLv + 1}！`, { icon: dev.icon, tone: 'success' });
     return true;
   };
@@ -1129,6 +1172,7 @@ function createApp() {
     app.currentPatronLine = patron.greet;
     persistSave(true);
     audio.playShopBuy();
+    emitShopBuyEvent('patron', pid, cost, 1);
     showToast(`成功邀请主厨搭档：${patron.name}！`, { icon: pid, tone: 'event', level: 'major' });
     return true;
   };
@@ -1164,6 +1208,7 @@ function createApp() {
     saveData.equippedTheme = th.id;
     persistSave(true);
     audio.playShopBuy();
+    emitShopBuyEvent('theme', th.id, cost, 1);
     showToast(`已解锁并装备：${th.name}！`, { icon: 'icon_ribbon', tone: 'event', level: 'major' });
     return true;
   };
@@ -1199,8 +1244,193 @@ function createApp() {
     saveData.researchUnlocks[item.id] = true;
     persistSave(true);
     audio.playShopBuy();
+    emitShopBuyEvent('research', item.id, cost, 1);
     showToast(`茶研所解锁：${item.name}！`, { icon: 'icon_stardust', tone: 'event', level: 'major' });
     return true;
+  };
+
+  // ==================== v0.13 M4: Settings, OpenData Friends & Rewarded Video Ads ====================
+
+  app.toggleSetting = function toggleSetting(key) {
+    if (key !== 'vibrateEnabled' && key !== 'lowPowerMode' && key !== 'colorblindMarks') {
+      return false;
+    }
+    if (!saveData.settings || typeof saveData.settings !== 'object') {
+      saveData.settings = { vibrateEnabled: true, lowPowerMode: false, colorblindMarks: false };
+    }
+    const curVal = key === 'vibrateEnabled' ? saveData.settings.vibrateEnabled !== false : Boolean(saveData.settings[key]);
+    const nextVal = !curVal;
+    saveData.settings[key] = nextVal;
+    syncAudioPrefsFromSave();
+    persistSave(true);
+    audio.playPatronSelect();
+    const labelMap = {
+      vibrateEnabled: nextVal ? '震动开关已开启' : '震动开关已关闭',
+      lowPowerMode: nextVal ? '节能轻量已开启' : '节能轻量已关闭',
+      colorblindMarks: nextVal ? '色觉角标已开启' : '色觉角标已关闭'
+    };
+    showToast(labelMap[key], { icon: 'icon_check' });
+    return nextVal;
+  };
+
+  let lastOpenDataKey = '';
+  app.renderFriendsOpenData = function renderFriendsOpenData(w, h, dpr) {
+    if (typeof platform.getOpenDataCanvas !== 'function') return null;
+    const sharedCanvas = platform.getOpenDataCanvas();
+    if (!sharedCanvas) return null;
+    const key = `${w}x${h}@${dpr}`;
+    if (key !== lastOpenDataKey) {
+      lastOpenDataKey = key;
+      if (typeof platform.postOpenDataMessage === 'function') {
+        platform.postOpenDataMessage({
+          type: 'render_friends',
+          width: w,
+          height: h,
+          dpr,
+          metric: 'stars'
+        });
+      }
+    }
+    return sharedCanvas;
+  };
+
+  app.shareToFriends = function shareToFriends() {
+    if (typeof platform.triggerShare === 'function') {
+      platform.triggerShare();
+    }
+    showToast('已打开分享，邀请好友一起做猫饼！', { icon: 'icon_ribbon', tone: 'success' });
+    return true;
+  };
+
+  const AD_DOUBLE_STORAGE_KEY = 'hoshi_ad_double_v1';
+
+  function readAdDoubleState() {
+    const today = RunModifiers.getDailyDateKeyUTC8();
+    const raw = platform.getStorageJSON ? platform.getStorageJSON(AD_DOUBLE_STORAGE_KEY) : null;
+    if (raw && typeof raw === 'object' && raw.dateKey === today) {
+      return { dateKey: today, count: Math.max(0, Math.floor(Number(raw.count) || 0)) };
+    }
+    return { dateKey: today, count: 0 };
+  }
+
+  function getAdDoubleRemaining() {
+    const cap = (BalanceConfig.ADS && BalanceConfig.ADS.dailyDoubleDustCap) || 3;
+    const st = readAdDoubleState();
+    return Math.max(0, cap - st.count);
+  }
+
+  function incrementAdDoubleCount() {
+    const st = readAdDoubleState();
+    st.count += 1;
+    if (platform.setStorageJSON) {
+      platform.setStorageJSON(AD_DOUBLE_STORAGE_KEY, st);
+    }
+    return st.count;
+  }
+
+  function emitAdRewardEvent(placement, extra) {
+    if (BalanceConfig.TELEMETRY.enabled && typeof platform.reportEvent === 'function') {
+      platform.reportEvent(BalanceConfig.TELEMETRY.eventNames.adReward || 'ad_reward', {
+        placement: String(placement || 'default'),
+        ...(extra || {})
+      });
+    }
+  }
+
+  app.canReviveWithAd = function canReviveWithAd() {
+    if (!BalanceConfig.ADS || !BalanceConfig.ADS.enabled) return false;
+    if (!app.lastResult || app.lastResult.cleared) return false;
+    if (!runCtx || !app.orderState) return false;
+    if (BalanceConfig.ADS.reviveOncePerRun && runCtx.reviveUsed) return false;
+    return true;
+  };
+
+  app.onReviveWithAd = function onReviveWithAd() {
+    if (!app.canReviveWithAd()) return Promise.resolve(false);
+    const adUnitId = (BalanceConfig.ADS && BalanceConfig.ADS.adUnitId) || 'adunit-placeholder-hoshi-reward';
+    return platform.showRewardedVideoAd('revive', { adUnitId }).then((res) => {
+      if (!res || !res.rewarded || !app.canReviveWithAd()) {
+        showToast('未看完视频，暂未获得加时', { icon: 'icon_warn', tone: 'warn' });
+        return false;
+      }
+      const addSec = (BalanceConfig.ADS && BalanceConfig.ADS.reviveAddSec) || 15;
+      if (runCtx.mode === 'endless' && app.endlessRun && app.lastResult) {
+        app.endlessRun.active = true;
+        app.endlessRun.totalScore = Math.max(0, (app.endlessRun.totalScore || 0) - (app.lastResult.score || 0));
+        app.endlessRun.totalServes = Math.max(0, (app.endlessRun.totalServes || 0) - (app.lastResult.ordersServed || 0));
+      }
+      runCtx.reviveUsed = true;
+      app.orderState.timeLeft = addSec;
+      app.orderState.settled = false;
+      app.screen = 'playing';
+      app.activeModal = null;
+      app.lastResult = null;
+      lastCountdownTickInt = 6;
+      syncGameStateMirror();
+      syncAudioMood();
+      audio.playStartCafe();
+      emitAdRewardEvent('revive', { mode: runCtx.mode, add_sec: addSec });
+      showToast(`加时 +${addSec} 秒，继续营业！`, { icon: 'icon_clock', tone: 'event', level: 'major' });
+      return true;
+    });
+  };
+
+  app.canDoubleDustWithAd = function canDoubleDustWithAd() {
+    if (!BalanceConfig.ADS || !BalanceConfig.ADS.enabled) return false;
+    if (!app.lastResult || !app.lastResult.cleared) return false;
+    if ((Number(app.lastResult.totalDustAward) || 0) <= 0) return false;
+    if (app.lastResult.doubleClaimed) return false;
+    return getAdDoubleRemaining() > 0;
+  };
+
+  app.onDoubleDustWithAd = function onDoubleDustWithAd() {
+    if (!app.canDoubleDustWithAd()) return Promise.resolve(false);
+    const adUnitId = (BalanceConfig.ADS && BalanceConfig.ADS.adUnitId) || 'adunit-placeholder-hoshi-reward';
+    return platform.showRewardedVideoAd('double_dust', { adUnitId }).then((res) => {
+      if (!res || !res.rewarded || !app.canDoubleDustWithAd()) {
+        showToast('未看完视频，暂未获得双倍星尘', { icon: 'icon_warn', tone: 'warn' });
+        return false;
+      }
+      const extra = Math.max(0, Math.floor(Number(app.lastResult.totalDustAward) || 0));
+      saveData.totalEarnedStardust = Math.max(0, (saveData.totalEarnedStardust || 0) + extra);
+      saveData.bankStardust = Math.max(0, (saveData.bankStardust || 0) + extra);
+      app.lastResult.doubleClaimed = true;
+      app.lastResult.doubleDustBonus = extra;
+      incrementAdDoubleCount();
+      persistSave(true);
+      audio.playShopBuy();
+      emitAdRewardEvent('double_dust', { dust: extra, remaining: getAdDoubleRemaining() });
+      showToast(`双倍星尘 +${extra}！`, { icon: 'icon_stardust', tone: 'event', level: 'major' });
+      return true;
+    });
+  };
+
+  app.onRerollEndlessPerksWithAd = function onRerollEndlessPerksWithAd() {
+    const eRun = app.endlessRun;
+    if (!BalanceConfig.ADS || !BalanceConfig.ADS.enabled) return Promise.resolve(false);
+    if (!eRun || !eRun.active || app.activeModal !== 'perk_pick' || eRun.pendingRerollUsed) {
+      return Promise.resolve(false);
+    }
+    const adUnitId = (BalanceConfig.ADS && BalanceConfig.ADS.adUnitId) || 'adunit-placeholder-hoshi-reward';
+    return platform.showRewardedVideoAd('perk_reroll', { adUnitId }).then((res) => {
+      if (!res || !res.rewarded || !app.endlessRun || app.endlessRun.pendingRerollUsed) {
+        showToast('未看完视频，加成未刷新', { icon: 'icon_warn', tone: 'warn' });
+        return false;
+      }
+      eRun.pendingRerollUsed = true;
+      const prevIds = (eRun.pendingChoices || []).map((p) => p && p.id).filter(Boolean);
+      const exclude = eRun.perkIds.concat(prevIds);
+      const rerollRng = Rng.createRng(Rng.hash32(`reroll:${eRun.seedBase}:${eRun.shift}`));
+      let nextChoices = RunModifiers.pickPerkChoices(exclude, saveData.researchUnlocks, rerollRng, 3);
+      if (nextChoices.length < 3) {
+        nextChoices = RunModifiers.pickPerkChoices(eRun.perkIds, saveData.researchUnlocks, rerollRng, 3);
+      }
+      eRun.pendingChoices = nextChoices;
+      audio.playPatronSelect();
+      emitAdRewardEvent('perk_reroll', { shift: eRun.shift });
+      showToast('已刷新本班 3 选 1 加成！', { icon: 'icon_ribbon', tone: 'success' });
+      return true;
+    });
   };
 
   app.openCompendium = function openCompendium(tab = 'catcakes') {
@@ -1479,6 +1709,7 @@ function createApp() {
       'leaderboard',
       'challenge',
       'perk_pick',
+      'settings',
       'pause',
       'help',
       'confirm'
@@ -1646,6 +1877,12 @@ function createApp() {
     if (!(hasOwn(saveData.seenTutorials, saveKey) && saveData.seenTutorials[saveKey])) {
       saveData.seenTutorials[saveKey] = true;
       persistSave(true);
+      if (BalanceConfig.TELEMETRY.enabled && typeof platform.reportEvent === 'function') {
+        platform.reportEvent(BalanceConfig.TELEMETRY.eventNames.tutorialStep, {
+          step: String(saveKey || ''),
+          level_id: String(app.currentLevelId || '')
+        });
+      }
     }
     app.activeTutorialStep = null;
     app.tutorialSkipRect = null;
@@ -3919,6 +4156,14 @@ function createApp() {
 
     // ---- Mode: Campaign Settlement ----
     const persistCampaign = mode === 'campaign';
+    if (persistCampaign && !settlement.cleared && settlement.totalDustAward > 0 && runCtx) {
+      if (runCtx.consolationAwarded) {
+        settlement.consolationDust = 0;
+        settlement.totalDustAward = 0;
+      } else {
+        runCtx.consolationAwarded = true;
+      }
+    }
 
     if (persistCampaign) {
       const updatedSave = SaveSync.recordLevelSettlementToSave(
@@ -5292,6 +5537,65 @@ function createApp() {
       return ok;
     },
 
+    toggleSetting(key) {
+      const val = app.toggleSetting(key);
+      renderFrame(0);
+      return val;
+    },
+
+    getSettings() {
+      const stg = saveData && saveData.settings ? saveData.settings : {};
+      return {
+        bgmTrack: saveData.bgmTrack,
+        sfxEnabled: Boolean(saveData.sfxEnabled),
+        vibrateEnabled: stg.vibrateEnabled !== false,
+        lowPowerMode: Boolean(stg.lowPowerMode),
+        colorblindMarks: Boolean(stg.colorblindMarks)
+      };
+    },
+
+    setMockAdResult(ok) {
+      return typeof platform.setMockAdResult === 'function' ? platform.setMockAdResult(ok) : Boolean(ok);
+    },
+
+    getAdDoubleRemaining() {
+      return getAdDoubleRemaining();
+    },
+
+    triggerReviveAd() {
+      return app.onReviveWithAd().then((ok) => {
+        renderFrame(0);
+        return ok;
+      });
+    },
+
+    triggerDoubleDustAd() {
+      return app.onDoubleDustWithAd().then((ok) => {
+        renderFrame(0);
+        return ok;
+      });
+    },
+
+    triggerPerkRerollAd() {
+      return app.onRerollEndlessPerksWithAd().then((ok) => {
+        renderFrame(0);
+        return ok;
+      });
+    },
+
+    fetchRemoteConfig() {
+      if (typeof platform.fetchRemoteConfig !== 'function') {
+        return Promise.resolve({ ok: false, reason: 'unsupported' });
+      }
+      return platform.fetchRemoteConfig(CloudConfig.CLOUD_FUNCTION_NAME || 'kissa_sync').then((res) => {
+        if (res && res.ok && res.overrides) {
+          const applied = BalanceConfig.applyRemoteOverrides(res.overrides);
+          return { ...res, applied };
+        }
+        return res;
+      });
+    },
+
     slide(dir) {
       const res = executeSlide(dir);
       renderFrame(0);
@@ -5352,6 +5656,20 @@ function createApp() {
     }
   };
 
+  function initRemoteConfigOnBoot() {
+    if (headlessSimMode || !CloudConfig.ENABLE_CLOUD_SYNC) return;
+    if (typeof platform.fetchRemoteConfig !== 'function') return;
+    platform
+      .fetchRemoteConfig(CloudConfig.CLOUD_FUNCTION_NAME || 'kissa_sync')
+      .then((res) => {
+        if (destroyed) return;
+        if (res && res.ok && res.overrides) {
+          BalanceConfig.applyRemoteOverrides(res.overrides);
+        }
+      })
+      .catch(() => {});
+  }
+
   if (gGlobal && typeof gGlobal === 'object') {
     gGlobal.__HOSHI_DEBUG__ = debugApi;
     gGlobal.__game = debugApi;
@@ -5367,6 +5685,7 @@ function createApp() {
   platform.setWxFriendCloudScore(saveData);
   syncAudioMood();
   initCloudSyncOnBoot();
+  initRemoteConfigOnBoot();
 
   // Synchronous initial render so getState().hits is immediately populated on boot
   renderFrame(0);

@@ -4,6 +4,25 @@
 
 ---
 
+## [0.13.0] - 2026-11-25（玩法大改造 M4 · 远程调参 / 激励视频 / We分析 / 开放域好友榜 / 星夜设置与无障碍）
+
+### Added（M4 · 平台能力与收口打磨）
+- **远程调参热修（`cloudfunctions/kissa_sync/index.js`、`src/platform.js`、`src/game_app.js`）**：云函数新增 `action: 'config'` 读取 `db.collection('config').doc('balance')` 并过滤清洗数值与 `features` 开关（无文档时安全回退默认空覆盖）；客户端启动时同步加载本地缓存 `__hoshi_remote_cfg_v1__` 并后台异步刷新，统一经 `BalanceConfig.applyRemoteOverrides()` 白名单夹逼生效。
+- **激励视频三触点（`BalanceConfig.ADS`、`platform.showRewardedVideoAd`）**：
+  - **失败复活加时**：结算失败页提供「视频加时 +15秒」（每局严格限 1 次，无尽模式回滚当班累计防双计，主线防重复发放安慰尘）；
+  - **结算双倍星尘**：通关获星尘后提供「视频双倍 +N」（每日上限 3 次，持久化于 `hoshi_ad_double_v1`）；
+  - **无尽词条刷新**：`perk_pick` 弹窗底部提供「观看视频刷新加成」（每班限 1 次）；
+  - 预留正式占位 `adUnitId: 'adunit-placeholder-hoshi-reward'`，未看完视频不发奖并弹出温和提示。
+- **We分析 完整埋点补齐**：在 `level_start / level_end / mode_start` 基础上补齐 `shop_buy`、`tutorial_step` 与 `ad_reward` 三类自定义事件上报（经 `platform.reportEvent` 蛇形键与类型清洗）。
+- **微信开放数据域好友榜（`openDataContext/index.js`、`game.json`）**：注册 `openDataContext` 目录，纯 Canvas 2D（零外部素材、零 `hsl()`、零原生 Emoji）按 `totalStars` / `totalScore` 同构 KV 渲染微信好友排行；主域排行榜「好友榜」分页在微信环境直接贴图渲染，非微信环境展示「已接入开放域」预览卡与「邀请好友一起玩」分享入口。
+- **星夜设置弹窗与无障碍增强（`src/modals_ui.js`、`src/screens_ui.js`、`src/ui_draw.js`、`src/board_renderer.js`）**：大厅左上角新增对称木质圆钮「设」（暂停弹窗同步增设「设置」入口），集成 5 项独立开关（背景音乐 / 操作音效 / 震动开关 / 节能轻量 / 色觉角标）并持久化至存档 `v3.settings`；开启「节能轻量」跳过环境星尘与外框光斑粒子，开启「色觉角标」在烤盘猫饼与顾客气泡风味角标叠加高对比度 `茶 / 莓 / 金` 圆形字标。
+- **测试与验证**：`test_v2_core.mjs` 新增 `UT-M12 ~ UT-M14`（共 **73** 项核心单测）；`e2e_tier4.mjs` 新增 `T4-14`（全量 **227** 条 4-Tier 端到端用例通过）；`.github/workflows/deploy-wechat-minigame.yml` 纳入 `openDataContext/*.js` 语法检查。
+
+### Changed（M4）
+- `GAME_VERSION` 升级至 **`0.13.0`**，`BALANCE_VERSION` 升级至 **`0.13.0-m4`**。
+
+---
+
 ## [0.12.0] - 2026-11-25（玩法大改造 M3 · 方向 D 顾客特性 / 18 张流派加成 / 每天特调 / 无限营业 / 茶研所 & 存档 v3）
 
 ### Added（M3 · 方向 D）

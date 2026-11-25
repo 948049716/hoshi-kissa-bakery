@@ -2913,7 +2913,7 @@ function renderBoardStage(
     const isThumb = Boolean(getOwn(opts, 'thumbnail', false));
 
     // Subtle ambient theme motes ONLY in outer margin around the board (never inside void cutouts)
-    if (!isThumb && layout.w >= 200 && layout.h >= 200) {
+    if (!isThumb && !getOwn(opts, 'lowPowerMode', false) && layout.w >= 200 && layout.h >= 200) {
       ctx.save();
       try {
         ctx.fillStyle = safeColor(themeObj.moteColor, 'rgba(255, 236, 178, 0.28)');

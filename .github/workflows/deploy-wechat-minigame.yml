@@ -34,7 +34,7 @@ jobs:
 
       - name: Syntax check Cloud Function & Client JS
         run: |
-          for f in 05-微信小游戏版本/game.js 05-微信小游戏版本/src/*.js 05-微信小游戏版本/cloudfunctions/kissa_sync/index.js; do
+          for f in 05-微信小游戏版本/game.js 05-微信小游戏版本/src/*.js 05-微信小游戏版本/openDataContext/*.js 05-微信小游戏版本/cloudfunctions/kissa_sync/index.js; do
             node --check "$f"
           done
 
@@ -94,6 +94,6 @@ jobs:
           WECHAT_PRIVATE_KEY: ${{ secrets.WECHAT_PRIVATE_KEY || secrets.WX_PRIVATE_KEY }}
           WECHAT_ACTION: upload
           WECHAT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
-          WECHAT_DESC: ${{ github.event_name == 'workflow_dispatch' && inputs.desc || '一起做猫饼 v0.9 体验版上传' }}
+          WECHAT_DESC: ${{ github.event_name == 'workflow_dispatch' && inputs.desc || '一起做猫饼 v0.13 体验版上传' }}
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: node scripts/upload_minigame.mjs

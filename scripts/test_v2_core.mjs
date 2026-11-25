@@ -4899,11 +4899,192 @@ async function runSectionI() {
 }
 
 // ============================================================================
+// Section J: M4 (v0.13) Remote Config, Rewarded Video Ads, Settings & OpenData Friends
+// ============================================================================
+
+async function runSectionJ() {
+  await runTest('UT-M12', '远程调参 (kissa_sync config 接口、本地缓存与白名单夹逼)', async () => {
+    const cloudVm = loadCloudFunctionInMemory('openid_m4_cfg_01');
+    const { main: cloudMain } = cloudVm.exports;
+
+    // 1) Missing config/balance doc gracefully returns empty overrides
+    const emptyCfg = await cloudMain({ action: 'config' });
+    assert.equal(emptyCfg.ok, true);
+    assert.equal(emptyCfg.configVersion, 'default');
+    assert.deepEqual(deepClone(emptyCfg.overrides), {});
+
+    // 2) Seeded config/balance doc returns sanitized overrides (filtering proto/non-finite)
+    cloudVm.docs.set(
+      'config',
+      new Map([
+        [
+          'balance',
+          {
+            _id: 'balance',
+            configVersion: '2026-11-25-hotfix',
+            overrides: {
+              'FRESH.windowSec': 8.5,
+              'DOUGH_TEMP.lockSec': 99,
+              __proto__: { evil: true },
+              badNaN: 'not-a-number',
+              features: { daily: true, endless: true }
+            }
+          }
+        ]
+      ])
+    );
+    const seededCfg = await cloudMain({ action: 'config' });
+    assert.equal(seededCfg.ok, true);
+    assert.equal(seededCfg.configVersion, '2026-11-25-hotfix');
+    assert.equal(seededCfg.overrides['FRESH.windowSec'], 8.5);
+    assert.equal(seededCfg.overrides.badNaN, undefined);
+
+    // 3) Platform.fetchRemoteConfig caches to storage and clamps via BalanceConfig.applyRemoteOverrides
+    const prevFresh = BalanceConfig.FRESH.windowSec;
+    const prevLock = BalanceConfig.DOUGH_TEMP.lockSec;
+    try {
+      Platform.setStorageJSON('__hoshi_mock_remote_config_v1__', {
+        configVersion: 'mock-v2',
+        overrides: { 'FRESH.windowSec': 9.0, 'DOUGH_TEMP.lockSec': 50 }
+      });
+      const fetched = await Platform.fetchRemoteConfig('kissa_sync');
+      assert.equal(fetched.ok, true);
+      assert.equal(fetched.configVersion, 'mock-v2');
+      const cached = Platform.getCachedRemoteConfig();
+      assert.ok(cached && cached.overrides['FRESH.windowSec'] === 9.0);
+      const applied = BalanceConfig.applyRemoteOverrides(cached.overrides);
+      assert.ok(applied.includes('FRESH.windowSec') && applied.includes('DOUGH_TEMP.lockSec'));
+      assert.equal(BalanceConfig.FRESH.windowSec, 9.0);
+      assert.equal(BalanceConfig.DOUGH_TEMP.lockSec, 3, 'lockSec clamped to max bound 3');
+    } finally {
+      BalanceConfig.FRESH.windowSec = prevFresh;
+      BalanceConfig.DOUGH_TEMP.lockSec = prevLock;
+      Platform.removeStorage('__hoshi_mock_remote_config_v1__');
+      Platform.removeStorage('__hoshi_remote_cfg_v1__');
+    }
+  });
+
+  await runTest('UT-M13', '激励视频三触点（复活+15s / 结算双倍星尘日限3次 / 无尽刷新词条）与拒绝保底', async () => {
+    Platform.removeStorage('hoshi_ad_double_v1');
+    const env = bootMockApp({}, {});
+    try {
+      await env.flushAssets();
+      const dbg = env.dbg;
+      dbg.setSaveData({
+        schemaVersion: 3,
+        totalEarnedStardust: 300,
+        lastSyncedEarnedStardust: 300,
+        bankStardust: 300,
+        levelStars: { '1-1': 3, '1-2': 3, '1-3': 3, '1-4': 3, '1-5': 3, '1-6': 3, '1-7': 3, '1-8': 3, '1-9': 3, '1-10': 3 },
+        highestUnlockedLevel: '2-1'
+      });
+
+      // 1) Fail revive +15s: declined ad does nothing; accepted ad restores 15s once; 2nd revive blocked
+      assert.equal(dbg.startLevel('1-2', { seed: 55, skipTutorial: true, disableEvents: true }), true);
+      dbg.advanceTime(110);
+      assert.equal(dbg.getState().activeModal, 'level_result');
+      assert.equal(dbg.getState().lastResult.cleared, false);
+
+      dbg.setMockAdResult(false);
+      assert.equal(await dbg.triggerReviveAd(), false);
+      assert.equal(dbg.getState().activeModal, 'level_result');
+
+      dbg.setMockAdResult(true);
+      assert.equal(await dbg.triggerReviveAd(), true);
+      assert.equal(dbg.getState().screen, 'playing');
+      assert.equal(dbg.getState().activeModal, null);
+      assert.ok(Math.abs(dbg.getState().timeLeft - 15) < 0.2);
+
+      // Fail again after revive -> second revive must be blocked
+      dbg.advanceTime(16);
+      assert.equal(dbg.getState().activeModal, 'level_result');
+      assert.equal(await dbg.triggerReviveAd(), false, 'revive is strictly once per run');
+
+      // 2) Settlement 2x stardust + daily cap (3)
+      const capBefore = dbg.getAdDoubleRemaining();
+      assert.equal(capBefore, 3);
+      assert.equal(dbg.startLevel('1-1', { seed: 77, skipTutorial: true, disableEvents: true }), true);
+      Object.assign(dbg.getSimView().orderState, { score: 2500, ordersServed: 10 });
+      dbg.advanceTime(95);
+      const resClear = dbg.getState().lastResult;
+      assert.equal(resClear.cleared, true);
+      assert.ok(resClear.totalDustAward > 0);
+      const bankBeforeDouble = dbg.getSaveData().bankStardust;
+      assert.equal(await dbg.triggerDoubleDustAd(), true);
+      assert.equal(dbg.getSaveData().bankStardust, bankBeforeDouble + resClear.totalDustAward);
+      assert.equal(dbg.getAdDoubleRemaining(), 2);
+      assert.equal(await dbg.triggerDoubleDustAd(), false, 'cannot double-claim on same settlement');
+
+      // 3) Endless perk reroll (once per shift)
+      assert.equal(dbg.startEndlessMode({ seedBase: 321, skipTutorial: true }), true);
+      Object.assign(dbg.getSimView().orderState, { score: 2400, ordersServed: 8 });
+      dbg.advanceTime(62);
+      assert.equal(dbg.getState().activeModal, 'perk_pick');
+      assert.equal(await dbg.triggerPerkRerollAd(), true);
+      assert.equal(await dbg.triggerPerkRerollAd(), false, 'perk reroll is strictly once per shift');
+
+      // Verify We分析 ad_reward events were recorded
+      const events = dbg.getReportedEvents();
+      const adPlacements = events.filter((e) => e.name === 'ad_reward').map((e) => e.payload && e.payload.placement);
+      assert.ok(adPlacements.includes('revive'));
+      assert.ok(adPlacements.includes('double_dust'));
+      assert.ok(adPlacements.includes('perk_reroll'));
+    } finally {
+      const LivePlatform = require(path.join(SRC_DIR, 'platform.js'));
+      LivePlatform.setMockAdResult(true);
+      LivePlatform.removeStorage('hoshi_ad_double_v1');
+      env.dispose();
+    }
+  });
+
+  await runTest('UT-M14', '星夜设置持久化、震动/节能/色觉角标同步与开放数据域好友榜 KV 同构', async () => {
+    // 1) Settings toggles persist & sync to Platform / UI flags
+    const env = bootMockApp({}, {});
+    try {
+      await env.flushAssets();
+      const dbg = env.dbg;
+      const LivePlatform = require(path.join(SRC_DIR, 'platform.js'));
+      const LiveUI = require(path.join(SRC_DIR, 'ui_draw.js'));
+      assert.equal(dbg.getSettings().vibrateEnabled, true);
+      assert.equal(dbg.getSettings().lowPowerMode, false);
+      assert.equal(dbg.getSettings().colorblindMarks, false);
+
+      assert.equal(dbg.toggleSetting('vibrateEnabled'), false);
+      assert.equal(LivePlatform.isVibrateEnabled(), false);
+      assert.equal(dbg.toggleSetting('lowPowerMode'), true);
+      assert.equal(dbg.toggleSetting('colorblindMarks'), true);
+      assert.equal(LiveUI.getColorblindMarks(), true);
+      assert.equal(dbg.getSaveData().settings.vibrateEnabled, false);
+      assert.equal(dbg.getSaveData().settings.lowPowerMode, true);
+      assert.equal(dbg.getSaveData().settings.colorblindMarks, true);
+
+      // Restore defaults cleanly so subsequent checks stay nominal
+      dbg.toggleSetting('vibrateEnabled');
+      dbg.toggleSetting('lowPowerMode');
+      dbg.toggleSetting('colorblindMarks');
+      assert.equal(LivePlatform.isVibrateEnabled(), true);
+      assert.equal(LiveUI.getColorblindMarks(), false);
+    } finally {
+      env.dispose();
+    }
+
+    // 2) game.json declares openDataContext & openDataContext/index.js matches platform KV keys + zero hsl/emoji
+    const gameJson = JSON.parse(fs.readFileSync(path.join(MINIGAME_DIR, 'game.json'), 'utf8'));
+    assert.equal(gameJson.openDataContext, 'openDataContext');
+    const odcPath = path.join(MINIGAME_DIR, 'openDataContext', 'index.js');
+    assert.ok(fs.existsSync(odcPath), 'openDataContext/index.js must exist');
+    const odcSrc = fs.readFileSync(odcPath, 'utf8');
+    assert.ok(odcSrc.includes("'totalStars'") && odcSrc.includes("'totalScore'"), 'openDataContext KV keys must match platform.setWxFriendCloudScore');
+    assert.equal(/hsla?\s*\(/i.test(odcSrc), false, 'openDataContext must contain 0 hsl() calls');
+  });
+}
+
+// ============================================================================
 // Main Entrypoint
 // ============================================================================
 
 async function main() {
-  console.log('=== 一起做猫饼 v0.12 Core L1 + L2 + M3 Verification Suite ===');
+  console.log('=== 一起做猫饼 v0.13 Core L1 + L2 + M4 Verification Suite ===');
   await runSectionA();
   await runSectionB();
   await runSectionC();
@@ -4913,6 +5094,7 @@ async function main() {
   await runSectionG();
   await runSectionH();
   await runSectionI();
+  await runSectionJ();
 
   const passed = results.filter((r) => r.ok).length;
   const failed = results.length - passed;

@@ -2358,6 +2358,46 @@ function drawProceduralBoardTileIcon(ctx, iconKey, cx, cy, size, alpha = 1, rot 
 /**
  * Draw circular flavor sticker badge ('matcha', 'berry', or 'gold') using v0.9.0 WebP sprites.
  */
+let colorblindMarksEnabled = false;
+
+function setColorblindMarks(on) {
+  colorblindMarksEnabled = Boolean(on);
+  return colorblindMarksEnabled;
+}
+
+function getColorblindMarks() {
+  return colorblindMarksEnabled;
+}
+
+function stampColorblindFlavorMark(ctx, flv, cx, cy, size, alpha) {
+  if (!colorblindMarksEnabled || !isCanvasCtx(ctx)) return;
+  const label = flv === 'matcha' ? '茶' : flv === 'berry' ? '莓' : flv === 'gold' ? '金' : '';
+  if (!label) return;
+  const bg = flv === 'matcha' ? '#2E6F24' : flv === 'berry' ? '#B8295E' : '#A66800';
+  const r = Math.max(5.5, Math.min(9.5, size * 0.34));
+  const bx = cx + size * 0.24;
+  const by = cy + size * 0.24;
+  if (!safeSave(ctx)) return;
+  try {
+    if (alpha < 1) ctx.globalAlpha *= alpha;
+    ctx.beginPath();
+    ctx.arc(bx, by, r, 0, Math.PI * 2);
+    ctx.fillStyle = bg;
+    ctx.fill();
+    ctx.lineWidth = 1.3;
+    ctx.strokeStyle = '#FFFDF7';
+    ctx.stroke();
+    ctx.fillStyle = '#FFFDF7';
+    ctx.font = fontStr(Math.max(8, Math.round(r * 1.25)), 900);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, bx, by + 0.5);
+  } catch (_) {
+  } finally {
+    safeRestore(ctx);
+  }
+}
+
 function drawFlavorBadge(ctx, sprites, flavor, cx, cy, size, opts = {}) {
   const safeSize = toSafeNum(size, 0);
   if (!isCanvasCtx(ctx) || !(safeSize > 0) || typeof flavor !== 'string') return false;
@@ -2385,7 +2425,10 @@ function drawFlavorBadge(ctx, sprites, flavor, cx, cy, size, opts = {}) {
     } finally {
       safeRestore(ctx);
     }
-    if (ok) return true;
+    if (ok) {
+      stampColorblindFlavorMark(ctx, flv, safeCx, safeCy, safeSize, alpha);
+      return true;
+    }
   }
 
   // Storybook circular sticker fallback when WebP is not loaded yet
@@ -2451,6 +2494,9 @@ function drawFlavorBadge(ctx, sprites, flavor, cx, cy, size, opts = {}) {
   } finally {
     safeRestore(ctx);
   }
+  if (okVec) {
+    stampColorblindFlavorMark(ctx, flv, safeCx, safeCy, safeSize, alpha);
+  }
   return okVec;
 }
 
@@ -2503,10 +2549,18 @@ function drawBoardTileOverlay(ctx, sprites, tileKey, x, y, size, opts = {}) {
     } finally {
       safeRestore(ctx);
     }
-    if (ok) return true;
+    if (ok) {
+      if (tileKey === 'tile_matcha' || tileKey === 'tile_berry' || tileKey === 'tile_gold') {
+        stampColorblindFlavorMark(ctx, tileKey.slice(5), sx + safeSize * 0.62, sy + safeSize * 0.62, safeSize * 0.42, alpha);
+      }
+      return true;
+    }
   }
 
   drawProceduralBoardTileIcon(ctx, tileKey, sx + safeSize * 0.5, sy + safeSize * 0.5, safeSize, alpha, 0);
+  if (tileKey === 'tile_matcha' || tileKey === 'tile_berry' || tileKey === 'tile_gold') {
+    stampColorblindFlavorMark(ctx, tileKey.slice(5), sx + safeSize * 0.62, sy + safeSize * 0.62, safeSize * 0.42, alpha);
+  }
   return true;
 }
 
@@ -3181,6 +3235,8 @@ module.exports = {
   drawGoldenAura,
   drawThemeSwatch,
   drawFlavorBadge,
+  setColorblindMarks,
+  getColorblindMarks,
   drawBoardTileOverlay,
   drawCatcakeSprite,
   drawCustomerPortrait,

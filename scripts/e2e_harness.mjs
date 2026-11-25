@@ -2246,6 +2246,14 @@ export function buildWxShimScript({ defaultUseBuiltInMock = false } = {}) {
       };
     }
 
+    if (action === 'config') {
+      return {
+        ok: true,
+        configVersion: 'mock-default',
+        overrides: (cloudConfig && cloudConfig.remoteConfigOverrides) || {}
+      };
+    }
+
     return { ok: false, reason: 'unknown_action:' + action };
   }
 

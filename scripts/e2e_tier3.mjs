@@ -2136,7 +2136,7 @@ export const TIER3_TESTS = [
         // Find R08 (C1+C2+C3) on 1-3 (where presets at t=0 already include (2,0):C1, (0,0):C2, (3,2):C3!)
         let r08SeatIdx = -1;
         for (let attempt = 0; attempt < 30; attempt++) {
-          await ctx.eval(() => globalThis.__HOSHI_DEBUG__.startLevel('1-3'));
+          await ctx.eval((f) => globalThis.__HOSHI_DEBUG__.startLevel('1-3', { features: f }), LEGACY_FORMULA_FEATURES);
           const st = await ctx.advanceTime(3.2);
           ctx.assertEq(st.trayCapacity, 4, 'Both dev_tray Lv.1 and Lv.2 provide 4 tray slots');
           r08SeatIdx = (st.seats || []).findIndex((s) => s && s.recipeId === 'R08');
@@ -2163,7 +2163,7 @@ export const TIER3_TESTS = [
         // Also check 1-item R02 (C2) on 1-1 (0 urgent/VIP!) to confirm <3-item orders get 1.00x
         let r02Score = 0;
         for (let attempt = 0; attempt < 20; attempt++) {
-          await ctx.eval(() => globalThis.__HOSHI_DEBUG__.startLevel('1-1'));
+          await ctx.eval((f) => globalThis.__HOSHI_DEBUG__.startLevel('1-1', { features: f }), LEGACY_FORMULA_FEATURES);
           const st1 = await ctx.advanceTime(3.2);
           const idx = (st1.seats || []).findIndex((s) => s && s.recipeId === 'R02');
           if (idx >= 0) {

@@ -2734,11 +2734,11 @@ const TIER2_F01_TO_F08 = [
       const pre1 = await ctx.getState();
       const idx1 = pre1.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
       const rec1 = pre1.seats[idx1].recipeId;
-      const baseMap = { R01: 30, R02: 70, R03: 100 * 1.12 };
+      const spec1 = BASIC_RECIPE_ORACLE[rec1];
       const post1 = await serveOneOrderOrganically(ctx, idx1, { useHarness: false, allowSpoon: false });
       ctx.assertEq(
         post1.score - pre1.score,
-        Math.round(baseMap[rec1] * 1.20 * 1.50),
+        zoneScore(spec1.items, { size: spec1.size, tip: 1.20, scene: 0.50 }),
         `1st post-Luna serve (${rec1}) must receive x1.50 burst`
       );
 
@@ -2751,10 +2751,11 @@ const TIER2_F01_TO_F08 = [
       }
       const idx2 = pre2.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.65);
       const rec2 = pre2.seats[idx2].recipeId;
+      const spec2 = BASIC_RECIPE_ORACLE[rec2];
       const post2 = await serveOneOrderOrganically(ctx, idx2, { useHarness: false, allowSpoon: false });
       ctx.assertEq(
         post2.score - pre2.score,
-        Math.round(baseMap[rec2] * 1.20 * 1.00),
+        zoneScore(spec2.items, { size: spec2.size, tip: 1.20, scene: 0 }),
         `2nd post-Luna serve (${rec2}) must revert to x1.00`
       );
 
@@ -3439,7 +3440,11 @@ const TIER2_F09_TO_F16 = [
         findUnfrozen(preJump, (t) => t.tier === 6);
       ctx.assert(!!c6Cell, 'Expected unfrozen C6 tile dynamically located on 2-2 before serving R17');
 
-      const starsBeforeJump = [7800, 11200, 14500].filter((t) => preJump.score >= t).length;
+      const starThresholds = await ctx.eval(() => {
+        const sim = globalThis.__HOSHI_DEBUG__.getSimView();
+        return (sim && sim.levelCfg && Array.isArray(sim.levelCfg.stars) ? sim.levelCfg.stars.slice() : [8400, 13900, 17000]);
+      });
+      const starsBeforeJump = starThresholds.filter((t) => preJump.score >= t).length;
       await resetAudioCounters(ctx);
       await ctx.eval((idx, tr, tc) => {
         const dbg = globalThis.__HOSHI_DEBUG__;
@@ -3450,7 +3455,7 @@ const TIER2_F09_TO_F16 = [
         dbg.clickHit(`seat_${idx}`);
       }, r17Idx, c6Cell.r, c6Cell.c);
       let postJump = await ctx.advanceTime(0.65);
-      const starsAfterJump = [7800, 11200, 14500].filter((t) => postJump.score >= t).length;
+      const starsAfterJump = starThresholds.filter((t) => postJump.score >= t).length;
       ctx.assert(
         starsAfterJump - starsBeforeJump >= 1 || starsAfterJump >= 2,
         `Expected star unlock on 2-2 (before=${preJump.score} [${starsBeforeJump}★] -> after=${postJump.score} [${starsAfterJump}★])`
@@ -3458,8 +3463,9 @@ const TIER2_F09_TO_F16 = [
       const jumpAudio = await readAudioStats(ctx);
       ctx.assert(countSynthStarts(jumpAudio) >= 1, 'Star unlock serve must synthesize chimes cleanly');
 
-      // Ensure score >= 14500 (3★), then serve one more order and settle -> starsEarned stays clamped to 3!
-      while ((await ctx.getState()).score < 14500) {
+      // Ensure score >= star3, then serve one more order and settle -> starsEarned stays clamped to 3!
+      const star3Target = starThresholds[2] || 17000;
+      while ((await ctx.getState()).score < star3Target) {
         await serveOneOrderOrganically(ctx, null, { useHarness: false });
       }
       await serveOneOrderOrganically(ctx, null, { useHarness: false });

@@ -2115,6 +2115,90 @@ export const TIER4_TESTS = [
       ctx.assertEq((await ctx.getState()).activeModal, 'leaderboard', 'Endless leaderboard tab rendered cleanly');
       await ctx.clickHit('modal_close', { viaCdp: true });
     }
+  },
+
+  // ==========================================================================
+  // T4-14: M4 Settings Modal, Colorblind Marks, Rewarded Video Ads & Friends Tab
+  // ==========================================================================
+  {
+    id: 'T4-14',
+    tier: 4,
+    features: ['F13', 'F14', 'F16'],
+    title: 'M4 Settings modal toggles persist across reload, colorblind marks & low-power active, rewarded ads (revive/double/reroll) & Friends leaderboard tab',
+    freshReload: true,
+    viewport: { width: 390, height: 844, dpr: 2, safeTop: 47, safeBottom: 34 },
+    query: '?safeTop=47&safeBottom=34&capsule=1&cloud=1',
+    run: async (ctx) => {
+      await ctx.resetGame({ clearLocal: true, clearCloud: true });
+      await ctx.eval(() => {
+        localStorage.removeItem('wx_hoshi_ad_double_v1');
+      });
+      await ctx.setSaveData({
+        schemaVersion: 3,
+        totalEarnedStardust: 300,
+        lastSyncedEarnedStardust: 300,
+        bankStardust: 300,
+        levelStars: {
+          '1-1': 3, '1-2': 3, '1-3': 3, '1-4': 3, '1-5': 3,
+          '1-6': 3, '1-7': 3, '1-8': 3, '1-9': 3, '1-10': 3
+        },
+        highestUnlockedLevel: '2-1',
+        seenTutorials: TUTORIALS_ALL_SEEN
+      });
+
+      // 1) Lobby top-left settings button -> toggle vibrate / lowPower / colorblind -> verify persistence across reload
+      await assertCapsuleAndSafeBottomExplicit(ctx, 'T4-14 lobby with settings btn', 34);
+      await ctx.clickHit('lobby_settings_btn', { viaCdp: true });
+      ctx.assertEq((await ctx.getState()).activeModal, 'settings', 'Settings modal opened from lobby_settings_btn');
+      await clickModalHit(ctx, 'settings_vibrate_btn');
+      await clickModalHit(ctx, 'settings_lowpower_btn');
+      await clickModalHit(ctx, 'settings_colorblind_btn');
+      await ctx.clickHit('modal_close', { viaCdp: true });
+
+      await ctx.reload();
+      const reloadedSettings = await ctx.eval(() => globalThis.__HOSHI_DEBUG__.getSettings());
+      ctx.assertEq(reloadedSettings.vibrateEnabled, false, 'vibrateEnabled=false persisted across reload');
+      ctx.assertEq(reloadedSettings.lowPowerMode, true, 'lowPowerMode=true persisted across reload');
+      ctx.assertEq(reloadedSettings.colorblindMarks, true, 'colorblindMarks=true persisted across reload');
+
+      // 2) Friends leaderboard tab renders cleanly with openDataContext fallback + invite button
+      await ctx.clickHit('dock_leaderboard', { viaCdp: true });
+      await clickModalHit(ctx, 'leaderboard_tab_friends');
+      const fSt = await ctx.getState();
+      ctx.assertEq(fSt.activeModal, 'leaderboard', 'Friends tab active');
+      ctx.assert((fSt.hits || []).some((h) => h.id === 'friends_share_btn'), 'Friends fallback exposes friends_share_btn');
+      await ctx.clickHit('modal_close', { viaCdp: true });
+
+      // 3) Rewarded video Fail Revive (+15s) on 2-1 (with colorblind flavor marks active)
+      const started = await ctx.eval(() => globalThis.__HOSHI_DEBUG__.startLevel('2-1', { seed: 88, skipTutorial: true, disableEvents: true }));
+      ctx.assert(started, 'Started 2-1');
+      let st = await ctx.getState();
+      await ctx.advanceTime(st.timeLeft + 0.6);
+      st = await ctx.getState();
+      ctx.assertEq(st.activeModal, 'level_result', '2-1 failed into level_result');
+      ctx.assert((st.hits || []).some((h) => h.id === 'result_revive_btn'), 'Failed settlement exposes result_revive_btn');
+      await ctx.eval(() => globalThis.__HOSHI_DEBUG__.triggerReviveAd());
+      const revivedSt = await ctx.getState();
+      ctx.assertEq(revivedSt.screen, 'playing', 'Revived back into playing state');
+      ctx.assertEq(revivedSt.activeModal, null, 'Modal closed after revive');
+      ctx.assert(revivedSt.timeLeft >= 14.5, `Revive restored +15s (got ${revivedSt.timeLeft})`);
+
+      // Now clear 2-1 during revived shift -> test 2x stardust button
+      await ctx.eval(() => {
+        const sim = globalThis.__HOSHI_DEBUG__.getSimView();
+        sim.orderState.score = sim.levelCfg.stars[0] + 500;
+        sim.orderState.ordersServed = 8;
+      });
+      await ctx.advanceTime(revivedSt.timeLeft + 0.6);
+      const clearedSt = await ctx.getState();
+      ctx.assertEq(clearedSt.lastResult.cleared, true, 'Cleared 2-1 after revive');
+      ctx.assert((clearedSt.hits || []).some((h) => h.id === 'result_double_dust_btn'), 'Cleared settlement exposes result_double_dust_btn');
+      const dustAward = clearedSt.lastResult.totalDustAward;
+      const bankBefore = (await ctx.getSaveData()).bankStardust;
+      await ctx.eval(() => globalThis.__HOSHI_DEBUG__.triggerDoubleDustAd());
+      ctx.assertEq((await ctx.getSaveData()).bankStardust, bankBefore + dustAward, 'Double stardust ad granted exact 2x bonus');
+      await clickModalHit(ctx, 'modal_close');
+    }
   }
 ];
 

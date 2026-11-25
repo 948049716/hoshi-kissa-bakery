@@ -13,7 +13,7 @@
  */
 'use strict';
 
-const BALANCE_VERSION = '0.12.0-m3';
+const BALANCE_VERSION = '0.13.0-m4';
 
 const FEATURES = {
   scoreZones: true,
@@ -112,6 +112,15 @@ const ENDLESS = {
   maxScorePerShiftCap: 60000
 };
 
+// Rewarded video ad config (replace adUnitId with real WeChat MP Ad Unit ID before release)
+const ADS = {
+  enabled: true,
+  adUnitId: 'adunit-placeholder-hoshi-reward',
+  dailyDoubleDustCap: 3,
+  reviveAddSec: 15,
+  reviveOncePerRun: true
+};
+
 const TELEMETRY = {
   enabled: true,
   // We分析 custom event names (must be registered in WeChat MP console before they show up)
@@ -120,7 +129,8 @@ const TELEMETRY = {
     levelEnd: 'level_end',
     tutorialStep: 'tutorial_step',
     shopBuy: 'shop_buy',
-    modeStart: 'mode_start'
+    modeStart: 'mode_start',
+    adReward: 'ad_reward'
   }
 };
 
@@ -218,6 +228,7 @@ module.exports = {
   CELLS,
   DAILY,
   ENDLESS,
+  ADS,
   TELEMETRY,
   REMOTE_OVERRIDE_BOUNDS,
   applyRemoteOverrides,

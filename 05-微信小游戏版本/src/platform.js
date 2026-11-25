@@ -1192,7 +1192,19 @@ function bindKeyboard(cb) {
   } catch (_) {}
 }
 
+let vibrateEnabled = true;
+
+function setVibrateEnabled(on) {
+  vibrateEnabled = Boolean(on);
+  return vibrateEnabled;
+}
+
+function isVibrateEnabled() {
+  return vibrateEnabled;
+}
+
 function vibrateShort(style = 'light') {
+  if (!vibrateEnabled) return;
   try {
     const wxObj = getWxObject();
     const vibFn = wxObj ? safeReadProp(wxObj, 'vibrateShort') : null;
@@ -1305,13 +1317,118 @@ function triggerShare(payload) {
   return false;
 }
 
+let mockAdRewarded = true;
+let cachedRewardedAd = null;
+let cachedRewardedAdUnitId = '';
+
+function setMockAdResult(ok) {
+  mockAdRewarded = Boolean(ok);
+  return mockAdRewarded;
+}
+
+/**
+ * Rewarded Video Ad wrapper (v0.13 M4).
+ * Uses `wx.createRewardedVideoAd({ adUnitId })` in WeChat Mini Game when configured,
+ * and falls back cleanly to controllable browser/dev mock (`setMockAdResult`).
+ */
+function showRewardedVideoAd(placement = 'default', opts = {}) {
+  const safePlacement =
+    typeof placement === 'string' && placement.trim() ? placement.trim().slice(0, 32) : 'default';
+  const adUnitId =
+    isPlainRecord(opts) && typeof getOwn(opts, 'adUnitId') === 'string' && getOwn(opts, 'adUnitId').trim()
+      ? getOwn(opts, 'adUnitId').trim()
+      : 'adunit-placeholder-hoshi-reward';
+
+  const wxObj = getWxObject();
+  const createAdFn = wxObj ? safeReadProp(wxObj, 'createRewardedVideoAd') : null;
+  const isPlaceholderUnit = adUnitId.indexOf('placeholder') >= 0;
+
+  if (wxObj && typeof createAdFn === 'function' && !isPlaceholderUnit) {
+    return new Promise((resolve) => {
+      let finished = false;
+      const done = (payload) => {
+        if (finished) return;
+        finished = true;
+        resolve(payload);
+      };
+      try {
+        if (!cachedRewardedAd || cachedRewardedAdUnitId !== adUnitId) {
+          cachedRewardedAd = createAdFn.call(wxObj, { adUnitId });
+          cachedRewardedAdUnitId = adUnitId;
+        }
+        const ad = cachedRewardedAd;
+        const onClose = (res) => {
+          try {
+            if (typeof ad.offClose === 'function') ad.offClose(onClose);
+          } catch (_) {}
+          const ended = !res || res.isEnded === undefined || Boolean(res.isEnded);
+          done({ ok: true, rewarded: ended, channel: 'wx_rewarded_video', placement: safePlacement });
+        };
+        const onError = (err) => {
+          try {
+            if (typeof ad.offError === 'function') ad.offError(onError);
+            if (typeof ad.offClose === 'function') ad.offClose(onClose);
+          } catch (_) {}
+          done({
+            ok: false,
+            rewarded: false,
+            channel: 'wx_rewarded_video',
+            placement: safePlacement,
+            reason: safeErrorText(err)
+          });
+        };
+        if (typeof ad.onClose === 'function') ad.onClose(onClose);
+        if (typeof ad.onError === 'function') ad.onError(onError);
+        const showP = ad.show();
+        if (showP && typeof showP.catch === 'function') {
+          showP.catch(() => {
+            try {
+              const loadP = ad.load();
+              if (loadP && typeof loadP.then === 'function') {
+                loadP
+                  .then(() => ad.show())
+                  .catch(onError);
+              } else {
+                onError(new Error('ad_load_failed'));
+              }
+            } catch (e2) {
+              onError(e2);
+            }
+          });
+        }
+      } catch (err) {
+        done({
+          ok: false,
+          rewarded: false,
+          channel: 'wx_rewarded_video',
+          placement: safePlacement,
+          reason: safeErrorText(err)
+        });
+      }
+    });
+  }
+
+  return Promise.resolve({
+    ok: true,
+    rewarded: Boolean(mockAdRewarded),
+    channel: 'mock_video_ad',
+    placement: safePlacement
+  });
+}
+
 /**
  * 统一激励行为抽象桩（商业化 IAA 激励视频 / 社交分享预留扩展口）。
- * 当前 v0.9.0 返回无广告分享成功桩，后续接入 `wx.createRewardedVideoAd` 无需修改业务层调用方。
+ * 兼容旧调用方（`requestRewardAction(scene)`）并支持接入 `showRewardedVideoAd`。
  */
 function requestRewardAction(scene = 'default', opts = {}) {
   const safeScene =
     typeof scene === 'string' && scene.trim() ? scene.trim().slice(0, 32) : 'default';
+  if (isPlainRecord(opts) && Boolean(getOwn(opts, 'useVideoAd'))) {
+    return showRewardedVideoAd(safeScene, opts).then((r) => ({
+      ...r,
+      scene: safeScene
+    }));
+  }
   const silent = isPlainRecord(opts) && Boolean(getOwn(opts, 'silent'));
   if (!silent) {
     const sharePayload = isPlainRecord(opts) ? getOwn(opts, 'sharePayload') : null;
@@ -1323,6 +1440,32 @@ function requestRewardAction(scene = 'default', opts = {}) {
     channel: 'share_stub',
     scene: safeScene
   });
+}
+
+function getOpenDataCanvas() {
+  try {
+    const wxObj = getWxObject();
+    const getCtxFn = wxObj ? safeReadProp(wxObj, 'getOpenDataContext') : null;
+    if (!wxObj || typeof getCtxFn !== 'function') return null;
+    const odc = getCtxFn.call(wxObj);
+    return odc && odc.canvas ? odc.canvas : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function postOpenDataMessage(msg) {
+  try {
+    const wxObj = getWxObject();
+    const getCtxFn = wxObj ? safeReadProp(wxObj, 'getOpenDataContext') : null;
+    if (!wxObj || typeof getCtxFn !== 'function') return false;
+    const odc = getCtxFn.call(wxObj);
+    if (!odc || typeof odc.postMessage !== 'function') return false;
+    odc.postMessage(msg || {});
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 // ============================================================================
@@ -3204,8 +3347,52 @@ function runBrowserMockCloudInner(data = {}) {
     );
   }
 
+  if (action === 'config') {
+    const seeded = getStorageJSON('__hoshi_mock_remote_config_v1__');
+    if (isPlainRecord(seeded)) {
+      return Promise.resolve({
+        ok: true,
+        configVersion: typeof getOwn(seeded, 'configVersion') === 'string' ? getOwn(seeded, 'configVersion') : 'mock-seeded',
+        overrides: isPlainRecord(getOwn(seeded, 'overrides')) ? getOwn(seeded, 'overrides') : {}
+      });
+    }
+    return Promise.resolve({ ok: true, configVersion: 'mock-default', overrides: {} });
+  }
+
   const safeActionLabel = typeof action === 'string' ? action.slice(0, 32) : 'invalid';
   return Promise.resolve({ ok: false, reason: `unknown_action:${safeActionLabel}` });
+}
+
+const REMOTE_CONFIG_CACHE_KEY = '__hoshi_remote_cfg_v1__';
+
+function getCachedRemoteConfig() {
+  const cached = getStorageJSON(REMOTE_CONFIG_CACHE_KEY);
+  if (!isPlainRecord(cached)) return null;
+  const overrides = getOwn(cached, 'overrides');
+  if (!isPlainRecord(overrides)) return null;
+  return {
+    configVersion: typeof getOwn(cached, 'configVersion') === 'string' ? getOwn(cached, 'configVersion') : 'cached',
+    overrides,
+    fetchedAt: Number(getOwn(cached, 'fetchedAt')) || 0
+  };
+}
+
+function fetchRemoteConfig(cloudFuncName = 'kissa_sync') {
+  return callCloudFunction(cloudFuncName, { action: 'config' })
+    .then((res) => {
+      if (isPlainRecord(res) && Boolean(getOwn(res, 'ok')) && isPlainRecord(getOwn(res, 'overrides'))) {
+        const record = {
+          configVersion:
+            typeof getOwn(res, 'configVersion') === 'string' ? getOwn(res, 'configVersion') : 'remote',
+          overrides: getOwn(res, 'overrides'),
+          fetchedAt: Date.now()
+        };
+        setStorageJSON(REMOTE_CONFIG_CACHE_KEY, record);
+        return { ok: true, ...record };
+      }
+      return { ok: false, reason: (isPlainRecord(res) && getOwn(res, 'reason')) || 'config_unavailable' };
+    })
+    .catch((err) => ({ ok: false, reason: safeErrorText(err) }));
 }
 
 function callCloudFunction(name, data = {}) {
@@ -3497,11 +3684,19 @@ module.exports = {
   bindPointerEvents,
   bindKeyboard,
   vibrateShort,
+  setVibrateEnabled,
+  isVibrateEnabled,
   reportEvent,
   getReportedEventLog,
   setupShare,
   triggerShare,
   requestRewardAction,
+  showRewardedVideoAd,
+  setMockAdResult,
+  getOpenDataCanvas,
+  postOpenDataMessage,
+  getCachedRemoteConfig,
+  fetchRemoteConfig,
   initCloud,
   callCloudFunction,
   setWxFriendCloudScore,

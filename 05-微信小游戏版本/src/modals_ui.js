@@ -35,6 +35,7 @@ const {
 } = require('./levels_data');
 const UI = require('./ui_draw');
 const BoardRenderer = require('./board_renderer');
+const LevelGoals = require('./level_goals');
 const {
   getSafeCtx,
   drawRedDot,
@@ -616,9 +617,20 @@ function renderLevelPreviewModal(ctx, metrics, app, hits, nowSec) {
       lineWidth: 1.6
     });
     drawSectionRibbonTag(c, f.ix + 8, featY - 10, '本关特色');
+    if (lvl && lvl.goal && lvl.goal.type && lvl.goal.type !== 'score') {
+      const preGoal = LevelGoals.createGoalState(lvl.goal, {
+        initialIce: (Array.isArray(lvl.matrix) ? lvl.matrix.join('') : '').split('I').length - 1
+      });
+      const gb = LevelGoals.formatGoalBadge(preGoal);
+      if (gb) {
+        UI.drawTagBadge(c, f.ix + f.iw - 96, featY - 9, 90, 20, gb.text, 'green', 9.2);
+      }
+    }
 
     const matJoined = Array.isArray(lvl.matrix) ? lvl.matrix.join('') : '';
     const featureItems = [];
+    if (matJoined.includes('O')) featureItems.push({ icon: 'icon_stardust', label: '星炉格' });
+    if (matJoined.includes('S')) featureItems.push({ icon: 'catcake_4', label: '蜜糖格' });
     if (matJoined.includes('X')) featureItems.push({ icon: 'tile_obstacle', label: '障碍格' });
     if (matJoined.includes('I')) featureItems.push({ icon: 'tile_ice', label: '冰封格' });
     if (matJoined.includes('M')) featureItems.push({ icon: 'flavor_matcha', label: '抹茶格' });
@@ -997,11 +1009,13 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
       lineWidth: 1.8
     });
 
-    // Top-left overlapping badge ("新纪录" or status)
-    if (res.isNewBest && (res.score || 0) > 0) {
+    // Top-left overlapping badge ("新纪录" / "营业达标" / "目标未达标" / "未达1星线")
+    if (res.isNewBest && (res.score || 0) > 0 && !res.goalUnmet) {
       UI.drawTagBadge(c, f.ix + 8, heroY - 9, 64, 21, '新纪录', 'urgent', 10.5);
     } else if (res.cleared) {
       UI.drawTagBadge(c, f.ix + 8, heroY - 9, 68, 21, '营业达标', 'green', 10.0);
+    } else if (res.goalUnmet) {
+      UI.drawTagBadge(c, f.ix + 8, heroY - 9, 80, 21, '目标未达标', 'urgent', 9.8);
     } else {
       UI.drawTagBadge(c, f.ix + 8, heroY - 9, 76, 21, '未达1星线', 'wood', 9.8);
     }
@@ -1032,7 +1046,7 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
       patronSz
     );
 
-    // 5. Inner Detailed Stats Sheet (Double warm-brown frame, 3 rows, Design 05)
+    // 5. Inner Detailed Stats Sheet (Double warm-brown frame, 3 rows + M2 diagnostics)
     const statsY = heroY + heroH + 10;
     const statsH = Math.max(106, f.sheetY + f.sheetH - 12 - statsY);
     UI.drawKissaCard(c, f.ix, statsY, f.iw, statsH, {
@@ -1046,8 +1060,9 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
     const comboIdx = Math.min(Math.max(0, maxCombo - 1), SERVE_COMBO_MULTS.length - 1);
     const comboMult = maxCombo >= 2 ? SERVE_COMBO_MULTS[comboIdx] : 1.0;
 
-    // Breakdown sub-note for stardust / soft-pity
+    // Breakdown sub-note for stardust / soft-pity / diagnostics
     const parts = [];
+    if (res.earlyCloseBonus > 0) parts.push(`提前打烊+${formatNum(res.earlyCloseBonus)}`);
     if (res.cleared) {
       if (res.firstStarDustAward > 0) parts.push(`首星+${res.firstStarDustAward}`);
       if (res.clearDustAward > 0) parts.push(`过关+${res.clearDustAward}`);
@@ -1067,11 +1082,18 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
       }
     }
 
+    const diag = res.diagnostics && typeof res.diagnostics === 'object' ? res.diagnostics : null;
+    const hasDiagBlock = Boolean(diag && statsH >= 146);
     const hasSubNote = statsH >= 122;
-    const rowBlockH = hasSubNote ? statsH - 22 : statsH - 8;
+    const footerH = hasDiagBlock ? 42 : hasSubNote ? 22 : 8;
+    const rowBlockH = statsH - footerH;
     const rowH = rowBlockH / 3;
     const statRows = [
-      { label: '上菜总得分', val: formatNum(res.score || 0), type: 'score' },
+      {
+        label: res.earlyCloseBonus > 0 ? '总得分(含打烊)' : '上菜总得分',
+        val: formatNum(res.score || 0),
+        type: 'score'
+      },
       {
         label: '最高上菜连击',
         val: maxCombo > 0 ? `${maxCombo}连` : '0连',
@@ -1158,10 +1180,38 @@ function renderLevelResultModal(ctx, metrics, app, hits) {
       }
     }
 
-    if (hasSubNote) {
+    if (hasDiagBlock) {
+      const hlText = Array.isArray(diag.highlights) ? diag.highlights.join(' · ') : parts.join(' · ');
       UI.drawFitText(
         c,
-        parts.join(' · '),
+        hlText,
+        f.ix + f.iw * 0.5,
+        statsY + statsH - 27,
+        f.iw - 20,
+        9.4,
+        7.6,
+        800,
+        '#7A4A24',
+        'center',
+        'middle'
+      );
+      UI.drawFitText(
+        c,
+        diag.tip || parts.join(' · '),
+        f.ix + f.iw * 0.5,
+        statsY + statsH - 11,
+        f.iw - 18,
+        9.2,
+        7.4,
+        700,
+        '#9A5C2E',
+        'center',
+        'middle'
+      );
+    } else if (hasSubNote) {
+      UI.drawFitText(
+        c,
+        diag && diag.tip ? diag.tip : parts.join(' · '),
         f.ix + f.iw * 0.5,
         statsY + statsH - 11,
         f.iw - 20,

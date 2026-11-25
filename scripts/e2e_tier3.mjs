@@ -33,7 +33,8 @@ const RECIPE_FALLBACK_SLOTS = {
   R21: [{ tier: 7, flavor: 'any' }],
   R22: [{ tier: 5, flavor: 'berry' }, { tier: 6, flavor: 'any' }],
   R23: [{ tier: 4, flavor: 'matcha' }, { tier: 5, flavor: 'berry' }],
-  R24: [{ tier: 5, flavor: 'berry' }, { tier: 6, flavor: 'matcha' }, { tier: 7, flavor: 'any' }]
+  R24: [{ tier: 5, flavor: 'berry' }, { tier: 6, flavor: 'matcha' }, { tier: 7, flavor: 'any' }],
+  R25: [{ tier: 3, flavor: 'berry' }]
 };
 
 const BASE_PRICES_LV0 = { 1: 30, 2: 70, 3: 150, 4: 320, 5: 680, 6: 1400, 7: 2800 };
@@ -44,7 +45,9 @@ const LEGACY_FORMULA_FEATURES = Object.freeze({
   bakeCrit: false,
   freshBonus: false,
   doughTemp: false,
-  feverV2: false
+  feverV2: false,
+  goals: false,
+  events: false
 });
 
 const TUTORIALS_ALL_SEEN = {
@@ -2522,40 +2525,47 @@ export const TIER3_TESTS = [
       await ctx.setSaveData({
         schemaVersion: 2,
         bankStardust: 30,
-        totalEarnedStardust: 30,
-        lastSyncedEarnedStardust: 30,
+        totalEarnedStardust: 1635,
+        lastSyncedEarnedStardust: 1635,
+        catcakeLevels: { 1: 4, 2: 4, 3: 4, 4: 0, 5: 0, 6: 0, 7: 0 },
+        deviceUpgrades: { dev_tray: 1, dev_flour: 3, dev_teapot: 2, dev_tools: 0 },
         seenTutorials: TUTORIALS_ALL_SEEN
       });
 
       // Clear 1-1 with 3 stars
       await ctx.clickHit('lobby_start_cta');
       await ctx.advanceTime(3.2);
-      while ((await ctx.getState()).score < lv1_1_s3 + 30) {
+      for (let g = 0; g < 35; g++) {
+        const cur = await ctx.getState();
+        if (cur.screen !== 'playing' || cur.score >= lv1_1_s3 + 30 || cur.timeLeft <= 2) break;
         await serveCustomerOrganic(ctx);
       }
       let st = await ctx.getState();
-      await ctx.advanceTime(st.timeLeft + 0.6);
-      st = await ctx.getState();
+      if (st.screen === 'playing') {
+        await ctx.advanceTime(st.timeLeft + 0.6);
+        st = await ctx.getState();
+      }
       ctx.assertEq(st.activeModal, 'level_result', '1-1 settled');
       ctx.assertEq(st.lastResult.starsEarned, 3, '1-1 earned 3 stars');
 
-      // Advance via result_next_btn into 1-2 and finish at >=2 stars (score >= 1800)
+      // Advance via result_next_btn into 1-2 and finish at >=2 stars
       await ctx.clickHit('result_next_btn');
       st = await ctx.getState();
       if (st.activeModal === 'level_preview') {
         await ctx.clickHit('preview_start_btn');
       }
       await ctx.advanceTime(3.2);
-      while ((await ctx.getState()).score < lv1_2_s2 + 30) {
+      for (let g = 0; g < 35; g++) {
         const cur = await ctx.getState();
-        const smallIdx = (cur.seats || []).findIndex((s) => s && ['R01', 'R02', 'R03', 'R04'].includes(s.recipeId));
-        await serveCustomerOrganic(ctx, smallIdx >= 0 ? smallIdx : null);
+        if (cur.screen !== 'playing' || cur.score >= lv1_2_s2 + 30 || cur.timeLeft <= 2) break;
+        const bigIdx = (cur.seats || []).findIndex((s) => s && ['R05', 'R06', 'R04', 'R03'].includes(s.recipeId));
+        await serveCustomerOrganic(ctx, bigIdx >= 0 ? bigIdx : null);
         if ((await ctx.getState()).score >= lv1_2_s2 + 10) break;
       }
       st = await ctx.getState();
-      // If a big combo pushed >= 1950, replay 1-2 once stopping right above 1520? Wait: bestStars is monotonic,
-      // so compute actual expected stars (2 or 3) dynamically while verifying exact cumulative math!
-      await ctx.advanceTime(st.timeLeft + 0.6);
+      if (st.screen === 'playing') {
+        await ctx.advanceTime(st.timeLeft + 0.6);
+      }
       await ctx.flushCloudSync(2000);
 
       const save = await ctx.getSaveData();
@@ -3089,6 +3099,125 @@ export const TIER3_TESTS = [
       const harness = await ctx.getHarnessState();
       ctx.assertEq(harness.gradientStats.hslViolations.length, 0, 'Zero hsl() violations in M1 UI');
       ctx.assertEq(ctx.cdp.errors.length, 0, 'Zero console/runtime errors in T3-20');
+    }
+  },
+
+  {
+    id: 'T3-21',
+    tier: 3,
+    features: ['F02', 'F03', 'F04', 'F13', 'F16'],
+    title: 'v0.11 M2 Star Oven O auto-upgrade, Honey Syrup S sticky stop, limited_knead, mid-shift event banner, and result diagnostics',
+    run: async (ctx) => {
+      await ctx.setViewport(390, 844, true, 2, { safeTop: 47, safeBottom: 34, showCapsule: true });
+      await ctx.resetGame({ clearCloud: true, clearLocal: true });
+
+      // Part 1: Star Oven O on 2-4 (Row 1: . M O G ., presets (1,1):C3(matcha), (1,3):C4(gold))
+      await ctx.setupSaveAndStart(
+        '2-4',
+        {
+          levelStars: ctx.allUnlockedStars(3),
+          selectedPatron: 'luna',
+          unlockedPatrons: ['mikan', 'luna'],
+          deviceUpgrades: { dev_tray: 1, dev_flour: 0, dev_teapot: 2, dev_tools: 3 },
+          seenTutorials: TUTORIALS_ALL_SEEN
+        },
+        { seed: 41, skipTutorial: true, disableEvents: true }
+      );
+      await ctx.clearBoardExcept([[1, 1], [1, 3]]);
+      // Move (1,1):C3(matcha) onto (1,2):O using fork so it sits cleanly on the Star Oven
+      await ctx.useToolOnCell('fork', 1, 1, 1, 2);
+      let st = await ctx.getState();
+      ctx.assertEq(st.grid.cells[1][2].type, 'oven', '2-4 (1,2) must be Star Oven O');
+      ctx.assertEq(st.grid.cells[1][2].tile?.tier, 3, 'C3 placed onto Star Oven (1,2)');
+
+      // Advance 3.0s -> mid-bake progress (ovenSec ~ 3.0s), still C3
+      st = await ctx.advanceTime(3.0);
+      ctx.assertEq(st.grid.cells[1][2].tile?.tier, 3, 'Tile remains C3 at 3.0s on Star Oven');
+      ctx.assert(st.grid.cells[1][2]?.ovenSec >= 2.5, `Expected ovenSec >= 2.5, got ${st.grid.cells[1][2]?.ovenSec}`);
+
+      // Advance another 3.3s -> total > 6.0s -> auto-upgraded to C4, fresh bakedAt stamped, 0 score!
+      st = await ctx.advanceTime(3.3);
+      ctx.assertEq(st.grid.cells[1][2].tile?.tier, 4, 'Star Oven O auto-upgraded C3 -> C4 after 6.0s');
+      ctx.assert(typeof st.grid.cells[1][2].tile?.bakedAt === 'number', 'Star Oven upgrade stamps fresh bakedAt');
+      ctx.assertEq(st.score, 0, 'Star Oven upgrade awards strictly 0 score');
+
+      // Part 2: Honey Syrup S sticky stop + limited_knead + critic_visit event on 3-4 (Col 0: . . S . .)
+      await ctx.setupSaveAndStart(
+        '3-4',
+        {
+          levelStars: ctx.allUnlockedStars(3),
+          selectedPatron: 'luna',
+          unlockedPatrons: ['mikan', 'luna'],
+          deviceUpgrades: { dev_tray: 1, dev_flour: 0, dev_teapot: 2, dev_tools: 3 },
+          seenTutorials: TUTORIALS_ALL_SEEN
+        },
+        { seed: 52, skipTutorial: true, disableEvents: true }
+      );
+      st = await ctx.getState();
+      ctx.assertEq(st.goal?.type, 'limited_knead', '3-4 exposes limited_knead goal');
+      ctx.assertEq(st.goal?.target, 14, '3-4 limited_knead target === 14');
+      ctx.assertEq(st.grid.cells[2][0].type, 'syrup', '3-4 (2,0) must be Honey Syrup S');
+
+      // Keep only (0,1):C3(matcha) unfrozen, slide left -> (0,0), slide down -> MUST stick at (2,0):S!
+      await ctx.clearBoardExcept([[0, 1]]);
+      await ctx.slide('left');
+      await ctx.clearBoardExcept([[0, 0]]);
+      await ctx.slide('down');
+      st = await ctx.getState();
+      ctx.assertEq(st.grid.cells[2][0].tile?.tier, 3, 'Sliding tile into Syrup S stops at (2,0) instead of (4,0)');
+      ctx.assertEq(st.grid.cells[4][0].tile, null, 'Syrup S stopped tile from passing to (4,0)');
+
+      // Slide down AGAIN from (2,0):S -> leaves Syrup S cleanly to (4,0)!
+      await ctx.clearBoardExcept([[2, 0]]);
+      await ctx.slide('down');
+      st = await ctx.getState();
+      ctx.assertEq(st.grid.cells[4][0].tile?.tier, 3, 'Tile starting on Syrup S slides out normally to (4,0)');
+
+      // Knead once via UI knead_btn -> kneadsUsed increments 0 -> 1
+      await ctx.advanceBothClocks(150);
+      await ctx.clickHit('knead_btn');
+      st = await ctx.getState();
+      ctx.assertEq(st.goal?.kneadsUsed, 1, 'knead_btn increments limited_knead usage to 1');
+
+      // Trigger mid-shift event critic_visit -> verify banner state & zero bounds violations
+      const ev = await ctx.eval(() => globalThis.__HOSHI_DEBUG__.triggerEvent('critic_visit'));
+      ctx.assertEq(ev?.id, 'critic_visit', 'dbg.triggerEvent("critic_visit") returned event');
+      st = await ctx.getState();
+      ctx.assertEq(st.activeEvent?.id, 'critic_visit', 'activeEvent exposes critic_visit banner');
+      await ctx.checkBounds('T3-21-syrup-event-390', { safeBottom: 34 });
+
+      // Part 3: Unmet goal gates clearing to 0★ & RunDiagnostics rendered on level_result (1-8 without shattering ice)
+      await ctx.setupSaveAndStart(
+        '1-8',
+        {
+          levelStars: ctx.allUnlockedStars(3),
+          selectedPatron: 'mikan',
+          unlockedPatrons: ['mikan'],
+          deviceUpgrades: { dev_tray: 1, dev_flour: 0, dev_teapot: 2, dev_tools: 3 },
+          seenTutorials: TUTORIALS_ALL_SEEN
+        },
+        { seed: 63, skipTutorial: true, disableEvents: true }
+      );
+      st = await ctx.getState();
+      ctx.assertEq(st.goal?.type, 'ice_clear', '1-8 exposes ice_clear goal');
+      ctx.assertEq(st.goal?.done, false, '1-8 starts with ice_clear unmet');
+      st = await ctx.advanceTime(st.timeLeft + 0.8);
+      ctx.assertEq(st.activeModal, 'level_result', '1-8 settled into level_result modal');
+      ctx.assertEq(st.lastResult?.cleared, false, 'Unmet ice_clear goal settles cleared === false');
+      ctx.assertEq(st.lastResult?.goalUnmet, true, 'Unmet ice_clear goal marks goalUnmet === true');
+      ctx.assertEq(st.lastResult?.starsEarned, 0, 'Unmet goal awards 0 stars');
+      ctx.assert(
+        st.lastResult?.diagnostics &&
+          Array.isArray(st.lastResult.diagnostics.highlights) &&
+          st.lastResult.diagnostics.highlights.length >= 2 &&
+          typeof st.lastResult.diagnostics.tip === 'string' &&
+          st.lastResult.diagnostics.tip.length > 0,
+        'Settlement attaches RunDiagnostics highlights and actionable tip'
+      );
+
+      const harness = await ctx.getHarnessState();
+      ctx.assertEq(harness.gradientStats.hslViolations.length, 0, 'Zero hsl() violations in M2 UI');
+      ctx.assertEq(ctx.cdp.errors.length, 0, 'Zero console/runtime errors in T3-21');
     }
   }
 ];

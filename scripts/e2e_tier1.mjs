@@ -38,7 +38,9 @@ const LEGACY_FORMULA_FEATURES = Object.freeze({
   bakeCrit: false,
   freshBonus: false,
   doughTemp: false,
-  feverV2: false
+  feverV2: false,
+  goals: false,
+  events: false
 });
 
 // ---------------------------------------------------------------------------
@@ -73,7 +75,8 @@ const EXPECTED_RECIPE_SCORES_LV0 = {
   R01: 30, R02: 70, R03: 112, R04: 150, R05: 246, R06: 157,
   R07: 320, R08: 313, R09: 526, R10: 675, R11: 680, R12: 930,
   R13: 1338, R14: 1120, R15: 288, R16: 616, R17: 1400, R18: 1778,
-  R19: 3000, R20: 526, R21: 2800, R22: 2520, R23: 1400, R24: 6750
+  R19: 3000, R20: 526, R21: 2800, R22: 2520, R23: 1400, R24: 6750,
+  R25: 188
 };
 const FALLBACK_RECIPE_SLOTS = {
   R01: [{ tier: 1, flavor: 'any' }],
@@ -99,7 +102,8 @@ const FALLBACK_RECIPE_SLOTS = {
   R21: [{ tier: 7, flavor: 'any' }],
   R22: [{ tier: 5, flavor: 'berry' }, { tier: 6, flavor: 'any' }],
   R23: [{ tier: 4, flavor: 'matcha' }, { tier: 5, flavor: 'berry' }],
-  R24: [{ tier: 5, flavor: 'berry' }, { tier: 6, flavor: 'matcha' }, { tier: 7, flavor: 'any' }]
+  R24: [{ tier: 5, flavor: 'berry' }, { tier: 6, flavor: 'matcha' }, { tier: 7, flavor: 'any' }],
+  R25: [{ tier: 3, flavor: 'berry' }]
 };
 
 // ---------------------------------------------------------------------------
@@ -1111,14 +1115,14 @@ const F02_TESTS = [
     id: 'T1-F02-04',
     tier: 1,
     features: ['F02', 'F14'],
-    title: '24 recipes catalog (R01..R24) structure, multipliers, base scores and Compendium modal',
+    title: '25 recipes catalog (R01..R25) structure, multipliers, base scores and Compendium modal',
     run: async (ctx) => {
       const levelsMod = await loadBundledModule(ctx, 'levels_data.js');
       const recipeList = levelsMod.RECIPE_LIST || Object.values(levelsMod.RECIPES || {});
-      ctx.assertEq(recipeList.length, 24, 'Expected exact 24 recipes R01..R24');
+      ctx.assertEq(recipeList.length, 25, 'Expected exact 25 recipes R01..R25');
 
       const comboMultMap = { 1: 1.0, 2: 1.12, 3: 1.25 };
-      for (let i = 1; i <= 24; i++) {
+      for (let i = 1; i <= 25; i++) {
         const rid = `R${String(i).padStart(2, '0')}`;
         const rec = levelsMod.RECIPES[rid];
         ctx.assert(rec, `Missing recipe ${rid}`);
@@ -3876,8 +3880,9 @@ const F12_TESTS = [
         catcakeLevels: { 1: 4, 2: 4, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 },
         deviceUpgrades: { dev_tray: 1, dev_flour: 2, dev_teapot: 2, dev_tools: 2 }
       });
+      const lv1_1s1 = (await ctx.requireBundledModule('./src/levels_data.js')).getLevelById('1-1').stars[0];
       let st = await ctx.advanceTime(3.1);
-      while (st.score < 900 && st.timeLeft > 10) {
+      while (st.score < lv1_1s1 + 50 && st.timeLeft > 10) {
         const idx = st.seats.findIndex(Boolean);
         if (idx >= 0) st = await bakeAndServeSeat(ctx, idx);
         else st = await ctx.advanceTime(2.0);
@@ -4313,10 +4318,11 @@ const F13_TESTS = [
     features: ['F13'],
     title: 'Incremental star replay awards delta first-star dust (1->2 star = +20) and 0 on same-star replay',
     run: async (ctx) => {
-      // Seed 1-1 already at 1 star (750..1049), bankStardust: 100
+      // Seed 1-1 already at 1 star, bankStardust: 100 (C1/C2 Lv.3 = 340 spent, totalEarned = 440 -> bank = 100)
       await startLevelClean(ctx, '1-1', {
         bankStardust: 100,
-        totalEarnedStardust: 100,
+        totalEarnedStardust: 440,
+        catcakeLevels: { 1: 3, 2: 3, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 },
         levelStars: { '1-1': 1 },
         levelBestScores: { '1-1': 800 },
         highestUnlockedLevel: '1-2'

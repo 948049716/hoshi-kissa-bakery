@@ -39,14 +39,18 @@ const MATRIX_CHAR_TO_CELL_TYPE = Object.assign(Object.create(null), {
   'G': 'gold',
   'M': 'matcha',
   'B': 'berry',
-  'I': 'normal'
+  'I': 'normal',
+  'O': 'oven',
+  'S': 'syrup'
 });
 
 const PLAYABLE_CELL_TYPES = Object.assign(Object.create(null), {
   normal: true,
   gold: true,
   matcha: true,
-  berry: true
+  berry: true,
+  oven: true,
+  syrup: true
 });
 
 const ORTHOGONAL_DIRS = [
@@ -65,7 +69,8 @@ const TILE_ROLLBACK_KEYS = [
   'fromR',
   'fromC',
   'justMerged',
-  'justSpawned'
+  'justSpawned',
+  'bakedAt'
 ];
 
 function safeIsArray(x) {
@@ -353,6 +358,7 @@ function snapshotTileOnce(tileObj, requireMutable, seenMap) {
     const fromCRead = readOwnPropOnce(tileObj, 'fromC');
     const mergedRead = readOwnPropOnce(tileObj, 'justMerged');
     const spawnedRead = readOwnPropOnce(tileObj, 'justSpawned');
+    const bakedAtRead = readOwnPropOnce(tileObj, 'bakedAt');
     origProps = {
       uid: uidRead,
       tier: tierRead,
@@ -362,7 +368,8 @@ function snapshotTileOnce(tileObj, requireMutable, seenMap) {
       fromR: fromRRead,
       fromC: fromCRead,
       justMerged: mergedRead,
-      justSpawned: spawnedRead
+      justSpawned: spawnedRead,
+      bakedAt: bakedAtRead
     };
   }
 
@@ -1136,6 +1143,83 @@ function planSegmentNodes(items, maxPasses) {
 }
 
 /**
+ * Syrup-aware segment planner: a tile moving past a 'syrup' cell stops at that cell (or merges
+ * with a tile stopped there), while a tile that STARTED on a 'syrup' cell may slide out normally.
+ */
+function planSyrupSegmentPlacements(segEntries, items, maxPasses) {
+  let placed = [];
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    let minWriteIdx = 0;
+    for (let k = it.segIdx - 1; k >= 0; k--) {
+      if (segEntries[k].cellType === 'syrup') {
+        minWriteIdx = k;
+        break;
+      }
+    }
+    const prev = placed.length > 0 ? placed[placed.length - 1] : null;
+    if (
+      prev &&
+      prev.node.kind === 'leaf' &&
+      prev.node.tier === it.tier &&
+      it.tier < MAX_TIER &&
+      prev.writeIdx >= minWriteIdx
+    ) {
+      prev.node = {
+        kind: 'merge',
+        tier: it.tier + 1,
+        depth: 1,
+        a: prev.node,
+        b: { kind: 'leaf', tier: it.tier, item: it }
+      };
+    } else {
+      const writeIdx = prev ? Math.max(prev.writeIdx + 1, minWriteIdx) : minWriteIdx;
+      safePush(placed, {
+        writeIdx,
+        minWriteIdx,
+        node: { kind: 'leaf', tier: it.tier, item: it }
+      });
+    }
+  }
+  for (let pass = 1; pass < maxPasses; pass++) {
+    const next = [];
+    let mergedAny = false;
+    let k = 0;
+    while (k < placed.length) {
+      const a = placed[k];
+      const b = k + 1 < placed.length ? placed[k + 1] : null;
+      const prevOut = next.length > 0 ? next[next.length - 1] : null;
+      const aIdx = prevOut ? Math.max(prevOut.writeIdx + 1, a.minWriteIdx) : a.minWriteIdx;
+      if (b && a.node.tier === b.node.tier && a.node.tier < MAX_TIER && aIdx >= b.minWriteIdx) {
+        safePush(next, {
+          writeIdx: aIdx,
+          minWriteIdx: a.minWriteIdx,
+          node: {
+            kind: 'merge',
+            tier: a.node.tier + 1,
+            depth:
+              Math.max(
+                a.node.kind === 'merge' ? a.node.depth : 0,
+                b.node.kind === 'merge' ? b.node.depth : 0
+              ) + 1,
+            a: a.node,
+            b: b.node
+          }
+        });
+        mergedAny = true;
+        k += 2;
+      } else {
+        safePush(next, { writeIdx: aIdx, minWriteIdx: a.minWriteIdx, node: a.node });
+        k += 1;
+      }
+    }
+    placed = next;
+    if (!mergedAny) break;
+  }
+  return placed;
+}
+
+/**
  * Performs a segmented shaped-grid 2048 slide in dir ('left'|'right'|'up'|'down').
  * Single-step non-chaining merges, C7 cap, orthogonal ice shatter, G/M/B dye, and 1 low-tier spawn.
  * v0.10 spawnOpts extensions: chainMerge / chainMaxPasses (fever chain merges), nowSec (stamps
@@ -1181,8 +1265,10 @@ function slideGrid(state, dir, spawnOpts) {
     for (let sIdx = 0; sIdx < segments.length; sIdx++) {
       const segEntries = segments[sIdx];
       const items = [];
+      let hasSyrup = false;
       for (let k = 0; k < segEntries.length; k++) {
         const cEntry = segEntries[k];
+        if (cEntry.cellType === 'syrup') hasSyrup = true;
         const ts = cEntry.curTileSnap;
         if (ts) {
           safePush(items, {
@@ -1192,25 +1278,44 @@ function slideGrid(state, dir, spawnOpts) {
             flavor: ts.flavor,
             uid: ts.uid !== null && ts.uid >= 1 ? ts.uid : 0,
             origR: cEntry.r,
-            origC: cEntry.c
+            origC: cEntry.c,
+            segIdx: k
           });
         }
       }
 
       const actions = [];
-      const nodes = planSegmentNodes(items, maxPasses);
-      for (let writeIdx = 0; writeIdx < nodes.length; writeIdx++) {
-        const destEntry = segEntries[writeIdx];
-        const node = nodes[writeIdx];
-        if (node.kind === 'merge') {
-          planMoved = true;
-          safePush(actions, { kind: 'merge', destEntry, node });
-        } else {
-          const item = node.item;
-          if (item.origR !== destEntry.r || item.origC !== destEntry.c) {
+      if (hasSyrup) {
+        const placed = planSyrupSegmentPlacements(segEntries, items, maxPasses);
+        for (let p = 0; p < placed.length; p++) {
+          const destEntry = segEntries[placed[p].writeIdx];
+          const node = placed[p].node;
+          if (node.kind === 'merge') {
             planMoved = true;
+            safePush(actions, { kind: 'merge', destEntry, node });
+          } else {
+            const item = node.item;
+            if (item.origR !== destEntry.r || item.origC !== destEntry.c) {
+              planMoved = true;
+            }
+            safePush(actions, { kind: 'place', destEntry, item });
           }
-          safePush(actions, { kind: 'place', destEntry, item });
+        }
+      } else {
+        const nodes = planSegmentNodes(items, maxPasses);
+        for (let writeIdx = 0; writeIdx < nodes.length; writeIdx++) {
+          const destEntry = segEntries[writeIdx];
+          const node = nodes[writeIdx];
+          if (node.kind === 'merge') {
+            planMoved = true;
+            safePush(actions, { kind: 'merge', destEntry, node });
+          } else {
+            const item = node.item;
+            if (item.origR !== destEntry.r || item.origC !== destEntry.c) {
+              planMoved = true;
+            }
+            safePush(actions, { kind: 'place', destEntry, item });
+          }
         }
       }
 
@@ -2314,6 +2419,118 @@ function applyFeverAfterglow(state) {
   return { upgradedCells };
 }
 
+/**
+ * v0.11 M2 Star Oven ('O' / 'oven') cell ticker:
+ * Any non-frozen tile with tier < maxTier resting on an oven cell for ovenSec seconds
+ * automatically promotes +1 tier (zero direct score) and gets a fresh bakedAt stamp.
+ */
+function tickOvenCells(state, dt, opts) {
+  const upgradedCells = [];
+  if (!isPlainObj(state) || !safeIsArray(state.cells)) return { upgradedCells };
+  const d = toSafeNum(dt);
+  if (!Number.isFinite(d) || d <= 0) return { upgradedCells };
+
+  const ovenSecNeed =
+    isPlainObj(opts) && Number.isFinite(toSafeNum(opts.ovenSec)) && toSafeNum(opts.ovenSec) > 0
+      ? toSafeNum(opts.ovenSec)
+      : 6.0;
+  const maxTier =
+    isPlainObj(opts) && Number.isFinite(toSafeNum(opts.maxTier))
+      ? Math.max(2, Math.min(MAX_TIER, Math.floor(toSafeNum(opts.maxTier))))
+      : 5;
+  const nowSec =
+    isPlainObj(opts) && Number.isFinite(toSafeNum(opts.nowSec)) ? toSafeNum(opts.nowSec) : null;
+
+  const rows = state.cells.length;
+  for (let r = 0; r < rows; r++) {
+    const row = state.cells[r];
+    if (!safeIsArray(row)) continue;
+    for (let c = 0; c < row.length; c++) {
+      const cell = row[c];
+      if (!isPlainObj(cell) || cell.type !== 'oven') continue;
+      const tile = cell.tile;
+      if (!isPlainObj(tile) || (toSafeNum(tile.frozenHp) || 0) > 0 || (toSafeNum(tile.tier) || 0) >= maxTier) {
+        safeSetProp(cell, 'ovenSec', 0);
+        safeSetProp(cell, 'ovenTileUid', 0);
+        continue;
+      }
+      const uid = toSafeInt(tile.uid) || 0;
+      if (cell.ovenTileUid !== uid) {
+        safeSetProp(cell, 'ovenTileUid', uid);
+        safeSetProp(cell, 'ovenSec', 0);
+      }
+      const nextSec = (Number.isFinite(toSafeNum(cell.ovenSec)) ? toSafeNum(cell.ovenSec) : 0) + d;
+      if (nextSec >= ovenSecNeed) {
+        const newTier = Math.min(maxTier, (toSafeInt(tile.tier) || 1) + 1);
+        safeSetProp(tile, 'tier', newTier);
+        setOptionalTileProp(tile, 'justMerged', true);
+        if (nowSec !== null) setOptionalTileProp(tile, 'bakedAt', nowSec);
+        safeSetProp(cell, 'ovenSec', 0);
+        safePush(upgradedCells, { r, c, uid, newTier });
+      } else {
+        safeSetProp(cell, 'ovenSec', nextSec);
+      }
+    }
+  }
+  return { upgradedCells };
+}
+
+/**
+ * v0.11 M2 frost_snap event helper: freezes up to `count` non-frozen tiles on playable cells
+ * (preferring lower tiers <= C5 first so it doesn't unfairly lock a player's C6/C7 centerpiece
+ * when lower-tier targets exist).
+ */
+function freezeRandomTiles(state, count, rngFn) {
+  const frozenCells = [];
+  if (!isPlainObj(state) || !safeIsArray(state.cells)) return frozenCells;
+  const want = Math.max(0, Math.floor(toSafeNum(count) || 0));
+  if (want <= 0) return frozenCells;
+
+  const lowPool = [];
+  const highPool = [];
+  for (let r = 0; r < state.cells.length; r++) {
+    const row = state.cells[r];
+    if (!safeIsArray(row)) continue;
+    for (let c = 0; c < row.length; c++) {
+      const cell = row[c];
+      if (!isPlainObj(cell) || PLAYABLE_CELL_TYPES[cell.type] !== true) continue;
+      const tile = cell.tile;
+      if (!isPlainObj(tile) || (toSafeNum(tile.frozenHp) || 0) > 0) continue;
+      if ((toSafeInt(tile.tier) || 1) <= 5) safePush(lowPool, { r, c, tile });
+      else safePush(highPool, { r, c, tile });
+    }
+  }
+
+  const pickFrom = (pool) => {
+    while (frozenCells.length < want && pool.length > 0) {
+      const idx = Math.floor(safeRand01(rngFn) * pool.length) % pool.length;
+      const chosen = pool.splice(idx, 1)[0];
+      safeSetProp(chosen.tile, 'frozenHp', 1);
+      safePush(frozenCells, { r: chosen.r, c: chosen.c, uid: chosen.tile.uid, tier: chosen.tile.tier });
+    }
+  };
+  pickFrom(lowPool);
+  pickFrom(highPool);
+  return frozenCells;
+}
+
+/** Counts currently frozen tiles on the board (used by ice_clear level goals). */
+function countFrozenTiles(state) {
+  if (!isPlainObj(state) || !safeIsArray(state.cells)) return 0;
+  let total = 0;
+  for (let r = 0; r < state.cells.length; r++) {
+    const row = state.cells[r];
+    if (!safeIsArray(row)) continue;
+    for (let c = 0; c < row.length; c++) {
+      const cell = row[c];
+      if (isPlainObj(cell) && isPlainObj(cell.tile) && (toSafeNum(cell.tile.frozenHp) || 0) > 0) {
+        total += 1;
+      }
+    }
+  }
+  return total;
+}
+
 module.exports = {
   createGridState,
   slideGrid,
@@ -2329,7 +2546,10 @@ module.exports = {
   applyLunaBoardTidy,
   applyMugiBoardBlast,
   applyBakeCritReward,
-  applyFeverAfterglow
+  applyFeverAfterglow,
+  tickOvenCells,
+  freezeRandomTiles,
+  countFrozenTiles
 };
 
 Object.defineProperty(module.exports, 'getBoardFlavors', {

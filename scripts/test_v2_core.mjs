@@ -38,6 +38,9 @@ const UI = require(path.join(SRC_DIR, 'ui_draw.js'));
 const BalanceConfig = require(path.join(SRC_DIR, 'balance_config.js'));
 const Rng = require(path.join(SRC_DIR, 'rng.js'));
 const GameEvents = require(path.join(SRC_DIR, 'game_events.js'));
+const LevelGoals = require(path.join(SRC_DIR, 'level_goals.js'));
+const LevelEvents = require(path.join(SRC_DIR, 'level_events.js'));
+const RunDiagnostics = require(path.join(SRC_DIR, 'run_diagnostics.js'));
 
 // ============================================================================
 // Deterministic PRNG & Test Runner Harness
@@ -2326,7 +2329,7 @@ async function runSectionD() {
       for (let r = 0; r < rows; r++) {
         const row = lvl.matrix[r];
         assert.equal(row.length, cols, `${lvl.id}: row ${r} ragged length`);
-        assert.match(row, /^[.#XGMBI]+$/, `${lvl.id}: row ${r} illegal char in "${row}"`);
+        assert.match(row, /^[.#XGMBIOS]+$/, `${lvl.id}: row ${r} illegal char in "${row}"`);
       }
     }
   });
@@ -2390,7 +2393,7 @@ async function runSectionD() {
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
           const ch = lvl.matrix[r][c];
-          if (ch === '.' || ch === 'G' || ch === 'M' || ch === 'B') {
+          if (ch === '.' || ch === 'G' || ch === 'M' || ch === 'B' || ch === 'O' || ch === 'S') {
             nonFrozenPlayable++;
           }
           if (ch === 'I') {
@@ -2484,9 +2487,9 @@ async function runSectionD() {
 
       const joined = lvl.matrix.join('');
       if (lvl.chapter === 1) {
-        assert.match(joined, /^[.#X]+$/, `${lvl.id}: Chapter 1 forbids G/M/B/I cells`);
+        assert.match(joined, /^[.#XGMI]+$/, `${lvl.id}: Chapter 1 forbids B/O/S cells`);
       } else if (lvl.chapter === 2) {
-        assert.match(joined, /^[.#XGM]+$/, `${lvl.id}: Chapter 2 forbids B/I cells`);
+        assert.match(joined, /^[.#XGMBIO]+$/, `${lvl.id}: Chapter 2 forbids S cells`);
       }
 
       const hasMatchaSource =
@@ -4251,11 +4254,248 @@ async function runSectionG() {
 }
 
 // ============================================================================
+// Section H — v0.11 M2 Level Goals, Mid-Shift Events, Star Oven (O), Syrup (S), Diagnostics
+// ============================================================================
+
+async function runSectionH() {
+  await runTest('UT-G19', '星炉格 O：停留 6 秒自动升阶并打热乎戳、封顶 C5、冰封/滑离重置且零直接加分', () => {
+    const gs = GridEngine.createGridState({ matrix: ['O.O.'] }, [
+      { r: 0, c: 0, tier: 2 },
+      { r: 0, c: 2, tier: 5 }
+    ]);
+    // 5.5s -> not upgraded yet
+    let r1 = GridEngine.tickOvenCells(gs, 5.5, { ovenSec: 6.0, maxTier: 5, nowSec: 12.0 });
+    assert.equal(r1.upgradedCells.length, 0);
+    assert.equal(gs.cells[0][0].tile.tier, 2);
+    assert.ok(gs.cells[0][0].ovenSec >= 5.4);
+    assert.equal(gs.cells[0][2].ovenSec, 0, 'C5 tile must not bake past maxTier=5');
+
+    // +0.6s -> upgrades C2 -> C3 with bakedAt stamped
+    r1 = GridEngine.tickOvenCells(gs, 0.6, { ovenSec: 6.0, maxTier: 5, nowSec: 12.6 });
+    assert.equal(r1.upgradedCells.length, 1);
+    assert.equal(gs.cells[0][0].tile.tier, 3);
+    assert.equal(gs.cells[0][0].tile.bakedAt, 12.6);
+    assert.equal(gs.cells[0][0].ovenSec, 0);
+
+    // Slide right moves tile off O(0,0) -> oven progress resets
+    GridEngine.tickOvenCells(gs, 3.0, { ovenSec: 6.0, maxTier: 5, nowSec: 15.6 });
+    assert.ok(gs.cells[0][0].ovenSec >= 2.9);
+    GridEngine.slideGrid(gs, 'right', { skipSpawn: true, rng: fixedRng });
+    GridEngine.tickOvenCells(gs, 0.2, { ovenSec: 6.0, maxTier: 5, nowSec: 15.8 });
+    assert.equal(gs.cells[0][0].ovenSec, 0);
+  });
+
+  await runTest('UT-G20', '蜜糖格 S：滑入停在 S、从 S 滑出不被卡死、同阶可在 S 合成', () => {
+    // 1) [., S, ., C2] slide left -> stops at S(0,1)
+    const gs1 = GridEngine.createGridState({ matrix: ['.S..'] }, [{ r: 0, c: 3, tier: 2 }]);
+    const s1 = GridEngine.slideGrid(gs1, 'left', { skipSpawn: true, rng: fixedRng });
+    assert.equal(s1.moved, true);
+    assert.deepEqual(rowTiers(gs1, 0), [null, 2, null, null]);
+
+    // 2) Next slide left: tile STARTED on S -> slides out to (0,0)
+    const s2 = GridEngine.slideGrid(gs1, 'left', { skipSpawn: true, rng: fixedRng });
+    assert.equal(s2.moved, true);
+    assert.deepEqual(rowTiers(gs1, 0), [2, null, null, null]);
+
+    // 3) [., S, C2, C2] slide left -> merges at S(0,1) into C3
+    const gs2 = GridEngine.createGridState({ matrix: ['.S..'] }, [
+      { r: 0, c: 2, tier: 2 },
+      { r: 0, c: 3, tier: 2 }
+    ]);
+    const s3 = GridEngine.slideGrid(gs2, 'left', { skipSpawn: true, rng: fixedRng });
+    assert.equal(s3.moved, true);
+    assert.equal(s3.mergeEvents.length, 1);
+    assert.deepEqual(rowTiers(gs2, 0), [null, 3, null, null]);
+
+    // 4) [C3, C2(on S), C2, .] slide left -> C2(on S) blocked by C3, incoming C2 merges at S -> [C3, C3, null, null]
+    const gs3 = GridEngine.createGridState({ matrix: ['.S..'] }, [
+      { r: 0, c: 0, tier: 3 },
+      { r: 0, c: 1, tier: 2 },
+      { r: 0, c: 2, tier: 2 }
+    ]);
+    GridEngine.slideGrid(gs3, 'left', { skipSpawn: true, rng: fixedRng });
+    assert.deepEqual(rowTiers(gs3, 0), [3, 3, null, null]);
+  });
+
+  await runTest('UT-L01..L07', '7 种关卡目标状态机、目标未达标 0★ 拦截与 earlyClose 反作弊边界', () => {
+    // L01: score
+    const gScore = LevelGoals.createGoalState(null, {});
+    assert.equal(gScore.done, true);
+    assert.equal(LevelGoals.isGoalActive(gScore), false);
+
+    // L02: ice_clear + earlyClose guard
+    const gIce = LevelGoals.createGoalState({ type: 'ice_clear', target: 2, earlyClose: true }, { initialIce: 2 });
+    assert.equal(gIce.done, false);
+    assert.equal(LevelGoals.onIceCountChanged(gIce, 1, 5), false);
+    assert.equal(LevelGoals.onIceCountChanged(gIce, 0, 8), true);
+    assert.equal(gIce.done, true);
+    // Guard: 0 serves or <3s must NOT earlyClose; when star3 is passed, requires score + bonus >= star3
+    assert.equal(LevelGoals.shouldTriggerEarlyClose(gIce, { ordersServed: 0, elapsedSec: 10, score: 5000, star1: 3000, star3: 6000, timeLeft: 80, chapter: 1 }), false);
+    assert.equal(LevelGoals.shouldTriggerEarlyClose(gIce, { ordersServed: 1, elapsedSec: 2, score: 5000, star1: 3000, star3: 6000, timeLeft: 80, chapter: 1 }), false);
+    assert.equal(LevelGoals.shouldTriggerEarlyClose(gIce, { ordersServed: 1, elapsedSec: 8, score: 1000, star1: 3500, star3: 6000, timeLeft: 70, chapter: 1 }), false); // 1000 + 2800 = 3800 < 6000 (keeps playing for 3★!)
+    assert.equal(LevelGoals.shouldTriggerEarlyClose(gIce, { ordersServed: 1, elapsedSec: 8, score: 3500, star1: 3500, star3: 6000, timeLeft: 70, chapter: 1 }), true); // 3500 + 2800 = 6300 >= 6000
+
+    // L03: centerpiece (default accepts any C5+ serve; requireVip restricts to VIP)
+    const gCp = LevelGoals.createGoalState({ type: 'centerpiece', target: 5, earlyClose: true }, {});
+    assert.equal(LevelGoals.onServeForGoal(gCp, { isVip: false, usedTiles: [{ tier: 4 }] }, 10), false);
+    assert.equal(LevelGoals.onServeForGoal(gCp, { isVip: false, usedTiles: [{ tier: 5 }] }, 12), true);
+    const gVipOnly = LevelGoals.createGoalState({ type: 'centerpiece', target: 5, requireVip: true }, {});
+    assert.equal(LevelGoals.onServeForGoal(gVipOnly, { isVip: false, usedTiles: [{ tier: 5 }] }, 10), false);
+    assert.equal(LevelGoals.onServeForGoal(gVipOnly, { isVip: true, usedTiles: [{ tier: 5 }] }, 14), true);
+
+    // L04: serve_count
+    const gServe = LevelGoals.createGoalState({ type: 'serve_count', target: 3 }, {});
+    LevelGoals.onServeForGoal(gServe, {}, 1);
+    LevelGoals.onServeForGoal(gServe, {}, 2);
+    assert.equal(gServe.done, false);
+    assert.equal(LevelGoals.onServeForGoal(gServe, {}, 3), true);
+
+    // L05: combo
+    const gCombo = LevelGoals.createGoalState({ type: 'combo', target: 3 }, {});
+    assert.equal(LevelGoals.onServeForGoal(gCombo, { comboCount: 2 }, 5), false);
+    assert.equal(LevelGoals.onServeForGoal(gCombo, { comboCount: 3 }, 7), true);
+
+    // L06: hot_serve
+    const gHot = LevelGoals.createGoalState({ type: 'hot_serve', target: 2 }, {});
+    assert.equal(LevelGoals.onServeForGoal(gHot, { allHot: false }, 5), false);
+    assert.equal(LevelGoals.onServeForGoal(gHot, { allHot: true }, 6), false);
+    assert.equal(LevelGoals.onServeForGoal(gHot, { allHot: true }, 8), true);
+
+    // L07: limited_knead
+    const gLim = LevelGoals.createGoalState({ type: 'limited_knead', target: 2 }, {});
+    assert.equal(LevelGoals.canKneadUnderGoal(gLim), true);
+    LevelGoals.onKneadForGoal(gLim);
+    LevelGoals.onKneadForGoal(gLim);
+    assert.equal(LevelGoals.canKneadUnderGoal(gLim), false);
+    assert.equal(LevelGoals.getKneadsRemaining(gLim), 0);
+
+    // Settlement: unmet goal -> 0 stars even when score >= star3!
+    const os = OrderService.createOrderState('1-8', SaveSync.createDefaultSave(), fixedRng);
+    os.score = 12000;
+    os.ordersServed = 8;
+    const unmet = OrderService.computeLevelSettlement('1-8', os, {}, { goalDone: false, earlyCloseBonus: 0 });
+    assert.equal(unmet.cleared, false);
+    assert.equal(unmet.starsEarned, 0);
+    assert.equal(unmet.goalUnmet, true);
+
+    const metWithEarly = OrderService.computeLevelSettlement('1-8', os, {}, { goalDone: true, earlyCloseBonus: 1200 });
+    assert.equal(metWithEarly.cleared, true);
+    assert.equal(metWithEarly.starsEarned, 3);
+    assert.equal(metWithEarly.finalScore, 13200);
+  });
+
+  await runTest('UT-E01..E05', '5 种局内随机事件（美食家/特价/热风/冰霜/快送）与种子调度确定性', () => {
+    const lv3 = Levels.getLevelById('3-5');
+    const stA = LevelEvents.createEventState(lv3, Rng.createRng(42));
+    const stB = LevelEvents.createEventState(lv3, Rng.createRng(42));
+    assert.deepEqual(stA.schedule, stB.schedule, 'same seed must produce identical event schedule');
+    assert.equal(stA.schedule.length, 3);
+
+    // E01 critic_visit
+    LevelEvents.startEventById(stA, 'critic_visit', 20);
+    assert.equal(LevelEvents.getEventSceneBonus(stA), 0.50);
+    assert.equal(LevelEvents.consumeServeEvent(stA), true);
+    assert.equal(LevelEvents.getEventSceneBonus(stA), 0);
+
+    // E02 flour_sale (5 charges)
+    LevelEvents.startEventById(stA, 'flour_sale', 30);
+    for (let i = 0; i < 5; i++) {
+      const hit = LevelEvents.consumeKneadEvent(stA);
+      assert.equal(hit.forceTier, 2);
+    }
+    assert.equal(LevelEvents.consumeKneadEvent(stA), null);
+
+    // E03 hot_oven (2.0x fresh window)
+    LevelEvents.startEventById(stA, 'hot_oven', 40);
+    assert.equal(LevelEvents.getFreshWindowMultiplier(stA), 2.0);
+    LevelEvents.tickEvents(stA, 8.5, 48.5);
+    assert.equal(LevelEvents.getFreshWindowMultiplier(stA), 1.0);
+
+    // E04 frost_snap (3s warning -> frostTrigger = 2)
+    LevelEvents.startEventById(stA, 'frost_snap', 50);
+    assert.equal(LevelEvents.tickEvents(stA, 2.0, 52).frostTrigger, 0);
+    assert.equal(LevelEvents.tickEvents(stA, 1.2, 53.2).frostTrigger, 2);
+    const gsFrost = GridEngine.createGridState({ matrix: ['....'] }, [
+      { r: 0, c: 0, tier: 2 },
+      { r: 0, c: 1, tier: 3 },
+      { r: 0, c: 2, tier: 6 }
+    ]);
+    const fr = GridEngine.freezeRandomTiles(gsFrost, 2, Rng.createRng(7));
+    assert.equal(fr.length, 2);
+    assert.equal(gsFrost.cells[0][2].tile.frozenHp, 0, 'frost_snap prefers lower tiers <= C5 first');
+
+    // E05 delivery_rush
+    LevelEvents.startEventById(stA, 'delivery_rush', 60);
+    const rider = LevelEvents.consumeDeliveryRider(stA);
+    assert.equal(rider.patienceMult, 0.7);
+    assert.equal(rider.bountyMult, 1.4);
+    assert.equal(LevelEvents.consumeDeliveryRider(stA), null);
+  });
+
+  await runTest('L2-7', 'M2 关卡机制出场顺序、R25 菜谱完备与目标关数量静态门禁', () => {
+    assert.equal(Levels.RECIPE_LIST.length, 25, 'M2 adds R25 (total 25 recipes)');
+    assert.equal(Levels.RECIPES.R25.baseScoreLv0, 188);
+    assert.equal(Levels.RECIPES.R15.unlockLevel, '1-4');
+
+    const firstIdxOf = (chChar) => Levels.LEVELS.findIndex((lv) => lv.matrix.join('').includes(chChar));
+    const idxM = firstIdxOf('M');
+    const idxG = firstIdxOf('G');
+    const idxI = firstIdxOf('I');
+    const idxB = firstIdxOf('B');
+    const idxO = firstIdxOf('O');
+    const idxS = firstIdxOf('S');
+    assert.ok(idxM >= 0 && idxM < idxG && idxG < idxI, `Ch.1 order M(${idxM}) < G(${idxG}) < I(${idxI})`);
+    assert.equal(Levels.LEVELS[idxB].id, '2-1', 'Berry debuts at 2-1');
+    assert.equal(Levels.LEVELS[idxO].chapter, 2, 'Star Oven O debuts in Ch.2');
+    assert.equal(Levels.LEVELS[idxS].chapter, 3, 'Syrup S debuts in Ch.3');
+
+    const goalCount = Levels.LEVELS.filter((lv) => lv.goal && lv.goal.type && lv.goal.type !== 'score').length;
+    assert.ok(goalCount >= 10 && goalCount <= 16, `Goal level count=${goalCount} expected in [10, 16]`);
+  });
+
+  await runTest('UT-M10', 'M2 控制器闭环：1-8 破冰提前打烊、3-4 限次揉面拦截、事件触发与结算诊断', async () => {
+    const env = bootMockApp({}, {});
+    try {
+      await env.flushAssets();
+      const dbg = env.dbg;
+      // 1) 3-4 limited_knead blocks after 14 realistic kneads
+      assert.ok(dbg.startLevel('3-4', { seed: 21, skipTutorial: true, disableEvents: true }));
+      assert.equal(dbg.getState().goal.type, 'limited_knead');
+      let blocked = false;
+      for (let i = 0; i < 20; i++) {
+        const res = dbg.knead({ realistic: true });
+        if (res.reason === 'knead_limit_reached') {
+          blocked = true;
+          break;
+        }
+        // Clear space if board gets full and let dough cool
+        dbg.slide('left');
+        dbg.advanceTime(1.5);
+      }
+      assert.equal(blocked, true, '3-4 must enforce knead_limit_reached after target kneads');
+
+      // 2) Trigger critic_visit event & verify activeEvent snapshot + diagnostics on settle
+      assert.ok(dbg.startLevel('1-8', { seed: 33, skipTutorial: true, disableEvents: true }));
+      const ev = dbg.triggerEvent('critic_visit');
+      assert.equal(ev.id, 'critic_visit');
+      assert.equal(dbg.getState().activeEvent.id, 'critic_visit');
+      dbg.advanceTime(112);
+      const lr = dbg.getState().lastResult;
+      assert.ok(lr && lr.diagnostics && Array.isArray(lr.diagnostics.highlights) && typeof lr.diagnostics.tip === 'string');
+      assert.equal(lr.goalUnmet, true, '1-8 without clearing ice must settle with goalUnmet=true');
+      assert.equal(lr.starsEarned, 0);
+    } finally {
+      env.dispose();
+    }
+  });
+}
+
+// ============================================================================
 // Main Entrypoint
 // ============================================================================
 
 async function main() {
-  console.log('=== 一起做猫饼 v0.10 Core L1 + L2 + M4 Verification Suite ===');
+  console.log('=== 一起做猫饼 v0.11 Core L1 + L2 + M4 Verification Suite ===');
   await runSectionA();
   await runSectionB();
   await runSectionC();
@@ -4263,6 +4503,7 @@ async function main() {
   await runSectionE();
   await runSectionF();
   await runSectionG();
+  await runSectionH();
 
   const passed = results.filter((r) => r.ok).length;
   const failed = results.length - passed;

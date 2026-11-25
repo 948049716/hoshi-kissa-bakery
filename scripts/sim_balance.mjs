@@ -73,20 +73,43 @@ function tileFits(tile, need) {
   return tile.flavor === need.flavor || tile.flavor === 'gold';
 }
 
-function collectNeeds(os) {
+function collectNeeds(os, goal) {
   const needs = [];
+  const activeGoal = goal && !goal.done ? goal : null;
   for (let s = 0; s < os.seats.length; s++) {
     const seat = os.seats[s];
     if (!seat || seat.readyToServe) continue;
     const ratio = seat.maxPatience > 0 ? seat.patience / seat.maxPatience : 1;
+    let seatMaxTier = 0;
+    for (let k = 0; k < seat.slots.length; k++) {
+      if (seat.slots[k].tier > seatMaxTier) seatMaxTier = seat.slots[k].tier;
+    }
+    const isCenterpieceOrder = Boolean(activeGoal && activeGoal.type === 'centerpiece' && seatMaxTier >= activeGoal.target);
+    const isSingleSlot = seat.slots.length === 1;
     for (let k = 0; k < seat.slots.length; k++) {
       const slot = seat.slots[k];
       if (slot.matchedTrayIdx === -1 || slot.matchedTrayIdx === undefined || slot.matchedTrayIdx === null) {
-        needs.push({ tier: slot.tier, flavor: slot.flavor, seatIdx: s, ratio, isVip: Boolean(seat.isVip) });
+        needs.push({
+          tier: slot.tier,
+          flavor: slot.flavor,
+          seatIdx: s,
+          ratio,
+          isVip: Boolean(seat.isVip),
+          isCenterpieceOrder,
+          isSingleSlot
+        });
       }
     }
   }
-  needs.sort((a, b) => (b.isVip - a.isVip) || (a.ratio - b.ratio));
+  needs.sort((a, b) => {
+    if (activeGoal && activeGoal.type === 'centerpiece' && a.isCenterpieceOrder !== b.isCenterpieceOrder) {
+      return b.isCenterpieceOrder - a.isCenterpieceOrder;
+    }
+    if (activeGoal && activeGoal.type === 'hot_serve' && a.isSingleSlot !== b.isSingleSlot) {
+      return b.isSingleSlot - a.isSingleSlot;
+    }
+    return (b.isVip - a.isVip) || (a.ratio - b.ratio);
+  });
   return needs;
 }
 
@@ -112,16 +135,23 @@ function countEmpty(gs) {
   return n;
 }
 
-function evalSlide(GridEngine, gs, dir, neededTiers, rng) {
+function evalSlide(GridEngine, gs, dir, neededTiers, rng, goalType, goalTarget) {
   const clone = structuredClone(gs);
   const res = GridEngine.slideGrid(clone, dir, { skipSpawn: true, rng });
   if (!res.moved) return null;
   let score = 0.05;
   for (const me of res.mergeEvents || []) {
     const nt = me.newTier || 0;
-    score += neededTiers.has(nt) ? 3 + nt * 0.3 : 1 + nt * 0.15;
+    let cpBoost = 0;
+    if (goalType === 'centerpiece' && goalTarget > 0) {
+      if (nt >= goalTarget) cpBoost = 20;
+      else if (nt === goalTarget - 1) cpBoost = 8;
+      else if (nt === goalTarget - 2) cpBoost = 2.5;
+    }
+    score += neededTiers.has(nt) ? 3 + nt * 0.3 + cpBoost : 1 + nt * 0.15 + cpBoost;
   }
-  score += (res.brokenIceCells ? res.brokenIceCells.length : 0) * 0.8;
+  const iceWeight = goalType === 'ice_clear' ? 4.5 : 0.8;
+  score += (res.brokenIceCells ? res.brokenIceCells.length : 0) * iceWeight;
   score += countEmpty(clone) * 0.04;
   return { score, clone, merges: (res.mergeEvents || []).length };
 }
@@ -153,6 +183,9 @@ function playRun(dbg, GridEngine, createRng, job) {
     if (v.screen !== 'playing' || !v.orderState) break;
     const os = v.orderState;
     const gs = v.gridState;
+    const goal = v.goal || null;
+    const goalType = goal && !goal.done ? goal.type : 'score';
+    const goalTarget = goal && !goal.done ? Number(goal.target || 0) : 0;
     let acted = false;
 
     // 1) serve a ready seat (VIP / lowest patience first)
@@ -161,7 +194,7 @@ function playRun(dbg, GridEngine, createRng, job) {
     for (let s = 0; s < os.seats.length; s++) {
       const seat = os.seats[s];
       if (seat && seat.readyToServe) {
-        const key = (seat.isVip ? -1 : 0) + (seat.maxPatience > 0 ? seat.patience / seat.maxPatience : 1);
+        const key = (seat.isVip ? -2 : 0) + (seat.maxPatience > 0 ? seat.patience / seat.maxPatience : 1);
         if (key < bestKey) {
           bestKey = key;
           bestSeat = s;
@@ -176,10 +209,28 @@ function playRun(dbg, GridEngine, createRng, job) {
     // 2) move a fitting board tile into the tray
     if (!acted) {
       const freeSlot = os.tray.slice(0, os.trayCapacity).findIndex((t) => !t);
-      const needs = collectNeeds(os);
+      const needs = collectNeeds(os, goal);
       if (freeSlot >= 0 && needs.length > 0) {
         const nowSec = typeof v.nowSec === 'number' ? v.nowSec : simT;
+        // Count how many tiles of each tier are currently unfrozen on board
+        const tierCounts = [0, 0, 0, 0, 0, 0, 0, 0];
+        for (let r = 0; r < gs.rows; r++) {
+          for (let c = 0; c < gs.cols; c++) {
+            const t = gs.cells[r][c] && gs.cells[r][c].tile;
+            if (t && !(t.frozenHp > 0) && t.tier >= 1 && t.tier <= 7) tierCounts[t.tier] += 1;
+          }
+        }
         outer: for (const need of needs) {
+          // On centerpiece goals, skilled/expert bots conserve (target-1) tiles on board until a target tile exists
+          if (
+            goalType === 'centerpiece' &&
+            prof.smartTray &&
+            !need.isCenterpieceOrder &&
+            tierCounts[goal.target] === 0 &&
+            (need.tier === goal.target - 1 || (goal.target >= 5 && need.tier === goal.target - 2 && tierCounts[goal.target - 1] <= 1 && tierCounts[need.tier] <= 2))
+          ) {
+            continue;
+          }
           let pickR = -1;
           let pickC = -1;
           let pickFresh = false;
@@ -192,6 +243,10 @@ function playRun(dbg, GridEngine, createRng, job) {
                   typeof cell.tile.bakedAt === 'number' &&
                   nowSec - cell.tile.bakedAt >= 0 &&
                   nowSec - cell.tile.bakedAt <= 6.0;
+                // When chasing hot_serve, skilled/expert bots avoid wasting a 1-slot order on a cold tile unless urgent
+                if (goalType === 'hot_serve' && prof.smartTray && need.isSingleSlot && !isFresh && need.ratio > 0.28) {
+                  continue;
+                }
                 if (pickR < 0 || (prof.smartTray && isFresh && !pickFresh)) {
                   pickR = r;
                   pickC = c;
@@ -207,6 +262,32 @@ function playRun(dbg, GridEngine, createRng, job) {
             acted = true;
             break outer;
           }
+        }
+      }
+      // 2b) On centerpiece goals, skilled/expert bots can spend a free spoon to promote (target-1) -> target
+      if (
+        !acted &&
+        goalType === 'centerpiece' &&
+        prof.smartTray &&
+        v.toolCounts &&
+        v.toolCounts.spoon > 0 &&
+        typeof dbg.useToolOnCell === 'function'
+      ) {
+        let spR = -1;
+        let spC = -1;
+        for (let r = 0; r < gs.rows && spR < 0; r++) {
+          for (let c = 0; c < gs.cols; c++) {
+            const t = gs.cells[r][c] && gs.cells[r][c].tile;
+            if (t && !(t.frozenHp > 0) && t.tier === goal.target - 1) {
+              spR = r;
+              spC = c;
+              break;
+            }
+          }
+        }
+        if (spR >= 0) {
+          dbg.useToolOnCell('spoon', spR, spC);
+          acted = true;
         }
       }
       // 3) tray clogged with useless items -> discard one
@@ -229,22 +310,27 @@ function playRun(dbg, GridEngine, createRng, job) {
     // 5) slide / knead decision
     if (!acted) {
       const neededTiers = new Set();
-      for (const n of collectNeeds(os)) {
+      for (const n of collectNeeds(os, goal)) {
         neededTiers.add(n.tier);
         if (n.tier > 1) neededTiers.add(n.tier - 1);
+      }
+      if (goalType === 'centerpiece' && goal && goal.target >= 4) {
+        neededTiers.add(goal.target);
+        neededTiers.add(goal.target - 1);
+        neededTiers.add(goal.target - 2);
       }
       let best = null;
       let bestDir = null;
       const moving = [];
       for (const dir of DIRS) {
-        const ev = evalSlide(GridEngine, gs, dir, neededTiers, botRng);
+        const ev = evalSlide(GridEngine, gs, dir, neededTiers, botRng, goalType, goalTarget);
         if (!ev) continue;
         moving.push(dir);
         let s = ev.score + (prof.noise > 0 ? (botRng() - 0.5) * prof.noise * 4 : 0);
         if (prof.lookahead > 0) {
           let la = 0;
           for (const d2 of DIRS) {
-            const ev2 = evalSlide(GridEngine, ev.clone, d2, neededTiers, botRng);
+            const ev2 = evalSlide(GridEngine, ev.clone, d2, neededTiers, botRng, goalType, goalTarget);
             if (ev2 && ev2.score > la) la = ev2.score;
           }
           s += la * 0.5;
@@ -256,7 +342,11 @@ function playRun(dbg, GridEngine, createRng, job) {
       }
       const empty = countEmpty(gs);
       const totalPlayable = gs.rows * gs.cols;
-      const wantsKnead = empty > 0 && (best === null || best < 0.9 || empty / totalPlayable > 0.45);
+      const canKneadGoal = !(goal && goal.type === 'limited_knead' && goal.kneadsUsed >= goal.target);
+      const wantsKnead =
+        canKneadGoal &&
+        empty > 0 &&
+        (best === null || best < (goal && goal.type === 'limited_knead' ? 0.35 : 0.9) || empty / totalPlayable > 0.45);
       const rhythmOk = prof.kneadRhythm <= 0 || simT - lastKneadAt >= prof.kneadRhythm;
       if (wantsKnead && rhythmOk) {
         dbg.knead({ realistic: true });
@@ -268,7 +358,7 @@ function playRun(dbg, GridEngine, createRng, job) {
       } else if (moving.length > 0) {
         dbg.slide(moving[Math.floor(botRng() * moving.length)]);
         acted = true;
-      } else if (empty > 0) {
+      } else if (canKneadGoal && empty > 0) {
         dbg.knead({ realistic: true });
         lastKneadAt = simT;
         acted = true;
@@ -436,6 +526,9 @@ export function checkLevel(levelCfg, levelAgg) {
   if (nov && s1 > (sk ? sk.p50 : nov.p90)) issues.push(`1★ ${s1} 过高 (> 熟练 P50 ${sk ? sk.p50 : nov.p90})`);
   if (ex && s3 > ex.p90 * 1.1) issues.push(`3★ ${s3} 不可达 (> 高手 P90 ${ex.p90} ×1.1)`);
   if (!ex && sk && s3 > sk.p90 * 1.6) issues.push(`3★ ${s3} 不可达 (> 熟练 P90 ${sk.p90} ×1.6)`);
+  if (levelCfg.goal && levelCfg.goal.type && levelCfg.goal.type !== 'score') {
+    if (sk && sk.goalRate < 0.65) issues.push(`L2-8 目标可达率过低 (熟练 ${(sk.goalRate * 100).toFixed(0)}% < 65%)`);
+  }
   return issues;
 }
 
@@ -446,8 +539,8 @@ function renderMarkdown(agg, levels, suggestions, opts) {
   lines.push(`- 生成时间：${new Date().toISOString()}`);
   lines.push(`- 每关每档种子数：${opts.seeds}，Bot 档位：${opts.profiles.join(' / ')}`);
   lines.push('');
-  lines.push('| 关卡 | 当前星级 | 建议星级 | 新手 P20/P50/P90 | 熟练 P50/P85 | 高手 P60/P90 | 熟练上菜 | 熟练暴击/局 | 熟练热乎 | 熟练狂欢 | 新手1★率 | 熟练3★率 |');
-  lines.push('|---|---|---|---|---|---|---|---|---|---|---|---|');
+  lines.push('| 关卡 | 当前星级 | 建议星级 | 新手 P20/P50/P90 | 熟练 P50/P85 | 高手 P60/P90 | 熟练上菜 | 熟练暴击/局 | 熟练热乎 | 熟练热潮 | 目标达成(新/熟) | 新手1★率 | 熟练3★率 |');
+  lines.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|');
   for (const lvl of levels) {
     const a = agg[lvl.id];
     if (!a) continue;
@@ -456,7 +549,7 @@ function renderMarkdown(agg, levels, suggestions, opts) {
     const e = a.profiles.expert || {};
     const sug = suggestions[lvl.id];
     lines.push(
-      `| ${lvl.id} | ${lvl.stars.join('/')} | ${sug ? sug.join('/') : '-'} | ${n.p20 ?? '-'}/${n.p50 ?? '-'}/${n.p90 ?? '-'} | ${s.p50 ?? '-'}/${s.p85 ?? '-'} | ${e.p60 ?? '-'}/${e.p90 ?? '-'} | ${s.serves ?? '-'} | ${s.crits ?? '-'} | ${s.hotServes ?? '-'} | ${s.feverCount ?? '-'} | ${n.starRates ? n.starRates[0] : '-'} | ${s.starRates ? s.starRates[2] : '-'} |`
+      `| ${lvl.id} | ${lvl.stars.join('/')} | ${sug ? sug.join('/') : '-'} | ${n.p20 ?? '-'}/${n.p50 ?? '-'}/${n.p90 ?? '-'} | ${s.p50 ?? '-'}/${s.p85 ?? '-'} | ${e.p60 ?? '-'}/${e.p90 ?? '-'} | ${s.serves ?? '-'} | ${s.crits ?? '-'} | ${s.hotServes ?? '-'} | ${s.feverCount ?? '-'} | ${n.goalRate ?? '-'}/${s.goalRate ?? '-'} | ${n.starRates ? n.starRates[0] : '-'} | ${s.starRates ? s.starRates[2] : '-'} |`
     );
   }
   return lines.join('\n');

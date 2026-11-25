@@ -2100,6 +2100,12 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
   );
 
   // 4. Full-Width Dark Espresso Serving Tray Rail + Plates + Warm-Wood Trash + Flame-Crest Combo & Fever Bar
+  const effFreshSec =
+    app.isFeatureOn && app.isFeatureOn('freshBonus')
+      ? typeof app.getEffectiveFreshWindowSec === 'function'
+        ? app.getEffectiveFreshWindowSec()
+        : app.freshWindowSec || 6
+      : 0;
   BoardRenderer.renderTrayStrip(
     c,
     { x: innerX, y: trayY, w: innerW, h: trayH },
@@ -2117,7 +2123,7 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
       animState,
       guideTargets,
       boardFullHint: app.boardFullHintTimer > 0,
-      freshWindowSec: app.isFeatureOn && app.isFeatureOn('freshBonus') ? app.freshWindowSec || 6 : 0,
+      freshWindowSec: effFreshSec,
       feverScenePct: app.isFeatureOn && app.isFeatureOn('feverV2') ? 20 : 25,
       forkTrashReady: Boolean(app.activeTool === 'fork' && app.forkSourceCell),
       onTapTraySlot: (idx) => app.handleTraySlotTap(idx),
@@ -2144,15 +2150,27 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
   const doughOn = Boolean(dough && app.isFeatureOn && app.isFeatureOn('doughTemp'));
   const kneadInFever = Boolean(orderState.feverActive && app.isFeatureOn && app.isFeatureOn('feverV2'));
   const kneadLocked = Boolean(doughOn && dough.locked && !kneadInFever);
+  const goalView = typeof app.getGoalView === 'function' ? app.getGoalView() : null;
+  const kneadLimited = Boolean(goalView && goalView.type === 'limited_knead' && goalView.target > 0);
+  const kneadsLeft = kneadLimited ? Math.max(0, goalView.target - (goalView.kneadsUsed || 0)) : Infinity;
+  const kneadOut = kneadLimited && kneadsLeft <= 0;
   UI.drawPillButton(c, kneadX, dockY + 4, kneadW, dockH - 8, {
     style: kneadInFever ? 'active' : 'knead',
-    label: kneadInFever ? '热潮揉面' : kneadLocked ? '过热中' : '揉面补料',
-    fontSize: compact ? 18.5 : 21.0,
+    label: kneadOut
+      ? '次数已用完'
+      : kneadInFever
+      ? '热潮揉面'
+      : kneadLocked
+      ? '过热中'
+      : kneadLimited
+      ? `揉面(${kneadsLeft})`
+      : '揉面补料',
+    fontSize: compact ? 17.5 : 19.5,
     radius: Math.round((dockH - 8) * 0.48),
     pressed: kneadPressed,
-    disabled: kneadLocked
+    disabled: kneadLocked || kneadOut
   });
-  if (doughOn && !kneadInFever) {
+  if (doughOn && !kneadInFever && !kneadOut) {
     drawDoughTempBar(c, kneadX + 14, dockY + dockH - 13, kneadW - 28, 4, dough, nowSec);
   }
   hits.add('knead_btn', kneadX, dockY + 2, kneadW, dockH - 4, () => app.onTapKneadButton());
@@ -2177,10 +2195,99 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
       forkSourceCell: app.forkSourceCell,
       guideTargets,
       neededTiers: app.neededTiers,
-      freshWindowSec: app.isFeatureOn && app.isFeatureOn('freshBonus') ? app.freshWindowSec || 6 : 0,
+      freshWindowSec: effFreshSec,
       feverV2: Boolean(app.isFeatureOn && app.isFeatureOn('feverV2'))
     }
   );
+
+  // v0.11 M2: Compact Goal Progress Pill in open top-left starry header (left of '一起做猫饼', zero overlap!)
+  if (goalView && goalView.badge && app.isFeatureOn && app.isFeatureOn('goals')) {
+    const gb = goalView.badge;
+    const pillH = 22;
+    const pillW = Math.min(118, Math.max(88, Math.round(innerW * 0.30)));
+    const pillX = innerX + 1;
+    const pillY = Math.max(4, Math.round(geom.topY + geom.headerH * 0.5 - pillH * 0.5));
+    c.save();
+    try {
+      UI.roundRectPath(c, pillX, pillY, pillW, pillH, pillH * 0.5);
+      c.fillStyle = gb.done ? 'rgba(54, 134, 72, 0.88)' : 'rgba(28, 36, 68, 0.86)';
+      c.fill();
+      c.lineWidth = 1.6;
+      c.strokeStyle = gb.done ? '#9AF0A6' : '#FFD45E';
+      c.stroke();
+      UI.drawStarIcon(c, pillX + 11, pillY + pillH * 0.5, 5.2, true, sprites);
+      UI.drawOutlinedText(c, gb.text, pillX + 21, pillY + pillH * 0.5 + 0.4, {
+        size: 10.6,
+        minSize: 8.6,
+        weight: 800,
+        fill: gb.done ? '#E6FFE6' : '#FFE89B',
+        stroke: '#24140A',
+        strokeWidth: 2.0,
+        shadowOffsetY: 0,
+        align: 'left',
+        maxWidth: pillW - 26
+      });
+    } finally {
+      c.restore();
+    }
+  }
+
+  // v0.11 M2: Sleek Mid-Shift Active Event Banner (zero board-bezel overlap on 375x667 & 390x844)
+  const activeEv = typeof app.getActiveEventView === 'function' ? app.getActiveEventView() : null;
+  if (activeEv && app.isFeatureOn && app.isFeatureOn('events')) {
+    const bw = Math.min(innerW - 24, 248);
+    const gapTop = trayY + trayH;
+    const gapBot = layout && Number.isFinite(layout.gridY) ? layout.gridY - (layout.bezelPad || 10) : stageY;
+    const availGap = gapBot - gapTop;
+    const bh = availGap >= 26 ? 24 : 20;
+    const bx = Math.round(innerX + (innerW - bw) * 0.5);
+    const by =
+      availGap >= bh + 2
+        ? Math.round(gapTop + (availGap - bh) * 0.5)
+        : Math.round(trayY + trayH - statusH + (statusH - bh) * 0.5);
+    const frac = activeEv.duration > 0 ? clamp(activeEv.timer / activeEv.duration, 0, 1) : 0;
+    const isIce = activeEv.tone === 'ice';
+    c.save();
+    try {
+      UI.roundRectPath(c, bx, by, bw, bh, bh * 0.5);
+      c.fillStyle = isIce ? 'rgba(28, 68, 114, 0.99)' : 'rgba(104, 52, 20, 0.99)';
+      c.fill();
+      c.lineWidth = 1.8;
+      c.strokeStyle = isIce ? '#9EE6FF' : '#FFD45E';
+      c.stroke();
+
+      const rCx = bx + 13;
+      const rCy = by + bh * 0.5;
+      const rRad = 7.2;
+      c.beginPath();
+      c.arc(rCx, rCy, rRad, 0, Math.PI * 2);
+      c.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+      c.lineWidth = 2.2;
+      c.stroke();
+      if (frac > 0) {
+        c.beginPath();
+        c.arc(rCx, rCy, rRad, -Math.PI * 0.5, -Math.PI * 0.5 + Math.PI * 2 * frac);
+        c.strokeStyle = isIce ? '#A8EEFF' : '#FFE478';
+        c.lineWidth = 2.4;
+        c.stroke();
+      }
+
+      const suffix = activeEv.chargesLeft > 0 ? `余${activeEv.chargesLeft}次` : `${Math.ceil(activeEv.timer)}秒`;
+      UI.drawOutlinedText(c, `${activeEv.name} · ${suffix}`, bx + 26, by + bh * 0.5 + 0.5, {
+        size: 11.4,
+        minSize: 9.0,
+        weight: 800,
+        fill: '#FFF6DC',
+        stroke: '#2C160A',
+        strokeWidth: 2.2,
+        shadowOffsetY: 0,
+        align: 'left',
+        maxWidth: bw - 34
+      });
+    } finally {
+      c.restore();
+    }
+  }
 
   if (orderState.rushHourActive && !app.activeTool) {
     UI.drawTagBadge(

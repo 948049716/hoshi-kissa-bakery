@@ -1025,6 +1025,10 @@ function validateAndClampClientMeta(serverRaw, clientRaw, runReport, serverWrapp
       }
       if (!rolledBack && VALID_LEVEL_SET.has(lid)) {
         const cap = getChapterScoreCapForLevel(lid);
+        const rawEarly = hasOwn(runReport, 'earlyCloseBonus') ? toSafeNum(getOwn(runReport, 'earlyCloseBonus')) : 0;
+        if (Number.isFinite(rawEarly) && rawEarly > 20000) {
+          pushUniqueWarning(warnings, 'early_close_bonus_clamped');
+        }
         if (rrScore > cap) {
           pushUniqueWarning(warnings, 'run_score_cap_clamped');
           pushUniqueWarning(warnings, 'level_score_cap_clamped');

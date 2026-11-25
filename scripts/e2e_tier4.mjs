@@ -1631,7 +1631,7 @@ export const TIER4_TESTS = [
           castedMugi = true;
         }
 
-        if (castedMugi && sawFever && st.vipServed >= 1 && st.score >= 39000) {
+        if (castedMugi && sawFever && st.vipServed >= 1 && st.score >= 39000 && (!st.goal || st.goal.done)) {
           break;
         }
         if (st.timeLeft <= 9) break;
@@ -1786,7 +1786,10 @@ export const TIER4_TESTS = [
         await ctx.clickHit('preview_start_btn', { viaCdp: true });
       }
       await ctx.advanceTime(3.2);
-      while ((await ctx.getState()).score < lv1_5s1 + 50) {
+      for (let g = 0; g < 24; g++) {
+        const cur15 = await ctx.getState();
+        if (cur15.score >= lv1_5s1 + 50 && (!cur15.goal || cur15.goal.done)) break;
+        if (cur15.timeLeft <= 8.5) break;
         await serveCustomerOrganic(ctx);
       }
       st = await ctx.getState();

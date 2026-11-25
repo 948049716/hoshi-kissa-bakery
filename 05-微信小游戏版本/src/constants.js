@@ -8,7 +8,7 @@ const { LEVEL_MAP, MAX_CAMPAIGN_STARS } = require('./levels_data');
 
 const STORAGE_KEY = 'hoshi_kissa_bakery_save_v1';
 const GAME_TITLE = '一起做猫饼';
-const GAME_VERSION = '0.10.0';
+const GAME_VERSION = '0.11.0';
 const DEFAULT_INITIAL_STARDUST = 15;
 
 const CATCAKE_UPGRADE_COSTS = {

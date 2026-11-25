@@ -2325,6 +2325,41 @@ class StarlightAudio {
     } catch (_) {}
   }
 
+  /** v0.11 M2 mid-shift event chime (ice = cool bell, gold/warm = bright trumpet-chime). */
+  playEvent(tone = 'gold') {
+    if (!_canPlaySfx(this)) return;
+    try {
+      if (tone === 'ice') {
+        [1046.5, 932.33, 783.99].forEach((f, i) => {
+          this._playTone(f, 'sine', 0.09, 0.24, 0.005, f * 0.99, i * 0.06);
+        });
+      } else {
+        [659.25, 880, 1174.66].forEach((f, i) => {
+          this._playTone(f, 'triangle', 0.1, 0.22, 0.005, null, i * 0.05);
+        });
+      }
+    } catch (_) {}
+  }
+
+  /** v0.11 M2 level goal completed fanfare. */
+  playGoalDone() {
+    if (!_canPlaySfx(this)) return;
+    try {
+      [587.33, 739.99, 880, 1174.66].forEach((f, i) => {
+        this._playTone(f, 'triangle', 0.11, 0.28, 0.006, null, i * 0.055);
+      });
+    } catch (_) {}
+  }
+
+  /** v0.11 M2 Star Oven ('O') auto-upgrade ding. */
+  playOvenDing() {
+    if (!_canPlaySfx(this)) return;
+    try {
+      this._playTone(1318.51, 'sine', 0.11, 0.34, 0.004, null, 0);
+      this._playTone(1975.53, 'sine', 0.07, 0.38, 0.005, null, 0.045);
+    } catch (_) {}
+  }
+
   playTool(kind) {
     if (!_canPlaySfx(this)) return;
     try {

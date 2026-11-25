@@ -195,7 +195,7 @@ const RECIPE_LIST = [
     ],
     comboMult: 1.12,
     baseScoreLv0: 288,
-    unlockLevel: '2-1'
+    unlockLevel: '1-4'
   },
   {
     id: 'R16',
@@ -291,6 +291,14 @@ const RECIPE_LIST = [
     comboMult: 1.25,
     baseScoreLv0: 6750,
     unlockLevel: '3-7'
+  },
+  {
+    id: 'R25',
+    name: '草莓小爪碟',
+    slots: [{ tier: 3, flavor: 'berry' }],
+    comboMult: 1.00,
+    baseScoreLv0: 188,
+    unlockLevel: '2-1'
   }
 ];
 
@@ -333,7 +341,7 @@ const LEVELS = [
     indexInChapter: 2,
     name: '单缺角吧台',
     durationSec: 95,
-    stars: [1950, 3200, 4400],
+    stars: [2000, 3300, 4350],
     baseClearDust: 6,
     firstStarDust: [10, 15, 22],
     matrix: ['...#', '....', '...#'],
@@ -357,7 +365,7 @@ const LEVELS = [
     indexInChapter: 3,
     name: '蜂蜜午茶角',
     durationSec: 100,
-    stars: [2850, 4650, 6100],
+    stars: [2850, 4700, 6100],
     baseClearDust: 6,
     firstStarDust: [10, 15, 22],
     matrix: ['..##', '...#', '....', '....'],
@@ -381,23 +389,23 @@ const LEVELS = [
     indexInChapter: 4,
     name: '星夜十字盘',
     durationSec: 100,
-    stars: [3450, 5650, 7450],
+    stars: [3300, 5450, 7600],
     baseClearDust: 6,
     firstStarDust: [10, 15, 22],
-    matrix: ['#..#', '....', '....', '#..#'],
+    matrix: ['#..#', '.M..', '..M.', '#..#'],
     presets: [
       { r: 0, c: 1, tier: 2, flavor: 'plain', frozen: false },
-      { r: 1, c: 1, tier: 2, flavor: 'plain', frozen: false },
-      { r: 2, c: 2, tier: 3, flavor: 'plain', frozen: false },
+      { r: 1, c: 1, tier: 2, flavor: 'matcha', frozen: false },
+      { r: 2, c: 2, tier: 3, flavor: 'matcha', frozen: false },
       { r: 3, c: 1, tier: 1, flavor: 'plain', frozen: false }
     ],
-    allowedRecipes: ['R02', 'R03', 'R04', 'R05', 'R06', 'R07', 'R08', 'R09'],
+    allowedRecipes: ['R02', 'R03', 'R04', 'R05', 'R06', 'R07', 'R08', 'R09', 'R15'],
     urgentRate: 0.15,
     vipQuota: 0,
     vipQuotaRange: [0, 0],
     vipFixedRecipeId: null,
     rushEndSec: null,
-    desc: 'C2~C4 十字四翼盘 · 善用装盘清理边角位'
+    desc: '抹茶洒粉格首秀 · 十字盘染味解锁宇治双爪'
   },
   {
     id: '1-5',
@@ -405,7 +413,7 @@ const LEVELS = [
     indexInChapter: 5,
     name: '双凹烘焙槽',
     durationSec: 105,
-    stars: [3700, 6100, 7350],
+    stars: [3850, 6350, 7650],
     baseClearDust: 6,
     firstStarDust: [10, 15, 22],
     matrix: ['.##.', '....', '....', '.##.'],
@@ -421,18 +429,19 @@ const LEVELS = [
     vipQuotaRange: [0, 0],
     vipFixedRecipeId: null,
     rushEndSec: null,
-    desc: 'C1~C4 组合 · 四角耳位暂存高阶成品'
+    goal: { type: 'serve_count', target: 5, earlyClose: false },
+    desc: '目标关：累计上菜 5 单 · 四角耳位暂存成品'
   },
   {
     id: '1-6',
     chapter: 1,
     indexInChapter: 6,
-    name: '草莓大福首秀',
+    name: '金光大福首秀',
     durationSec: 105,
-    stars: [3850, 6350, 7750],
+    stars: [4250, 6700, 8050],
     baseClearDust: 6,
     firstStarDust: [10, 15, 22],
-    matrix: ['...#', '....', '....', '#...'],
+    matrix: ['...#', '.G..', '....', '#...'],
     presets: [
       { r: 0, c: 1, tier: 3, flavor: 'plain', frozen: false },
       { r: 1, c: 2, tier: 3, flavor: 'plain', frozen: false },
@@ -445,7 +454,7 @@ const LEVELS = [
     vipQuotaRange: [0, 0],
     vipFixedRecipeId: null,
     rushEndSec: null,
-    desc: '解锁 C5 草莓猫咪大福 · 斜梯宽盘冲高分'
+    desc: '镀金格首秀 + 解锁 C5 大福 · 镀金 1.35 倍加价'
   },
   {
     id: '1-7',
@@ -453,7 +462,7 @@ const LEVELS = [
     indexInChapter: 7,
     name: '满格标准炉',
     durationSec: 110,
-    stars: [4050, 6650, 8650],
+    stars: [4350, 7000, 8800],
     baseClearDust: 6,
     firstStarDust: [10, 15, 22],
     matrix: ['....', '....', '....', '....'],
@@ -469,21 +478,22 @@ const LEVELS = [
     vipQuotaRange: [0, 0],
     vipFixedRecipeId: null,
     rushEndSec: null,
-    desc: '4x4 满格爽快连合 · C2~C5 双拼与三拼套餐'
+    goal: { type: 'combo', target: 2, earlyClose: false },
+    desc: '目标关：达成 2 连击 · 4x4 满格爽快连合'
   },
   {
     id: '1-8',
     chapter: 1,
     indexInChapter: 8,
-    name: '独柱分流炉',
+    name: '独柱破冰炉',
     durationSec: 110,
-    stars: [4150, 6350, 8000],
+    stars: [4450, 6900, 8150],
     baseClearDust: 6,
     firstStarDust: [10, 15, 22],
-    matrix: ['....', '.X..', '....', '....'],
+    matrix: ['....', '.XI.', '....', '....'],
     presets: [
       { r: 0, c: 1, tier: 3, flavor: 'plain', frozen: false },
-      { r: 1, c: 2, tier: 2, flavor: 'plain', frozen: false },
+      { r: 1, c: 2, tier: 2, flavor: 'plain', frozen: true },
       { r: 2, c: 1, tier: 3, flavor: 'plain', frozen: false },
       { r: 3, c: 0, tier: 2, flavor: 'plain', frozen: false }
     ],
@@ -493,7 +503,8 @@ const LEVELS = [
     vipQuotaRange: [0, 0],
     vipFixedRecipeId: null,
     rushEndSec: null,
-    desc: '木质障碍柱登场 · 利用分段挡板卡位合大饼'
+    goal: { type: 'ice_clear', target: 1, earlyClose: true },
+    desc: '冰封格首秀 · 邻格合成碎冰可提前打烊加分'
   },
   {
     id: '1-9',
@@ -501,7 +512,7 @@ const LEVELS = [
     indexInChapter: 9,
     name: '双柱回廊',
     durationSec: 115,
-    stars: [4600, 7500, 8800],
+    stars: [4850, 7900, 9300],
     baseClearDust: 6,
     firstStarDust: [10, 15, 22],
     matrix: ['....', '.X..', '..X.', '....'],
@@ -525,7 +536,7 @@ const LEVELS = [
     indexInChapter: 10,
     name: '星夜店考核',
     durationSec: 115,
-    stars: [4700, 7450, 8800],
+    stars: [5150, 7250, 8850],
     baseClearDust: 6,
     firstStarDust: [10, 15, 22],
     matrix: ['....', '#..#', '....', '.X..', '....'],
@@ -541,7 +552,8 @@ const LEVELS = [
     vipQuotaRange: [1, 1],
     vipFixedRecipeId: 'R14',
     rushEndSec: null,
-    desc: '第 1 章关底考核 · 美食家 VIP 惊喜试访点双层塔'
+    goal: { type: 'centerpiece', target: 5, earlyClose: true },
+    desc: '目标关：献上含 C5 大福大单达标 · 满星提前打烊'
   },
 
   // =========================================================================
@@ -551,25 +563,25 @@ const LEVELS = [
     id: '2-1',
     chapter: 2,
     indexInChapter: 1,
-    name: '抹茶初绽',
+    name: '樱莓双香',
     durationSec: 110,
-    stars: [5750, 9500, 12200],
+    stars: [6100, 10000, 12500],
     baseClearDust: 10,
     firstStarDust: [16, 22, 32],
-    matrix: ['...#', '.M..', '..M.', '#...'],
+    matrix: ['...#', '.M..', '..B.', '#...'],
     presets: [
       { r: 0, c: 1, tier: 2, flavor: 'plain', frozen: false },
       { r: 1, c: 1, tier: 3, flavor: 'matcha', frozen: false },
-      { r: 2, c: 2, tier: 3, flavor: 'matcha', frozen: false },
+      { r: 2, c: 2, tier: 3, flavor: 'berry', frozen: false },
       { r: 3, c: 2, tier: 2, flavor: 'plain', frozen: false }
     ],
-    allowedRecipes: ['R05', 'R07', 'R09', 'R15', 'R16', 'R17'],
+    allowedRecipes: ['R05', 'R07', 'R09', 'R15', 'R16', 'R17', 'R25'],
     urgentRate: 0.20,
     vipQuota: 1,
     vipQuotaRange: [1, 1],
     vipFixedRecipeId: null,
     rushEndSec: null,
-    desc: '抹茶洒粉格教学 · 解锁 C6 星空马卡龙与抹茶单'
+    desc: '草莓格首秀 · 解锁草莓小爪碟与 C6 星空马卡龙'
   },
   {
     id: '2-2',
@@ -577,7 +589,7 @@ const LEVELS = [
     indexInChapter: 2,
     name: '金光微露',
     durationSec: 115,
-    stars: [7500, 12400, 15500],
+    stars: [8400, 13900, 17000],
     baseClearDust: 10,
     firstStarDust: [16, 22, 32],
     matrix: ['#..#', '.G..', '..M.', '....'],
@@ -593,7 +605,7 @@ const LEVELS = [
     vipQuotaRange: [1, 2],
     vipFixedRecipeId: null,
     rushEndSec: null,
-    desc: '镀金烘焙格教学 · 万能风味顶替且享 1.35 倍加价'
+    desc: '镀金烘焙格进阶 · 万能风味顶替且享 1.35 倍加价'
   },
   {
     id: '2-3',
@@ -601,7 +613,7 @@ const LEVELS = [
     indexInChapter: 3,
     name: '樱花回字廊',
     durationSec: 115,
-    stars: [7600, 11400, 14300],
+    stars: [8500, 12800, 15600],
     baseClearDust: 10,
     firstStarDust: [16, 22, 32],
     matrix: ['....', '.XX.', '.GM.', '....'],
@@ -611,24 +623,25 @@ const LEVELS = [
       { r: 2, c: 1, tier: 4, flavor: 'gold', frozen: false },
       { r: 3, c: 2, tier: 2, flavor: 'plain', frozen: false }
     ],
-    allowedRecipes: ['R09', 'R10', 'R11', 'R12', 'R13', 'R14', 'R15', 'R16', 'R17', 'R18'],
+    allowedRecipes: ['R07', 'R09', 'R11', 'R12', 'R14', 'R15', 'R16', 'R17'],
     urgentRate: 0.25,
     vipQuota: 2,
     vipQuotaRange: [1, 2],
     vipFixedRecipeId: null,
     rushEndSec: null,
-    desc: '中心双木柱回廊 · 穿过底部金箔与抹茶区染味'
+    goal: { type: 'hot_serve', target: 2, earlyClose: false },
+    desc: '目标关：上 2 份整单热乎 · 穿过金箔与抹茶区染味'
   },
   {
     id: '2-4',
     chapter: 2,
     indexInChapter: 4,
-    name: '露台双岛桥',
+    name: '星炉双岛桥',
     durationSec: 120,
-    stars: [7700, 12500, 15000],
+    stars: [8600, 12600, 15200],
     baseClearDust: 10,
     firstStarDust: [16, 22, 32],
-    matrix: ['..#..', '.M.G.', '..#..', '..#..'],
+    matrix: ['..#..', '.MOG.', '..#..', '..#..'],
     presets: [
       { r: 0, c: 0, tier: 3, flavor: 'plain', frozen: false },
       { r: 1, c: 1, tier: 3, flavor: 'matcha', frozen: false },
@@ -641,7 +654,7 @@ const LEVELS = [
     vipQuotaRange: [2, 2],
     vipFixedRecipeId: null,
     rushEndSec: null,
-    desc: '哑铃双岛独木桥 · 中行互通左右分区烘烤'
+    desc: '星炉格 O 首秀 · 桥心停满 6 秒自动升 1 阶（最高 C5）'
   },
   {
     id: '2-5',
@@ -649,7 +662,7 @@ const LEVELS = [
     indexInChapter: 5,
     name: '抹茶星塔',
     durationSec: 120,
-    stars: [7800, 11500, 16000],
+    stars: [8700, 12300, 16600],
     baseClearDust: 10,
     firstStarDust: [16, 22, 32],
     matrix: ['.M..', '...G', 'G...', '..M.'],
@@ -665,7 +678,8 @@ const LEVELS = [
     vipQuotaRange: [2, 2],
     vipFixedRecipeId: null,
     rushEndSec: null,
-    desc: '双金双抹全通炉 · 冲击美食家星夜三层塔'
+    goal: { type: 'serve_count', target: 7, earlyClose: false },
+    desc: '目标关：本局上菜 7 单 · 双金双抹全通炉冲星夜塔'
   },
   {
     id: '2-6',
@@ -673,10 +687,10 @@ const LEVELS = [
     indexInChapter: 6,
     name: '美食家之夜',
     durationSec: 125,
-    stars: [8150, 13400, 16800],
+    stars: [8800, 14200, 18600],
     baseClearDust: 10,
     firstStarDust: [16, 22, 32],
-    matrix: ['#...#', '.M.G.', '..X..', '.....'],
+    matrix: ['#...#', '.M.G.', '..X..', '..B..'],
     presets: [
       { r: 0, c: 2, tier: 4, flavor: 'plain', frozen: false },
       { r: 1, c: 1, tier: 3, flavor: 'matcha', frozen: false },
@@ -684,7 +698,7 @@ const LEVELS = [
       { r: 3, c: 1, tier: 3, flavor: 'plain', frozen: false },
       { r: 3, c: 3, tier: 2, flavor: 'plain', frozen: false }
     ],
-    allowedRecipes: ['R12', 'R13', 'R14', 'R15', 'R16', 'R17', 'R18', 'R19'],
+    allowedRecipes: ['R12', 'R13', 'R14', 'R15', 'R16', 'R17', 'R18', 'R19', 'R25'],
     urgentRate: 0.25,
     vipQuota: 3,
     vipQuotaRange: [3, 3],
@@ -696,12 +710,12 @@ const LEVELS = [
     id: '2-7',
     chapter: 2,
     indexInChapter: 7,
-    name: '十字交错廊',
+    name: '十字星炉廊',
     durationSec: 125,
-    stars: [8250, 12300, 15500],
+    stars: [9250, 15100, 18400],
     baseClearDust: 10,
     firstStarDust: [16, 22, 32],
-    matrix: ['..X..', '.G.M.', '..#..', '.....'],
+    matrix: ['..X..', '.G.M.', '..#..', '..O..'],
     presets: [
       { r: 0, c: 0, tier: 4, flavor: 'plain', frozen: false },
       { r: 1, c: 1, tier: 4, flavor: 'gold', frozen: false },
@@ -714,18 +728,19 @@ const LEVELS = [
     vipQuotaRange: [2, 3],
     vipFixedRecipeId: null,
     rushEndSec: null,
-    desc: '中轴错位障碍 U 型连通 · 含急单与 2~3 位 VIP'
+    goal: { type: 'combo', target: 3, earlyClose: false },
+    desc: '目标关：达成 3 连击 · 底部星炉持续升阶助攻'
   },
   {
     id: '2-8',
     chapter: 2,
     indexInChapter: 8,
-    name: '五行大烤盘',
+    name: '五行双炉盘',
     durationSec: 130,
-    stars: [9050, 14900, 18000],
+    stars: [10300, 16400, 19400],
     baseClearDust: 10,
     firstStarDust: [16, 22, 32],
-    matrix: ['#...#', '..M..', '.XGX.', '..M..', '#...#'],
+    matrix: ['#...#', '.OM..', '.XGX.', '..MO.', '#...#'],
     presets: [
       { r: 0, c: 2, tier: 3, flavor: 'plain', frozen: false },
       { r: 1, c: 2, tier: 4, flavor: 'matcha', frozen: false },
@@ -738,7 +753,7 @@ const LEVELS = [
     vipQuotaRange: [2, 3],
     vipFixedRecipeId: null,
     rushEndSec: null,
-    desc: '5x5 八角星盘首秀 · 中央双柱护航黄金底座'
+    desc: '5x5 八角星盘 · 双星炉与中央黄金底座齐开'
   },
   {
     id: '2-9',
@@ -746,23 +761,24 @@ const LEVELS = [
     indexInChapter: 9,
     name: '双桥花坊',
     durationSec: 130,
-    stars: [9100, 15000, 18600],
+    stars: [10500, 16700, 19700],
     baseClearDust: 10,
     firstStarDust: [16, 22, 32],
-    matrix: ['..#..', '.MXG.', '..#..', '.GXM.', '.....'],
+    matrix: ['..#..', '.MXG.', '..#..', '.GXM.', '..B..'],
     presets: [
       { r: 0, c: 1, tier: 4, flavor: 'plain', frozen: false },
       { r: 1, c: 1, tier: 3, flavor: 'matcha', frozen: false },
       { r: 3, c: 3, tier: 4, flavor: 'matcha', frozen: false },
-      { r: 4, c: 2, tier: 5, flavor: 'plain', frozen: false }
+      { r: 4, c: 2, tier: 5, flavor: 'berry', frozen: false }
     ],
-    allowedRecipes: ['R13', 'R14', 'R15', 'R16', 'R17', 'R18', 'R19'],
+    allowedRecipes: ['R13', 'R14', 'R15', 'R16', 'R17', 'R18', 'R19', 'R25'],
     urgentRate: 0.30,
     vipQuota: 3,
     vipQuotaRange: [3, 3],
     vipFixedRecipeId: null,
     rushEndSec: null,
-    desc: '中井切分双通道 · 底部长廊汇聚 C5~C6 大饼'
+    goal: { type: 'hot_serve', target: 3, earlyClose: false },
+    desc: '目标关：上 3 份整单热乎 · 底部草莓长廊汇聚大饼'
   },
   {
     id: '2-10',
@@ -770,7 +786,7 @@ const LEVELS = [
     indexInChapter: 10,
     name: '樱花露台大赏',
     durationSec: 135,
-    stars: [9250, 15200, 19500],
+    stars: [10600, 15400, 19100],
     baseClearDust: 10,
     firstStarDust: [16, 22, 32],
     matrix: ['#...#', '.G.G.', '..X..', '.M.M.', '.....'],
@@ -787,7 +803,8 @@ const LEVELS = [
     vipQuotaRange: [3, 3],
     vipFixedRecipeId: null,
     rushEndSec: null,
-    desc: '第 2 章关底王冠盘 · 双金双抹迎战 3 位 VIP'
+    goal: { type: 'centerpiece', target: 6, earlyClose: true },
+    desc: '目标关：献上含 C6 星空马卡龙达标 · 满星提前打烊'
   },
 
   // =========================================================================
@@ -799,7 +816,7 @@ const LEVELS = [
     indexInChapter: 1,
     name: '草莓雪夜',
     durationSec: 120,
-    stars: [9350, 12300, 16100],
+    stars: [10700, 14100, 18400],
     baseClearDust: 14,
     firstStarDust: [22, 30, 42],
     matrix: ['.....', '.BI..', '..IM.', '#...#'],
@@ -823,12 +840,12 @@ const LEVELS = [
     id: '3-2',
     chapter: 3,
     indexInChapter: 2,
-    name: '双果风味台',
+    name: '蜜糖风味台',
     durationSec: 125,
-    stars: [9450, 14100, 17900],
+    stars: [10800, 14300, 18600],
     baseClearDust: 14,
     firstStarDust: [22, 30, 42],
-    matrix: ['#...#', '.M.B.', '..I..', '.I..#', '#..##'],
+    matrix: ['#...#', '.M.B.', '.SI..', '.I..#', '#..##'],
     presets: [
       { r: 0, c: 2, tier: 4, flavor: 'plain', frozen: false },
       { r: 1, c: 1, tier: 3, flavor: 'matcha', frozen: false },
@@ -842,7 +859,7 @@ const LEVELS = [
     vipQuotaRange: [2, 3],
     vipFixedRecipeId: null,
     rushEndSec: null,
-    desc: '月牙盘抹茶草莓同台 · 破冰释放高阶 C4~C5'
+    desc: '蜜糖格 S 首秀 · 滑入猫饼停留卡位助力破冰'
   },
   {
     id: '3-3',
@@ -850,7 +867,7 @@ const LEVELS = [
     indexInChapter: 3,
     name: '冰封双塔',
     durationSec: 125,
-    stars: [11300, 18600, 22400],
+    stars: [11900, 19600, 23600],
     baseClearDust: 14,
     firstStarDust: [22, 30, 42],
     matrix: ['..#..', '.IXI.', '.M.B.', '..G..', '#...#'],
@@ -868,18 +885,19 @@ const LEVELS = [
     vipQuotaRange: [3, 3],
     vipFixedRecipeId: null,
     rushEndSec: null,
-    desc: '双塔腰部冰封 · 塔顶合成解放两翼并串联金箔格'
+    goal: { type: 'ice_clear', target: 2, earlyClose: true },
+    desc: '目标关：击碎全部 2 块冰封 · 清冰即提前打烊加分'
   },
   {
     id: '3-4',
     chapter: 3,
     indexInChapter: 4,
-    name: '风味调色板',
+    name: '风味蜜糖盘',
     durationSec: 130,
-    stars: [11400, 18100, 22100],
+    stars: [12100, 18000, 21700],
     baseClearDust: 14,
     firstStarDust: [22, 30, 42],
-    matrix: ['.M.B.', '..I..', '.XGX.', '..I..', '.B.M.'],
+    matrix: ['.M.B.', '..I..', 'SXGXS', '..I..', '.B.M.'],
     presets: [
       { r: 0, c: 1, tier: 3, flavor: 'matcha', frozen: false },
       { r: 0, c: 3, tier: 3, flavor: 'berry', frozen: false },
@@ -893,7 +911,8 @@ const LEVELS = [
     vipQuotaRange: [3, 3],
     vipFixedRecipeId: null,
     rushEndSec: null,
-    desc: '对称四风味池 · 专攻双韵抹茶草莓拼与中央镀金'
+    goal: { type: 'limited_knead', target: 14, earlyClose: false },
+    desc: '目标关：限揉面 14 次 · 善用左右蜜糖格精算合成'
   },
   {
     id: '3-5',
@@ -901,7 +920,7 @@ const LEVELS = [
     indexInChapter: 5,
     name: '星冠天台',
     durationSec: 135,
-    stars: [12900, 18900, 23300],
+    stars: [14500, 19600, 24900],
     baseClearDust: 14,
     firstStarDust: [22, 30, 42],
     matrix: ['##.##', '#.I.#', '.MGB.', '.I.I.', '.....'],
@@ -928,10 +947,10 @@ const LEVELS = [
     indexInChapter: 6,
     name: '猫神降临礼',
     durationSec: 135,
-    stars: [14300, 21800, 25800],
+    stars: [16900, 27500, 32400],
     baseClearDust: 14,
     firstStarDust: [22, 30, 42],
-    matrix: ['#...#', '.GIM.', '..X..', '.BIG.', '#...#'],
+    matrix: ['#.O.#', '.GIM.', '.SXS.', '.BIG.', '#...#'],
     presets: [
       { r: 0, c: 2, tier: 4, flavor: 'plain', frozen: false },
       { r: 1, c: 2, tier: 5, flavor: 'plain', frozen: true },
@@ -946,7 +965,7 @@ const LEVELS = [
     vipQuotaRange: [3, 4],
     vipFixedRecipeId: null,
     rushEndSec: null,
-    desc: '传说星冠满汉席开放 · 解冻双 C5 速合猫神蛋糕'
+    desc: '传说满汉席开放 · 顶部星炉与双蜜糖速合猫神蛋糕'
   },
   {
     id: '3-7',
@@ -954,7 +973,7 @@ const LEVELS = [
     indexInChapter: 7,
     name: '满汉极速流',
     durationSec: 140,
-    stars: [16000, 25800, 30400],
+    stars: [17500, 25300, 30100],
     baseClearDust: 14,
     firstStarDust: [22, 30, 42],
     matrix: ['..XM.', '.I...', 'X.G.X', '...I.', '.BX..'],
@@ -972,7 +991,8 @@ const LEVELS = [
     vipQuotaRange: [3, 4],
     vipFixedRecipeId: null,
     rushEndSec: null,
-    desc: '风车四柱三风味迷宫 · 善用搭档主动技破局洗牌'
+    goal: { type: 'limited_knead', target: 16, earlyClose: false },
+    desc: '目标关：限揉面 16 次 · 善用搭档主动技破局洗牌'
   },
   {
     id: '3-8',
@@ -980,7 +1000,7 @@ const LEVELS = [
     indexInChapter: 8,
     name: '碎冰三重奏',
     durationSec: 140,
-    stars: [16200, 25900, 31200],
+    stars: [17700, 25300, 30400],
     baseClearDust: 14,
     firstStarDust: [22, 30, 42],
     matrix: ['.I.I.', '.M.B.', '#.G.#', '.B.M.', '.I.I.'],
@@ -999,7 +1019,8 @@ const LEVELS = [
     vipQuotaRange: [4, 4],
     vipFixedRecipeId: null,
     rushEndSec: null,
-    desc: '四角四重冰封对称盘 · 中轴合成连锁破冰冲满汉席'
+    goal: { type: 'ice_clear', target: 4, earlyClose: true },
+    desc: '目标关：击碎四角全部 4 块冰封 · 清冰即提前打烊'
   },
   {
     id: '3-9',
@@ -1007,10 +1028,10 @@ const LEVELS = [
     indexInChapter: 9,
     name: '星海终曲前夜',
     durationSec: 145,
-    stars: [16400, 23800, 28700],
+    stars: [17900, 24100, 32700],
     baseClearDust: 14,
     firstStarDust: [22, 30, 42],
-    matrix: ['..#..', '.GXM.', '.I.I.', '.BXG.', '..#..'],
+    matrix: ['..#..', '.GXM.', '.ISI.', '.BXG.', '..#..'],
     presets: [
       { r: 0, c: 1, tier: 4, flavor: 'plain', frozen: false },
       { r: 1, c: 1, tier: 4, flavor: 'gold', frozen: false },
@@ -1025,7 +1046,7 @@ const LEVELS = [
     vipQuotaRange: [4, 4],
     vipFixedRecipeId: null,
     rushEndSec: null,
-    desc: '双脊窄廊高难博弈 · 巧借宽托盘暂存半成品腾道'
+    desc: '中轴蜜糖双脊窄廊 · 巧借宽托盘暂存半成品腾道'
   },
   {
     id: '3-10',
@@ -1033,7 +1054,7 @@ const LEVELS = [
     indexInChapter: 10,
     name: '星冠夜宴终章',
     durationSec: 150,
-    stars: [20100, 31800, 37600],
+    stars: [18700, 28000, 33000],
     baseClearDust: 14,
     firstStarDust: [22, 30, 42],
     matrix: ['#...#', '.MIB.', '.IGI.', '.BXM.', '#...#'],
@@ -1051,7 +1072,8 @@ const LEVELS = [
     vipQuotaRange: [5, 5],
     vipFixedRecipeId: null,
     rushEndSec: 15,
-    desc: '全章总决赛 · 镀金 C6 破三冰冲猫神 · 5 位 VIP 盛宴'
+    goal: { type: 'centerpiece', target: 6, earlyClose: false },
+    desc: '全章总决赛 · 献上含 C6+ 盛宴冲击猫神满汉席'
   }
 ];
 

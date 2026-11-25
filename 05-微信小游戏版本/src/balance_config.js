@@ -13,7 +13,7 @@
  */
 'use strict';
 
-const BALANCE_VERSION = '0.10.0-m1';
+const BALANCE_VERSION = '0.11.0-m2';
 
 const FEATURES = {
   scoreZones: true,
@@ -21,8 +21,8 @@ const FEATURES = {
   freshBonus: true,
   doughTemp: true,
   feverV2: true,
-  goals: false,
-  events: false,
+  goals: true,
+  events: true,
   traits: false,
   daily: false,
   endless: false
@@ -86,6 +86,17 @@ const FEVER_V2 = {
   afterglowC1toC2: true
 };
 
+const GOALS = {
+  earlyClosePerSec: 40,
+  earlyCloseChapterFactors: { 1: 1.0, 2: 1.8, 3: 3.0 },
+  earlyCloseCap: 20000
+};
+
+const CELLS = {
+  ovenSec: 6.0,
+  ovenMaxTier: 5
+};
+
 const TELEMETRY = {
   enabled: true,
   // We分析 custom event names (must be registered in WeChat MP console before they show up)
@@ -117,10 +128,12 @@ const REMOTE_OVERRIDE_BOUNDS = {
   'FEVER_V2.durationSec': [5, 20],
   'FEVER_V2.sceneBonus': [0, 0.6],
   'FEVER_V2.extendPerServe': [0, 3],
-  'FEVER_V2.extendCap': [0, 10]
+  'FEVER_V2.extendCap': [0, 10],
+  'GOALS.earlyClosePerSec': [10, 100],
+  'CELLS.ovenSec': [3, 12]
 };
 
-const TABLES = { SCORE_ZONES, BAKE_CRIT, FRESH, DOUGH_TEMP, FEVER_V2 };
+const TABLES = { SCORE_ZONES, BAKE_CRIT, FRESH, DOUGH_TEMP, FEVER_V2, GOALS, CELLS };
 
 const appliedOverrides = {};
 
@@ -186,6 +199,8 @@ module.exports = {
   FRESH,
   DOUGH_TEMP,
   FEVER_V2,
+  GOALS,
+  CELLS,
   TELEMETRY,
   REMOTE_OVERRIDE_BOUNDS,
   applyRemoteOverrides,

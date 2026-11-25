@@ -2629,6 +2629,14 @@ function buildSpawnContextOnce(state, boardFlavors) {
     ? safeInt(nextUidRead.value, 1, 1, 1000000000)
     : 1;
 
+  const levelIdRead = readOwnPropOnce(state, 'levelId');
+  const levelId = levelIdRead.exists && !levelIdRead.threw ? String(levelIdRead.value || '') : '';
+  const lvlDef = levelId ? getLevelById(levelId) : null;
+  const centerpieceTarget =
+    lvlDef && lvlDef.goal && lvlDef.goal.type === 'centerpiece'
+      ? safeInt(lvlDef.goal.target, 0, 0, 7)
+      : 0;
+
   return {
     pool,
     minPoolMaxTier,
@@ -2639,6 +2647,7 @@ function buildSpawnContextOnce(state, boardFlavors) {
     vipQuotaTarget,
     vipScheduleSnap,
     vipFixedId,
+    centerpieceTarget,
     baseUrgRate,
     chapter,
     devTeapotLv,
@@ -2734,14 +2743,23 @@ function planCustomerForSeatFromSnap(
       chosenRecipe = getOwn(RECIPES, vipFixedId, chosenRecipe);
     } else {
       let vipPool = [];
-      for (let i = 0; i < pool.length; i++) {
-        const r = pool[i];
-        if (
-          getRecipeMaxTier(r) >= 5 ||
-          recipeHasFlavor(r, 'matcha') ||
-          recipeHasFlavor(r, 'berry')
-        ) {
-          safePush(vipPool, r);
+      if (spawnCtx.centerpieceTarget > 0) {
+        for (let i = 0; i < pool.length; i++) {
+          if (getRecipeMaxTier(pool[i]) >= spawnCtx.centerpieceTarget) {
+            safePush(vipPool, pool[i]);
+          }
+        }
+      }
+      if (vipPool.length === 0) {
+        for (let i = 0; i < pool.length; i++) {
+          const r = pool[i];
+          if (
+            getRecipeMaxTier(r) >= 5 ||
+            recipeHasFlavor(r, 'matcha') ||
+            recipeHasFlavor(r, 'berry')
+          ) {
+            safePush(vipPool, r);
+          }
         }
       }
       if (vipPool.length === 0) vipPool = pool;
@@ -3437,10 +3455,11 @@ function applyMikanComfortTea(state) {
  * Computes end-of-level 0..3 star rating and stardust breakdown.
  * Enforces Pure Serve-Only Scoring Iron Law: 0 serves => 0 valid score and 0 consolation dust.
  */
-function computeLevelSettlement(levelCfgOrId, orderState, prevStarsOrSave) {
+function computeLevelSettlement(levelCfgOrId, orderState, prevStarsOrSave, settlementOpts) {
   let rawLvlArg = levelCfgOrId;
   let rawOsArg = orderState;
   let rawPrevArg = prevStarsOrSave;
+  let rawOptsArg = settlementOpts;
   if (
     prevStarsOrSave === undefined &&
     isPlainObj(levelCfgOrId) &&
@@ -3451,6 +3470,7 @@ function computeLevelSettlement(levelCfgOrId, orderState, prevStarsOrSave) {
     rawLvlArg = getOwn(levelCfgOrId, 'levelId', '1-1');
     rawOsArg = levelCfgOrId;
     rawPrevArg = orderState;
+    rawOptsArg = undefined;
   }
 
   const lvl = resolveLevelConfig(rawLvlArg);
@@ -3462,9 +3482,14 @@ function computeLevelSettlement(levelCfgOrId, orderState, prevStarsOrSave) {
   const baseClearDust = safeInt(lvl.baseClearDust, 6, 0, 200);
 
   const os = isPlainObj(rawOsArg) ? rawOsArg : null;
+  const opts = isPlainObj(rawOptsArg) ? rawOptsArg : null;
   const ordersServed = os ? safeInt(getOwn(os, 'ordersServed', 0), 0, 0, 100000) : 0;
   const rawScore = os ? safeInt(getOwn(os, 'score', 0), 0, 0, 100000000) : 0;
-  const score = ordersServed >= 1 ? rawScore : 0;
+  const earlyCloseBonus =
+    ordersServed >= 1 && opts
+      ? safeInt(getOwn(opts, 'earlyCloseBonus', 0), 0, 0, 20000)
+      : 0;
+  const score = ordersServed >= 1 ? rawScore + earlyCloseBonus : 0;
   const vipServed =
     ordersServed >= 1 && os ? safeInt(getOwn(os, 'vipServed', 0), 0, 0, 1000) : 0;
 
@@ -3483,8 +3508,11 @@ function computeLevelSettlement(levelCfgOrId, orderState, prevStarsOrSave) {
   const star2 = Math.max(star1 + 1, safeInt(getOwn(stars, 1, 1250), 1250, 1, 100000000));
   const star3 = Math.max(star2 + 1, safeInt(getOwn(stars, 2, 1750), 1750, 1, 100000000));
 
-  const starsEarned = score >= star3 ? 3 : score >= star2 ? 2 : score >= star1 ? 1 : 0;
-  const cleared = starsEarned >= 1;
+  const goalMet = !(opts && getOwn(opts, 'goalDone', true) === false);
+  const rawStars = score >= star3 ? 3 : score >= star2 ? 2 : score >= star1 ? 1 : 0;
+  const starsEarned = goalMet ? rawStars : 0;
+  const cleared = goalMet && starsEarned >= 1;
+  const goalUnmet = !goalMet;
   const newStarsDelta = Math.max(0, starsEarned - prevStars);
 
   let firstStarDustAward = 0;
@@ -3508,7 +3536,7 @@ function computeLevelSettlement(levelCfgOrId, orderState, prevStarsOrSave) {
     vipDustAward = vipServed * 3;
     threeStarBonusDust = starsEarned === 3 ? 2 : 0;
   } else if (ordersServed >= 1) {
-    consolationDust = Math.max(1, Math.floor((score / star1) * 4));
+    consolationDust = Math.max(1, Math.floor((Math.min(score, star1) / star1) * 4));
     vipDustAward = vipServed * 1;
   }
 
@@ -3521,6 +3549,9 @@ function computeLevelSettlement(levelCfgOrId, orderState, prevStarsOrSave) {
 
   return {
     cleared,
+    goalUnmet,
+    earlyCloseBonus,
+    finalScore: score,
     starsEarned,
     newStarsDelta,
     isReplayDecay,

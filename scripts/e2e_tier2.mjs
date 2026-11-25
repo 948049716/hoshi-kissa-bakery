@@ -40,7 +40,9 @@ const LEGACY_FORMULA_FEATURES = Object.freeze({
   bakeCrit: false,
   freshBonus: false,
   doughTemp: false,
-  feverV2: false
+  feverV2: false,
+  goals: false,
+  events: false
 });
 
 const DEFAULT_TUTORIALS_SEEN = {
@@ -810,6 +812,8 @@ const TIER2_F01_TO_F08 = [
         G: 'gold',
         M: 'matcha',
         B: 'berry',
+        O: 'oven',
+        S: 'syrup',
         '.': 'normal',
         I: 'normal',
       };
@@ -821,7 +825,7 @@ const TIER2_F01_TO_F08 = [
         for (let r = 0; r < lv.matrix.length; r++) {
           const rowStr = lv.matrix[r];
           ctx.assertEq(rowStr.length, cols, `${lv.id}: row ${r} ragged length`);
-          ctx.assert(/^[.#XGMBI]+$/.test(rowStr), `${lv.id}: invalid char in "${rowStr}"`);
+          ctx.assert(/^[.#XGMBIOS]+$/.test(rowStr), `${lv.id}: invalid char in "${rowStr}"`);
         }
       }
 
@@ -906,12 +910,12 @@ const TIER2_F01_TO_F08 = [
         }
       }
 
-      // Cross-verify live frozenHp bijection on all Chapter 3 levels
+      // Cross-verify live frozenHp bijection on all levels containing I (including 1-8 and Ch.3)
       await ctx.setSaveData({ schemaVersion: 2, levelStars: getAllUnlockedStars(ctx, 3), seenTutorials: DEFAULT_TUTORIALS_SEEN });
-      const ch3Errors = await ctx.eval((ch3Levels) => {
+      const iceErrors = await ctx.eval((iceLevels) => {
         const dbg = globalThis.__HOSHI_DEBUG__;
         const errs = [];
-        for (const lv of ch3Levels) {
+        for (const lv of iceLevels) {
           dbg.startLevel(lv.id);
           const g = dbg.getState().grid;
           for (let r = 0; r < g.rows; r++) {
@@ -924,8 +928,8 @@ const TIER2_F01_TO_F08 = [
           }
         }
         return errs;
-      }, LEVELS.filter((l) => l.chapter === 3).map((l) => ({ id: l.id, matrix: l.matrix })));
-      ctx.assertEq(ch3Errors, [], `Live Ch.3 frozenHp bijection errors: ${ch3Errors.join('; ')}`);
+      }, LEVELS.filter((l) => l.matrix.join('').includes('I')).map((l) => ({ id: l.id, matrix: l.matrix })));
+      ctx.assertEq(iceErrors, [], `Live ice frozenHp bijection errors: ${iceErrors.join('; ')}`);
     },
   },
 
@@ -952,7 +956,7 @@ const TIER2_F01_TO_F08 = [
         for (let r = 0; r < rows; r++) {
           for (let c = 0; c < cols; c++) {
             const ch = lv.matrix[r][c];
-            if (ch === '.' || ch === 'G' || ch === 'M' || ch === 'B') unfrozenPlayable++;
+            if (ch === '.' || ch === 'G' || ch === 'M' || ch === 'B' || ch === 'O' || ch === 'S') unfrozenPlayable++;
             if (ch !== '#' && ch !== 'X') passable.push([r, c]);
           }
         }
@@ -994,12 +998,16 @@ const TIER2_F01_TO_F08 = [
     id: 'T2-F02-04',
     tier: 2,
     features: ['F02'],
-    title: 'L2 Invariant #5: Strict star monotonicity (0 < s1 < s2 < s3), progressive s1 curve (750..35000), and chapter mechanic gates',
+    title: 'L2 Invariant #5: Strict star monotonicity (0 < s1 < s2 < s3), progressive s1 curve, and v0.11 chapter mechanic gates',
     run: async (ctx) => {
       const { LEVELS } = await ctx.requireBundledModule('./src/levels_data.js');
       let prevS1 = 0;
-      let ch2SawSpecial = false;
-      let ch3SawBerry = false;
+      let ch1SawM = false;
+      let ch1SawG = false;
+      let ch1SawI = false;
+      let ch2SawB = false;
+      let ch2SawO = false;
+      let ch3SawS = false;
 
       for (const lv of LEVELS) {
         const [s1, s2, s3] = lv.stars || [];
@@ -1012,20 +1020,25 @@ const TIER2_F01_TO_F08 = [
 
         const flat = lv.matrix.join('');
         if (lv.chapter === 1) {
-          ctx.assert(/^[.#X]+$/.test(flat), `${lv.id}: Ch.1 matrix must not contain G/M/B/I ("${flat}")`);
+          ctx.assert(/^[.#XGMI]+$/.test(flat), `${lv.id}: Ch.1 matrix must not contain B/O/S ("${flat}")`);
+          if (flat.includes('M')) ch1SawM = true;
+          if (flat.includes('G')) ch1SawG = true;
+          if (flat.includes('I')) ch1SawI = true;
         } else if (lv.chapter === 2) {
-          ctx.assert(/^[.#XGM]+$/.test(flat), `${lv.id}: Ch.2 matrix must not contain B/I ("${flat}")`);
-          if (/[GM]/.test(flat)) ch2SawSpecial = true;
+          ctx.assert(/^[.#XGMBO]+$/.test(flat), `${lv.id}: Ch.2 matrix must not contain I/S ("${flat}")`);
+          if (flat.includes('B')) ch2SawB = true;
+          if (flat.includes('O')) ch2SawO = true;
         } else if (lv.chapter === 3) {
           ctx.assert(flat.includes('I'), `${lv.id}: every Ch.3 level must contain at least 1 'I' cell`);
-          if (flat.includes('B')) ch3SawBerry = true;
+          if (flat.includes('S')) ch3SawS = true;
         }
       }
 
       ctx.assert(LEVELS[0].stars[0] >= 500 && LEVELS[0].stars[2] <= 6000, `1-1 stars out of range: [${LEVELS[0].stars}]`);
       ctx.assert(LEVELS[29].stars[0] >= 10000 && LEVELS[29].stars[2] * 2.5 <= 220000, `3-10 stars out of anti-cheat headroom: [${LEVELS[29].stars}]`);
-      ctx.assert(ch2SawSpecial, 'Chapter 2 must introduce M and G special cells');
-      ctx.assert(ch3SawBerry, 'Chapter 3 must introduce B berry special cells');
+      ctx.assert(ch1SawM && ch1SawG && ch1SawI, 'Chapter 1 must introduce M, G, and I mechanics');
+      ctx.assert(ch2SawB && ch2SawO, 'Chapter 2 must introduce B berry and O star oven cells');
+      ctx.assert(ch3SawS, 'Chapter 3 must introduce S honey syrup cells');
     },
   },
 
@@ -2345,7 +2358,9 @@ const TIER2_F01_TO_F08 = [
         const s1 = st.seats[1];
         const disjoint21 =
           (s0?.recipeId === 'R07' && (s1?.recipeId === 'R05' || s1?.recipeId === 'R15')) ||
-          (s1?.recipeId === 'R07' && (s0?.recipeId === 'R05' || s0?.recipeId === 'R15'));
+          (s1?.recipeId === 'R07' && (s0?.recipeId === 'R05' || s0?.recipeId === 'R15')) ||
+          (s0?.recipeId === 'R15' && s1?.recipeId === 'R16') ||
+          (s1?.recipeId === 'R15' && s0?.recipeId === 'R16');
         if (
           s0 &&
           s1 &&
@@ -2357,13 +2372,18 @@ const TIER2_F01_TO_F08 = [
           (s1.isVip || s1.isUrgent)
         ) {
           priorityTested = true;
-          await ctx.eval(() => {
+          const needC4Matcha = s0.recipeId === 'R16' || s1.recipeId === 'R16';
+          await ctx.eval((upgradeMatcha) => {
             const dbg = globalThis.__HOSHI_DEBUG__;
-            dbg.useToolOnCell('spoon', 2, 2); // (2,2):C3(matcha) -> C4(matcha)
+            if (upgradeMatcha) {
+              dbg.useToolOnCell('spoon', 1, 1); // (1,1):C3(matcha) -> C4(matcha)
+            } else {
+              dbg.useToolOnCell('spoon', 2, 2); // (2,2):C3(berry) -> C4(berry)
+            }
             dbg.tapBoardCell(0, 1);           // C2(plain)
-            dbg.tapBoardCell(1, 1);           // C3(matcha)
-            dbg.tapBoardCell(2, 2);           // C4(matcha)
-          });
+            dbg.tapBoardCell(1, 1);           // C3(matcha) or C4(matcha)
+            dbg.tapBoardCell(2, 2);           // C4(berry) or C3(berry)
+          }, needC4Matcha);
           const mid = await ctx.advanceTime(0.55);
           ctx.assertEq(mid.ordersServed, 0, 'Normal seat_0 must NOT auto-hijack VIP/Urgent ingredients');
           await ctx.clickHit('seat_1');
@@ -4082,11 +4102,20 @@ const TIER2_F09_TO_F16 = [
       const lv3_10s1 = (await ctx.requireBundledModule('./src/levels_data.js')).getLevelById('3-10').stars[0];
       for (let guard = 0; guard < 36; guard++) {
         const cur = await ctx.getState();
-        if (cur.score >= lv3_10s1 || cur.timeLeft <= 8.5) break;
+        const goalOk = !cur.goal || cur.goal.done;
+        if (cur.score >= lv3_10s1 && goalOk) break;
+        if (cur.timeLeft <= 8.5) break;
         if (cur.skillEnergy >= 100) {
           await ctx.castPatronSkill();
         }
-        await serveOneOrderOrganically(ctx, null);
+        let targetSeat = null;
+        if (!goalOk && Array.isArray(cur.seats)) {
+          const cpIdx = cur.seats.findIndex(
+            (s) => s && (s.isVip || (Array.isArray(s.slots) && s.slots.some((sl) => sl.tier >= (cur.goal.target || 6))))
+          );
+          if (cpIdx >= 0) targetSeat = cpIdx;
+        }
+        await serveOneOrderOrganically(ctx, targetSeat);
       }
 
       let st = await ctx.getState();

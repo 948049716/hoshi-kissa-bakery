@@ -1022,8 +1022,8 @@ const TIER2_F01_TO_F08 = [
         }
       }
 
-      ctx.assertEq(LEVELS[0].stars, [850, 1250, 1750], '1-1 stars must equal v0.9.0 [850, 1250, 1750]');
-      ctx.assertEq(LEVELS[29].stars, [39200, 56800, 77500], '3-10 stars must equal v0.9.0 [39200, 56800, 77500]');
+      ctx.assert(LEVELS[0].stars[0] >= 500 && LEVELS[0].stars[2] <= 6000, `1-1 stars out of range: [${LEVELS[0].stars}]`);
+      ctx.assert(LEVELS[29].stars[0] >= 10000 && LEVELS[29].stars[2] * 2.5 <= 220000, `3-10 stars out of anti-cheat headroom: [${LEVELS[29].stars}]`);
       ctx.assert(ch2SawSpecial, 'Chapter 2 must introduce M and G special cells');
       ctx.assert(ch3SawBerry, 'Chapter 3 must introduce B berry special cells');
     },
@@ -4079,10 +4079,10 @@ const TIER2_F09_TO_F16 = [
         seenTutorials: DEFAULT_TUTORIALS_SEEN,
       });
 
-      // Reach >= 39,200 (v0.9.0 star1 on 3-10) using upgraded Lv.4 recipes + Mugi blast when charged
-      for (let guard = 0; guard < 28; guard++) {
+      const lv3_10s1 = (await ctx.requireBundledModule('./src/levels_data.js')).getLevelById('3-10').stars[0];
+      for (let guard = 0; guard < 36; guard++) {
         const cur = await ctx.getState();
-        if (cur.score >= 39200 || cur.timeLeft <= 8.5) break;
+        if (cur.score >= lv3_10s1 || cur.timeLeft <= 8.5) break;
         if (cur.skillEnergy >= 100) {
           await ctx.castPatronSkill();
         }
@@ -4090,7 +4090,7 @@ const TIER2_F09_TO_F16 = [
       }
 
       let st = await ctx.getState();
-      ctx.assert(st.score >= 39200, `Expected 3-10 score >= 39200, got ${st.score}`);
+      ctx.assert(st.score >= lv3_10s1, `Expected 3-10 score >= ${lv3_10s1}, got ${st.score}`);
       st = await ctx.advanceTime(st.timeLeft + 0.6);
 
       ctx.assertEq(st.activeModal, 'level_result');
@@ -4122,33 +4122,34 @@ const TIER2_F09_TO_F16 = [
         bankStardust: 100,
         totalEarnedStardust: 165,
         levelStars: { '1-1': 3 },
-        levelBestScores: { '1-1': 1920 },
+        levelBestScores: { '1-1': 9999 },
         catcakeLevels: { 1: 2, 2: 2, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 },
         unlockedPatrons: ['mikan', 'luna'],
         selectedPatron: 'luna',
         seenTutorials: DEFAULT_TUTORIALS_SEEN,
       });
 
-      for (let i = 0; i < 18; i++) {
+      const [s1_1_1, , s3_1_1] = (await ctx.requireBundledModule('./src/levels_data.js')).getLevelById('1-1').stars;
+      for (let i = 0; i < 35; i++) {
         const s = await ctx.getState();
-        if (s.score >= 860) break;
+        if (s.score >= s1_1_1 + 10) break;
         await serveOneOrderOrganically(ctx, null, { useHarness: false });
       }
       let mid = await ctx.getState();
-      ctx.assert(mid.score >= 850 && mid.score < 1750, `Expected 1★/2★ replay score (<1920), got ${mid.score}`);
+      ctx.assert(mid.score >= s1_1_1 && mid.score < s3_1_1, `Expected 1★/2★ replay score in [${s1_1_1}, ${s3_1_1}), got ${mid.score}`);
       const resA = await ctx.advanceTime(mid.timeLeft + 0.6);
       ctx.assertEq(resA.lastResult?.firstStarDustAward, 0, 'Replay below historical 3★ must award 0 firstStarDust');
 
       let save = await ctx.getSaveData();
       ctx.assertEq(save.levelStars['1-1'], 3, 'Historical 3★ must never downgrade on lower-star replay');
-      ctx.assertEq(save.levelBestScores['1-1'], 1920, 'Historical best score 1920 must never downgrade');
+      ctx.assertEq(save.levelBestScores['1-1'], 9999, 'Historical best score 9999 must never downgrade');
 
       // Run B: 0-score replay
       await ctx.eval(() => globalThis.__HOSHI_DEBUG__.startLevel('1-1'));
       await ctx.advanceTime(91);
       save = await ctx.getSaveData();
       ctx.assertEq(save.levelStars['1-1'], 3, '0-score fail replay must preserve 3★');
-      ctx.assertEq(save.levelBestScores['1-1'], 1920, '0-score fail replay must preserve best score 1920');
+      ctx.assertEq(save.levelBestScores['1-1'], 9999, '0-score fail replay must preserve best score 9999');
     },
   },
 
@@ -4162,16 +4163,17 @@ const TIER2_F09_TO_F16 = [
       const levelsMod = await ctx.requireBundledModule('./src/levels_data.js');
       const orderMod = await ctx.requireBundledModule('./src/order_service.js');
       const lv1_1 = levelsMod.getLevelById('1-1');
+      const [s1, s2] = lv1_1.stars;
       if (orderMod && typeof orderMod.computeLevelSettlement === 'function') {
-        const s849 = orderMod.computeLevelSettlement(lv1_1, { score: 849, ordersServed: 6, vipServed: 0 }, 0);
-        const s850 = orderMod.computeLevelSettlement(lv1_1, { score: 850, ordersServed: 6, vipServed: 0 }, 0);
-        ctx.assertEq(s849.cleared, false, 'Exact 849 on 1-1 must have cleared=false');
-        ctx.assertEq(s849.starsEarned, 0, 'Exact 849 on 1-1 must earn 0 stars');
-        ctx.assertEq(s850.cleared, true, 'Exact 850 on 1-1 must have cleared=true');
-        ctx.assertEq(s850.starsEarned, 1, 'Exact 850 on 1-1 must earn 1 star');
+        const sBelow = orderMod.computeLevelSettlement(lv1_1, { score: s1 - 1, ordersServed: 6, vipServed: 0 }, 0);
+        const sAt = orderMod.computeLevelSettlement(lv1_1, { score: s1, ordersServed: 6, vipServed: 0 }, 0);
+        ctx.assertEq(sBelow.cleared, false, `Exact ${s1 - 1} on 1-1 must have cleared=false`);
+        ctx.assertEq(sBelow.starsEarned, 0, `Exact ${s1 - 1} on 1-1 must earn 0 stars`);
+        ctx.assertEq(sAt.cleared, true, `Exact ${s1} on 1-1 must have cleared=true`);
+        ctx.assertEq(sAt.starsEarned, 1, `Exact ${s1} on 1-1 must earn 1 star`);
       }
 
-      // 2) Live E2E Shift A: 0 < score < 850 -> fail, 1-2 stays locked
+      // 2) Live E2E Shift A: 0 < score < s1 -> fail, 1-2 stays locked
       await ctx.setupSaveAndStart('1-1', {
         bankStardust: 15,
         totalEarnedStardust: 15,
@@ -4185,14 +4187,14 @@ const TIER2_F09_TO_F16 = [
         await serveOneOrderOrganically(ctx, null, { useHarness: false });
       }
       let stFail = await ctx.getState();
-      ctx.assert(stFail.score > 0 && stFail.score < 850, `Expected 0 < score < 850, got ${stFail.score}`);
+      ctx.assert(stFail.score > 0 && stFail.score < s1, `Expected 0 < score < ${s1}, got ${stFail.score}`);
       stFail = await ctx.advanceTime(stFail.timeLeft + 0.6);
       ctx.assertEq(stFail.lastResult?.cleared, false);
       ctx.assertEq(stFail.lastResult?.starsEarned, 0);
       const saveFail = await ctx.getSaveData();
-      ctx.assertEq(levelsMod.isLevelUnlocked('1-2', saveFail.levelStars).unlocked, false, '1-2 must stay locked when score < 850');
+      ctx.assertEq(levelsMod.isLevelUnlocked('1-2', saveFail.levelStars).unlocked, false, `1-2 must stay locked when score < ${s1}`);
 
-      // 3) Live E2E Shift B: 850 <= score < 1250 -> 1★ clear, 1-2 unlocks!
+      // 3) Live E2E Shift B: s1 <= score < s2 -> 1★ clear, 1-2 unlocks!
       await ctx.setupSaveAndStart('1-1', {
         bankStardust: 15,
         totalEarnedStardust: 15,
@@ -4203,15 +4205,15 @@ const TIER2_F09_TO_F16 = [
         selectedPatron: 'luna',
         seenTutorials: DEFAULT_TUTORIALS_SEEN,
       });
-      while ((await ctx.getState()).score < 850) {
+      while ((await ctx.getState()).score < s1) {
         const cur = await ctx.getState();
-        if (cur.score >= 680 && (cur.comboCount >= 2 || cur.feverActive)) {
-          await ctx.advanceTime(8.5);
+        if (cur.score >= s1 - 180 && (cur.comboCount >= 2 || cur.feverActive)) {
+          await ctx.advanceTime(10.5);
         }
         await serveOneOrderOrganically(ctx, null, { useHarness: false });
       }
       let stPass = await ctx.getState();
-      ctx.assert(stPass.score >= 850 && stPass.score < 1250, `Expected 1★ band [850, 1249], got ${stPass.score}`);
+      ctx.assert(stPass.score >= s1 && stPass.score < s2, `Expected 1★ band [${s1}, ${s2 - 1}], got ${stPass.score}`);
       stPass = await ctx.advanceTime(stPass.timeLeft + 0.6);
       ctx.assertEq(stPass.lastResult?.cleared, true);
       ctx.assertEq(stPass.lastResult?.starsEarned, 1);

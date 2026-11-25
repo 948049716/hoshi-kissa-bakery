@@ -3249,7 +3249,8 @@ const F09_TESTS = [
     title: 'VIP Critic (cust_critic) visit, x1.50 bounty, +40% skill / +35% fever, and +5 stardust settlement bonus',
     query: '?safeTop=47&safeBottom=34&capsule=1&cloud=0',
     run: async (ctx) => {
-      // 1-10 has vipQuota: 1, vipFixedRecipeId: 'R14' (C4 + C5), stars: [5500, 8000, 10600]
+      // 1-10 has vipQuota: 1, vipFixedRecipeId: 'R14' (C4 + C5)
+      const lv1_10Star1 = (await ctx.requireBundledModule('./src/levels_data.js')).getLevelById('1-10').stars[0];
       const pre1_10Stars = {};
       for (let i = 1; i <= 9; i++) pre1_10Stars[`1-${i}`] = 3;
       await startLevelClean(ctx, '1-10', {
@@ -3258,7 +3259,7 @@ const F09_TESTS = [
         levelStars: pre1_10Stars,
         catcakeLevels: { 1: 4, 2: 4, 3: 4, 4: 4, 5: 4, 6: 4, 7: 4 },
         deviceUpgrades: { dev_tray: 2, dev_flour: 3, dev_teapot: 3, dev_tools: 3 }
-      });
+      }, { features: LEGACY_FORMULA_FEATURES });
       const saveBefore = await ctx.getSaveData();
       const bankBefore = saveBefore.bankStardust;
 
@@ -3285,14 +3286,14 @@ const F09_TESTS = [
             ctx.assertEq(st.feverEnergy, feverBefore + 30, 'VIP serve must grant +30% feverEnergy');
           }
           vipServedDone = true;
-          if (st.score >= 5500) break;
+          if (st.score >= lv1_10Star1) break;
         }
 
         // Serve a normal seat to cycle waves AND ensure score >= 5500 (star1 on 1-10)
         const anyIdx = st.seats.findIndex(Boolean);
         if (anyIdx >= 0) {
           st = await bakeAndServeSeat(ctx, anyIdx);
-          if (vipServedDone && st.score >= 5500) break;
+          if (vipServedDone && st.score >= lv1_10Star1) break;
           st = await ctx.advanceTime(2.3);
         } else {
           st = await ctx.advanceTime(2.3);
@@ -3300,12 +3301,12 @@ const F09_TESTS = [
       }
 
       ctx.assert(vipServedDone, 'Expected cust_critic VIP to visit and be served on 1-10');
-      while (st.score < 5500 && st.timeLeft > 9.0) {
+      while (st.score < lv1_10Star1 && st.timeLeft > 9.0) {
         const idx = st.seats.findIndex(Boolean);
         if (idx >= 0) st = await bakeAndServeSeat(ctx, idx);
         else st = await ctx.advanceTime(2.0);
       }
-      ctx.assert(st.score >= 5500, `Expected score >= 5500 on 1-10, got ${st.score}`);
+      ctx.assert(st.score >= lv1_10Star1, `Expected score >= ${lv1_10Star1} on 1-10, got ${st.score}`);
 
       st = await ctx.advanceTime(st.timeLeft + 1.0);
       ctx.assertEq(st.activeModal, 'level_result', 'Expected level_result modal');
@@ -4264,9 +4265,10 @@ const F13_TESTS = [
         highestUnlockedLevel: '1-1'
       });
 
-      // Organically serve orders on 1-1 until score >= 1750 (3-star target in v0.9.0)
+      // Organically serve orders on 1-1 until reaching 3-star target
+      const [, , s3_1_1] = (await ctx.requireBundledModule('./src/levels_data.js')).getLevelById('1-1').stars;
       let st = await ctx.advanceTime(3.1);
-      for (let guard = 0; guard < 45 && st.score < 1770 && st.timeLeft > 9.0; guard++) {
+      for (let guard = 0; guard < 80 && st.score < s3_1_1 + 20 && st.timeLeft > 9.0; guard++) {
         let idx = st.seats.findIndex((s) => s && s.patience / s.maxPatience > 0.62);
         if (idx < 0) idx = st.seats.findIndex(Boolean);
         if (idx >= 0) {
@@ -4275,7 +4277,7 @@ const F13_TESTS = [
           st = await ctx.advanceTime(2.0);
         }
       }
-      ctx.assert(st.score >= 1750, `Expected 3-star score >= 1750 on 1-1, got ${st.score}`);
+      ctx.assert(st.score >= s3_1_1, `Expected 3-star score >= ${s3_1_1} on 1-1, got ${st.score}`);
 
       // Expire remaining shift timer to trigger settlement
       st = await ctx.advanceTime(st.timeLeft + 1.0);
@@ -4320,17 +4322,18 @@ const F13_TESTS = [
         highestUnlockedLevel: '1-2'
       });
 
-      // Run 1: achieve 2 stars (1250 <= score < 1750) -> +15 (2nd star) + 6 (base clear) = +21 stardust
+      // Run 1: achieve 2 stars (s2 <= score < s3) -> +15 (2nd star) + 6 (base clear) = +21 stardust
+      const [, s2_1_1, s3_1_1] = (await ctx.requireBundledModule('./src/levels_data.js')).getLevelById('1-1').stars;
       let st = await ctx.advanceTime(3.1);
-      while (st.score < 1265 && st.timeLeft > 10) {
-        if (st.score >= 1120 && st.comboCount >= 3) {
-          st = await ctx.advanceTime(8.5);
+      while (st.score < s2_1_1 + 15 && st.timeLeft > 10) {
+        if (st.score >= s2_1_1 - 150 && (st.comboCount >= 3 || st.feverActive)) {
+          st = await ctx.advanceTime(10.5);
         }
         const idx = st.seats.findIndex(Boolean);
         if (idx >= 0) st = await bakeAndServeSeat(ctx, idx);
         else st = await ctx.advanceTime(2.0);
       }
-      ctx.assert(st.score >= 1250 && st.score < 1750, `Expected 2-star score in [1250, 1749], got ${st.score}`);
+      ctx.assert(st.score >= s2_1_1 && st.score < s3_1_1, `Expected 2-star score in [${s2_1_1}, ${s3_1_1 - 1}], got ${st.score}`);
 
       st = await ctx.advanceTime(st.timeLeft + 1.0);
       ctx.assertEq(st.activeModal, 'level_result', 'Run 1 settled');
@@ -4346,15 +4349,15 @@ const F13_TESTS = [
       // Run 2: replay 1-1 achieving 2 stars again -> 0 first-star dust + ceil(6 * 0.5) = +3 stardust
       await ctx.eval(() => window.__HOSHI_DEBUG__.startLevel('1-1'));
       st = await ctx.advanceTime(3.1);
-      while (st.score < 1265 && st.timeLeft > 10) {
-        if (st.score >= 1120 && st.comboCount >= 3) {
-          st = await ctx.advanceTime(8.5);
+      while (st.score < s2_1_1 + 15 && st.timeLeft > 10) {
+        if (st.score >= s2_1_1 - 150 && (st.comboCount >= 3 || st.feverActive)) {
+          st = await ctx.advanceTime(10.5);
         }
         const idx = st.seats.findIndex(Boolean);
         if (idx >= 0) st = await bakeAndServeSeat(ctx, idx);
         else st = await ctx.advanceTime(2.0);
       }
-      ctx.assert(st.score >= 1250 && st.score < 1750, `Run 2 expected 2-star score, got ${st.score}`);
+      ctx.assert(st.score >= s2_1_1 && st.score < s3_1_1, `Run 2 expected 2-star score in [${s2_1_1}, ${s3_1_1 - 1}], got ${st.score}`);
 
       st = await ctx.advanceTime(st.timeLeft + 1.0);
       const res2 = st.lastResult || {};
@@ -4382,15 +4385,16 @@ const F13_TESTS = [
       });
       let st = await ctx.advanceTime(0.6);
       st = await bakeAndServeSeat(ctx, st.seats.findIndex(Boolean));
+      const s1_1_1 = (await ctx.requireBundledModule('./src/levels_data.js')).getLevelById('1-1').stars[0];
       const failScore = st.score;
-      ctx.assert(failScore > 0 && failScore < 850 && st.ordersServed === 1, `Expected 1 serve < 850, got ${failScore}`);
+      ctx.assert(failScore > 0 && failScore < s1_1_1 && st.ordersServed === 1, `Expected 1 serve < ${s1_1_1}, got ${failScore}`);
 
       st = await ctx.advanceTime(st.timeLeft + 1.0);
       ctx.assertEq(st.activeModal, 'level_result', 'Run A settled');
       const resA = st.lastResult || {};
       ctx.assertEq(resA.cleared, false, 'Run A cleared === false');
       ctx.assertEq(resA.starsEarned ?? resA.stars, 0, 'Run A starsEarned === 0');
-      const expectedConsolation = Math.max(1, Math.floor((failScore / 850) * 4));
+      const expectedConsolation = Math.max(1, Math.floor((failScore / s1_1_1) * 4));
       ctx.assertEq(resA.totalDustAward ?? resA.consolationDust, expectedConsolation, 'Run A consolation formula');
       let save = await ctx.getSaveData();
       ctx.assertEq(save.bankStardust, 50 + expectedConsolation, 'Consolation stardust credited to bankStardust');
@@ -4727,7 +4731,7 @@ const F15_TESTS = [
         unlockedPatrons: ['mikan', 'luna'],
         selectedPatron: 'luna',
         deviceUpgrades: { dev_tray: 1, dev_flour: 0, dev_teapot: 3, dev_tools: 3 }
-      });
+      }, { features: LEGACY_FORMULA_FEATURES });
 
       // Charge luna skillEnergy to 100 via 4 serves
       let st = await ctx.advanceTime(3.1);

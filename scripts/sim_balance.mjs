@@ -33,9 +33,9 @@ const LEVELS_PATH = path.join(REPO_ROOT, '05-微信小游戏版本', 'src', 'lev
 // Bot profiles & assumed meta progression per chapter (what a typical player owns when arriving)
 // ---------------------------------------------------------------------------------------------
 export const PROFILES = {
-  novice: { label: '新手', aps: 1.0, noise: 0.7, skillUse: 0.5, lookahead: 0, smartTray: false, kneadRhythm: 0.0 },
-  skilled: { label: '熟练', aps: 2.2, noise: 0.12, skillUse: 1.0, lookahead: 0, smartTray: true, kneadRhythm: 0.38 },
-  expert: { label: '高手', aps: 3.4, noise: 0.0, skillUse: 1.0, lookahead: 1, smartTray: true, kneadRhythm: 0.42 }
+  novice: { label: '新手', aps: 0.88, noise: 0.45, skillUse: 0.6, lookahead: 0, smartTray: false, kneadRhythm: 0.0 },
+  skilled: { label: '熟练', aps: 1.32, noise: 0.22, skillUse: 0.9, lookahead: 0, smartTray: true, kneadRhythm: 0.44 },
+  expert: { label: '高手', aps: 1.95, noise: 0.0, skillUse: 1.0, lookahead: 1, smartTray: true, kneadRhythm: 0.44 }
 };
 
 export const META_BY_CHAPTER = {
@@ -178,17 +178,34 @@ function playRun(dbg, GridEngine, createRng, job) {
       const freeSlot = os.tray.slice(0, os.trayCapacity).findIndex((t) => !t);
       const needs = collectNeeds(os);
       if (freeSlot >= 0 && needs.length > 0) {
+        const nowSec = typeof v.nowSec === 'number' ? v.nowSec : simT;
         outer: for (const need of needs) {
+          let pickR = -1;
+          let pickC = -1;
+          let pickFresh = false;
           for (let r = 0; r < gs.rows; r++) {
             for (let c = 0; c < gs.cols; c++) {
               const cell = gs.cells[r][c];
               if (cell && cell.tile && tileFits(cell.tile, need)) {
                 if (!prof.smartTray && botRng() < prof.noise * 0.4) continue;
-                dbg.tapBoardCell(r, c);
-                acted = true;
-                break outer;
+                const isFresh =
+                  typeof cell.tile.bakedAt === 'number' &&
+                  nowSec - cell.tile.bakedAt >= 0 &&
+                  nowSec - cell.tile.bakedAt <= 6.0;
+                if (pickR < 0 || (prof.smartTray && isFresh && !pickFresh)) {
+                  pickR = r;
+                  pickC = c;
+                  pickFresh = isFresh;
+                  if (!prof.smartTray || pickFresh) break;
+                }
               }
             }
+            if (pickR >= 0 && (!prof.smartTray || pickFresh)) break;
+          }
+          if (pickR >= 0) {
+            dbg.tapBoardCell(pickR, pickC);
+            acted = true;
+            break outer;
           }
         }
       }
@@ -242,7 +259,7 @@ function playRun(dbg, GridEngine, createRng, job) {
       const wantsKnead = empty > 0 && (best === null || best < 0.9 || empty / totalPlayable > 0.45);
       const rhythmOk = prof.kneadRhythm <= 0 || simT - lastKneadAt >= prof.kneadRhythm;
       if (wantsKnead && rhythmOk) {
-        dbg.knead();
+        dbg.knead({ realistic: true });
         lastKneadAt = simT;
         acted = true;
       } else if (bestDir) {
@@ -252,7 +269,7 @@ function playRun(dbg, GridEngine, createRng, job) {
         dbg.slide(moving[Math.floor(botRng() * moving.length)]);
         acted = true;
       } else if (empty > 0) {
-        dbg.knead();
+        dbg.knead({ realistic: true });
         lastKneadAt = simT;
         acted = true;
       }
@@ -360,34 +377,48 @@ export function aggregate(results) {
   return agg;
 }
 
+// Gentle FTUE onboarding multiplier for the first 3 tutorial levels (reading time + gesture learning).
+const ONBOARDING_RAMP = { '1-1': 0.55, '1-2': 0.72, '1-3': 0.86 };
+
 export function suggestStars(levelAgg) {
   const nov = levelAgg.profiles.novice;
   const sk = levelAgg.profiles.skilled;
   const ex = levelAgg.profiles.expert;
   if (!nov || !sk) return null;
-  let s1 = nov.p50;
-  let s2 = Math.max(sk.p50, s1 * 1.3);
-  let s3 = Math.max(sk.p85, s2 * 1.18);
-  if (ex) s3 = Math.min(s3, Math.max(ex.p60, s2 * 1.15));
+  const ramp = ONBOARDING_RAMP[levelAgg.levelId] || 1.0;
+  let s1 = nov.p50 * ramp;
+  let s2 = Math.max(sk.p50 * ramp, s1 * 1.3);
+  let s3 = Math.max(sk.p85 * ramp, s2 * 1.18);
+  if (ex) s3 = Math.min(s3, Math.max(ex.p60 * ramp, s2 * 1.15));
   // keep ratios within design band
   s2 = Math.min(Math.max(s2, s1 * 1.30), s1 * 1.65);
   s3 = Math.min(Math.max(s3, s1 * 1.70), s1 * 2.30);
   return [roundNice(s1), roundNice(s2), roundNice(s3)];
 }
 
-function smoothMonotonic(levelIds, suggestions) {
-  // within each chapter, 1★ must not drop more than 10% vs previous level
+function smoothMonotonic(levels, suggestions, chapterCaps) {
+  // Enforce T2-F02-04 (strictly increasing 1★ across all 30 levels) and L2-6 (3★ * 2.5 <= chapterCap),
+  // while keeping 2★/1★ in [1.30, 1.65] and 3★/1★ in [1.70, 2.30].
   let prev = null;
   let prevChapter = null;
-  for (const id of levelIds) {
-    const s = suggestions[id];
+  for (const lvl of levels) {
+    const s = suggestions[lvl.id];
     if (!s) continue;
-    const ch = id.split('-')[0];
-    if (prev && prevChapter === ch) {
-      for (let k = 0; k < 3; k++) {
-        if (s[k] < prev[k] * 0.9) s[k] = roundNice(prev[k] * 0.9);
+    const ch = lvl.chapter;
+    const step = s[0] < 1000 ? 50 : s[0] < 10000 ? 100 : 200;
+    if (prev) {
+      if (s[0] <= prev[0]) s[0] = roundNice(prev[0] + step);
+      if (prevChapter === ch) {
+        if (s[1] < prev[1] * 0.92) s[1] = roundNice(prev[1] * 0.92);
+        if (s[2] < prev[2] * 0.92) s[2] = roundNice(prev[2] * 0.92);
       }
     }
+    // Re-apply design ratio band and chapter anti-cheat cap (s3 * 2.5 <= cap)
+    const cap = chapterCaps && chapterCaps[ch] ? Math.floor(chapterCaps[ch] / 2.5 / 100) * 100 : Infinity;
+    s[1] = roundNice(Math.min(Math.max(s[1], s[0] * 1.32), s[0] * 1.65));
+    s[2] = roundNice(Math.min(Math.max(s[2], s[0] * 1.72, s[1] * 1.15), s[0] * 2.30, cap));
+    if (s[2] <= s[1]) s[1] = roundNice(Math.min(s[2] - step, s[0] * 1.45));
+    if (s[1] <= s[0]) s[0] = roundNice(Math.max(100, s[1] - step));
     prev = s;
     prevChapter = ch;
   }
@@ -400,7 +431,8 @@ export function checkLevel(levelCfg, levelAgg) {
   const sk = levelAgg.profiles.skilled;
   const ex = levelAgg.profiles.expert;
   const [s1, , s3] = levelCfg.stars;
-  if (nov && s1 < nov.p20 * 0.85) issues.push(`1★ ${s1} 过低 (< 新手 P20 ${nov.p20} ×0.85)`);
+  const ramp = ONBOARDING_RAMP[levelCfg.id] || 1.0;
+  if (nov && s1 < nov.p20 * ramp * 0.85) issues.push(`1★ ${s1} 过低 (< 新手 P20 ${nov.p20} ×${ramp}×0.85)`);
   if (nov && s1 > (sk ? sk.p50 : nov.p90)) issues.push(`1★ ${s1} 过高 (> 熟练 P50 ${sk ? sk.p50 : nov.p90})`);
   if (ex && s3 > ex.p90 * 1.1) issues.push(`3★ ${s3} 不可达 (> 高手 P90 ${ex.p90} ×1.1)`);
   if (!ex && sk && s3 > sk.p90 * 1.6) issues.push(`3★ ${s3} 不可达 (> 熟练 P90 ${sk.p90} ×1.6)`);
@@ -485,7 +517,9 @@ async function mainThread() {
       if (s) suggestions[lvl.id] = s;
     }
   }
-  smoothMonotonic(levels.map((l) => l.id), suggestions);
+  const chapterCaps = {};
+  for (const ch of Levels.CHAPTERS || []) chapterCaps[ch.chapter] = ch.maxScoreAntiCheatCap;
+  smoothMonotonic(levels, suggestions, chapterCaps);
 
   const md = renderMarkdown(agg, levels, suggestions, opts);
   if (!opts.quiet) console.log(md);

@@ -1784,6 +1784,46 @@ function renderPlayTopBar(ctx, barRect, app, hits, nowSec) {
 }
 
 /**
+ * v0.10 dough temperature bar inside the knead pill: cold (blue) → warm band (gold) → overheat (red).
+ * Locked state shows a draining grey bar. Purely visual; never registers hits.
+ */
+function drawDoughTempBar(ctx, x, y, w, h, dough, nowSec) {
+  if (!dough || !(w > 8)) return;
+  const c = getSafeCtx(ctx);
+  c.save();
+  UI.roundRectPath(c, x, y, w, h, h / 2);
+  c.fillStyle = 'rgba(60, 34, 20, 0.35)';
+  c.fill();
+  // Warm band marker (warmMin..overheat ≈ 40%..100%)
+  c.fillStyle = 'rgba(255, 214, 120, 0.22)';
+  UI.roundRectPath(c, x + w * 0.4, y, w * 0.6, h, h / 2);
+  c.fill();
+  let ratio = Math.max(0, Math.min(1, Number(dough.ratio) || 0));
+  let color = '#7EC8FF';
+  if (dough.locked) {
+    const total = Math.max(0.1, Number(dough.lockDuration) || 1.2);
+    ratio = Math.max(0.05, Math.min(1, (Number(dough.lockTimer) || 0) / total));
+    color = '#FF6B6B';
+  } else if (dough.zone === 'warm') {
+    color = ratio > 0.85 ? '#FF9A5C' : '#FFD45E';
+  }
+  if (ratio > 0.01) {
+    UI.roundRectPath(c, x, y, Math.max(h, w * ratio), h, h / 2);
+    c.fillStyle = color;
+    c.fill();
+  }
+  if (!dough.locked && dough.zone === 'warm') {
+    const pulse = 0.35 + 0.25 * Math.sin((Number(nowSec) || 0) * 9);
+    c.globalAlpha = pulse;
+    UI.roundRectPath(c, x - 1, y - 1, Math.max(h, w * ratio) + 2, h + 2, (h + 2) / 2);
+    c.strokeStyle = '#FFF4C8';
+    c.lineWidth = 1;
+    c.stroke();
+  }
+  c.restore();
+}
+
+/**
  * Square warm-wood tool button (`移位叉` / `升阶勺`) with wood-grain texture & glossy red count badge (Design 03)
  */
 function drawUtensilButton(ctx, x, y, w, h, kind, app, hits) {
@@ -2077,6 +2117,8 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
       animState,
       guideTargets,
       boardFullHint: app.boardFullHintTimer > 0,
+      freshWindowSec: app.isFeatureOn && app.isFeatureOn('freshBonus') ? app.freshWindowSec || 6 : 0,
+      feverScenePct: app.isFeatureOn && app.isFeatureOn('feverV2') ? 20 : 25,
       forkTrashReady: Boolean(app.activeTool === 'fork' && app.forkSourceCell),
       onTapTraySlot: (idx) => app.handleTraySlotTap(idx),
       onTapTrash: () => app.handleTrashBtnTap()
@@ -2098,13 +2140,21 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
   drawUtensilButton(c, forkX, dockY + 2, forkW, dockH - 4, 'fork', app, hits);
 
   const kneadPressed = app.kneadPressTimer > 0 || isHitPressed(app, 'knead_btn');
+  const dough = typeof app.getDoughView === 'function' ? app.getDoughView() : null;
+  const doughOn = Boolean(dough && app.isFeatureOn && app.isFeatureOn('doughTemp'));
+  const kneadInFever = Boolean(orderState.feverActive && app.isFeatureOn && app.isFeatureOn('feverV2'));
+  const kneadLocked = Boolean(doughOn && dough.locked && !kneadInFever);
   UI.drawPillButton(c, kneadX, dockY + 4, kneadW, dockH - 8, {
-    style: 'knead',
-    label: '揉面补料',
+    style: kneadInFever ? 'active' : 'knead',
+    label: kneadInFever ? '热潮揉面' : kneadLocked ? '过热中' : '揉面补料',
     fontSize: compact ? 18.5 : 21.0,
     radius: Math.round((dockH - 8) * 0.48),
-    pressed: kneadPressed
+    pressed: kneadPressed,
+    disabled: kneadLocked
   });
+  if (doughOn && !kneadInFever) {
+    drawDoughTempBar(c, kneadX + 14, dockY + dockH - 13, kneadW - 28, 4, dough, nowSec);
+  }
   hits.add('knead_btn', kneadX, dockY + 2, kneadW, dockH - 4, () => app.onTapKneadButton());
   guideTargets.kneadBtn = { x: kneadX, y: dockY + 2, w: kneadW, h: dockH - 4 };
 
@@ -2126,7 +2176,9 @@ function renderPlayScreen(ctx, metrics, app, hits, nowSec) {
       activeTool: app.activeTool,
       forkSourceCell: app.forkSourceCell,
       guideTargets,
-      neededTiers: app.neededTiers
+      neededTiers: app.neededTiers,
+      freshWindowSec: app.isFeatureOn && app.isFeatureOn('freshBonus') ? app.freshWindowSec || 6 : 0,
+      feverV2: Boolean(app.isFeatureOn && app.isFeatureOn('feverV2'))
     }
   );
 

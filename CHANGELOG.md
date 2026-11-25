@@ -4,18 +4,30 @@
 
 ---
 
-## [Unreleased]
+## [0.10.0] - 2026-11-25（玩法大改造 M0 基建 + M1 核心循环 A/B）
 
-### Added（v0.10 M0 · 玩法大改造基建）
+### Added（M1 · 方向 A 搓饼与上菜联动 + 方向 B 星光狂欢 V2）
+- **烘焙暴击（`FEATURES.bakeCrit`）**：单次滑动同时合出 `≥ 2` 颗 `C3+` 触发「双重烘焙！/三重烘焙！/星光暴击！」（热潮 `+8/+15/+25`、搭档技能 `+6%/+10%/+15%`，3 连最高新饼镀金，4 连镀金 + 升 1 阶；**严格 0 分**）；配套金色扩散环、微震屏、叠层风铃音效（`audio.playCrit`）与短震动。
+- **面团温度（`src/dough_temp.js`，`FEATURES.doughTemp`）**：揉面升温 `+22°`、指数+线性冷却；金色温区（`40~99°`）`C2` 概率 `+15%` 且连揉 6 次保底 `C3`（风味关优先落抹茶/草莓）；过热（`≥ 100°`）本次出 `C1` 并锁定 `1.2s`（连败 `≥ 2` 次缩短为 `0.6s`），解锁回落 `50°`；揉面按钮下方显示冷蓝→适温金→过热红温度条并切换「过热中」文案，配套 `audio.playOverheat`。
+- **出炉新鲜度（`FEATURES.freshBonus`）**：合成产出的 `C2+` 猫饼记录 `bakedAt`，`6s` 内端给顾客单品品质区 `×1.15` 并显示盘面热气与托盘热乎火点；订单全部可合成项热乎额外 `+6` 热潮能量。
+- **星光热潮 V2（`FEATURES.feverV2`）**：场面区加成调整为 `+20%`；热潮中支持同滑最多 `3` 轮连锁合成、「热潮揉面」（`70% C2 / 30% C3` 且冻结面团温度）、上菜延时 `+1s`（单次上限 `+4s`）、结束「热潮余温」全盘非冰封 `C1 → C2` 与星空色调覆层。
+- **一次性轻量引导**：`bake_crit / fresh / dough_temp / fever_v2` 4 条首触提示；全部新增文案均在现有 `kissa_round.ttf` 字库内零缺字。
+- **单测与 E2E**：新增 `UT-G16~G18 / UT-K01~K03 / UT-O14 / UT-F01~F02 / UT-M09`（共 58 项核心单测）与 `T3-19 / T3-20` 端到端用例；CI（`minigame-ci.yml`）新增 `sim_balance.mjs --check --seeds 6` 数值门禁。
+
+### Changed（M1）
+- `GAME_VERSION` 升级至 **`0.10.0`**，`BALANCE_VERSION` 升级至 **`0.10.0-m1`**。
+- 使用 `scripts/sim_balance.mjs`（人类节奏三档 Bot × 12 seeds × 30 关）重新定标全 30 关星级门槛，解决原 `v0.9.0` 第 2/3 章门槛偏陡与第 1 章偏平问题；保持各星尘奖励与商店价格不变。
+
+### Added（M0 · 基建与数值体系，已合入）
 - `src/rng.js`：mulberry32 种子 RNG + 网格/顾客/事件分流，`startLevel(id, { seed })` 全局可复现（每日特调/回放/模拟器基础）。
-- `src/game_events.js`：局内同步事件总线（`run:start / slide / knead / serve / fever:start / run:end` …），监听器异常隔离。
+- `src/game_events.js`：局内同步事件总线（`run:start / slide / knead / crit / serve / fever:start / fever:end / run:end` …），监听器异常隔离。
 - `src/balance_config.js`：v0.10+ 数值单一来源、`FEATURES` 特性开关、远程调参白名单夹逼 `applyRemoteOverrides()`。
 - `scripts/sim_balance.mjs` + `scripts/lib/headless_app.mjs`：无头驱动真实控制器的三档 Bot 数值模拟器（分布报告 / 建议星级 / `--write` 定标 / `--check` 门禁）。
 - `platform.reportEvent`（We分析）与 `runReport.telemetry` 局内统计埋点；`docs/07-数值模拟与调参手册.md`。
 - 单测 `UT-R01 / UT-O11 / UT-O12 / UT-O13 / UT-E00`。
 
-### Changed（v0.10 M0）
-- **计分改为乘区制**：技巧区相加封顶 +0.90、场面区相加封顶 +1.00、顾客区相乘；旧连乘公式保留在 `FEATURES.scoreZones=false`。热潮提示改为「得分 +25%」。
+### Changed（M0）
+- **计分改为乘区制**：技巧区相加封顶 +0.90、场面区相加封顶 +1.00、顾客区相乘；旧连乘公式保留在 `FEATURES.scoreZones=false`。
 - **`modeOverrides` 全链路生效**：上菜计分、C2 概率、搭档技能、开局厨具、关卡形状/星级覆盖统一走 run context；非 `campaign` 模式不写存档、不推云、不触发连败保底。
 - 包体门禁由 3.2 MB 上调至 **3.5 MB**（T1-F01-06 / UT-M01 / L3-8 与文档同步）；修正文档中残留的「自动上菜」描述与计分过期注释。
 

@@ -1736,6 +1736,42 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
             showFlavorBadge: true
           }
         );
+
+        // v0.10 M1: hot tray items (inside opts.freshWindowSec) puff a steam wisp + warm dot.
+        const trayFreshWin = toSafeNum(getOwn(opts, 'freshWindowSec', 0), 0);
+        const trayBakedAt = getOwn(tile, 'bakedAt', null);
+        if (trayFreshWin > 0 && typeof trayBakedAt === 'number' && Number.isFinite(trayBakedAt)) {
+          const trayAge = toSafeNum(getOwn(orderState, 'elapsedSec', 0), 0) - trayBakedAt;
+          if (trayAge >= 0 && trayAge <= trayFreshWin) {
+            const trayHeat = 1 - trayAge / trayFreshWin;
+            const steamX = plateCx + cakeSz * 0.34;
+            const steamY = ry + trayRowH * 0.33 - cakeSz * 0.42 + bounceDy;
+            ctx.save();
+            try {
+              ctx.globalAlpha = clamp(0.55 + trayHeat * 0.45, 0, 1);
+              ctx.fillStyle = '#FF8A3D';
+              ctx.strokeStyle = '#FFF1D6';
+              ctx.lineWidth = 1.4;
+              ctx.beginPath();
+              ctx.arc(steamX, steamY, Math.max(3, cakeSz * 0.09), 0, Math.PI * 2);
+              ctx.fill();
+              ctx.stroke();
+              ctx.strokeStyle = '#FFFFFF';
+              ctx.lineCap = 'round';
+              ctx.lineWidth = Math.max(1.1, cakeSz * 0.04);
+              const ph = (nowSec * 1.4 + i * 0.37) % 1;
+              ctx.globalAlpha = clamp(trayHeat * (1 - ph) * 0.8, 0, 0.8);
+              const wy = steamY - cakeSz * 0.12 - ph * cakeSz * 0.22;
+              ctx.beginPath();
+              ctx.moveTo(steamX, wy + cakeSz * 0.1);
+              ctx.quadraticCurveTo(steamX + cakeSz * 0.06, wy + cakeSz * 0.05, steamX, wy);
+              ctx.quadraticCurveTo(steamX - cakeSz * 0.06, wy - cakeSz * 0.05, steamX, wy - cakeSz * 0.1);
+              ctx.stroke();
+            } finally {
+              try { ctx.restore(); } catch (_) {}
+            }
+          }
+        }
       }
     }
 
@@ -2139,9 +2175,14 @@ function renderTrayStrip(ctx, rect, orderState, sprites, hits, arg6 = 0, arg7 = 
       });
 
       if (feverActive) {
+        const feverPctOpt = toSafeNum(getOwn(opts, 'feverScenePct', 0), 0);
+        const feverBadgeTxt =
+          feverPctOpt > 0
+            ? `+${Math.round(feverPctOpt)}% ${Math.ceil(feverTimer)}s`
+            : `×${(FEVER_CONFIG.scoreMult || 1.25).toFixed(2)} ${Math.ceil(feverTimer)}s`;
         UI.drawOutlinedText(
           ctx,
-          `×${(FEVER_CONFIG.scoreMult || 1.25).toFixed(2)} ${Math.ceil(feverTimer)}s`,
+          feverBadgeTxt,
           feverX + feverW - 11,
           fTxtCy,
           {
@@ -2305,6 +2346,18 @@ function resolveSlideState(animState) {
 
 function resolveBlockedShakeOffset(animState) {
   if (!isPlainObj(animState)) return { dx: 0, dy: 0 };
+  // v0.10 bake crit: short omni-directional jolt that scales with crit level
+  const rawCs = getOwn(animState, 'critShake', null);
+  if (isPlainObj(rawCs)) {
+    const cRem = toSafeNum(getOwn(rawCs, 'timer', 0), 0);
+    const cDur = Math.max(0.02, toSafeNum(getOwn(rawCs, 'duration', 0.2), 0.2));
+    if (cRem > 0) {
+      const cp = clamp(1 - cRem / cDur, 0, 1);
+      const lv = clamp(toSafeNum(getOwn(rawCs, 'level', 2), 2), 2, 4);
+      const amp = Math.sin(cp * Math.PI * 3) * (1 - cp) * (1.6 + lv);
+      return { dx: amp * 0.6, dy: amp };
+    }
+  }
   const rawBs = getOwn(animState, 'blockedShake', null);
   const bs = isPlainObj(rawBs) ? rawBs : null;
   const dir = bs ? getOwn(bs, 'dir', null) : getOwn(animState, 'shakeDir', null);
@@ -2402,6 +2455,123 @@ function collectCellFXMaps(animState) {
   }
 
   return { mergeMap, spawnMap, iceList };
+}
+
+/**
+ * v0.10 M1 board overlays (pure display):
+ *  - steam wisps over tiles baked within opts.freshWindowSec of orderState.elapsedSec
+ *  - expanding gold rings for cellFX kind 'crit'
+ *  - soft starry tint across the bed while Starlight Fever is active
+ */
+function renderV010BoardOverlays(ctx, layout, cellsMatrix, orderState, animState, nowSec, opts) {
+  const cellSize = layout.cellSize;
+  const rows = layout.rows;
+  const cols = layout.cols;
+  const freshWindow = toSafeNum(getOwn(opts, 'freshWindowSec', 0), 0);
+  const gameSec = toSafeNum(getOwn(orderState, 'elapsedSec', 0), 0);
+  const feverTimer = toSafeNum(getOwn(orderState, 'feverTimer', 0), 0);
+  const feverOn = Boolean(getOwn(orderState, 'feverActive', false) || feverTimer > 0);
+
+  if (feverOn && Boolean(getOwn(opts, 'feverV2', false))) {
+    ctx.save();
+    try {
+      ctx.globalAlpha *= 0.16 + 0.06 * Math.sin(nowSec * 3.1);
+      ctx.fillStyle = '#B98CFF';
+      UI.roundRectPath(ctx, layout.gridX - 2, layout.gridY - 2, layout.gridW + 4, layout.gridH + 4, Math.round(cellSize * 0.2));
+      ctx.fill();
+      ctx.globalAlpha = 0.75;
+      ctx.fillStyle = '#FFF6C8';
+      for (let k = 0; k < 7; k++) {
+        const ang = nowSec * 0.9 + k * 0.9;
+        const sx = layout.gridX + layout.gridW * ((k * 0.29 + 0.07 + Math.sin(ang) * 0.04 + 1) % 1);
+        const sy = layout.gridY + layout.gridH * ((k * 0.41 + 0.11 + nowSec * 0.05) % 1);
+        UI.drawStar(ctx, sx, sy, 2.6 + (k % 3), ang);
+      }
+    } finally {
+      try {
+        ctx.restore();
+      } catch (_) {}
+    }
+  }
+
+  if (freshWindow > 0) {
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const cell = cellsMatrix[r][c];
+        if (!cell || !cell.tile) continue;
+        const bakedAt = getOwn(cell.tile, 'bakedAt', null);
+        if (typeof bakedAt !== 'number' || !Number.isFinite(bakedAt)) continue;
+        if (toSafeNum(getOwn(cell.tile, 'frozenHp', 0), 0) > 0) continue;
+        const age = gameSec - bakedAt;
+        if (!(age >= 0) || age > freshWindow) continue;
+        const heat = 1 - age / freshWindow;
+        const cx = layout.gridX + (c + 0.5) * cellSize;
+        const topY = layout.gridY + r * cellSize + cellSize * 0.2;
+        ctx.save();
+        try {
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.lineCap = 'round';
+          ctx.lineWidth = Math.max(1.2, cellSize * 0.035);
+          for (let k = 0; k < 2; k++) {
+            const ph = (nowSec * 1.3 + k * 0.5 + (r * 7 + c * 3) * 0.13) % 1;
+            ctx.globalAlpha = clamp(heat * (1 - ph) * 0.75, 0, 0.75);
+            const wx = cx + (k === 0 ? -1 : 1) * cellSize * 0.12;
+            const wy = topY - ph * cellSize * 0.28;
+            ctx.beginPath();
+            ctx.moveTo(wx, wy + cellSize * 0.1);
+            ctx.quadraticCurveTo(wx + cellSize * 0.06, wy + cellSize * 0.05, wx, wy);
+            ctx.quadraticCurveTo(wx - cellSize * 0.06, wy - cellSize * 0.05, wx, wy - cellSize * 0.1);
+            ctx.stroke();
+          }
+        } finally {
+          try {
+            ctx.restore();
+          } catch (_) {}
+        }
+      }
+    }
+  }
+
+  const cellFX = getOwn(animState, 'cellFX', null);
+  const fxLen = safeArrayLen(cellFX, 256);
+  for (let i = 0; i < fxLen; i++) {
+    const fx = getOwn(cellFX, i, null);
+    if (!isPlainObj(fx) || getOwn(fx, 'kind', '') !== 'crit') continue;
+    const dur = Math.max(0.05, toSafeNum(getOwn(fx, 'duration', 0.42), 0.42));
+    const rem = toSafeNum(getOwn(fx, 'timer', 0), 0);
+    if (!(rem > 0)) continue;
+    const p = clamp(1 - rem / dur, 0, 1);
+    const r = toSafeNum(getOwn(fx, 'r', -1), -1);
+    const c = toSafeNum(getOwn(fx, 'c', -1), -1);
+    if (r < 0 || c < 0) continue;
+    const lv = clamp(toSafeNum(getOwn(fx, 'level', 2), 2), 2, 4);
+    const cx = layout.gridX + (c + 0.5) * cellSize;
+    const cy = layout.gridY + (r + 0.5) * cellSize;
+    ctx.save();
+    try {
+      for (let ring = 0; ring < lv - 1; ring++) {
+        const rp = clamp(p - ring * 0.12, 0, 1);
+        if (rp <= 0) continue;
+        ctx.globalAlpha = clamp(1 - rp, 0, 1);
+        ctx.strokeStyle = ring === 0 ? '#FFD45E' : '#FFF2A8';
+        ctx.lineWidth = Math.max(1.5, cellSize * 0.07 * (1 - rp));
+        ctx.beginPath();
+        ctx.arc(cx, cy, cellSize * (0.3 + rp * 0.6), 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = clamp(1 - p, 0, 1);
+      ctx.fillStyle = '#FFF6C8';
+      for (let k = 0; k < 4 + lv * 2; k++) {
+        const ang = (k / (4 + lv * 2)) * Math.PI * 2 + p;
+        const dist = cellSize * (0.25 + p * 0.65);
+        UI.drawStar(ctx, cx + Math.cos(ang) * dist, cy + Math.sin(ang) * dist, 2.2 + lv * 0.5, ang);
+      }
+    } finally {
+      try {
+        ctx.restore();
+      } catch (_) {}
+    }
+  }
 }
 
 /**
@@ -3562,6 +3732,11 @@ function renderBoardStage(
           } catch (_) {}
         }
       }
+    }
+
+    // Pass 4B (v0.10): fresh steam wisps, bake-crit gold rings, Fever starry tint
+    if (!isThumb) {
+      renderV010BoardOverlays(ctx, layout, cellsMatrix, orderState, animState, nowSec, opts);
     }
 
     // Pass 5: Active Utensil Aiming Notice Banner at Top of Board Stage

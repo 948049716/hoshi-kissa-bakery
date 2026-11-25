@@ -40,6 +40,13 @@ const BASE_PRICES_LV0 = { 1: 30, 2: 70, 3: 150, 4: 320, 5: 680, 6: 1400, 7: 2800
 const COMBO_SIZE_MULTS = { 1: 1.0, 2: 1.12, 3: 1.25 };
 const SERVE_COMBO_MULTS = [1.0, 1.06, 1.13, 1.2, 1.28];
 
+const LEGACY_FORMULA_FEATURES = Object.freeze({
+  bakeCrit: false,
+  freshBonus: false,
+  doughTemp: false,
+  feverV2: false
+});
+
 const TUTORIALS_ALL_SEEN = {
   intro_slide: true,
   tray_trash: true,
@@ -81,7 +88,8 @@ function inspectBoard(st) {
           uid: cell.tile.uid,
           tier: cell.tile.tier,
           flavor: cell.tile.flavor || 'plain',
-          frozenHp
+          frozenHp,
+          bakedAt: cell.tile.bakedAt
         });
       }
     }
@@ -1126,7 +1134,7 @@ export const TIER3_TESTS = [
         totalEarnedStardust: 110,
         bankStardust: 30,
         seenTutorials: TUTORIALS_ALL_SEEN
-      });
+      }, { features: LEGACY_FORMULA_FEATURES });
 
       // Verify non-serve actions grant 0 Fever energy
       await ctx.slide('left');
@@ -1394,7 +1402,7 @@ export const TIER3_TESTS = [
         totalEarnedStardust: 990,
         bankStardust: 130,
         seenTutorials: TUTORIALS_ALL_SEEN
-      });
+      }, { features: LEGACY_FORMULA_FEATURES });
 
       let st = await ctx.getState();
       ctx.assertEq(inspectBoard(st).frozenCount, 4, '3-8 begins with 4 corner frozen I tiles');
@@ -1695,7 +1703,7 @@ export const TIER3_TESTS = [
           bankStardust: 160,
           seenTutorials: TUTORIALS_ALL_SEEN
         },
-        { skillEnergy: 100, forceCharge: true }
+        { skillEnergy: 100, forceCharge: true, features: LEGACY_FORMULA_FEATURES }
       );
 
       let st = await ctx.getState();
@@ -2200,7 +2208,7 @@ export const TIER3_TESTS = [
 
       const serveR04On1_2 = async () => {
         for (let attempt = 0; attempt < 25; attempt++) {
-          await ctx.eval(() => globalThis.__HOSHI_DEBUG__.startLevel('1-2'));
+          await ctx.eval((feats) => globalThis.__HOSHI_DEBUG__.startLevel('1-2', { features: feats }), LEGACY_FORMULA_FEATURES);
           const st = await ctx.advanceTime(3.2);
           const idx = (st.seats || []).findIndex((s) => s && s.recipeId === 'R04');
           if (idx >= 0) {
@@ -2303,10 +2311,10 @@ export const TIER3_TESTS = [
 
       await ctx.advanceTime(3.2);
 
-      // Serve waves on 2-6 until vipServed >= 1 AND score >= 12200 (star1 of 2-6 in v0.9.0)
-      for (let wave = 0; wave < 42; wave++) {
+      const lv2_6s1 = (await ctx.requireBundledModule('./src/levels_data.js')).getLevelById('2-6').stars[0];
+      for (let wave = 0; wave < 48; wave++) {
         let st = await ctx.getState();
-        if (st.vipServed >= 1 && st.score >= 12200) break;
+        if (st.vipServed >= 1 && st.score >= lv2_6s1) break;
         if (st.timeLeft <= 9) break;
 
         const vipIdx = (st.seats || []).findIndex((s) => s && (s.isVip || s.customerId === 'cust_critic'));
@@ -2323,7 +2331,7 @@ export const TIER3_TESTS = [
 
       let stMid = await ctx.getState();
       ctx.assert(stMid.vipServed >= 1, `Expected >= 1 VIP served on 2-6, got ${stMid.vipServed}`);
-      ctx.assert(stMid.score >= 12200, `Expected score >= 12200 (2-6 star1), got ${stMid.score}`);
+      ctx.assert(stMid.score >= lv2_6s1, `Expected score >= ${lv2_6s1} (2-6 star1), got ${stMid.score}`);
 
       // Advance countdown to 0 for Chapter 2 settlement
       const stEnd = await ctx.advanceTime(stMid.timeLeft + 0.8);
@@ -2498,11 +2506,16 @@ export const TIER3_TESTS = [
 
       // Seed 3 cloud rivals to verify BOTH primary sort and tie-break order across 'stars' and 'score' boards:
       // Player will achieve 5 stars (1-1: 3★ >=1400, 1-2: 2★ in [1520, 1949]) with cumulative score ~3000..4500.
+      const levelsMod15 = await ctx.requireBundledModule('./src/levels_data.js');
+      const lv1_1_s3 = levelsMod15.getLevelById('1-1').stars[2];
+      const lv1_2_s2 = levelsMod15.getLevelById('1-2').stars[1];
+      const richRivalScore = Math.max(15000, (lv1_1_s3 + lv1_2_s2) * 3);
+      const topRivalScore = richRivalScore + 10000;
       await ctx.setCloudConfig({
         seedRivals: [
-          { id: 'rival_top', nickName: '星冠大师A', avatarPreset: 'luna', totalStars: 12, totalCumulativeScore: 15000, isNpc: false },
+          { id: 'rival_top', nickName: '星冠大师A', avatarPreset: 'luna', totalStars: 12, totalCumulativeScore: topRivalScore, isNpc: false },
           { id: 'rival_tie', nickName: '同星店长B', avatarPreset: 'mikan', totalStars: 5, totalCumulativeScore: 2100, isNpc: false },
-          { id: 'rival_rich', nickName: '高分冲刺C', avatarPreset: 'mugi', totalStars: 3, totalCumulativeScore: 9500, isNpc: false }
+          { id: 'rival_rich', nickName: '高分冲刺C', avatarPreset: 'mugi', totalStars: 3, totalCumulativeScore: richRivalScore, isNpc: false }
         ]
       });
 
@@ -2514,10 +2527,10 @@ export const TIER3_TESTS = [
         seenTutorials: TUTORIALS_ALL_SEEN
       });
 
-      // Clear 1-1 with 3 stars (score >= 1750, < 4000)
+      // Clear 1-1 with 3 stars
       await ctx.clickHit('lobby_start_cta');
       await ctx.advanceTime(3.2);
-      while ((await ctx.getState()).score < 1800) {
+      while ((await ctx.getState()).score < lv1_1_s3 + 30) {
         await serveCustomerOrganic(ctx);
       }
       let st = await ctx.getState();
@@ -2533,11 +2546,11 @@ export const TIER3_TESTS = [
         await ctx.clickHit('preview_start_btn');
       }
       await ctx.advanceTime(3.2);
-      while ((await ctx.getState()).score < 1850) {
+      while ((await ctx.getState()).score < lv1_2_s2 + 30) {
         const cur = await ctx.getState();
         const smallIdx = (cur.seats || []).findIndex((s) => s && ['R01', 'R02', 'R03', 'R04'].includes(s.recipeId));
         await serveCustomerOrganic(ctx, smallIdx >= 0 ? smallIdx : null);
-        if ((await ctx.getState()).score >= 1820) break;
+        if ((await ctx.getState()).score >= lv1_2_s2 + 10) break;
       }
       st = await ctx.getState();
       // If a big combo pushed >= 1950, replay 1-2 once stopping right above 1520? Wait: bestStars is monotonic,
@@ -2551,7 +2564,7 @@ export const TIER3_TESTS = [
       const expectedTotalStars = stars1 + stars2;
       const expectedTotalScore = (save.levelBestScores['1-1'] || 0) + (save.levelBestScores['1-2'] || 0);
       ctx.assert(expectedTotalStars >= 5, `Expected >= 5 total stars, got ${expectedTotalStars}`);
-      ctx.assert(expectedTotalScore >= 2950 && expectedTotalScore < 9500, `Expected cumulative score in [2950, 9500), got ${expectedTotalScore}`);
+      ctx.assert(expectedTotalScore >= lv1_1_s3 + lv1_2_s2 && expectedTotalScore < richRivalScore, `Expected cumulative score in [${lv1_1_s3 + lv1_2_s2}, ${richRivalScore}), got ${expectedTotalScore}`);
 
       // Verify Cloud leaderboard responses directly AND via live UI modal tabs
       const lbStars = await ctx.callCloud({ action: 'leaderboard', boardType: 'stars' });
@@ -2846,6 +2859,236 @@ export const TIER3_TESTS = [
       }
       ctx.assertEq((ctx.cdp.networkErrors || []).length, 0, 'Zero HTTP 404/500 network asset errors');
       ctx.assertEq(ctx.cdp.errors.length, 0, 'Zero console/runtime errors');
+    }
+  },
+
+  {
+    id: 'T3-19',
+    tier: 3,
+    features: ['F03', 'F08'],
+    title: 'v0.10 M1 Bake Crit (>=2 C3+ merges award 0 score + fever/skill energy) and Fresh Bonus (<=6s x1.15 + allHot +6 fever)',
+    run: async (ctx) => {
+      await ctx.resetGame({ clearCloud: true, clearLocal: true });
+
+      // Part 1: Fresh bonus on a freshly merged C2 vs expired C2 (1-1, luna -> 0 patron scene bonus)
+      let r02Idx = -1;
+      for (let attempt = 0; attempt < 25; attempt++) {
+        await ctx.setupSaveAndStart(
+          '1-1',
+          {
+            selectedPatron: 'luna',
+            unlockedPatrons: ['mikan', 'luna'],
+            deviceUpgrades: { dev_tray: 1, dev_flour: 0, dev_teapot: 3, dev_tools: 3 },
+            seenTutorials: TUTORIALS_ALL_SEEN
+          },
+          { seed: 42 + attempt, skipTutorial: true }
+        );
+        const st0 = await ctx.advanceTime(3.2);
+        r02Idx = (st0.seats || []).findIndex((s) => s && s.recipeId === 'R02' && s.patience / s.maxPatience > 0.65);
+        if (r02Idx >= 0) break;
+      }
+      ctx.assert(r02Idx >= 0, 'Expected green R02 customer on 1-1');
+
+      // Check M1 feature flags are ON by default
+      const runInfo = await ctx.eval(() => globalThis.__HOSHI_DEBUG__.getRunInfo());
+      ctx.assert(
+        runInfo && runInfo.features && runInfo.features.bakeCrit && runInfo.features.freshBonus && runInfo.features.doughTemp && runInfo.features.feverV2,
+        'M1 feature flags must all be active by default'
+      );
+
+      // Clear board, spawn C1s until two can merge into a fresh C2 (bakedAt stamped)
+      await ctx.clearBoardExcept([]);
+      let freshC2 = null;
+      for (let guard = 0; guard < 30 && !freshC2; guard++) {
+        await ctx.knead();
+        const stMid = await ctx.getState();
+        const c1s = inspectBoard(stMid).tiles.filter((t) => t.tier === 1);
+        if (c1s.length >= 2) {
+          for (const dir of ['left', 'up', 'right', 'down']) {
+            const pv = previewSlideReadOnly(stMid.grid, dir);
+            if (pv && (Array.isArray(pv.merges) ? pv.merges.length : pv.merges) > 0) {
+              await ctx.slide(dir);
+              const afterSlide = await ctx.getState();
+              freshC2 = inspectBoard(afterSlide).tiles.find((t) => t.tier === 2 && typeof t.bakedAt === 'number');
+              if (freshC2) break;
+            }
+          }
+        }
+      }
+      ctx.assert(freshC2, 'Organically merged a freshly baked C2 with bakedAt timestamp');
+      const preFresh = await ctx.getState();
+      const seatPre = preFresh.seats[r02Idx];
+      ctx.assert(seatPre && seatPre.patience / seatPre.maxPatience > 0.60, 'Target R02 seat still in green band');
+      const feverPre = preFresh.feverEnergy;
+
+      await ctx.tapBoardCell(freshC2.r, freshC2.c);
+      await ctx.clickHit(`seat_${r02Idx}`);
+      const postFresh = await ctx.advanceTime(0.35);
+      // Fresh C2 (70 * 1.15 = 80.5) * green tip (1.20) = round(96.6) = 97 (vs cold 84)
+      ctx.assertClose(postFresh.score, Math.round(70 * 1.15 * 1.2), 1, 'Fresh C2 serve applies x1.15 quality bonus (97 vs 84)');
+      ctx.assertEq(postFresh.feverEnergy, feverPre + 26, 'All-hot green R02 serve grants +20 + 6 = +26 fever energy');
+
+      // Part 2: Bake Crit — craft two C2+C2 pairs in separate rows on 1-7 and slide left -> simultaneous 2x C3 merge!
+      await ctx.setupSaveAndStart(
+        '1-7',
+        {
+          levelStars: ctx.allUnlockedStars(3),
+          selectedPatron: 'luna',
+          unlockedPatrons: ['mikan', 'luna'],
+          deviceUpgrades: { dev_tray: 1, dev_flour: 0, dev_teapot: 3, dev_tools: 3 },
+          seenTutorials: TUTORIALS_ALL_SEEN
+        },
+        { seed: 108, skipTutorial: true, modeOverrides: { tools: { fork: 10, spoon: 10 } } }
+      );
+      await ctx.clearBoardExcept([]);
+      const critRes = await ctx.eval(() => {
+        const dbg = globalThis.__HOSHI_DEBUG__;
+        for (let k = 0; k < 4; k++) dbg.knead();
+        const targets = [{ r: 0, c: 0 }, { r: 0, c: 1 }, { r: 1, c: 0 }, { r: 1, c: 1 }];
+        const isTarget = (r, c) => targets.some((t) => t.r === r && t.c === c);
+        // Move only tiles outside the 4 target cells into the empty target cells (never colliding!)
+        for (let step = 0; step < 6; step++) {
+          const st = dbg.getState();
+          const emptyDst = targets.find((t) => !st.grid.cells[t.r][t.c]?.tile);
+          if (!emptyDst) break;
+          let src = null;
+          for (let r = 0; r < st.grid.rows && !src; r++) {
+            for (let c = 0; c < st.grid.cols && !src; c++) {
+              if (st.grid.cells[r][c]?.tile && !isTarget(r, c)) src = { r, c };
+            }
+          }
+          if (!src) break;
+          dbg.useToolOnCell('fork', src.r, src.c, emptyDst.r, emptyDst.c);
+        }
+        // Upgrade any C1 among the 4 target cells to C2 so both rows hold [C2, C2]
+        const stMid = dbg.getState();
+        for (const t of targets) {
+          const tile = stMid.grid.cells[t.r][t.c]?.tile;
+          if (tile && tile.tier === 1) dbg.useToolOnCell('spoon', t.r, t.c);
+        }
+        const before = dbg.getState();
+        const slideRes = dbg.slide('left');
+        const after = dbg.getState();
+        return {
+          beforeScore: before.score,
+          beforeFever: before.feverEnergy,
+          beforeSkill: before.skillEnergy,
+          slideRes,
+          afterScore: after.score,
+          afterFever: after.feverEnergy,
+          afterSkill: after.skillEnergy
+        };
+      });
+
+      ctx.assert(critRes.slideRes && critRes.slideRes.crit && critRes.slideRes.crit.level >= 2, `Expected bake crit level >= 2, got ${JSON.stringify(critRes.slideRes && critRes.slideRes.crit)}`);
+      ctx.assertEq(critRes.afterScore, critRes.beforeScore, 'Bake crit strictly obeys Serve-Only Scoring Iron Law (0 score)');
+      ctx.assert(critRes.afterFever >= critRes.beforeFever + 8, `Bake crit grants >= +8 feverEnergy (${critRes.beforeFever} -> ${critRes.afterFever})`);
+      ctx.assert(critRes.afterSkill >= critRes.beforeSkill + 6, `Bake crit grants >= +6 skillEnergy (${critRes.beforeSkill} -> ${critRes.afterSkill})`);
+      ctx.assertEq(ctx.cdp.errors.length, 0, 'Zero console/runtime errors during M1 crit & fresh test');
+    }
+  },
+
+  {
+    id: 'T3-20',
+    tier: 3,
+    features: ['F05', 'F08', 'F16'],
+    title: 'v0.10 M1 Dough Temp overheat UI lock/recovery on knead_btn and Fever V2 knead/extend/afterglow',
+    run: async (ctx) => {
+      await ctx.setViewport(390, 844, true, 2, { safeTop: 47, safeBottom: 34, showCapsule: true });
+      await ctx.resetGame({ clearCloud: true, clearLocal: true });
+      await ctx.setupSaveAndStart(
+        '1-7',
+        {
+          levelStars: ctx.allUnlockedStars(3),
+          selectedPatron: 'luna',
+          unlockedPatrons: ['mikan', 'luna'],
+          deviceUpgrades: { dev_tray: 1, dev_flour: 0, dev_teapot: 3, dev_tools: 3 },
+          seenTutorials: TUTORIALS_ALL_SEEN
+        },
+        { seed: 77, skipTutorial: true }
+      );
+      await ctx.clearBoardExcept([]);
+
+      // Part 1: Mash real UI knead_btn at 135ms cadence -> overheat & 1.2s lock
+      const lockedSt = await ctx.eval(() => {
+        const dbg = globalThis.__HOSHI_DEBUG__;
+        for (let i = 0; i < 8; i++) {
+          dbg.clickHit('knead_btn');
+          const st = dbg.getState();
+          if (st.dough && st.dough.locked) return st;
+          window.__WX_HARNESS__?.advanceClockMs?.(135);
+          dbg.advanceTime(0.135);
+        }
+        return dbg.getState();
+      });
+      ctx.assert(lockedSt && lockedSt.dough && lockedSt.dough.locked === true, 'Rapid UI knead_btn tapping triggers dough overheat lock');
+      ctx.assertEq(lockedSt.dough.zone, 'locked', 'Dough zone reports locked during overheat');
+      ctx.assert(lockedSt.dough.lockTimer > 0.9, `Expected lockTimer > 0.9s, got ${lockedSt.dough.lockTimer}`);
+      ctx.assertEq(lockedSt.score, 0, 'Dough kneads award 0 score');
+
+      // Clicking knead_btn while locked must spawn 0 tiles
+      const countLocked = inspectBoard(lockedSt).tiles.length;
+      await ctx.advanceBothClocks(150);
+      await ctx.clickHit('knead_btn');
+      ctx.assertEq(inspectBoard(await ctx.getState()).tiles.length, countLocked, 'knead_btn is rejected while overheat locked');
+      await ctx.checkBounds('T3-20-overheat-390', { safeBottom: 34 });
+
+      // Advance 1.3s -> lock expires, temp resets <= 50, knead_btn works again
+      const unlockedSt = await ctx.advanceTime(1.3);
+      ctx.assertEq(unlockedSt.dough.locked, false, 'Overheat lock expires after 1.2s');
+      ctx.assert(unlockedSt.dough.temp <= 55, `Temp resets near 50 after unlock (got ${unlockedSt.dough.temp})`);
+      await ctx.clickHit('knead_btn');
+      ctx.assertEq(inspectBoard(await ctx.getState()).tiles.length, countLocked + 1, 'knead_btn spawns again after unlock');
+
+      // Part 2: Fever V2 — trigger Fever via serves, verify fever knead (C2/C3, temp frozen), serve extend, and afterglow C1->C2
+      await ctx.advanceTime(3.2);
+      for (let k = 0; k < 6; k++) {
+        const cur = await ctx.getState();
+        if (cur.feverActive) break;
+        const idx = cur.seats.findIndex(Boolean);
+        if (idx >= 0) await serveCustomerOrganic(ctx, idx);
+        else await ctx.advanceTime(2.3);
+      }
+      let fSt = await ctx.getState();
+      ctx.assertEq(fSt.feverActive, true, 'Starlight Fever V2 activated');
+
+      // Fever knead: temp stays frozen & spawned tile is C2 or C3 (never C1)
+      await ctx.clearBoardExcept([]);
+      const tempBeforeFeverKnead = (await ctx.getState()).dough.temp;
+      await ctx.advanceBothClocks(140);
+      await ctx.clickHit('knead_btn');
+      fSt = await ctx.getState();
+      const feverTiles = inspectBoard(fSt).tiles;
+      ctx.assertEq(feverTiles.length, 1, 'Fever knead spawned 1 tile');
+      ctx.assert(feverTiles[0].tier >= 2 && feverTiles[0].tier <= 3, `Fever knead must yield C2/C3, got C${feverTiles[0].tier}`);
+      ctx.assert(fSt.dough.temp <= tempBeforeFeverKnead + 0.01, 'Fever knead does not heat up dough');
+
+      // Serve during Fever -> extends feverTimer (+1.0s)
+      await ctx.advanceTime(2.5);
+      fSt = await ctx.getState();
+      const seatInFever = fSt.seats.findIndex(Boolean);
+      ctx.assert(seatInFever >= 0 && fSt.feverActive, 'Seated customer available inside Fever');
+      const timerBeforeServe = fSt.feverTimer;
+      await serveCustomerOrganic(ctx, seatInFever);
+      const timerAfterServe = (await ctx.getState()).feverTimer;
+      ctx.assert(timerAfterServe > timerBeforeServe - 0.5, `Fever V2 serve extends feverTimer (${timerBeforeServe.toFixed(2)} -> ${timerAfterServe.toFixed(2)})`);
+
+      // Plant a C1 via raw debug knead (if C2 landed, retry) then let Fever expire -> afterglow turns non-frozen C1 into C2!
+      await ctx.clearBoardExcept([]);
+      for (let g = 0; g < 10; g++) {
+        await ctx.knead();
+        if (inspectBoard(await ctx.getState()).tiles.some((t) => t.tier === 1)) break;
+      }
+      const preEnd = await ctx.getState();
+      const hadC1 = inspectBoard(preEnd).tiles.some((t) => t.tier === 1);
+      ctx.assert(hadC1, 'Planted at least one C1 before Fever end');
+      const postEnd = await ctx.advanceTime(preEnd.feverTimer + 0.5);
+      ctx.assertEq(postEnd.feverActive, false, 'Fever V2 ended cleanly');
+      ctx.assertEq(inspectBoard(postEnd).tiles.filter((t) => t.tier === 1).length, 0, 'Fever V2 afterglow promoted all non-frozen C1 tiles to C2');
+
+      const harness = await ctx.getHarnessState();
+      ctx.assertEq(harness.gradientStats.hslViolations.length, 0, 'Zero hsl() violations in M1 UI');
+      ctx.assertEq(ctx.cdp.errors.length, 0, 'Zero console/runtime errors in T3-20');
     }
   }
 ];

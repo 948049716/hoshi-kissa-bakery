@@ -13,14 +13,14 @@
  */
 'use strict';
 
-const BALANCE_VERSION = '0.10.0-m0';
+const BALANCE_VERSION = '0.10.0-m1';
 
 const FEATURES = {
   scoreZones: true,
-  bakeCrit: false,
-  freshBonus: false,
-  doughTemp: false,
-  feverV2: false,
+  bakeCrit: true,
+  freshBonus: true,
+  doughTemp: true,
+  feverV2: true,
   goals: false,
   events: false,
   traits: false,
@@ -57,9 +57,13 @@ const FRESH = {
   minTier: 2
 };
 
+// Cooling: temp ← temp·e^(−decayRate·dt) − decayFlat·dt. With perKnead 22 the steady-state
+// peak for a tap period T is 22 / (1 − e^(−0.8T)): T=0.12s overheats after ~6 taps (~0.6s),
+// T=0.35s peaks ≈ 90 (warm), T=0.5s oscillates 45..67 (warm), T≥1s mostly cold.
 const DOUGH_TEMP = {
   perKnead: 22,
-  decayPerSec: 30,
+  decayRate: 0.8,
+  decayFlat: 2,
   warmMin: 40,
   overheat: 100,
   lockSec: 1.2,
@@ -106,7 +110,7 @@ const REMOTE_OVERRIDE_BOUNDS = {
   'FRESH.itemMult': [1, 1.5],
   'FRESH.allHotFever': [0, 20],
   'DOUGH_TEMP.perKnead': [5, 50],
-  'DOUGH_TEMP.decayPerSec': [5, 80],
+  'DOUGH_TEMP.decayRate': [0.2, 3],
   'DOUGH_TEMP.lockSec': [0, 3],
   'DOUGH_TEMP.warmC2Bonus': [0, 0.4],
   'DOUGH_TEMP.pityEvery': [3, 15],

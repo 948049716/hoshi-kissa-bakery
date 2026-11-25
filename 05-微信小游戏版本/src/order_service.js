@@ -899,6 +899,9 @@ function snapshotSingleTileEntry(t, seenTiles) {
   const frozenHpRead = readOwnPropOnce(t, 'frozenHp');
   const frozenRead = readOwnPropOnce(t, 'frozen');
   const flavorRead = readOwnPropOnce(t, 'flavor');
+  const bakedRead = readOwnPropOnce(t, 'bakedAt');
+  const bakedNum = bakedRead.exists && !bakedRead.threw ? toSafeNum(bakedRead.value) : NaN;
+  const bakedAt = Number.isFinite(bakedNum) && bakedNum >= 0 ? bakedNum : null;
 
   const isFrozen =
     (frozenHpRead.exists && !frozenHpRead.threw && toSafeNum(frozenHpRead.value, 0) > 0) ||
@@ -913,7 +916,7 @@ function snapshotSingleTileEntry(t, seenTiles) {
 
   const matchEntry =
     !isFrozen && intTier !== null && intTier >= 1 && intTier <= 7
-      ? { rawTile: t, tier: intTier, flavor }
+      ? { rawTile: t, tier: intTier, flavor, bakedAt }
       : null;
 
   const info = {
@@ -923,7 +926,8 @@ function snapshotSingleTileEntry(t, seenTiles) {
     rawTierVal: tierRead.value,
     matchEntry,
     scoreTier: tierRead.exists ? scoreTier : null,
-    flavor
+    flavor,
+    bakedAt
   };
   if (seenTiles) {
     seenTiles.set(t, info);
@@ -1363,6 +1367,7 @@ function tryPlaceToTray(state, tile) {
   }
   const tier = tileSnap.matchEntry.tier;
   const flavor = tileSnap.matchEntry.flavor;
+  const bakedAt = tileSnap.matchEntry.bakedAt;
 
   const curTrayLen = safeArrayLen(tray, MAX_TRAY_SLOTS);
   const defaultCap = curTrayLen > 0 ? curTrayLen : 3;
@@ -1422,7 +1427,8 @@ function tryPlaceToTray(state, tile) {
     mutatedNextUid = true;
   }
 
-  const trayTile = { uid, tier, flavor };
+  // v0.10 fresh bonus: freshly-baked (merged) tiles carry their in-run bake timestamp into the tray
+  const trayTile = bakedAt !== null && bakedAt !== undefined ? { uid, tier, flavor, bakedAt } : { uid, tier, flavor };
   if (!verifiedWriteProp(tray, emptyIdx, trayTile)) {
     restorePropSnapshot(tray, emptyIdx, chosenSlotPrevRead);
     if (mutatedNextUid) {
@@ -1431,7 +1437,7 @@ function tryPlaceToTray(state, tile) {
     return { placed: false, slotIdx: -1, reason: 'invalid_tile' };
   }
 
-  safeSetIdx(traySnap, emptyIdx, { rawTile: trayTile, tier, flavor });
+  safeSetIdx(traySnap, emptyIdx, { rawTile: trayTile, tier, flavor, bakedAt: trayTile.bakedAt === undefined ? null : trayTile.bakedAt });
   const { seatRecords } = snapshotSeatsArrayOnce(
     seats,
     { withMeta: false, withRecipeId: false },
@@ -1569,6 +1575,35 @@ function discardTraySlot(state, slotIdx, opts) {
 }
 
 /**
+ * v0.10 品质区 fresh bonus: a paired tray item is "hot" when it was baked (merged) within
+ * ctx.freshWindowSec (default FRESH.windowSec) of ctx.nowSec and its tier >= FRESH.minTier.
+ * Returns false whenever the feature flag is off or the ctx lacks a clock (legacy callers).
+ */
+function readFreshClock(ctx) {
+  if (!ctx || !BalanceConfig.isFeatureOn('freshBonus')) return null;
+  const nowRead = readOwnPropOnce(ctx, 'nowSec');
+  const now = nowRead.exists && !nowRead.threw ? toSafeNum(nowRead.value) : NaN;
+  if (!Number.isFinite(now)) return null;
+  let windowSec = BalanceConfig.FRESH.windowSec;
+  const wRead = readOwnPropOnce(ctx, 'freshWindowSec');
+  if (wRead.exists && !wRead.threw) {
+    const w = toSafeNum(wRead.value);
+    if (Number.isFinite(w) && w >= 0) windowSec = clamp(w, 0, 60);
+  }
+  return { now, windowSec };
+}
+
+function isHotPairedEntry(entry, clock) {
+  if (!clock || !entry) return false;
+  const b = entry.bakedAt;
+  const tier = entry.scoreTier !== null && entry.scoreTier !== undefined ? entry.scoreTier : entry.tier;
+  if (typeof b !== 'number' || !Number.isFinite(b)) return false;
+  if (!(tier >= BalanceConfig.FRESH.minTier)) return false;
+  const age = clock.now - b;
+  return age >= -0.05 && age <= clock.windowSec + 1e-9;
+}
+
+/**
  * Computes exact single-serve score from already-snapshotted orderMeta, slotSnap, and pairedTileSnaps
  * using unrounded itemSum floats and a single outer Math.round (zero live re-reads on order/tiles).
  */
@@ -1580,6 +1615,7 @@ function computeServeScoreFromSnapshots(orderMeta, slotSnap, pairedTileSnaps, sc
 
   const ctx = isPlainObj(scoreCtx) ? scoreCtx : null;
   const catcakeLevelsMap = extractCatcakeLevels(ctx ? getOwn(ctx, 'catcakeLevels', null) : null);
+  const freshClock = readFreshClock(ctx);
 
   let itemSum = 0;
   for (let i = 0; i < slotLen; i++) {
@@ -1605,7 +1641,8 @@ function computeServeScoreFromSnapshots(orderMeta, slotSnap, pairedTileSnaps, sc
       itemFlavorMult = FLAVORS[reqFlavor].mult;
     }
 
-    itemSum += basePrice * itemFlavorMult;
+    const freshMult = isHotPairedEntry(pSnap, freshClock) ? BalanceConfig.FRESH.itemMult : 1.0;
+    itemSum += basePrice * itemFlavorMult * freshMult;
   }
 
   if (!(itemSum > 0)) return 0;
@@ -1921,7 +1958,8 @@ function matchTrayToCustomer(state, arg2, arg3) {
       const entry = matchRes.matchedTrayEntries[m];
       safePush(pairedScoreEntries, {
         scoreTier: entry.tier,
-        flavor: entry.flavor
+        flavor: entry.flavor,
+        bakedAt: entry.bakedAt === undefined ? null : entry.bakedAt
       });
     }
 
@@ -2086,6 +2124,16 @@ function matchTrayToCustomer(state, arg2, arg3) {
           )
         : stateInFever
   };
+  // v0.10 zone / fresh inputs supplied by game_app (modes, fever V2, events, perks, traits)
+  if (distinctCtx) {
+    const ZONE_PASSTHROUGH_KEYS = ['feverSceneBonus', 'sceneBonusExtra', 'sceneCap', 'traitMult', 'nowSec', 'freshWindowSec'];
+    for (let zk = 0; zk < ZONE_PASSTHROUGH_KEYS.length; zk++) {
+      const zr = readOwnPropOnce(distinctCtx, ZONE_PASSTHROUGH_KEYS[zk]);
+      if (zr.exists && !zr.threw && typeof zr.value === 'number' && Number.isFinite(zr.value)) {
+        effectiveScoreCtx[ZONE_PASSTHROUGH_KEYS[zk]] = zr.value;
+      }
+    }
+  }
 
   const scoreGain = computeServeScoreFromSnapshots(
     winner.orderMeta,
@@ -2271,14 +2319,27 @@ function matchTrayToCustomer(state, arg2, arg3) {
     }
   }
 
+  // 7b. Fresh (热乎) stats for this order (allHot requires every craftable >=minTier item to be hot)
+  const freshClockServe = readFreshClock(effectiveScoreCtx);
+  let hotCount = 0;
+  let eligibleHotCount = 0;
+  for (let h = 0; h < winner.pairedScoreEntries.length; h++) {
+    const pe = winner.pairedScoreEntries[h];
+    const tVal = pe && pe.scoreTier !== null && pe.scoreTier !== undefined ? pe.scoreTier : pe ? pe.tier : 0;
+    if (tVal >= BalanceConfig.FRESH.minTier) eligibleHotCount += 1;
+    if (isHotPairedEntry(pe, freshClockServe)) hotCount += 1;
+  }
+  const allHot = eligibleHotCount > 0 && hotCount >= eligibleHotCount;
+
   // 8. Charge Starlight Fever energy (when not currently in Fever)
   let triggeredFever = false;
   if (!stateInFever) {
-    const feverGain = winner.isVip
-      ? FEVER_CONFIG.gainVip
-      : winner.pRatio > PATIENCE_TIP_BANDS.greenThreshold
-        ? FEVER_CONFIG.gainGreen
-        : FEVER_CONFIG.gainNormal;
+    const feverGain =
+      (winner.isVip
+        ? FEVER_CONFIG.gainVip
+        : winner.pRatio > PATIENCE_TIP_BANDS.greenThreshold
+          ? FEVER_CONFIG.gainGreen
+          : FEVER_CONFIG.gainNormal) + (allHot ? BalanceConfig.FRESH.allHotFever : 0);
     const prevFeverEnergyRead = readOwnPropOnce(state, 'feverEnergy');
     const prevEnergy = prevFeverEnergyRead.exists && !prevFeverEnergyRead.threw
       ? safeInt(prevFeverEnergyRead.value, 0, 0, 100)
@@ -2341,8 +2402,65 @@ function matchTrayToCustomer(state, arg2, arg3) {
     scoreGain,
     dustBonus,
     triggeredFever,
-    skillChargeGain
+    skillChargeGain,
+    hotCount,
+    allHot,
+    wasInFever: stateInFever
   };
+}
+
+/**
+ * v0.10: adds Starlight Fever energy from non-serve sources (bake crits). Never touches score.
+ * Ignored while Fever is active. Returns { gained, triggered }.
+ */
+function addFeverEnergy(state, amount) {
+  const add = safeInt(amount, 0, 0, 100);
+  if (!isPlainObj(state) || safeIsFrozen(state) || add <= 0) return { gained: 0, triggered: false };
+  const timerRead = readOwnPropOnce(state, 'feverTimer');
+  const activeRead = readOwnPropOnce(state, 'feverActive');
+  const timer = timerRead.exists && !timerRead.threw ? toSafeNum(timerRead.value) : 0;
+  const inFever =
+    (Number.isFinite(timer) && timer > 1e-6) ||
+    Boolean(activeRead.exists && !activeRead.threw && activeRead.value === true);
+  if (inFever) return { gained: 0, triggered: false };
+  const energyRead = readOwnPropOnce(state, 'feverEnergy');
+  const prev = energyRead.exists && !energyRead.threw ? safeInt(energyRead.value, 0, 0, 100) : 0;
+  const next = Math.min(100, prev + add);
+  if (next >= 100) {
+    if (
+      verifiedWriteProp(state, 'feverEnergy', 0) &&
+      verifiedWriteProp(state, 'feverActive', true) &&
+      verifiedWriteProp(state, 'feverTimer', FEVER_CONFIG.durationSec)
+    ) {
+      return { gained: 100 - prev, triggered: true };
+    }
+    restorePropSnapshot(state, 'feverEnergy', energyRead);
+    restorePropSnapshot(state, 'feverActive', activeRead);
+    restorePropSnapshot(state, 'feverTimer', timerRead);
+    return { gained: 0, triggered: false };
+  }
+  if (!verifiedWriteProp(state, 'feverEnergy', next)) {
+    restorePropSnapshot(state, 'feverEnergy', energyRead);
+    return { gained: 0, triggered: false };
+  }
+  return { gained: next - prev, triggered: false };
+}
+
+/**
+ * v0.10 Fever V2: extends an active Fever by `sec` seconds. Returns the seconds actually added.
+ */
+function extendFever(state, sec) {
+  const add = toSafeNum(sec);
+  if (!isPlainObj(state) || safeIsFrozen(state) || !Number.isFinite(add) || add <= 0) return 0;
+  const timerRead = readOwnPropOnce(state, 'feverTimer');
+  const timer = timerRead.exists && !timerRead.threw ? toSafeNum(timerRead.value) : 0;
+  if (!Number.isFinite(timer) || timer <= 1e-6) return 0;
+  const capped = Math.min(add, 30);
+  if (!verifiedWriteProp(state, 'feverTimer', timer + capped)) {
+    restorePropSnapshot(state, 'feverTimer', timerRead);
+    return 0;
+  }
+  return capped;
 }
 
 /**
@@ -3427,5 +3545,7 @@ module.exports = {
   serveCustomerSeat,
   computeServeScore,
   applyMikanComfortTea,
-  computeLevelSettlement
+  computeLevelSettlement,
+  addFeverEnergy,
+  extendFever
 };

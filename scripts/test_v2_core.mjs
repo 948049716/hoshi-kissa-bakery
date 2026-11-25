@@ -1818,7 +1818,7 @@ async function runSectionB() {
   await runTest('UT-O09', '同星级纯重刷星尘折半衰减与 modeOverrides 模式解耦校验', () => {
     // 1) First 3-star clear on 1-1: firstStarDustAward (10+15+22=47) + clearDustAward (6) + threeStarBonusDust (4) = 57
     const osFirst = OrderService.createOrderState('1-1', SaveSync.createDefaultSave(), fixedRng);
-    osFirst.score = 1800;
+    osFirst.score = Levels.getLevelById('1-1').stars[2] + 50;
     osFirst.ordersServed = 12;
     const setFirst = OrderService.computeLevelSettlement('1-1', osFirst, {});
     assert.equal(setFirst.cleared, true);
@@ -1843,7 +1843,7 @@ async function runSectionB() {
 
     // 3) 3-10 same-star 3-star replay with 5 VIPs: ceil(14*0.5)=7 + 2 + 5*3 = 24
     const osBoss = OrderService.createOrderState('3-10', SaveSync.createDefaultSave(), fixedRng);
-    osBoss.score = 90000;
+    osBoss.score = Levels.getLevelById('3-10').stars[2] + 500;
     osBoss.ordersServed = 18;
     osBoss.vipServed = 5;
     osBoss.vipBonusDustEarned = 20;
@@ -2863,7 +2863,7 @@ async function runSectionE() {
         const { dbg } = env;
         assert.ok(dbg && typeof dbg === 'object');
         assert.strictEqual(globalThis.__HOSHI_DEBUG__, globalThis.__game);
-        assert.equal(dbg.version, '0.9.0');
+        assert.equal(dbg.version, Constants.GAME_VERSION);
 
         await env.flushAssets();
         let st = dbg.getState();
@@ -3074,13 +3074,14 @@ async function runSectionE() {
       assert.ok(dbg.getState().ordersServed >= 1);
       assert.ok(dbg.getState().score > 0);
 
-      // Keep serving until reaching >= 850 (1 star on 1-1 in v0.9.0)
+      // Keep serving until reaching >= star1 on 1-1
+      const star1_1 = Levels.getLevelById('1-1').stars[0];
       let safety = 0;
-      while (dbg.getState().score < 850 && safety < 30) {
+      while (dbg.getState().score < star1_1 && safety < 40) {
         serveOneCustomerOnLevel1(dbg);
         safety++;
       }
-      assert.ok(dbg.getState().score >= 850);
+      assert.ok(dbg.getState().score >= star1_1);
 
       dbg.advanceTime(95);
       const resClear = dbg.getState();
@@ -3105,16 +3106,16 @@ async function runSectionE() {
       assert.equal(zeroServeRes.consolationDust, 0);
       assert.equal(zeroServeRes.totalDustAward, 0);
 
-      // 3) >= 1 serve but < star1 (850) timeout -> consolationDust === Math.max(1, Math.floor((score / 850) * 4))
+      // 3) >= 1 serve but < star1 timeout -> consolationDust === Math.max(1, Math.floor((score / star1) * 4))
       dbg.closeModal();
       dbg.startLevel('1-1', { skipTutorial: true, rng: mulberry32(999) });
       serveOneCustomerOnLevel1(dbg);
       const subStarScore = dbg.getState().score;
-      assert.ok(subStarScore > 0 && subStarScore < 850);
+      assert.ok(subStarScore > 0 && subStarScore < star1_1);
       dbg.advanceTime(95);
       const subStarRes = dbg.getState().lastResult;
       assert.equal(subStarRes.cleared, false);
-      assert.equal(subStarRes.consolationDust, Math.max(1, Math.floor((subStarRes.score / 850) * 4)));
+      assert.equal(subStarRes.consolationDust, Math.max(1, Math.floor((subStarRes.score / star1_1) * 4)));
     } finally {
       env.dispose();
     }
@@ -3996,6 +3997,260 @@ async function runSectionF() {
 }
 
 // ============================================================================
+// Section G: v0.10 M1 core loop (bake crit / fresh / dough temp / Fever V2)
+// ============================================================================
+
+const DoughTemp = require(path.join(SRC_DIR, 'dough_temp.js'));
+
+function makeFreshTestOrderState() {
+  const save = { ...SaveSync.createDefaultSave(), selectedPatron: 'none' };
+  const os = OrderService.createOrderState('1-2', save, fixedRng);
+  os.seats[0] = {
+    uid: 77,
+    customerId: 'cust_ragdoll',
+    recipeId: 'R03',
+    slots: [{ tier: 3, flavor: 'any' }],
+    patience: 20,
+    maxPatience: 25,
+    bountyMult: 1.0,
+    isVip: false,
+    isUrgent: false
+  };
+  os.seats[1] = null;
+  os.seats[2] = null;
+  return os;
+}
+
+async function runSectionG() {
+  await runTest('UT-G16', '烘焙暴击计数：单次滑动 ≥C3 合成计入 critLevel，C1 洪流 (C1+C1→C2) 不计入', () => {
+    const gs = GridEngine.createGridState(
+      { matrix: ['....', '....', '....'] },
+      [
+        { r: 0, c: 0, tier: 2 }, { r: 0, c: 1, tier: 2 },
+        { r: 1, c: 0, tier: 3 }, { r: 1, c: 1, tier: 3 },
+        { r: 2, c: 0, tier: 1 }, { r: 2, c: 1, tier: 1 }, { r: 2, c: 2, tier: 1 }, { r: 2, c: 3, tier: 1 }
+      ]
+    );
+    const res = GridEngine.slideGrid(gs, 'left', { skipSpawn: true, critMinTier: 3, nowSec: 4.5 });
+    assert.equal(res.moved, true);
+    assert.equal(res.mergeEvents.length, 4);
+    assert.equal(res.critLevel, 2, 'C3 + C4 count, the two C1→C2 merges do not');
+    assert.equal(gs.cells[0][0].tile.bakedAt, 4.5, 'merged tiles are stamped with bakedAt');
+    assert.equal(gs.cells[2][0].tile.tier, 2);
+
+    const gsFlood = GridEngine.createGridState({ matrix: ['....'] }, [
+      { r: 0, c: 0, tier: 1 }, { r: 0, c: 1, tier: 1 }, { r: 0, c: 2, tier: 1 }, { r: 0, c: 3, tier: 1 }
+    ]);
+    assert.equal(GridEngine.slideGrid(gsFlood, 'left', { skipSpawn: true }).critLevel, 0);
+
+    // Crit reward: gild + upgrade picks the highest new tile and never touches score
+    const reward = GridEngine.applyBakeCritReward(gs, res.mergeEvents, { gild: true, upgrade: true });
+    assert.equal(reward.applied, true);
+    assert.deepEqual([reward.r, reward.c, reward.tier, reward.flavor], [1, 0, 5, 'gold']);
+    assert.equal(gs.cells[1][0].tile.tier, 5);
+    assert.equal(gs.cells[1][0].tile.flavor, 'gold');
+    assert.equal(GridEngine.applyBakeCritReward(gs, res.mergeEvents, {}).applied, false);
+  });
+
+  await runTest('UT-G17', '热潮连锁合成：最多 3 轮（2,2,3,4→5；1,1,2,3,4,5→4,4,5），关闭时保持单步', () => {
+    const mk = (tiers) =>
+      GridEngine.createGridState({ matrix: ['.'.repeat(tiers.length)] }, tiers.map((t, c) => ({ r: 0, c, tier: t })));
+    const a = mk([2, 2, 3, 4]);
+    const ra = GridEngine.slideGrid(a, 'left', { skipSpawn: true, chainMerge: true, chainMaxPasses: 3 });
+    assert.deepEqual(rowTiers(a, 0), [5, null, null, null]);
+    assert.equal(ra.mergeEvents.length, 3);
+    assert.equal(ra.critLevel, 3);
+    assert.equal(Math.max(...ra.mergeEvents.map((m) => m.chainDepth || 1)), 3);
+
+    const b = mk([1, 1, 2, 3, 4, 5]);
+    GridEngine.slideGrid(b, 'left', { skipSpawn: true, chainMerge: true, chainMaxPasses: 9 });
+    assert.deepEqual(rowTiers(b, 0), [4, 4, 5, null, null, null], 'chain passes are hard-capped at 3');
+
+    const c = mk([2, 2, 3, 4]);
+    const rc = GridEngine.slideGrid(c, 'left', { skipSpawn: true });
+    assert.deepEqual(rowTiers(c, 0), [3, 3, 4, null]);
+    assert.equal(rc.critLevel, 1);
+  });
+
+  await runTest('UT-G18', '揉面档位表：热潮 [[2,.7],[3,.3]] 分布、保底强制 C3 + 风味、仍为每次 2 次 RNG', () => {
+    const rng = mulberry32(1234);
+    let c3 = 0;
+    const N = 1500;
+    for (let i = 0; i < N; i++) {
+      const gs = GridEngine.createGridState({ matrix: ['....'] }, []);
+      const kr = GridEngine.kneadSpawn(gs, { rng, tierTable: [[2, 0.7], [3, 0.3]] });
+      assert.equal(kr.spawned, true);
+      assert.ok(kr.tile.tier === 2 || kr.tile.tier === 3);
+      if (kr.tile.tier === 3) c3 += 1;
+    }
+    assert.ok(Math.abs(c3 / N - 0.3) < 0.04, `C3 ratio ${c3 / N}`);
+
+    let draws = 0;
+    const countingRng = () => {
+      draws += 1;
+      return 0.42;
+    };
+    const gs = GridEngine.createGridState({ matrix: ['....'] }, []);
+    const forced = GridEngine.kneadSpawn(gs, { rng: countingRng, tierTable: [[3, 1]], flavor: 'matcha' });
+    assert.equal(forced.tile.tier, 3);
+    assert.equal(forced.tile.flavor, 'matcha');
+    assert.equal(draws, 2);
+  });
+
+  await runTest('UT-K01', '面团温度：0.12s 狂点 ≤6 次过热 → 产 C1 + 锁 1.2s，锁内揉面被拒，解锁回落 50°', () => {
+    const st = DoughTemp.createDoughTemp();
+    let overheatAt = -1;
+    for (let i = 0; i < 8 && overheatAt < 0; i++) {
+      const r = DoughTemp.onKnead(st, {});
+      if (r.overheated) {
+        overheatAt = i + 1;
+        assert.equal(r.forceTier, 1);
+      }
+      DoughTemp.tickDoughTemp(st, 0.12);
+    }
+    assert.ok(overheatAt > 0 && overheatAt <= 6, `overheat after ${overheatAt} taps`);
+    assert.equal(DoughTemp.getZone(st), 'locked');
+    assert.equal(DoughTemp.onKnead(st, {}).allowed, false);
+    DoughTemp.tickDoughTemp(st, 1.3);
+    assert.equal(st.locked, false);
+    assert.equal(st.temp, BalanceConfig.DOUGH_TEMP.resetTo);
+    assert.equal(st.overheats, 1);
+  });
+
+  await runTest('UT-K02', '面团温度：0.45s 节奏 30 次不过热、稳居温区、每 6 次温区揉面保底 C3', () => {
+    const st = DoughTemp.createDoughTemp();
+    let pity = 0;
+    let warm = 0;
+    for (let i = 0; i < 30; i++) {
+      const r = DoughTemp.onKnead(st, {});
+      assert.equal(r.overheated, false);
+      if (r.zone === 'warm') {
+        warm += 1;
+        assert.equal(r.c2Bonus, BalanceConfig.DOUGH_TEMP.warmC2Bonus);
+      }
+      if (r.pity) {
+        pity += 1;
+        assert.equal(r.forceTier, BalanceConfig.DOUGH_TEMP.pityTier);
+      }
+      DoughTemp.tickDoughTemp(st, 0.45);
+    }
+    assert.ok(warm >= 26, `warm kneads ${warm}`);
+    assert.equal(pity, Math.floor(warm / BalanceConfig.DOUGH_TEMP.pityEvery));
+    assert.equal(st.overheats, 0);
+  });
+
+  await runTest('UT-K03', '面团温度：热潮中不升温、连败 ≥2 过热锁缩短为 0.6s、慢揉 (≥1.5s) 保持冷区', () => {
+    const st = DoughTemp.createDoughTemp();
+    st.temp = 70;
+    const fr = DoughTemp.onKnead(st, { inFever: true });
+    assert.equal(fr.zone, 'fever');
+    assert.equal(st.temp, 70);
+    st.temp = 95;
+    const oh = DoughTemp.onKnead(st, { failStreak: 2 });
+    assert.equal(oh.overheated, true);
+    assert.equal(st.lockTimer, BalanceConfig.DOUGH_TEMP.lockSecPity);
+
+    const cold = DoughTemp.createDoughTemp();
+    for (let i = 0; i < 10; i++) {
+      assert.equal(DoughTemp.onKnead(cold, {}).zone, 'cold');
+      DoughTemp.tickDoughTemp(cold, 1.5);
+    }
+  });
+
+  await runTest('UT-O14', '出炉热乎：bakedAt 随托盘进入结算，6s 内品质区 ×1.15 且整单热乎 +6 热潮；C1/过期/开关关闭不加成', () => {
+    const W = BalanceConfig.FRESH.windowSec;
+    const serveWith = (bakedAt, nowSec, tier = 3) => {
+      const os = makeFreshTestOrderState();
+      os.seats[0].slots = [{ tier, flavor: 'any' }];
+      assert.equal(OrderService.tryPlaceToTray(os, { uid: 900, tier, flavor: 'plain', bakedAt }).placed, true);
+      assert.equal(os.tray[0].bakedAt, bakedAt);
+      const fe0 = os.feverEnergy || 0;
+      const res = OrderService.matchTrayToCustomer(os, { catcakeLevels: {}, patronId: 'none', devTrayLv: 0, nowSec });
+      assert.equal(res.served, true);
+      return { res, feverGain: (os.feverEnergy || 0) - fe0 };
+    };
+    const hot = serveWith(10, 10 + W - 0.5);
+    const stale = serveWith(10, 10 + W + 2);
+    assert.equal(hot.res.hotCount, 1);
+    assert.equal(hot.res.allHot, true);
+    assert.equal(stale.res.hotCount, 0);
+    assert.ok(Math.abs(hot.res.scoreGain / stale.res.scoreGain - BalanceConfig.FRESH.itemMult) < 0.02);
+    assert.equal(hot.feverGain - stale.feverGain, BalanceConfig.FRESH.allHotFever);
+
+    const restore = BalanceConfig.withFeatures({ freshBonus: false });
+    try {
+      const off = serveWith(10, 11);
+      assert.equal(off.res.hotCount, 0);
+      assert.equal(off.res.scoreGain, stale.res.scoreGain);
+    } finally {
+      restore();
+    }
+  });
+
+  await runTest('UT-F01', '热潮 V2：暴击充能触发热潮、热潮中充能无效、上菜延长受单次上限约束', () => {
+    const os = makeFreshTestOrderState();
+    os.feverEnergy = 90;
+    os.feverActive = false;
+    os.feverTimer = 0;
+    assert.equal(OrderService.extendFever(os, 1), 0, 'cannot extend when no fever');
+    const r1 = OrderService.addFeverEnergy(os, 15);
+    assert.equal(r1.triggered, true);
+    assert.equal(os.feverActive, true);
+    assert.ok(os.feverTimer > 0);
+    assert.equal(os.feverEnergy, 0);
+    assert.deepEqual(OrderService.addFeverEnergy(os, 50), { gained: 0, triggered: false });
+    const t0 = os.feverTimer;
+    assert.equal(OrderService.extendFever(os, 1), 1);
+    assert.ok(Math.abs(os.feverTimer - (t0 + 1)) < 1e-9);
+    assert.equal(OrderService.extendFever(os, 99), 30, 'single call hard cap');
+    assert.equal(os.score, 0, 'fever helpers never touch score');
+  });
+
+  await runTest('UT-F02', '热潮余温：结束时非冰封 C1 → C2，冰封与高阶不变', () => {
+    const gs = GridEngine.createGridState({ matrix: ['I...'] }, [
+      { r: 0, c: 0, tier: 1, frozen: true },
+      { r: 0, c: 1, tier: 1 },
+      { r: 0, c: 2, tier: 1, flavor: 'matcha' },
+      { r: 0, c: 3, tier: 4 }
+    ]);
+    const res = GridEngine.applyFeverAfterglow(gs);
+    assert.equal(res.upgradedCells.length, 2);
+    assert.deepEqual(rowTiers(gs, 0), [1, 2, 2, 4]);
+    assert.equal(gs.cells[0][2].tile.flavor, 'matcha');
+  });
+
+  await runTest('UT-M09', 'M1 控制器闭环：真实揉面过热锁定、调试揉面绕过温度、暴击奖励写入统计且不加分', async () => {
+    const env = bootMockApp({}, {});
+    try {
+      await env.flushAssets();
+      const dbg = env.dbg;
+      assert.ok(dbg.startLevel('1-7', { seed: 11, skipTutorial: true }));
+      let locked = false;
+      for (let i = 0; i < 10 && !locked; i++) {
+        const r = dbg.knead({ realistic: true });
+        if (r.reason === 'overheat_locked') locked = true;
+        dbg.advanceTime(0.05);
+      }
+      const st = dbg.getState();
+      assert.ok(locked || st.dough.locked, 'rapid realistic kneads must overheat');
+      assert.ok(dbg.getRunInfo().stats.overheats >= 1);
+      assert.equal(dbg.knead().spawned !== undefined, true, 'raw debug knead ignores the lock');
+      dbg.advanceTime(1.5);
+      assert.equal(dbg.getState().dough.locked, false);
+      assert.equal(dbg.getState().score, 0);
+
+      // Legacy feature override is per-run and restored on next start
+      assert.ok(dbg.startLevel('1-7', { seed: 11, skipTutorial: true, features: { doughTemp: false } }));
+      assert.equal(dbg.getRunInfo().features.doughTemp, false);
+      assert.ok(dbg.startLevel('1-7', { seed: 11, skipTutorial: true }));
+      assert.equal(dbg.getRunInfo().features.doughTemp, true);
+    } finally {
+      env.dispose();
+    }
+  });
+}
+
+// ============================================================================
 // Main Entrypoint
 // ============================================================================
 
@@ -4007,6 +4262,7 @@ async function main() {
   await runSectionD();
   await runSectionE();
   await runSectionF();
+  await runSectionG();
 
   const passed = results.filter((r) => r.ok).length;
   const failed = results.length - passed;

@@ -7,7 +7,7 @@
  * buggy hook can never break the core loop.
  *
  * Event names (payload documented in docs/07):
- *   'run:start' 'run:end' 'slide' 'knead' 'tray:place' 'serve' 'fever:start' 'fever:end'
+ *   'run:start' 'run:end' 'slide' 'knead' 'tray:place' 'serve' 'fever:start' 'fever:end' 'crit'
  *   'customer:spawn' 'customer:leave' 'tick' 'event:start' 'event:end' 'goal:progress' 'goal:done'
  */
 'use strict';

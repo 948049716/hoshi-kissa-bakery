@@ -2290,6 +2290,41 @@ class StarlightAudio {
     } catch (_) {}
   }
 
+  /** v0.10 bake crit: 2 = 双重烘焙, 3 = 三重烘焙, 4 = 星光暴击 (rising stacked chimes). */
+  playCrit(level = 2) {
+    if (!_canPlaySfx(this)) return;
+    try {
+      const lv = Math.max(2, Math.min(4, Math.round(_toSafeAudioNum(level, 2))));
+      if (lv >= 3) this._duckBGM(0.72, 0.4, 0.5);
+      // Warm punch
+      this._playTone(196, 'sine', 0.16, 0.18, 0.004, 392, 0);
+      const ladders = {
+        2: [783.99, 1046.5],
+        3: [783.99, 1046.5, 1318.51],
+        4: [783.99, 1046.5, 1318.51, 1567.98, 2093.0]
+      };
+      const notes = ladders[lv];
+      notes.forEach((f, i) => {
+        this._playTone(f, 'triangle', 0.12, 0.26 + i * 0.03, 0.005, f * 1.01, 0.03 + i * 0.045);
+      });
+      if (lv >= 4) this._playTone(2637.02, 'sine', 0.07, 0.5, 0.01, null, 0.28);
+    } catch (_) {}
+  }
+
+  /** v0.10 dough overheat: spawned=true → sizzle drop; false → dull puff while locked. */
+  playOverheat(spawned = true) {
+    if (!_canPlaySfx(this)) return;
+    try {
+      if (spawned) {
+        this._playTone(880, 'triangle', 0.1, 0.22, 0.004, 220, 0);
+        this._playTone(1760, 'sine', 0.05, 0.16, 0.004, 660, 0.02);
+        this._playTone(140, 'sine', 0.12, 0.2, 0.006, 90, 0.05);
+      } else {
+        this._playTone(170, 'triangle', 0.07, 0.09, 0.004, 120, 0);
+      }
+    } catch (_) {}
+  }
+
   playTool(kind) {
     if (!_canPlaySfx(this)) return;
     try {

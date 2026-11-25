@@ -49,6 +49,7 @@ const ModalsUI = require('./modals_ui');
 const Rng = require('./rng');
 const GameEvents = require('./game_events');
 const BalanceConfig = require('./balance_config');
+const DoughTemp = require('./dough_temp');
 
 let previousAppCleanup = null;
 
@@ -124,6 +125,7 @@ function createEmptyAnimState() {
     slideDuration: 0.11,
     moveEvents: [],
     blockedShake: null,
+    critShake: null,
     mergeTimer: 0,
     mergeDuration: 0.22,
     mergeEvents: [],
@@ -338,12 +340,18 @@ function createApp() {
       totalItemsServed: 0,
       feverCount: 0,
       overheats: 0,
+      warmKneads: 0,
+      pityHits: 0,
+      feverExtendSec: 0,
+      afterglowTiles: 0,
       angryWalkouts: 0,
       eventsSeen: [],
       goalDone: false,
       earlyCloseBonus: 0
     };
   }
+  /** Restore fn for per-run feature flag overrides (startLevel opts.features; tests / sim A-B only). */
+  let restoreRunFeatures = null;
   let kneadCooldown = 0;
   let tutorialAutoFadeTimer = 0;
   let levelSkipTutorial = false;
@@ -484,6 +492,11 @@ function createApp() {
     }
   }
   app.showToast = showToast;
+  app.isFeatureOn = (name) => BalanceConfig.isFeatureOn(name);
+  Object.defineProperty(app, 'freshWindowSec', {
+    enumerable: false,
+    get: () => BalanceConfig.FRESH.windowSec
+  });
 
   function persistSave(syncCloud = true) {
     SaveSync.saveLocalSave(platform, saveData);
@@ -1574,7 +1587,14 @@ function createApp() {
     if (typeof sceneExtra === 'number' && Number.isFinite(sceneExtra)) ctx.sceneBonusExtra = sceneExtra;
     const sceneCap = getOverride('sceneCap');
     if (typeof sceneCap === 'number' && Number.isFinite(sceneCap)) ctx.sceneCap = sceneCap;
+    // v0.10 M1: fresh bonus clock (品质区) + Fever V2 scene bonus (场面区)
+    if (app.orderState) ctx.nowSec = Number(app.orderState.elapsedSec) || 0;
+    if (BalanceConfig.isFeatureOn('feverV2')) ctx.feverSceneBonus = BalanceConfig.FEVER_V2.sceneBonus;
     return ctx;
+  }
+
+  function getNowSec() {
+    return app.orderState ? Number(app.orderState.elapsedSec) || 0 : 0;
   }
 
   function refreshNeededAndOrderMarks() {
@@ -1595,6 +1615,14 @@ function createApp() {
     const hasSeed = opts && (typeof opts.seed === 'number' || typeof opts.seed === 'string');
     const rngs = Rng.createLevelRngs(hasSeed ? opts.seed : null);
     if (runCtx && runCtx.events) runCtx.events.clear();
+    // Feature overrides only live for one run: always restore the previous run's flags first.
+    if (typeof restoreRunFeatures === 'function') {
+      restoreRunFeatures();
+      restoreRunFeatures = null;
+    }
+    if (opts && opts.features && typeof opts.features === 'object') {
+      restoreRunFeatures = BalanceConfig.withFeatures(opts.features);
+    }
     runCtx = {
       mode: (modeOverrides && typeof modeOverrides.mode === 'string' && modeOverrides.mode) || 'campaign',
       levelCfg: lvl,
@@ -1602,7 +1630,9 @@ function createApp() {
       seed: rngs.seed,
       rngs,
       events: GameEvents.createEventBus(),
-      stats: createRunStats()
+      stats: createRunStats(),
+      dough: DoughTemp.createDoughTemp(),
+      feverExtended: 0
     };
 
     lastFrameMs = rawNowMs();
@@ -1688,6 +1718,150 @@ function createApp() {
     return startLevelInternal(levelId, opts);
   };
 
+  // ==================== v0.10 M1: crit / fresh / dough / fever V2 helpers ====================
+
+  const TIPS_STORAGE_KEY = 'hoshi_tips_v1';
+  const M1_TIPS = {
+    bake_crit: '烘焙暴击：一次滑动合出 2 个以上 C3+ 会引发双重/三重烘焙，奖励热潮与星能！',
+    fresh: '新出炉的猫饼带着热气，6 秒内上菜品质 +15%，整单热乎还会加热潮！',
+    dough_temp: '面团温度：稳定节奏揉面保持金色温区，C2 概率更高且有保底；连点过快会过热锁定！',
+    fever_v2: '星光热潮中滑动可连锁合成，揉面必出 C2/C3，每次上菜还能延长热潮！'
+  };
+
+  /** One-time gameplay tips (major toast). Skipped in headless sim and skip-tutorial runs. */
+  function maybeShowTip(key) {
+    if (headlessSimMode || levelSkipTutorial || !hasOwn(M1_TIPS, key)) return false;
+    let seen = null;
+    try {
+      seen = platform.getStorageJSON(TIPS_STORAGE_KEY);
+    } catch (e) {
+      seen = null;
+    }
+    const seenObj = seen && typeof seen === 'object' && !Array.isArray(seen) ? seen : {};
+    if (seenObj[key] === true) return false;
+    seenObj[key] = true;
+    try {
+      platform.setStorageJSON(TIPS_STORAGE_KEY, seenObj);
+    } catch (e) {
+      // storage failure only means the tip may show again next time
+    }
+    showToast(M1_TIPS[key], { icon: 'icon_stardust', tone: 'event', level: 'major', duration: 3.2 });
+    return true;
+  }
+
+  function getFeverScenePercent() {
+    const z = BalanceConfig.isFeatureOn('feverV2')
+      ? BalanceConfig.FEVER_V2.sceneBonus
+      : BalanceConfig.SCORE_ZONES.feverSceneBonus || 0.25;
+    return Math.round(z * 100);
+  }
+
+  /** Shared Fever start FX (serve-triggered or crit-triggered). */
+  function onFeverTriggered(source) {
+    audio.setFeverMode(true);
+    audio.playFeverStart();
+    if (runCtx) {
+      runCtx.stats.feverCount += 1;
+      runCtx.feverExtended = 0;
+    }
+    emitRunEvent('fever:start', { source: source || 'serve' });
+    showToast(`星光热潮开启！10 秒内得分 +${getFeverScenePercent()}% 且耐心减半流逝`, {
+      icon: 'icon_stardust',
+      tone: 'event',
+      level: 'major'
+    });
+    if (BalanceConfig.isFeatureOn('feverV2')) maybeShowTip('fever_v2');
+  }
+
+  const CRIT_LABELS = ['', '', '双重烘焙！', '三重烘焙！', '星光暴击！'];
+
+  /**
+   * Bake crit (方向A): ≥2 merges creating C(minNewTier)+ in ONE slide. Rewards are resources only
+   * (fever energy, patron skill energy, gild / +1 tier on the best new tile) — never direct score.
+   */
+  function handleBakeCrit(res) {
+    if (!BalanceConfig.isFeatureOn('bakeCrit') || !res || !res.moved) return null;
+    const rawLevel = Math.floor(Number(res.critLevel) || 0);
+    if (rawLevel < 2) return null;
+    const level = Math.min(4, rawLevel);
+    const tierCfg = BalanceConfig.BAKE_CRIT.tiers[level] || BalanceConfig.BAKE_CRIT.tiers[2];
+    if (!tierCfg) return null;
+
+    if (tierCfg.skill > 0) app.skillEnergy = clamp(app.skillEnergy + tierCfg.skill, 0, 100);
+    const feverRes = tierCfg.fever > 0
+      ? OrderService.addFeverEnergy(app.orderState, tierCfg.fever)
+      : { gained: 0, triggered: false };
+    const reward = GridEngine.applyBakeCritReward(app.gridState, res.mergeEvents || [], {
+      gild: tierCfg.gild > 0,
+      upgrade: tierCfg.upgrade > 0
+    });
+
+    if (runCtx) {
+      const crits = runCtx.stats.crits;
+      if (Array.isArray(crits)) crits[level] = (crits[level] || 0) + 1;
+    }
+
+    // FX: popup above the rewarded (or last merged) cell + gold ring + shake + SFX
+    let fxR = reward.applied ? reward.r : -1;
+    let fxC = reward.applied ? reward.c : -1;
+    if (fxR < 0 && Array.isArray(res.mergeEvents) && res.mergeEvents.length > 0) {
+      const last = res.mergeEvents[res.mergeEvents.length - 1];
+      fxR = last.r;
+      fxC = last.c;
+    }
+    if (fxR >= 0 && fxC >= 0) {
+      const pt = cellCenterScreenPos(fxR, fxC);
+      app.animState.popups.push({
+        text: CRIT_LABELS[level] || '双重烘焙！',
+        subText: reward.applied && reward.upgraded ? '升阶+镀金' : reward.applied && reward.gilded ? '镀金' : '',
+        x: pt.x,
+        y: pt.y - 6,
+        color: level >= 4 ? '#FFF2A8' : level >= 3 ? '#FFD45E' : '#FFC27A',
+        timer: 0.8,
+        duration: 0.8
+      });
+      app.animState.cellFX.push({ r: fxR, c: fxC, kind: 'crit', level, timer: 0.42, duration: 0.42 });
+    }
+    app.animState.critShake = { level, timer: 0.16 + level * 0.03, duration: 0.16 + level * 0.03 };
+    if (typeof audio.playCrit === 'function') audio.playCrit(level);
+    platform.vibrateShort(level >= 3 ? 'heavy' : 'medium');
+
+    const info = {
+      level,
+      feverGain: feverRes.gained,
+      feverTriggered: Boolean(feverRes.triggered),
+      skillGain: tierCfg.skill,
+      reward
+    };
+    emitRunEvent('crit', info);
+    if (feverRes.triggered) onFeverTriggered('crit');
+    maybeShowTip('bake_crit');
+    return info;
+  }
+
+  /** Picks a deterministic pity flavor from current order needs (no RNG draw). */
+  function pickPityFlavor() {
+    const needed = app.neededTiers && Array.isArray(app.neededTiers.allNeeded) ? app.neededTiers.allNeeded : [];
+    for (let i = 0; i < needed.length; i++) {
+      const f = needed[i] && needed[i].flavor;
+      if (f === 'matcha' || f === 'berry') return f;
+    }
+    return 'plain';
+  }
+
+  function countEmptyPlayableCells() {
+    const g = app.gridState;
+    if (!g || !Array.isArray(g.cells)) return 0;
+    let n = 0;
+    for (let r = 0; r < g.rows; r++) {
+      for (let c = 0; c < g.cols; c++) {
+        const cell = g.cells[r] && g.cells[r][c];
+        if (cell && cell.type !== 'void' && cell.type !== 'block' && !cell.tile) n += 1;
+      }
+    }
+    return n;
+  }
+
   function executeSlide(dir) {
     if (app.screen !== 'playing' || app.activeModal !== null || !app.gridState || !app.orderState) {
       return {
@@ -1714,10 +1888,21 @@ function createApp() {
       };
     }
 
-    const res = GridEngine.slideGrid(app.gridState, dir, {
+    const slideOpts = {
       c2Rate: getSpawnC2Rate(),
       rng: levelRng
-    });
+    };
+    if (BalanceConfig.isFeatureOn('freshBonus')) slideOpts.nowSec = getNowSec();
+    if (BalanceConfig.isFeatureOn('bakeCrit')) slideOpts.critMinTier = BalanceConfig.BAKE_CRIT.minNewTier;
+    if (
+      BalanceConfig.isFeatureOn('feverV2') &&
+      BalanceConfig.FEVER_V2.chainMerge &&
+      app.orderState.feverActive
+    ) {
+      slideOpts.chainMerge = true;
+      slideOpts.chainMaxPasses = BalanceConfig.FEVER_V2.chainMaxPasses;
+    }
+    const res = GridEngine.slideGrid(app.gridState, dir, slideOpts);
 
     if (!res.moved) {
       app.animState.blockedShake = { dir, timer: 0.09, duration: 0.09 };
@@ -1800,6 +1985,9 @@ function createApp() {
       app.skillEnergy = clamp(app.skillEnergy + res.skillChargeGain, 0, 100);
     }
 
+    const critInfo = handleBakeCrit(res);
+    if (critInfo) res.crit = critInfo;
+
     if (runCtx) {
       runCtx.stats.slides += 1;
       runCtx.stats.merges += res.mergeEvents ? res.mergeEvents.length : 0;
@@ -1811,18 +1999,51 @@ function createApp() {
     return res;
   }
 
-  function executeKnead(bypassCooldown = false) {
+  /**
+   * @param {boolean} bypassCooldown debug/test path: skips cooldown AND dough temperature / fever
+   *   knead table (raw C1/C2 roll) unless opts.realistic is set (balance simulator).
+   * @param {{realistic?: boolean}} [opts]
+   */
+  function executeKnead(bypassCooldown = false, opts = undefined) {
     if (app.screen !== 'playing' || app.activeModal !== null || !app.gridState || !app.orderState) {
       return { spawned: false, reason: 'not_playing' };
     }
     if (!bypassCooldown && kneadCooldown > 0) {
       return { spawned: false, reason: 'cooldown' };
     }
+    const realistic = !bypassCooldown || Boolean(opts && opts.realistic);
+    const dough = runCtx ? runCtx.dough : null;
+    const inFever = Boolean(app.orderState.feverActive);
 
-    const res = GridEngine.kneadSpawn(app.gridState, {
+    if (realistic && dough && BalanceConfig.isFeatureOn('doughTemp') && dough.locked) {
+      app.kneadPressTimer = 0.06;
+      if (typeof audio.playOverheat === 'function') audio.playOverheat(false);
+      else audio.playGridBlocked();
+      return { spawned: false, reason: 'overheat_locked' };
+    }
+
+    const spawnOpts = {
       c2Rate: getSpawnC2Rate(),
       rng: levelRng
-    });
+    };
+    let kneadInfo = null;
+    // Only heat the dough when the knead can actually land (board-full presses are free).
+    if (realistic && countEmptyPlayableCells() > 0) {
+      if (inFever && BalanceConfig.isFeatureOn('feverV2')) {
+        spawnOpts.tierTable = BalanceConfig.FEVER_V2.kneadTierTable;
+        kneadInfo = { zone: 'fever', pity: false, overheated: false };
+      } else if (dough && BalanceConfig.isFeatureOn('doughTemp')) {
+        kneadInfo = DoughTemp.onKnead(dough, { failStreak: runCtx ? runCtx.failStreak : 0, inFever });
+        if (kneadInfo.forceTier) {
+          spawnOpts.tierTable = [[kneadInfo.forceTier, 1]];
+          if (kneadInfo.pity) spawnOpts.flavor = pickPityFlavor();
+        } else if (kneadInfo.c2Bonus > 0) {
+          spawnOpts.c2Rate = clamp(spawnOpts.c2Rate + kneadInfo.c2Bonus, 0, 0.9);
+        }
+      }
+    }
+
+    const res = GridEngine.kneadSpawn(app.gridState, spawnOpts);
 
     app.kneadPressTimer = 0.11;
     if (!res.spawned) {
@@ -1831,11 +2052,45 @@ function createApp() {
       showToast('烤盘已无空格，先装盘或合成腾出位置吧', { icon: 'icon_warn', tone: 'warn' });
       return res;
     }
+    if (kneadInfo) res.dough = kneadInfo;
 
     if (!bypassCooldown) {
       kneadCooldown = 0.12;
     }
-    audio.playKneadSpawn();
+    if (kneadInfo && kneadInfo.overheated) {
+      if (runCtx) runCtx.stats.overheats += 1;
+      if (typeof audio.playOverheat === 'function') audio.playOverheat(true);
+      const pt = cellCenterScreenPos(res.r, res.c);
+      app.animState.popups.push({
+        text: '过热！',
+        subText: '面团冷却一下',
+        x: pt.x,
+        y: pt.y - 4,
+        color: '#FF8A7A',
+        timer: 0.7,
+        duration: 0.7
+      });
+      maybeShowTip('dough_temp');
+    } else {
+      audio.playKneadSpawn();
+      if (kneadInfo && kneadInfo.zone === 'warm') {
+        if (runCtx) runCtx.stats.warmKneads += 1;
+        maybeShowTip('dough_temp');
+      }
+      if (kneadInfo && kneadInfo.pity) {
+        if (runCtx) runCtx.stats.pityHits += 1;
+        const pt = cellCenterScreenPos(res.r, res.c);
+        app.animState.popups.push({
+          text: '面团正好！',
+          subText: `C${res.tile ? res.tile.tier : 3}`,
+          x: pt.x,
+          y: pt.y - 4,
+          color: '#FFD45E',
+          timer: 0.7,
+          duration: 0.7
+        });
+      }
+    }
     app.animState.cellFX.push({
       r: res.r,
       c: res.c,
@@ -1931,6 +2186,9 @@ function createApp() {
       tier: cell.tile.tier,
       flavor: cell.tile.flavor
     };
+    if (typeof cell.tile.bakedAt === 'number' && Number.isFinite(cell.tile.bakedAt)) {
+      tileSnap.bakedAt = cell.tile.bakedAt;
+    }
     const trayRes = OrderService.tryPlaceToTray(app.orderState, tileSnap);
     if (!trayRes.placed) {
       audio.playGridBlocked();
@@ -2746,21 +3004,54 @@ function createApp() {
     platform.vibrateShort('medium');
 
     if (runCtx) runCtx.stats.totalItemsServed += usedIndices.length;
+    if (runCtx) {
+      const hotCount = Math.max(0, Math.floor(Number(serveRes.hotCount) || 0));
+      runCtx.stats.hotItems += hotCount;
+      if (serveRes.allHot) runCtx.stats.hotServes += 1;
+      if (hotCount > 0) maybeShowTip('fresh');
+    }
+    if (serveRes.allHot) {
+      app.animState.popups.push({
+        text: '热乎！',
+        subText: '',
+        x: toPt.x,
+        y: toPt.y - 18,
+        color: '#FFB36B',
+        timer: 0.6,
+        duration: 0.6
+      });
+    }
     emitRunEvent('serve', { seatIdx, result: serveRes, usedTiles: usedIndices.map((i) => traySnap[i]).filter(Boolean) });
 
-    if (serveRes.triggeredFever) {
-      audio.setFeverMode(true);
-      audio.playFeverStart();
-      if (runCtx) runCtx.stats.feverCount += 1;
-      emitRunEvent('fever:start', {});
-      showToast(
-        `星光热潮开启！10 秒内得分 +${Math.round((BalanceConfig.SCORE_ZONES.feverSceneBonus || 0.25) * 100)}% 且耐心减半流逝`,
-        {
-          icon: 'icon_stardust',
-          tone: 'event',
-          level: 'major'
+    // Fever V2: every serve during Fever extends it (capped per Fever)
+    if (
+      serveRes.wasInFever &&
+      !serveRes.triggeredFever &&
+      runCtx &&
+      BalanceConfig.isFeatureOn('feverV2')
+    ) {
+      const room = Math.max(0, BalanceConfig.FEVER_V2.extendCap - (runCtx.feverExtended || 0));
+      const want = Math.min(BalanceConfig.FEVER_V2.extendPerServe, room);
+      if (want > 1e-6) {
+        const added = OrderService.extendFever(app.orderState, want);
+        if (added > 0) {
+          runCtx.feverExtended = (runCtx.feverExtended || 0) + added;
+          runCtx.stats.feverExtendSec += added;
+          app.animState.popups.push({
+            text: `热潮 +${added.toFixed(added % 1 === 0 ? 0 : 1)}s`,
+            subText: '',
+            x: toPt.x,
+            y: toPt.y + 26,
+            color: '#C9A8FF',
+            timer: 0.6,
+            duration: 0.6
+          });
         }
-      );
+      }
+    }
+
+    if (serveRes.triggeredFever) {
+      onFeverTriggered('serve');
     }
 
     // Check 1~3 Star crossings
@@ -2958,6 +3249,10 @@ function createApp() {
       anim.slide.timer = Math.max(0, anim.slide.timer - dt);
       if (anim.slide.timer <= 0) anim.slide = null;
     }
+    if (anim.critShake && anim.critShake.timer > 0) {
+      anim.critShake.timer = Math.max(0, anim.critShake.timer - dt);
+      if (anim.critShake.timer <= 0) anim.critShake = null;
+    }
     if (anim.blockedShake && anim.blockedShake.timer > 0) {
       anim.blockedShake.timer = Math.max(0, anim.blockedShake.timer - dt);
       if (anim.blockedShake.timer <= 0) anim.blockedShake = null;
@@ -2994,6 +3289,11 @@ function createApp() {
 
     if (kneadCooldown > 0) {
       kneadCooldown = Math.max(0, kneadCooldown - dt);
+    }
+
+    // v0.10 M1: dough temperature cools / overheat lock counts down on the same gameplay clock.
+    if (runCtx && runCtx.dough && BalanceConfig.isFeatureOn('doughTemp')) {
+      DoughTemp.tickDoughTemp(runCtx.dough, dt);
     }
 
     if (app.activeTutorialStep === 'tray_trash' && tutorialAutoFadeTimer > 0) {
@@ -3035,6 +3335,22 @@ function createApp() {
 
     if (tickRes.feverEnded) {
       audio.setFeverMode(false);
+      if (runCtx) runCtx.feverExtended = 0;
+      if (BalanceConfig.isFeatureOn('feverV2') && BalanceConfig.FEVER_V2.afterglowC1toC2) {
+        const glow = GridEngine.applyFeverAfterglow(app.gridState);
+        const cells = glow && Array.isArray(glow.upgradedCells) ? glow.upgradedCells : [];
+        if (cells.length > 0) {
+          for (let i = 0; i < cells.length; i++) {
+            app.animState.cellFX.push({ r: cells[i].r, c: cells[i].c, kind: 'spawn', timer: 0.2, duration: 0.2 });
+          }
+          if (runCtx) runCtx.stats.afterglowTiles += cells.length;
+          showToast(`热潮余温：${cells.length} 块 C1 升为 C2`, { icon: 'icon_stardust', tone: 'success' });
+          refreshNeededAndOrderMarks();
+        }
+        emitRunEvent('fever:end', { afterglow: cells.length });
+      } else {
+        emitRunEvent('fever:end', { afterglow: 0 });
+      }
     }
 
     if (tickRes.spawnedSeats && tickRes.spawnedSeats.length > 0) {
@@ -3611,7 +3927,8 @@ function createApp() {
                 uid: t.uid,
                 tier: t.tier,
                 flavor: t.flavor,
-                frozenHp: t.frozenHp || 0
+                frozenHp: t.frozenHp || 0,
+                ...(typeof t.bakedAt === 'number' ? { bakedAt: t.bakedAt } : {})
               }
             : null
         });
@@ -3651,6 +3968,23 @@ function createApp() {
     });
   }
 
+  function buildDoughSnapshot() {
+    const d = runCtx ? runCtx.dough : null;
+    if (!d) return null;
+    return {
+      temp: Math.round(d.temp * 100) / 100,
+      zone: DoughTemp.getZone(d),
+      ratio: DoughTemp.getTempRatio(d),
+      locked: Boolean(d.locked),
+      lockTimer: d.lockTimer,
+      lockDuration: d.lockDuration,
+      warmStreak: d.warmStreak,
+      overheats: d.overheats,
+      pityHits: d.pityHits
+    };
+  }
+  app.getDoughView = buildDoughSnapshot;
+
   const debugApi = {
     version: GAME_VERSION,
 
@@ -3664,7 +3998,8 @@ function createApp() {
         stats: cloneJsonSafe(runCtx.stats),
         patronId: getEffectivePatronId(),
         c2Rate: getSpawnC2Rate(),
-        balanceVersion: BalanceConfig.BALANCE_VERSION
+        balanceVersion: BalanceConfig.BALANCE_VERSION,
+        features: { ...BalanceConfig.FEATURES }
       };
     },
 
@@ -3688,7 +4023,9 @@ function createApp() {
         toolCounts: app.toolCounts,
         lastResult: app.lastResult,
         runStats: runCtx ? runCtx.stats : null,
-        levelCfg: runCtx ? runCtx.levelCfg : null
+        levelCfg: runCtx ? runCtx.levelCfg : null,
+        dough: runCtx ? runCtx.dough : null,
+        nowSec: getNowSec()
       };
     },
 
@@ -3700,7 +4037,9 @@ function createApp() {
         ? 4
         : 3;
       const trayArr = os && Array.isArray(os.tray)
-        ? os.tray.slice(0, trayCap).map((t) => (t ? { uid: t.uid, tier: t.tier, flavor: t.flavor } : null))
+        ? os.tray.slice(0, trayCap).map((t) =>
+            t ? { uid: t.uid, tier: t.tier, flavor: t.flavor, ...(typeof t.bakedAt === 'number' ? { bakedAt: t.bakedAt } : {}) } : null
+          )
         : new Array(trayCap).fill(null);
 
       const lay = app.currentBoardLayout;
@@ -3758,6 +4097,8 @@ function createApp() {
         trayCapacity: trayCap,
         tray: trayArr,
         seats: buildNormalizedSeatsSnapshot(),
+        dough: buildDoughSnapshot(),
+        feverTimer: os ? Number(os.feverTimer) || 0 : 0,
         preferredSeatIdx: os ? os.preferredSeatIdx : null,
         grid: buildNormalizedGridSnapshot(),
         boardLayout,
@@ -3945,8 +4286,10 @@ function createApp() {
       return res;
     },
 
-    knead() {
-      const res = executeKnead(true);
+    /** Raw debug knead (no cooldown / dough temperature / fever table). knead({realistic:true}) applies them. */
+    knead(opts = undefined) {
+      const realistic = Boolean(opts && opts.realistic);
+      const res = executeKnead(true, realistic ? { realistic: true } : undefined);
       renderFrame(0);
       return res;
     },

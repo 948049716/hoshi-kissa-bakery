@@ -1093,13 +1093,14 @@ export const TIER4_TESTS = [
       const bankBefore = saveBefore.bankStardust;
       ctx.assertEq(bankBefore, 15, 'Fresh save starts at 15 stardust');
 
+      const lv1_1s3 = (await ctx.requireBundledModule('./src/levels_data.js')).getLevelById('1-1').stars[2];
       await ctx.advanceTime(3.2);
-      while ((await ctx.getState()).score < 1780) {
+      while ((await ctx.getState()).score < lv1_1s3 + 30) {
         await serveCustomerOrganic(ctx);
       }
 
       st = await ctx.getState();
-      ctx.assert(st.score >= 1750, `Reached 3-star score (>= 1750) on 1-1: ${st.score}`);
+      ctx.assert(st.score >= lv1_1s3, `Reached 3-star score (>= ${lv1_1s3}) on 1-1: ${st.score}`);
 
       // Advance timer to shift end
       st = await ctx.advanceTime(st.timeLeft + 0.6);
@@ -1146,8 +1147,9 @@ export const TIER4_TESTS = [
           seenTutorials: TUTORIALS_ALL_SEEN
         });
         await ctx.clickHit('lobby_start_cta', { viaCdp: true });
+        const lv1_1s3 = (await ctx.requireBundledModule('./src/levels_data.js')).getLevelById('1-1').stars[2];
         await ctx.advanceTime(3.2);
-        while ((await ctx.getState()).score < 1780) {
+        while ((await ctx.getState()).score < lv1_1s3 + 30) {
           await serveCustomerOrganic(ctx);
         }
         const stRun = await ctx.getState();
@@ -1230,11 +1232,21 @@ export const TIER4_TESTS = [
         const targetOrder = st.seats[c1OrderIdx];
         if (targetOrder && targetOrder.patience / targetOrder.maxPatience > 0.62) {
           const { scoreGain } = await serveCustomerOrganic(ctx, c1OrderIdx);
-          const expected35 =
+          // Zone scoring: R01 -> round(35 * (1 + 0.20) * (1 + 0.08)) = 45;
+          // R03 -> round((35 + 70*fresh) * (1 + 0.12 + 0.20) * (1 + 0.08)) = 150 (cold) or 165 (fresh C2 x1.15)
+          const expectedCold =
             targetOrder.recipeId === 'R01'
-              ? Math.round(35 * 1.0 * 1.2 * 1.08)
-              : Math.round((35 + 70) * 1.12 * 1.2 * 1.08);
-          ctx.assertClose(scoreGain, expected35, 2, `Live ${targetOrder.recipeId} serve reflects C1 Lv.1 price === 35`);
+              ? Math.round(35 * 1.2 * 1.08)
+              : Math.round((35 + 70) * 1.32 * 1.08);
+          const expectedHot =
+            targetOrder.recipeId === 'R01'
+              ? expectedCold
+              : Math.round((35 + 70 * 1.15) * 1.32 * 1.08);
+          const nearExpected = Math.abs(scoreGain - expectedCold) <= 2 || Math.abs(scoreGain - expectedHot) <= 2;
+          ctx.assert(
+            nearExpected,
+            `Live ${targetOrder.recipeId} serve reflects C1 Lv.1 price === 35 (got ${scoreGain}, expected ${expectedCold} or ${expectedHot})`
+          );
         }
       }
 
@@ -1643,7 +1655,8 @@ export const TIER4_TESTS = [
       ctx.assert(sawFever, 'Triggered Starlight Fever during 3-10 boss run');
       ctx.assert(castedMugi, 'Charged and cast Mugi active skill during 3-10');
       ctx.assert(st.vipServed >= 1, `Served >= 1 VIP critic on 3-10 (got ${st.vipServed})`);
-      ctx.assert(st.score >= 38500, `Cleared 3-10 star1 >= 38500 (got ${st.score})`);
+      const lv3_10s1 = (await ctx.requireBundledModule('./src/levels_data.js')).getLevelById('3-10').stars[0];
+      ctx.assert(st.score >= lv3_10s1, `Cleared 3-10 star1 >= ${lv3_10s1} (got ${st.score})`);
 
       // Settle 3-10 and sync with CloudBase
       const stRes = await ctx.advanceTime(st.timeLeft + 0.8);
@@ -1756,9 +1769,11 @@ export const TIER4_TESTS = [
 
       ctx.assertEq((await ctx.getSaveData()).consumableSpentStardust, 20, 'Offline emergency fork recorded 20 stardust');
 
-      // Clear 1-4 (star1 = 2300)
+      const levelsMod10 = await ctx.requireBundledModule('./src/levels_data.js');
+      const lv1_4s1 = levelsMod10.getLevelById('1-4').stars[0];
+      const lv1_5s1 = levelsMod10.getLevelById('1-5').stars[0];
       await ctx.advanceTime(3.2);
-      while ((await ctx.getState()).score < 2350) {
+      while ((await ctx.getState()).score < lv1_4s1 + 50) {
         await serveCustomerOrganic(ctx);
       }
       st = await ctx.getState();
@@ -1771,7 +1786,7 @@ export const TIER4_TESTS = [
         await ctx.clickHit('preview_start_btn', { viaCdp: true });
       }
       await ctx.advanceTime(3.2);
-      while ((await ctx.getState()).score < 2850) {
+      while ((await ctx.getState()).score < lv1_5s1 + 50) {
         await serveCustomerOrganic(ctx);
       }
       st = await ctx.getState();

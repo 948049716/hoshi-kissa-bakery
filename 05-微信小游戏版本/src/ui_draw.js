@@ -1329,6 +1329,7 @@ function drawTagBadge(ctx, x, y, w, h, text, tone = 'amber', fontSize = 9.5, ico
     amber: { top: '#ffebb0', bot: '#f5c762', border: '#a8681c', text: '#5e2e08' },
     berry: { top: '#ff9685', bot: '#eb6b58', border: '#4A2C2A', text: '#fffdf8' },
     sage: { top: '#e4f5de', bot: '#bfe0b5', border: '#3c703a', text: '#214d20' },
+    matcha: { top: '#e4f5de', bot: '#bfe0b5', border: '#3c703a', text: '#214d20' },
     cocoa: { top: '#59331d', bot: '#3d2112', border: '#dfa855', text: '#ffefc8' },
     soft: { top: '#f6e8cc', bot: '#ead4ad', border: '#b89058', text: '#694127' },
     plum: { top: '#f8e6f0', bot: '#edd0e1', border: '#944a6d', text: '#632644' },

@@ -33,6 +33,7 @@ const {
 } = require('./levels_data');
 const UI = require('./ui_draw');
 const BoardRenderer = require('./board_renderer');
+const RunModifiers = require('./run_modifiers');
 
 const NOOP_GRADIENT = Object.freeze({
   addColorStop() {}
@@ -1186,11 +1187,12 @@ function renderLobbyBottomDock(ctx, rect, app, hits) {
   const colW = Math.floor((w - gap * 4) / 5);
   const saveData = app.saveData || {};
   const dailyUnlocked = typeof app.isDailyUnlocked === 'function' ? app.isDailyUnlocked() : false;
-  const dailyClaimed =
+  const todayKey = RunModifiers.getDailyDateKeyUTC8();
+  const dailyClaimed = Boolean(
     saveData.modeStats &&
-    saveData.modeStats.daily &&
-    saveData.modeStats.daily.claimedDate &&
-    saveData.modeStats.daily.claimedDate.length === 8;
+      saveData.modeStats.daily &&
+      saveData.modeStats.daily.claimedDate === todayKey
+  );
   const items = [
     {
       id: 'dock_shop',
@@ -1213,7 +1215,9 @@ function renderLobbyBottomDock(ctx, rect, app, hits) {
     {
       id: 'dock_challenge',
       label: '挑战',
-      icon: 'icon_trophy',
+      icon: 'icon_urgent_flame',
+      scaleMult: 0.96,
+      offsetY: -1,
       redDot: Boolean(dailyUnlocked && !dailyClaimed),
       onClick: () => app.openChallenge()
     },
@@ -1246,9 +1250,11 @@ function renderLobbyBottomDock(ctx, rect, app, hits) {
     const cx = bx + colW * 0.5;
     const pressed = isHitPressed(app, it.id);
     const dy = pressed ? 2 : 0;
-    const drawS = Math.round(baseIconS * it.scaleMult);
+    const scaleMult = Number.isFinite(it.scaleMult) ? it.scaleMult : 1;
+    const offsetY = Number.isFinite(it.offsetY) ? it.offsetY : 0;
+    const drawS = Math.round(baseIconS * scaleMult);
 
-    UI.drawUiIcon(c, sprites, it.icon, cx, iconCyBase + it.offsetY + dy, drawS);
+    UI.drawUiIcon(c, sprites, it.icon, cx, iconCyBase + offsetY + dy, drawS);
     UI.drawOutlinedText(c, it.label, cx, y + h * 0.82 + dy, {
       size: h >= 58 ? 14.0 : 12.8,
       weight: 900,
@@ -1806,7 +1812,10 @@ function renderPlayTopBar(ctx, barRect, app, hits, nowSec) {
   const curId = String(app.currentLevelId || orderState.levelId || '1-1');
   const isDaily = curId.indexOf('daily_') === 0;
   const isEndless = curId.indexOf('endless_') === 0;
-  const lvl = getLevelById(curId) || getLevelById('1-1');
+  const lvl =
+    (app.currentLevelCfg && app.currentLevelCfg.id === curId ? app.currentLevelCfg : null) ||
+    getLevelById(curId) ||
+    getLevelById('1-1');
   const stars =
     Array.isArray(orderState.starsOverride) && orderState.starsOverride.length >= 3
       ? orderState.starsOverride

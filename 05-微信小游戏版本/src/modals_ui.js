@@ -823,7 +823,7 @@ function renderLevelPreviewModal(ctx, metrics, app, hits, nowSec) {
       );
       UI.drawFitText(
         c,
-        !owned ? `${p.cost}星解锁` : active ? `(${p.skillName})` : '点击出战',
+        !owned ? `${p.cost}星尘解锁` : active ? `(${p.skillName})` : '点击出战',
         px + patW * 0.5,
         patCardY + patCardH - 9,
         patW - 6,
@@ -1633,7 +1633,7 @@ function renderShopModal(ctx, metrics, app, hits) {
           UI.drawSegmentedBar(c, barX, lvY - 7.5, barW, 15, isUnlocked ? lv : 0, 4);
 
           const subCopy = !isUnlocked
-            ? `通关第 ${cake.unlockLevel} 关解锁研发`
+            ? `开启第 ${cake.unlockLevel} 关解锁研发`
             : isMax
             ? `已满级 · 菜价 ${curP} 分 (+60%)`
             : `得分 +${lv * 15}% → +${(lv + 1) * 15}%`;
@@ -2729,7 +2729,11 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
     const infoW = Math.max(60, authX - 8 - infoX);
     const dispName = profile.nickName || '星夜店长';
     const syncLabel =
-      app.cloudStatus === 'synced'
+      boardType === 'friends'
+        ? '好友星级榜'
+        : app.leaderboardLoading
+        ? '云端同步中'
+        : app.cloudStatus === 'synced'
         ? '云端实时榜'
         : app.cloudStatus === 'syncing'
         ? '云端同步中'
@@ -2738,7 +2742,7 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
     UI.drawUiIcon(
       c,
       sprites,
-      app.cloudStatus === 'synced' ? 'icon_cloud_sync' : 'icon_star_coin',
+      boardType === 'friends' || app.cloudStatus === 'synced' ? 'icon_cloud_sync' : 'icon_star_coin',
       infoX + 7,
       profY + 32,
       14
@@ -2779,60 +2783,78 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
           radius: 13,
           lineWidth: 2.0
         });
+
+        const midX = f.ix + f.iw * 0.5;
+        const shareW = Math.min(196, f.iw - 36);
+        const shareH = 36;
+        const shareX = Math.round(midX - shareW * 0.5);
+        const shareY = listY + listH - shareH - 10;
+        const contentY = listY + 6;
+        const contentH = Math.max(110, shareY - contentY - 8);
+
         const sharedCanvas =
           typeof app.renderFriendsOpenData === 'function'
-            ? app.renderFriendsOpenData(Math.floor(f.iw - 12), Math.floor(listH - 12), metrics.dpr || 2)
+            ? app.renderFriendsOpenData(Math.floor(f.iw - 12), Math.floor(contentH), metrics.dpr || 2)
             : null;
         if (sharedCanvas && sharedCanvas.width > 0 && sharedCanvas.height > 0) {
-          c.drawImage(sharedCanvas, f.ix + 6, listY + 6, f.iw - 12, listH - 12);
+          c.drawImage(sharedCanvas, f.ix + 6, contentY, f.iw - 12, contentH);
         } else {
-          const midX = f.ix + f.iw * 0.5;
-          const midY = listY + listH * 0.44;
-          UI.drawUiIcon(c, sprites, 'patron_mikan', midX - 24, midY - 32, 60);
-          UI.drawUiIcon(c, sprites, 'icon_cloud_sync', midX + 26, midY - 28, 38);
-          UI.drawTagBadge(c, midX - 58, midY + 4, 116, 24, '已接入开放域', 'matcha', 11.4);
+          const compactF = contentH < 195;
+          const iconS = compactF ? 44 : 54;
+          const badgeH = 22;
+          const titleH = compactF ? 22 : 26;
+          const descLineH = compactF ? 16 : 18;
+          const blockH = iconS + 8 + badgeH + 8 + titleH + 6 + descLineH * 2;
+          const blockTop = Math.max(contentY + 6, Math.round(contentY + (contentH - blockH) * 0.5));
+          const iconCy = blockTop + iconS * 0.5;
+
+          UI.drawUiIcon(c, sprites, 'patron_mikan', midX - 22, iconCy, iconS);
+          UI.drawUiIcon(c, sprites, 'icon_cloud_sync', midX + 24, iconCy + 2, Math.round(iconS * 0.65));
+
+          const badgeY = blockTop + iconS + 8;
+          UI.drawTagBadge(c, midX - 54, badgeY, 108, badgeH, '微信好友榜', 'matcha', 11.2);
+
+          const titleCy = badgeY + badgeH + 8 + titleH * 0.5;
           UI.drawFitText(
             c,
-            '微信好友排行已开启',
+            '邀请微信好友一起比拼',
             midX,
-            midY + 40,
+            titleCy,
             f.iw - 28,
-            17.0,
-            12.2,
+            compactF ? 15.0 : 16.6,
+            12.0,
             900,
             '#4E2B18',
             'center',
             'middle'
           );
+
+          const descTop = badgeY + badgeH + 8 + titleH + 6;
           UI.drawWrappedText(
             c,
-            '微信端内自动同步好友总星与营业排行，点击下方按钮邀请好友加入星夜猫饼店。',
+            '在微信小游戏中将自动展示同玩好友的星级排行，通关后成绩自动同步。',
             midX,
-            midY + 58,
-            f.iw - 40,
-            18,
-            UI.fontStr(11.6, 700),
+            descTop,
+            f.iw - 36,
+            descLineH,
+            UI.fontStr(compactF ? 11.0 : 11.6, 700),
             '#6A422B',
             'center',
             3
           );
-
-          const shareW = Math.min(188, f.iw - 40);
-          const shareH = 36;
-          const shareX = Math.round(midX - shareW * 0.5);
-          const shareY = Math.min(listY + listH - shareH - 12, midY + 102);
-          UI.drawPillButton(c, shareX, shareY, shareW, shareH, {
-            variant: 'primary',
-            textOutline: true,
-            label: '邀请好友一起玩',
-            fontSize: 13.4,
-            radius: 18,
-            pressed: isPressed(app, 'friends_share_btn')
-          });
-          hits.add('friends_share_btn', shareX, shareY, shareW, shareH, () => {
-            if (typeof app.shareToFriends === 'function') app.shareToFriends();
-          });
         }
+
+        UI.drawPillButton(c, shareX, shareY, shareW, shareH, {
+          variant: 'primary',
+          textOutline: true,
+          label: '邀请好友一起玩',
+          fontSize: 13.4,
+          radius: 18,
+          pressed: isPressed(app, 'friends_share_btn')
+        });
+        hits.add('friends_share_btn', shareX, shareY, shareW, shareH, () => {
+          if (typeof app.shareToFriends === 'function') app.shareToFriends();
+        });
       } finally {
         c.restore();
       }
@@ -3025,7 +3047,11 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
     const myStars = computeTotalStars(saveData.levelStars);
     const myScore = (saveData.lifetimeStats && saveData.lifetimeStats.totalCumulativeScore) || 0;
     const ms = saveData.modeStats || {};
-    const myDaily = ms.daily ? Math.max(0, Math.floor(Number(ms.daily.bestScore) || 0)) : 0;
+    const todayKey = RunModifiers.getDailyDateKeyUTC8();
+    const myDaily =
+      ms.daily && ms.daily.lastDate === todayKey
+        ? Math.max(0, Math.floor(Number(ms.daily.bestScore) || 0))
+        : 0;
     const myShift = ms.endless ? Math.max(0, Math.floor(Number(ms.endless.bestShift) || 0)) : 0;
     const myEndless = ms.endless ? Math.max(0, Math.floor(Number(ms.endless.bestScore) || 0)) : 0;
     UI.drawKissaCard(c, f.ix, footerY, f.iw, footerH, {
@@ -3034,7 +3060,12 @@ function renderLeaderboardModal(ctx, metrics, app, hits) {
       lineWidth: 2.4
     });
 
-    const myRankText = lb.myRank ? String(lb.myRank) : '--';
+    const myRankText =
+      boardType === 'friends'
+        ? '--'
+        : (!lb.boardType || lb.boardType === boardType) && lb.myRank
+        ? String(lb.myRank)
+        : '--';
     UI.drawFitText(c, myRankText, f.ix + 23, footerY + footerH * 0.5, 34, 17.0, 12.0, 900, '#4E2B18', 'center', 'middle');
 
     const myAvCx = f.ix + 60;
@@ -3098,7 +3129,10 @@ function renderPauseModal(ctx, metrics, app, hits) {
   const curId = String(app.currentLevelId || orderState.levelId || '1-1');
   const isDaily = curId.indexOf('daily_') === 0;
   const isEndless = curId.indexOf('endless_') === 0;
-  const lvl = getLevelById(curId) || getLevelById('1-1');
+  const lvl =
+    (app.currentLevelCfg && app.currentLevelCfg.id === curId ? app.currentLevelCfg : null) ||
+    getLevelById(curId) ||
+    getLevelById('1-1');
   const chapName = getChapterName(lvl.chapter);
   const pauseSubtitle = isDaily
     ? '每天特调 · 限时挑战'
@@ -3123,9 +3157,14 @@ function renderPauseModal(ctx, metrics, app, hits) {
     // Live shift progress micro-strip
     const statusY = f.iy + 6;
     const statusH = 22;
+    const target1Star =
+      Array.isArray(orderState.starsOverride) && Number(orderState.starsOverride[0]) > 0
+        ? Number(orderState.starsOverride[0])
+        : lvl.stars[0];
+    const targetLabel = isEndless ? '本班目标' : '1星';
     UI.drawFitText(
       c,
-      `剩余 ${formatClockMMSS(orderState.timeLeft || 0)} · 营业分 ${formatNum(orderState.score || 0)} / 1星 ${formatNum(lvl.stars[0])}`,
+      `剩余 ${formatClockMMSS(orderState.timeLeft || 0)} · 营业分 ${formatNum(orderState.score || 0)} / ${targetLabel} ${formatNum(target1Star)}`,
       f.ix + f.iw * 0.5,
       statusY + statusH * 0.5,
       f.iw - 8,
@@ -3251,7 +3290,7 @@ function renderPauseModal(ctx, metrics, app, hits) {
       radius: btnH * 0.5,
       pressed: isPressed(app, 'pause_restart_btn')
     });
-    hits.add('pause_restart_btn', btnX, b2Y, btnW, btnH, () => app.startLevel(lvl.id));
+    hits.add('pause_restart_btn', btnX, b2Y, btnW, btnH, () => app.startLevel(curId));
 
     const b3Y = b2Y + btnH + btnGap;
     UI.drawPillButton(c, btnX, b3Y, btnW, btnH, {
@@ -3296,8 +3335,8 @@ function renderPauseModal(ctx, metrics, app, hits) {
     UI.drawPillButton(c, setX, secY, secRowW - (secW + secGap) * 2, secH, {
       variant: 'card',
       label: '星夜设置',
-      fontSize: 10.2,
-      radius: 11,
+      fontSize: 12.6,
+      radius: 12,
       pressed: isPressed(app, 'pause_settings_btn')
     });
     hits.add('pause_settings_btn', setX, secY, secRowW - (secW + secGap) * 2, secH, () => app.openModal('settings'));
@@ -3941,7 +3980,7 @@ function renderSettingsModal(ctx, metrics, app, hits) {
       UI.drawFitText(c, r.sub, f.ix + 12, ry + rowH * 0.70, textW, 9.8, 7.8, 700, '#754C36', 'left', 'middle');
 
       UI.drawSwitchToggle(c, swX, swY, swW, swH, r.on, r.on ? 1 : 0);
-      hits.add(r.hitId, swX - 6, ry + 2, swW + 12, rowH - 4, r.onToggle);
+      hits.add(r.hitId, f.ix, ry, f.iw, rowH, r.onToggle);
     }
   } finally {
     endModalFrame(c);

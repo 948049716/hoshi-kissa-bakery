@@ -5077,6 +5077,275 @@ async function runSectionJ() {
     assert.ok(odcSrc.includes("'totalStars'") && odcSrc.includes("'totalScore'"), 'openDataContext KV keys must match platform.setWxFriendCloudScore');
     assert.equal(/hsla?\s*\(/i.test(odcSrc), false, 'openDataContext must contain 0 hsl() calls');
   });
+
+  await runTest('UT-M15', '局外回归门禁：挑战底栏图标、排行榜防闪烁/竞态/稀疏混排、开放域子域零写尺寸与每日/无尽暂停重开', async () => {
+    // 1) Daily & Endless NPC rivals + daily UTC+8 date isolation
+    const rivals = Platform.getDefaultNpcRivals();
+    assert.ok(rivals.length >= 6, 'Expected >= 6 default NPC rivals');
+    for (const r of rivals) {
+      assert.ok(r.dailyBestScore > 0, `NPC ${r.nickName} missing dailyBestScore`);
+      assert.ok(r.endlessBestShift >= 1 && r.endlessBestScore > 0, `NPC ${r.nickName} missing endless stats`);
+    }
+    const todayKey = RunModifiers.getDailyDateKeyUTC8();
+    const yesterdaySave = SaveSync.createDefaultSave();
+    yesterdaySave.modeStats.daily = {
+      lastDate: '20200101',
+      bestScore: 99999,
+      claimedDate: '20200101',
+      claimed3Date: ''
+    };
+    for (const bt of ['stars', 'score', 'daily', 'endless']) {
+      const board = Platform.buildOfflineLeaderboard(bt, yesterdaySave, 'TEST', todayKey);
+      assert.equal(board.ok, true, `Offline board ${bt} must succeed`);
+      assert.ok(board.list.length >= 6, `Offline board ${bt} must have >= 6 rows (got ${board.list.length})`);
+      if (bt === 'daily') {
+        assert.equal(board.list.some((row) => row.isMe), false, 'Yesterday daily score must not appear on today daily board');
+      }
+    }
+
+    // 2) openDataContext static & runtime contract (never writes canvas.width/height, zero numeric font weights)
+    const odcPath = path.join(MINIGAME_DIR, 'openDataContext', 'index.js');
+    const odcSrc = fs.readFileSync(odcPath, 'utf8');
+    assert.equal(/\bcanvas\.(width|height)\s*=/.test(odcSrc), false, 'openDataContext must never write canvas.width or canvas.height');
+    assert.equal(/\b[1-9]00\s+\d+px\b/.test(odcSrc), false, 'openDataContext must avoid numeric font weights for iOS safety');
+
+    const drawTexts = [];
+    const mockOdcCtx = {
+      save() {},
+      restore() {},
+      beginPath() {},
+      closePath() {},
+      moveTo() {},
+      lineTo() {},
+      arcTo() {},
+      arc() {},
+      clip() {},
+      fill() {},
+      stroke() {},
+      scale() {},
+      setTransform() {},
+      clearRect() {},
+      drawImage() {},
+      fillText(txt) { drawTexts.push(String(txt)); },
+      fillStyle: '',
+      strokeStyle: '',
+      lineWidth: 1,
+      font: '',
+      textAlign: 'left',
+      textBaseline: 'alphabetic'
+    };
+    const lockedSharedCanvas = {
+      get width() { return 640; },
+      set width(_) { throw new Error('Subdomain must not write sharedCanvas.width'); },
+      get height() { return 520; },
+      set height(_) { throw new Error('Subdomain must not write sharedCanvas.height'); },
+      getContext() { return mockOdcCtx; }
+    };
+    let onOdcMsg = null;
+    let friendMode = 'ready';
+    const sandbox = {
+      wx: {
+        getSharedCanvas: () => lockedSharedCanvas,
+        onMessage: (cb) => { onOdcMsg = cb; },
+        getFriendCloudStorage: ({ success, fail }) => {
+          if (friendMode === 'ready') {
+            success({
+              data: [
+                { nickname: '好友乙', avatarUrl: '', KVDataList: [{ key: 'totalStars', value: '18' }, { key: 'totalScore', value: '32000' }] },
+                { nickname: '好友甲', avatarUrl: '', KVDataList: [{ key: 'totalStars', value: '52' }, { key: 'totalScore', value: '188000' }] }
+              ]
+            });
+          } else if (friendMode === 'empty') {
+            success({ data: [] });
+          } else {
+            fail({ errMsg: 'auth denied' });
+          }
+        }
+      },
+      Date,
+      Math,
+      Number,
+      String,
+      Array,
+      Object
+    };
+    vm.runInNewContext(odcSrc, sandbox);
+    assert.equal(typeof onOdcMsg, 'function', 'openDataContext must register wx.onMessage handler');
+    onOdcMsg({ type: 'render_friends', width: 320, height: 260, dpr: 2, metric: 'stars', forceRefresh: true });
+    assert.ok(drawTexts.indexOf('好友甲') !== -1 && drawTexts.indexOf('好友乙') !== -1, 'Friends rendered in ready state');
+    assert.ok(drawTexts.indexOf('好友甲') < drawTexts.indexOf('好友乙'), 'Friends sorted by totalStars desc');
+    drawTexts.length = 0;
+    friendMode = 'empty';
+    onOdcMsg({ type: 'render_friends', width: 320, height: 260, dpr: 2, metric: 'stars', forceRefresh: true });
+    assert.ok(drawTexts.some((t) => t.includes('还没有微信好友上榜')), 'Empty friends state renders cleanly');
+    drawTexts.length = 0;
+    friendMode = 'error';
+    onOdcMsg({ type: 'render_friends', width: 320, height: 260, dpr: 2, metric: 'stars', forceRefresh: true });
+    assert.ok(drawTexts.some((t) => t.includes('暂未获取到好友排行')), 'Error friends state renders cleanly');
+
+    // 3) Dock challenge icon finite geometry + leaderboard sparse-cloud blend & race guard + main-domain sharedCanvas sizing + Pause Daily/Endless restart
+    const env = bootMockApp({}, {});
+    const LiveUI = require(path.join(SRC_DIR, 'ui_draw.js'));
+    const LivePlatform = require(path.join(SRC_DIR, 'platform.js'));
+    const origDrawUiIcon = LiveUI.drawUiIcon;
+    const origCallCloud = LivePlatform.callCloudFunction;
+    const origGetOdc = LivePlatform.getOpenDataCanvas;
+    const origPostOdc = LivePlatform.postOpenDataMessage;
+
+    const iconDraws = [];
+    LiveUI.drawUiIcon = function spyDrawUiIcon(ctx, sprites, iconId, cx, cy, size) {
+      iconDraws.push({ iconId, cx, cy, size });
+      return origDrawUiIcon.apply(this, arguments);
+    };
+
+    try {
+      await env.flushAssets();
+      const dbg = env.dbg;
+      dbg.setSaveData({
+        schemaVersion: 3,
+        totalEarnedStardust: 500,
+        lastSyncedEarnedStardust: 500,
+        bankStardust: 500,
+        levelStars: { '1-1': 3, '1-2': 3, '1-3': 3, '1-4': 3, '1-5': 3, '1-6': 3, '1-7': 3, '1-8': 3, '1-9': 3, '1-10': 3 },
+        highestUnlockedLevel: '2-1',
+        modeStats: {
+          daily: { lastDate: '20200101', bestScore: 8888, claimedDate: '20200101', claimed3Date: '' },
+          endless: { bestShift: 0, bestScore: 0, runs: 0, dailyDustDate: '', dailyDust: 0 }
+        }
+      });
+
+      const challengeDraws = iconDraws.filter((d) => d.iconId === 'icon_urgent_flame');
+      assert.ok(challengeDraws.length > 0, 'Lobby dock must draw icon_urgent_flame for dock_challenge');
+      for (const d of challengeDraws) {
+        assert.ok(Number.isFinite(d.cx) && Number.isFinite(d.cy) && Number.isFinite(d.size) && d.size > 0, 'dock_challenge icon coords & size must be finite > 0');
+      }
+
+      // Mock sparse cloud (1 real player) + tab-switch race
+      let resolveSlowStars = null;
+      let resolveFastDaily = null;
+      LivePlatform.callCloudFunction = function mockCloud(name, payload) {
+        if (payload && payload.action === 'leaderboard') {
+          if (payload.boardType === 'stars') {
+            return new Promise((resolve) => { resolveSlowStars = resolve; });
+          }
+          if (payload.boardType === 'daily') {
+            return new Promise((resolve) => { resolveFastDaily = resolve; });
+          }
+          if (payload.boardType === 'score') {
+            // Return 7 real players (>= 6) to verify pure cloud list mode
+            const realList = Array.from({ length: 7 }, (_, idx) => ({
+              rank: idx + 1,
+              id: `real_${idx + 1}`,
+              openidSuffix: `R00${idx + 1}`,
+              isMe: idx === 2,
+              isNpc: false,
+              nickName: `真实玩家${idx + 1}`,
+              avatarUrl: '',
+              avatarPreset: 'mikan',
+              totalStars: 70 - idx * 5,
+              totalCumulativeScore: 300000 - idx * 20000
+            }));
+            return Promise.resolve({ ok: true, boardType: 'score', list: realList, myRank: 3, totalPlayers: 7 });
+          }
+        }
+        return origCallCloud.apply(this, arguments);
+      };
+
+      // Open stars (slow), switch immediately to daily (fast)
+      dbg.clickHit('dock_leaderboard');
+      dbg.clickHit('leaderboard_tab_daily');
+      assert.equal(typeof resolveFastDaily, 'function', 'Daily leaderboard RPC fired');
+      assert.equal(typeof resolveSlowStars, 'function', 'Stars leaderboard RPC fired');
+
+      // Fast daily returns sparse 1-player cloud response -> blended with rivals (>= 6 rows, real player included)
+      resolveFastDaily({
+        ok: true,
+        boardType: 'daily',
+        dateKey: todayKey,
+        list: [{
+          rank: 1,
+          id: 'real_daily_1',
+          openidSuffix: 'D001',
+          isMe: false,
+          isNpc: false,
+          nickName: '云端特调冠军',
+          avatarUrl: '',
+          avatarPreset: 'luna',
+          dailyBestScore: 18888
+        }],
+        myRank: null,
+        totalPlayers: 1
+      });
+      const flushMicrotasks = async () => {
+        for (let i = 0; i < 6; i++) await Promise.resolve();
+      };
+      await flushMicrotasks();
+      let st = dbg.getState();
+      assert.equal(st.leaderboardBoardType, 'daily');
+      assert.ok(st.leaderboardData.list.length >= 7, `Sparse daily cloud must blend with NPCs (got ${st.leaderboardData.list.length})`);
+      assert.equal(st.leaderboardData.list[0].nickName, '云端特调冠军');
+
+      // Now slow stale stars response resolves -> MUST be ignored!
+      resolveSlowStars({
+        ok: true,
+        boardType: 'stars',
+        list: [{ rank: 1, id: 'stale_star', isMe: false, nickName: '过期数据', totalStars: 90, totalCumulativeScore: 999999 }],
+        myRank: null,
+        totalPlayers: 1
+      });
+      await flushMicrotasks();
+      st = dbg.getState();
+      assert.equal(st.leaderboardBoardType, 'daily', 'Stale stars response must not overwrite daily tab');
+      assert.equal(st.leaderboardData.boardType, 'daily');
+      assert.equal(st.leaderboardData.list[0].nickName, '云端特调冠军');
+
+      // Switch to score (>= 6 real players -> pure cloud list without NPCs)
+      dbg.clickHit('leaderboard_tab_score');
+      await flushMicrotasks();
+      st = dbg.getState();
+      assert.equal(st.leaderboardData.list.length, 7);
+      assert.equal(st.leaderboardData.myRank, 3);
+      assert.equal(st.leaderboardData.list.some((r) => r.isNpc), false, 'Full cloud board (>=6) must not inject NPCs');
+
+      // Main-domain sharedCanvas sizing & friends_share_btn visibility with active sharedCanvas
+      const fakeSharedCanvas = { width: 780, height: 1688 };
+      const postedMsgs = [];
+      LivePlatform.getOpenDataCanvas = () => fakeSharedCanvas;
+      LivePlatform.postOpenDataMessage = (msg) => { postedMsgs.push(msg); return true; };
+      dbg.clickHit('leaderboard_tab_friends');
+      st = dbg.getState();
+      assert.equal(st.leaderboardBoardType, 'friends');
+      assert.ok(st.hits.some((h) => h.id === 'friends_share_btn'), 'friends_share_btn must stay visible even when sharedCanvas is active');
+      assert.ok(fakeSharedCanvas.width !== 780 && fakeSharedCanvas.height !== 1688, 'Main domain must resize sharedCanvas to modal viewport');
+      assert.ok(postedMsgs.some((m) => m.type === 'render_friends' && m.forceRefresh === true), 'Main domain posts render_friends with forceRefresh');
+      dbg.closeModal();
+
+      // Pause restart in Daily & Endless stays in active mode (not 1-1!)
+      dbg.clickHit('dock_challenge');
+      dbg.clickHit('challenge_start_daily');
+      st = dbg.getState();
+      assert.ok(st.currentLevelId.startsWith('daily_'), 'Entered daily mode');
+      dbg.clickHit('pause_btn');
+      assert.equal(dbg.getState().activeModal, 'pause');
+      dbg.clickHit('pause_restart_btn');
+      assert.ok(dbg.getState().currentLevelId.startsWith('daily_'), 'Pause restart in Daily must restart Daily, not 1-1');
+      dbg.clickHit('pause_btn');
+      dbg.clickHit('pause_lobby_btn');
+
+      dbg.clickHit('dock_challenge');
+      dbg.clickHit('challenge_start_endless');
+      assert.ok(dbg.getState().currentLevelId.startsWith('endless_'), 'Entered endless mode');
+      dbg.clickHit('pause_btn');
+      dbg.clickHit('pause_restart_btn');
+      assert.ok(dbg.getState().currentLevelId.startsWith('endless_'), 'Pause restart in Endless must restart Endless, not 1-1');
+    } finally {
+      LiveUI.drawUiIcon = origDrawUiIcon;
+      LivePlatform.callCloudFunction = origCallCloud;
+      LivePlatform.getOpenDataCanvas = origGetOdc;
+      LivePlatform.postOpenDataMessage = origPostOdc;
+      env.dispose();
+    }
+  });
 }
 
 // ============================================================================

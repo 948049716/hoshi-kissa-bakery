@@ -1478,6 +1478,15 @@ let initializedWxCloudRef = null;
 let activeUserInfoBtn = null;
 let activeUserInfoRectKey = '';
 
+function getUtc8DateKey(nowMs = Date.now()) {
+  const t = Number.isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
+  const d = new Date(t + 8 * 3600 * 1000);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}${m}${day}`;
+}
+
 function getDefaultNpcRivals() {
   const srcArr = safeIsArray(DEFAULT_NPC_RIVALS) ? DEFAULT_NPC_RIVALS : [];
   const out = [];
@@ -1504,6 +1513,9 @@ function getDefaultNpcRivals() {
         MAX_TOTAL_CUMULATIVE_SCORE,
         0
       ),
+      dailyBestScore: clampSafeInt(getOwn(r, 'dailyBestScore'), 0, 150000, 0),
+      endlessBestShift: clampSafeInt(getOwn(r, 'endlessBestShift'), 0, 99, 0),
+      endlessBestScore: clampSafeInt(getOwn(r, 'endlessBestScore'), 0, 6000000, 0),
       isNpc: true
     });
   }
@@ -2494,13 +2506,17 @@ function rankLeaderboardEntries(rawBoardType, candidateRows, myStars, myScore, e
   };
 }
 
-function buildOfflineLeaderboard(boardType = 'stars', saveData = null, openidSuffix = 'LOCAL') {
+function buildOfflineLeaderboard(boardType = 'stars', saveData = null, openidSuffix = 'LOCAL', dateKeyArg = '') {
   try {
     const SaveSync = getSaveSync();
     const safeSuffix =
       typeof openidSuffix === 'string' && openidSuffix.trim()
         ? openidSuffix.trim().slice(0, 8)
         : 'LOCAL';
+    const targetDailyKey =
+      typeof dateKeyArg === 'string' && /^\d{8}$/.test(dateKeyArg.trim())
+        ? dateKeyArg.trim()
+        : getUtc8DateKey();
 
     let normalizedSave = null;
     let myStars = 0;
@@ -2545,7 +2561,10 @@ function buildOfflineLeaderboard(boardType = 'stars', saveData = null, openidSuf
           myScore = rawExplicitScore;
         }
         const ms = normalizedSave.modeStats || {};
-        myDailyScore = ms.daily ? clampSafeInt(ms.daily.bestScore, 0, 150000, 0) : 0;
+        myDailyScore =
+          ms.daily && ms.daily.lastDate === targetDailyKey
+            ? clampSafeInt(ms.daily.bestScore, 0, 150000, 0)
+            : 0;
         myEndlessShift = ms.endless ? clampSafeInt(ms.endless.bestShift, 0, 99, 0) : 0;
         myEndlessScore = ms.endless ? clampSafeInt(ms.endless.bestScore, 0, 6000000, 0) : 0;
       }
@@ -2595,6 +2614,7 @@ function buildOfflineLeaderboard(boardType = 'stars', saveData = null, openidSuf
       normBoard === 'daily' ? myDailyScore : normBoard === 'endless' ? myEndlessScore : myScore;
     return rankLeaderboardEntries(boardType, rows, myStars, primaryMyScore, {
       isLocalFallback: true,
+      dateKey: normBoard === 'daily' ? targetDailyKey : '',
       myShift: normBoard === 'endless' ? myEndlessShift : 0
     });
   } catch (_) {
@@ -3296,8 +3316,13 @@ function runBrowserMockCloudInner(data = {}) {
     }
 
     const docModeStats = doc && doc.metaSave && isPlainRecord(doc.metaSave.modeStats) ? doc.metaSave.modeStats : {};
+    const reqDateKey = getOwn(req, 'dateKey');
+    const targetDailyKey =
+      typeof reqDateKey === 'string' && /^\d{8}$/.test(reqDateKey.trim())
+        ? reqDateKey.trim()
+        : getUtc8DateKey();
     const myDailyScore =
-      doc && !callerDisqualified && docModeStats.daily
+      doc && !callerDisqualified && docModeStats.daily && docModeStats.daily.lastDate === targetDailyKey
         ? clampSafeInt(docModeStats.daily.bestScore, 0, 150000, 0)
         : 0;
     const myEndlessShift =
@@ -3342,6 +3367,7 @@ function runBrowserMockCloudInner(data = {}) {
     return Promise.resolve(
       rankLeaderboardEntries(rawBoard, rows, myStars, primaryMyScore, {
         isMockCloud: true,
+        dateKey: normBoard === 'daily' ? targetDailyKey : '',
         myShift: normBoard === 'endless' ? myEndlessShift : 0
       })
     );
@@ -3705,5 +3731,6 @@ module.exports = {
   getDefaultNpcRivals,
   getGlobal,
   runBrowserMockCloud,
+  rankLeaderboardEntries,
   buildOfflineLeaderboard
 };

@@ -667,11 +667,30 @@ function createApp() {
     }
   }
 
+  let leaderboardReqSeq = 0;
+  let openDataForceRefresh = false;
+  const leaderboardCache = {
+    stars: null,
+    score: null,
+    daily: null,
+    endless: null
+  };
+
+  function clearLeaderboardCache() {
+    leaderboardCache.stars = null;
+    leaderboardCache.score = null;
+    leaderboardCache.daily = null;
+    leaderboardCache.endless = null;
+  }
+
   function refreshOfflineLeaderboardFallback() {
+    const bt = normalizeUiBoardType(app.leaderboardBoardType);
+    if (bt === 'friends') return;
     app.leaderboardData = platform.buildOfflineLeaderboard(
-      app.leaderboardBoardType,
+      bt,
       saveData,
-      cloudState.openidSuffix || 'LOCAL'
+      cloudState.openidSuffix || 'LOCAL',
+      bt === 'daily' ? RunModifiers.getDailyDateKeyUTC8() : ''
     );
   }
 
@@ -683,18 +702,168 @@ function createApp() {
     return 'stars';
   }
 
+  function buildLocalLeaderboardMe(cleanType, dateKey) {
+    const norm = SaveSync.normalizeSaveData(saveData);
+    const suffix =
+      typeof cloudState.openidSuffix === 'string' && cloudState.openidSuffix.trim()
+        ? cloudState.openidSuffix.trim().slice(0, 8)
+        : 'LOCAL';
+    const myStars = (norm.lifetimeStats && norm.lifetimeStats.totalStars) || 0;
+    const myScore = (norm.lifetimeStats && norm.lifetimeStats.totalCumulativeScore) || 0;
+    const ms = norm.modeStats || {};
+    const myDailyScore =
+      ms.daily && ms.daily.lastDate === dateKey
+        ? Math.max(0, Math.floor(Number(ms.daily.bestScore) || 0))
+        : 0;
+    const myEndlessShift = ms.endless ? Math.max(0, Math.floor(Number(ms.endless.bestShift) || 0)) : 0;
+    const myEndlessScore = ms.endless ? Math.max(0, Math.floor(Number(ms.endless.bestScore) || 0)) : 0;
+    const hasMetric =
+      cleanType === 'daily'
+        ? myDailyScore > 0
+        : cleanType === 'endless'
+        ? myEndlessShift > 0 && myEndlessScore > 0
+        : cleanType === 'stars'
+        ? myStars > 0
+        : myScore > 0;
+    if (!hasMetric) {
+      return { row: null, myStars, myScore, myDailyScore, myEndlessShift, myEndlessScore };
+    }
+    const prof = norm.playerProfile || {};
+    const nickName =
+      typeof prof.nickName === 'string' && prof.nickName.trim()
+        ? prof.nickName.trim().slice(0, 16)
+        : `星夜店长#${suffix}`;
+    return {
+      row: {
+        id: 'me',
+        openidSuffix: suffix,
+        isMe: true,
+        isNpc: false,
+        nickName,
+        avatarUrl: typeof prof.avatarUrl === 'string' ? prof.avatarUrl.trim().slice(0, 512) : '',
+        avatarPreset: normalizePatronId(prof.avatarPreset || norm.selectedPatron),
+        totalStars: myStars,
+        totalCumulativeScore: myScore,
+        dailyBestScore: myDailyScore,
+        endlessBestShift: myEndlessShift,
+        endlessBestScore: myEndlessScore
+      },
+      myStars,
+      myScore,
+      myDailyScore,
+      myEndlessShift,
+      myEndlessScore
+    };
+  }
+
+  function blendSparseCloudLeaderboard(cleanType, cloudRes, dateKey) {
+    const MIN_FULL_ROWS = 6;
+    const cloudRows = Array.isArray(cloudRes && cloudRes.list) ? cloudRes.list : [];
+    const resolvedDateKey = (cloudRes && cloudRes.dateKey) || (cleanType === 'daily' ? dateKey : '');
+
+    // Once at least 6 real players are on the cloud board, display the pure real cloud ranking.
+    if (cloudRows.length >= MIN_FULL_ROWS) {
+      return {
+        ok: true,
+        boardType: cleanType,
+        dateKey: resolvedDateKey,
+        list: cloudRows,
+        myRank: cloudRes.myRank || null,
+        myShift: cloudRes.myShift || 0,
+        totalPlayers: cloudRes.totalPlayers || cloudRows.length,
+        isCloud: true
+      };
+    }
+
+    // Sparse cloud environment (< 6 real players): blend real cloud entries with rival bakeries
+    // so opening the leaderboard never flashes 6 entries and then collapses to 0–1 rows.
+    const merged = [];
+    const seenIds = new Set();
+    let hasMe = false;
+
+    for (let i = 0; i < cloudRows.length; i++) {
+      const r = cloudRows[i];
+      if (!r || typeof r !== 'object') continue;
+      const rid = typeof r.id === 'string' && r.id ? r.id : `cloud_${i + 1}`;
+      if (seenIds.has(rid)) continue;
+      seenIds.add(rid);
+      if (r.isMe) hasMe = true;
+      merged.push({ ...r, id: rid });
+    }
+
+    const localMe = buildLocalLeaderboardMe(cleanType, dateKey);
+    if (!hasMe && localMe.row && !seenIds.has(localMe.row.id)) {
+      seenIds.add(localMe.row.id);
+      merged.push(localMe.row);
+    }
+
+    const npcs =
+      typeof platform.getDefaultNpcRivals === 'function' ? platform.getDefaultNpcRivals() : [];
+    for (let i = 0; i < npcs.length; i++) {
+      const npc = npcs[i];
+      if (!npc || typeof npc !== 'object') continue;
+      const nid = typeof npc.id === 'string' && npc.id ? npc.id : `npc_${i + 1}`;
+      if (seenIds.has(nid)) continue;
+      seenIds.add(nid);
+      merged.push({
+        ...npc,
+        id: nid,
+        openidSuffix: `NPC${i + 1}`,
+        isMe: false,
+        isNpc: true
+      });
+    }
+
+    const primaryMyScore =
+      cleanType === 'daily'
+        ? localMe.myDailyScore
+        : cleanType === 'endless'
+        ? localMe.myEndlessScore
+        : localMe.myScore;
+    if (typeof platform.rankLeaderboardEntries === 'function') {
+      return platform.rankLeaderboardEntries(cleanType, merged, localMe.myStars, primaryMyScore, {
+        dateKey: resolvedDateKey,
+        myShift: cleanType === 'endless' ? localMe.myEndlessShift : 0,
+        isCloud: cloudRows.length > 0,
+        isSparseCloudBlend: true
+      });
+    }
+    return platform.buildOfflineLeaderboard(
+      cleanType,
+      saveData,
+      cloudState.openidSuffix || 'LOCAL',
+      resolvedDateKey
+    );
+  }
+
   function fetchLeaderboard(boardType) {
     const cleanType = normalizeUiBoardType(boardType);
+    const reqSeq = ++leaderboardReqSeq;
     if (cleanType === 'friends') {
       app.leaderboardBoardType = 'friends';
       app.leaderboardLoading = false;
+      openDataForceRefresh = true;
       return;
     }
     app.leaderboardBoardType = cleanType;
-    refreshOfflineLeaderboardFallback();
+    const todayKey = RunModifiers.getDailyDateKeyUTC8();
+    const cached = leaderboardCache[cleanType];
+    const cacheValid = Boolean(
+      cached &&
+        Array.isArray(cached.list) &&
+        cached.list.length > 0 &&
+        (cleanType !== 'daily' || cached.dateKey === todayKey)
+    );
+
+    if (cacheValid) {
+      app.leaderboardData = cached;
+    } else {
+      refreshOfflineLeaderboardFallback();
+    }
 
     if (!CloudConfig.ENABLE_CLOUD_SYNC) {
       cloudState.status = 'local_only';
+      app.leaderboardLoading = false;
       return;
     }
 
@@ -705,25 +874,28 @@ function createApp() {
       boardType: cleanType
     };
     if (cleanType === 'daily') {
-      reqPayload.dateKey = RunModifiers.getDailyDateKeyUTC8();
+      reqPayload.dateKey = todayKey;
     }
     platform
       .callCloudFunction(CloudConfig.CLOUD_FUNCTION_NAME, reqPayload)
       .then((res) => {
-        if (destroyed || reqEpoch !== saveEpoch) return;
+        if (
+          destroyed ||
+          reqEpoch !== saveEpoch ||
+          reqSeq !== leaderboardReqSeq ||
+          app.leaderboardBoardType !== cleanType
+        ) {
+          return;
+        }
         app.leaderboardLoading = false;
-        if (res && res.ok && Array.isArray(res.list) && res.list.length > 0) {
-          app.leaderboardData = {
-            ok: true,
-            boardType: cleanType,
-            dateKey: res.dateKey || reqPayload.dateKey || '',
-            list: res.list,
-            myRank: res.myRank || null,
-            myShift: res.myShift || 0,
-            totalPlayers: res.totalPlayers || res.list.length
-          };
-          if (cloudState.status === 'idle') cloudState.status = 'synced';
-        } else {
+        if (res && res.ok && Array.isArray(res.list)) {
+          const nextBoard = blendSparseCloudLeaderboard(cleanType, res, todayKey);
+          leaderboardCache[cleanType] = nextBoard;
+          app.leaderboardData = nextBoard;
+          if (cloudState.status === 'idle' || cloudState.status === 'syncing') {
+            cloudState.status = 'synced';
+          }
+        } else if (!cacheValid) {
           refreshOfflineLeaderboardFallback();
         }
         if (app.activeModal === 'leaderboard') {
@@ -731,9 +903,18 @@ function createApp() {
         }
       })
       .catch(() => {
-        if (destroyed || reqEpoch !== saveEpoch) return;
+        if (
+          destroyed ||
+          reqEpoch !== saveEpoch ||
+          reqSeq !== leaderboardReqSeq ||
+          app.leaderboardBoardType !== cleanType
+        ) {
+          return;
+        }
         app.leaderboardLoading = false;
-        refreshOfflineLeaderboardFallback();
+        if (!cacheValid) {
+          refreshOfflineLeaderboardFallback();
+        }
         if (app.activeModal === 'leaderboard') {
           renderFrame(0);
         }
@@ -816,6 +997,7 @@ function createApp() {
             saveData.lastSyncedEarnedStardust = saveData.totalEarnedStardust;
             SaveSync.saveLocalSave(platform, saveData);
           }
+          clearLeaderboardCache();
           if (app.activeModal === 'leaderboard') {
             fetchLeaderboard(app.leaderboardBoardType);
           }
@@ -879,7 +1061,9 @@ function createApp() {
         if (destroyed || reqEpoch !== saveEpoch) return;
         if (!res || !res.ok) {
           cloudState.status = 'local_only';
-          refreshOfflineLeaderboardFallback();
+          if (!leaderboardCache[app.leaderboardBoardType]) {
+            refreshOfflineLeaderboardFallback();
+          }
           return;
         }
         cloudState.revision = typeof res.revision === 'number' ? res.revision : 1;
@@ -925,12 +1109,21 @@ function createApp() {
             flushCloudPush(null);
           }
         }
-        refreshOfflineLeaderboardFallback();
+        clearLeaderboardCache();
+        if (app.activeModal === 'leaderboard') {
+          if (app.leaderboardBoardType !== 'friends') {
+            fetchLeaderboard(app.leaderboardBoardType);
+          }
+        } else {
+          refreshOfflineLeaderboardFallback();
+        }
       })
       .catch(() => {
         if (destroyed || reqEpoch !== saveEpoch) return;
         cloudState.status = 'local_only';
-        refreshOfflineLeaderboardFallback();
+        if (!leaderboardCache[app.leaderboardBoardType]) {
+          refreshOfflineLeaderboardFallback();
+        }
       });
   }
 
@@ -1278,16 +1471,30 @@ function createApp() {
     if (typeof platform.getOpenDataCanvas !== 'function') return null;
     const sharedCanvas = platform.getOpenDataCanvas();
     if (!sharedCanvas) return null;
-    const key = `${w}x${h}@${dpr}`;
-    if (key !== lastOpenDataKey) {
+    const safeDpr = Math.max(1, Math.min(3, Number(dpr) || 2));
+    const logicalW = Math.max(200, Math.floor(Number(w) || 300));
+    const logicalH = Math.max(160, Math.floor(Number(h) || 260));
+    const targetW = Math.round(logicalW * safeDpr);
+    const targetH = Math.round(logicalH * safeDpr);
+    if (sharedCanvas.width !== targetW || sharedCanvas.height !== targetH) {
+      try {
+        sharedCanvas.width = targetW;
+        sharedCanvas.height = targetH;
+      } catch (_) {}
+    }
+    const key = `${logicalW}x${logicalH}@${safeDpr}`;
+    if (key !== lastOpenDataKey || openDataForceRefresh) {
+      const forceRefresh = openDataForceRefresh;
       lastOpenDataKey = key;
+      openDataForceRefresh = false;
       if (typeof platform.postOpenDataMessage === 'function') {
         platform.postOpenDataMessage({
           type: 'render_friends',
-          width: w,
-          height: h,
-          dpr,
-          metric: 'stars'
+          width: logicalW,
+          height: logicalH,
+          dpr: safeDpr,
+          metric: 'stars',
+          forceRefresh
         });
       }
     }
@@ -1629,7 +1836,14 @@ function createApp() {
     if (!saveData.playerProfile) saveData.playerProfile = {};
     saveData.playerProfile.avatarPreset = next;
     persistSave(true);
-    refreshOfflineLeaderboardFallback();
+    clearLeaderboardCache();
+    if (app.leaderboardData && Array.isArray(app.leaderboardData.list)) {
+      for (let i = 0; i < app.leaderboardData.list.length; i++) {
+        if (app.leaderboardData.list[i] && app.leaderboardData.list[i].isMe) {
+          app.leaderboardData.list[i].avatarPreset = next;
+        }
+      }
+    }
     audio.playPatronSelect();
     showToast('已切换名片头像', { icon: next });
   };
@@ -1643,6 +1857,7 @@ function createApp() {
       authorized: true
     };
     persistSave(true);
+    clearLeaderboardCache();
     if (CloudConfig.ENABLE_CLOUD_SYNC) {
       const reqEpoch = saveEpoch;
       platform
@@ -1677,7 +1892,10 @@ function createApp() {
         authorized: true
       };
       persistSave(true);
-      refreshOfflineLeaderboardFallback();
+      clearLeaderboardCache();
+      if (!CloudConfig.ENABLE_CLOUD_SYNC) {
+        refreshOfflineLeaderboardFallback();
+      }
       audio.playPatronSelect();
       showToast('已同步本地店长名片', { icon: 'icon_id_card' });
     }
@@ -2149,6 +2367,7 @@ function createApp() {
       app.previewLevelId = lvl.id;
     }
     app.currentLevelId = lvl.id;
+    app.currentLevelCfg = lvl;
     app.screen = 'playing';
     app.activeModal = null;
     app.confirmDialog = null;
@@ -3974,6 +4193,7 @@ function createApp() {
 
       const savedNorm = SaveSync.saveLocalSave(platform, saveData);
       Object.assign(saveData, savedNorm);
+      clearLeaderboardCache();
       const eRunReport = {
         mode: 'endless',
         levelId: lvl.id,
@@ -4101,6 +4321,7 @@ function createApp() {
 
       const savedNorm = SaveSync.saveLocalSave(platform, saveData);
       Object.assign(saveData, savedNorm);
+      clearLeaderboardCache();
       const dRunReport = {
         mode: 'daily',
         levelId: lvl.id,
@@ -4182,6 +4403,8 @@ function createApp() {
       );
       SaveSync.saveLocalSave(platform, updatedSave);
       Object.assign(saveData, updatedSave);
+      clearLeaderboardCache();
+      openDataForceRefresh = true;
       platform.setWxFriendCloudScore(saveData);
     }
 
@@ -5297,6 +5520,8 @@ function createApp() {
         activeShopTab: app.activeShopTab,
         activeCompendiumTab: app.activeCompendiumTab,
         leaderboardBoardType: app.leaderboardBoardType,
+        leaderboardLoading: Boolean(app.leaderboardLoading),
+        leaderboardData: cloneJsonSafe(app.leaderboardData),
         activeTutorialStep: app.activeTutorialStep,
         score: os
           ? os.score
@@ -5412,7 +5637,10 @@ function createApp() {
 
       if (saveData.higherSchemaDetected) {
         cloudState.status = 'higher_schema_blocked';
-      } else if (cloudState.status === 'higher_schema_blocked') {
+      } else if (
+        cloudState.status === 'higher_schema_blocked' ||
+        cloudState.status === 'syncing'
+      ) {
         cloudState.status = CloudConfig.ENABLE_CLOUD_SYNC ? 'idle' : 'local_only';
       }
 
@@ -5475,6 +5703,8 @@ function createApp() {
         refreshNeededAndOrderMarks();
       }
 
+      clearLeaderboardCache();
+      openDataForceRefresh = true;
       refreshOfflineLeaderboardFallback();
       platform.setWxFriendCloudScore(saveData);
       syncAudioMood();

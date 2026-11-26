@@ -920,6 +920,7 @@ function drawTagBadge(ctx, x, y, w, h, text, tone = 'amber', fontSize = 9.5, ico
     berry: { bg: '#F27C38', fg: '#FFF8EC', stroke: '#5A3928' },
     red: { bg: '#E85C5C', fg: '#FFF8EC', stroke: '#5A3928' },
     green: { bg: '#74C353', fg: '#FFF8EC', stroke: '#3B5924' },
+    matcha: { bg: '#74C353', fg: '#FFF8EC', stroke: '#3B5924' },
     sage: { bg: '#74C353', fg: '#FFF8EC', stroke: '#3B5924' },
     wood: { bg: '#7B4F32', fg: '#FFF8EC', stroke: '#5A3928' },
     cocoa: { bg: '#6D432B', fg: '#FFF8EC', stroke: '#5A3928' },
